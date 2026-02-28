@@ -1,8 +1,8 @@
 use super::*;
 use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
 use aos_air_types::{
-    CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, WorkflowAbi,
-    Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord,
+    CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, Routing,
+    RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord, WorkflowAbi,
     catalog::EffectCatalog,
 };
 use aos_store::MemStore;
@@ -101,6 +101,7 @@ pub(crate) fn loaded_manifest_with_schema(
         secrets: vec![],
         modules: HashMap::new(),
         effects: HashMap::new(),
+
         caps: HashMap::new(),
         policies: HashMap::new(),
         schemas: HashMap::from([(schema_name.into(), schema)]),
@@ -174,6 +175,8 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
             hash: HashRef::new(hash(1)).unwrap(),
         }],
         effects: vec![],
+        effect_bindings: vec![],
+
         caps: vec![],
         policies: vec![],
         secrets: vec![],
@@ -193,6 +196,7 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
         secrets: vec![],
         modules,
         effects: HashMap::new(),
+
         caps: HashMap::new(),
         policies: HashMap::new(),
         schemas,
@@ -241,6 +245,8 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemSto
             hash: HashRef::new(hash(1)).unwrap(),
         }],
         effects: vec![],
+        effect_bindings: vec![],
+
         caps: vec![],
         policies: vec![],
         secrets: vec![],
@@ -260,6 +266,7 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemSto
         secrets: vec![],
         modules,
         effects: HashMap::new(),
+
         caps: HashMap::new(),
         policies: HashMap::new(),
         schemas,
@@ -308,6 +315,8 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
             hash: HashRef::new(hash(1)).unwrap(),
         }],
         effects: vec![],
+        effect_bindings: vec![],
+
         caps: vec![],
         policies: vec![],
         secrets: vec![],
@@ -327,6 +336,7 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
         secrets: vec![],
         modules,
         effects: HashMap::new(),
+
         caps: HashMap::new(),
         policies: HashMap::new(),
         schemas,
@@ -376,6 +386,8 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemS
             hash: HashRef::new(hash(1)).unwrap(),
         }],
         effects: vec![],
+        effect_bindings: vec![],
+
         caps: vec![],
         policies: vec![],
         secrets: vec![],
@@ -395,6 +407,7 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemS
         secrets: vec![],
         modules,
         effects: HashMap::new(),
+
         caps: HashMap::new(),
         policies: HashMap::new(),
         schemas,
@@ -414,6 +427,8 @@ pub(crate) fn empty_manifest() -> Manifest {
         schemas: vec![],
         modules: vec![],
         effects: vec![],
+        effect_bindings: vec![],
+
         caps: vec![],
         policies: vec![],
         secrets: vec![],
@@ -439,6 +454,7 @@ pub(crate) fn kernel_with_store_and_journal(
         secrets: vec![],
         modules: HashMap::new(),
         effects: HashMap::new(),
+
         caps: HashMap::new(),
         policies: HashMap::new(),
         schemas: HashMap::new(),

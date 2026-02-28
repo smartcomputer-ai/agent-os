@@ -35,6 +35,10 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [{"name": "com.acme/Workflow@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
         "effects": [],
+        "effect_bindings": [{
+            "kind": "http.request",
+            "adapter_id": "http.default"
+        }],
         "caps": [{"name": "com.acme/Cap@1", "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}],
         "policies": [{"name": "com.acme/Policy@1", "hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}],
         "defaults": {
@@ -79,6 +83,7 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
     assert_eq!(manifest.module_bindings.len(), 1);
     let routing = manifest.routing.expect("routing");
     assert_eq!(routing.subscriptions.len(), 1);
+    assert_eq!(manifest.effect_bindings.len(), 1);
 }
 
 #[test]

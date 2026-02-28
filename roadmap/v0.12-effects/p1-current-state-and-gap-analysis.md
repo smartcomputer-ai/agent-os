@@ -1,8 +1,8 @@
 # P1: Effect Runtime Contract and Gap Analysis (as implemented)
 
 **Priority**: P1  
-**Status**: Proposed (refreshed baseline)  
-**Date**: 2026-02-27
+**Status**: In Progress (baseline + partial implementation)  
+**Date**: 2026-02-28
 
 ## Goal
 
@@ -20,7 +20,7 @@ The current control surface is still split:
 3. Internal effects are kernel-handled (`workspace.*`, `introspect.*`, `governance.*`).
 
 That split is valid, but today there is still no governed world-level adapter
-route contract.
+route **enforcement** in host dispatch/preflight.
 
 ## Current Behavior (Code Reality)
 
@@ -125,17 +125,26 @@ Internal effect list is explicit in kernel and bypasses external adapters:
 
 Current internal set includes `introspect.*`, `workspace.*`, and `governance.*`.
 
-## 7) Programmatic pluggability exists, governed routing does not
+## 7) Programmatic pluggability exists; governed routing metadata is now present
 
 Host/testhost support programmatic adapter registration:
 
 - `crates/aos-host/src/host.rs:287`
 - `crates/aos-host/src/testhost.rs:208`
 
-But there is no manifest-level `effect_bindings` field in AIR schema/model yet:
+Manifest-level `effect_bindings` now exists in AIR schema/model, and validator
+enforces key invariants:
 
-- `spec/schemas/manifest.schema.json:6`
-- `crates/aos-air-types/src/model.rs:650`
+1. bound kinds must be declared in loaded `defeffect` set (`manifest.effects`),
+2. no duplicate `kind` entries,
+3. internal kinds (`workspace.*`, `introspect.*`, `governance.*`) are forbidden.
+
+- `spec/schemas/manifest.schema.json:25`
+- `crates/aos-air-types/src/model.rs:657`
+- `crates/aos-air-types/src/validate.rs:256`
+
+However, host dispatch is still kind-keyed (`intent.kind`) and does not yet
+route by `adapter_id` from `effect_bindings`.
 
 ## 8) No startup compatibility preflight for required external kinds
 
@@ -194,6 +203,25 @@ Main mismatches now:
 4. Keep adapter route metadata out of `defeffect`; land it as manifest-level
    data in P2.
 5. Update docs/diagnostics terminology to workflow modules (not plans/reducers).
+
+## Progress Update (2026-02-28)
+
+Completed:
+
+1. Governed manifest route metadata landed (`manifest.effect_bindings`) in AIR
+   schema + model.
+2. Semantic validation landed for binding correctness (declared kinds only,
+   duplicate prevention, internal-kind rejection), with tests.
+3. Baseline fixtures/manifest constructors across workspace were updated for the
+   new manifest field.
+
+Still open for P1:
+
+1. Host preflight at world-open for required external route availability.
+2. Startup diagnostics for required routes vs provided routes.
+3. Conformance coverage for startup missing-route failure path.
+4. Any host/runtime use of `effect_bindings` for dispatch (still kind-keyed;
+   adapter-id routing remains P2/P3 runtime work).
 
 ## P1 Deliverables
 

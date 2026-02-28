@@ -175,6 +175,8 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             effects: vec![],
+            effect_bindings: vec![],
+
             caps: vec![],
             policies: vec![],
             secrets: vec![],

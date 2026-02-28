@@ -22,6 +22,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
+    "effect_bindings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/EffectBinding" }
+    },
     "caps": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
@@ -108,6 +112,18 @@
         "hash": { "$ref": "common.schema.json#/$defs/Hash" }
       },
       "required": ["name","hash"],
+      "additionalProperties": false
+    },
+    "EffectBinding": {
+      "type": "object",
+      "properties": {
+        "kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
+        "adapter_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
+        }
+      },
+      "required": ["kind", "adapter_id"],
       "additionalProperties": false
     }
   }

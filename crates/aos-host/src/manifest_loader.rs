@@ -565,8 +565,8 @@ fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
 mod tests {
     use super::*;
     use aos_air_types::{
-        HashRef, ModuleAbi, ModuleKind, WorkflowAbi, SchemaRef, SecretEntry, TypeExpr,
-        TypePrimitive, TypePrimitiveNat, TypeRef, TypeVariant,
+        HashRef, ModuleAbi, ModuleKind, SchemaRef, SecretEntry, TypeExpr, TypePrimitive,
+        TypePrimitiveNat, TypeRef, TypeVariant, WorkflowAbi,
     };
     use aos_cbor::Hash;
     use indexmap::IndexMap;
@@ -781,6 +781,8 @@ mod tests {
             }],
             modules: Vec::new(),
             effects: Vec::new(),
+            effect_bindings: vec![],
+
             caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),
@@ -835,6 +837,8 @@ mod tests {
             }],
             modules: Vec::new(),
             effects: Vec::new(),
+            effect_bindings: vec![],
+
             caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),
@@ -872,6 +876,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             effects: Vec::new(),
+            effect_bindings: vec![],
+
             caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),
@@ -904,6 +910,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             effects: Vec::new(),
+            effect_bindings: vec![],
+
             caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),

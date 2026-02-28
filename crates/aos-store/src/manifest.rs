@@ -579,6 +579,8 @@ mod tests {
             },
             modules: vec![],
             effects: builtin_effect_refs(),
+            effect_bindings: vec![],
+
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -600,6 +602,8 @@ mod tests {
             schemas: builtin_schema_refs(),
             modules: vec![],
             effects: builtin_effect_refs(),
+            effect_bindings: vec![],
+
             caps: vec![],
             policies: vec![],
             secrets: vec![SecretEntry::Decl(SecretDecl {

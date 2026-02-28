@@ -653,6 +653,8 @@ pub struct Manifest {
     pub modules: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<NamedRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effect_bindings: Vec<EffectBinding>,
     pub caps: Vec<NamedRef>,
     pub policies: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -663,6 +665,12 @@ pub struct Manifest {
     pub module_bindings: IndexMap<Name, ModuleBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<Routing>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EffectBinding {
+    pub kind: EffectKind,
+    pub adapter_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
