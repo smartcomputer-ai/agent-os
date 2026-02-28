@@ -627,7 +627,7 @@ mod tests {
         append_record, empty_manifest, event_record, kernel_with_store_and_journal,
         loaded_manifest_with_schema, minimal_kernel_non_keyed, write_manifest,
     };
-    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, WorkflowAbi, SchemaRef};
+    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
     use aos_effects::EffectStreamFrame;
     use aos_store::MemStore;
     use serde_json::json;
@@ -828,16 +828,7 @@ mod tests {
         let (loaded, manifest_hash) =
             loaded_manifest_with_schema(store.as_ref(), "com.acme/Event@1");
 
-        let snapshot = KernelSnapshot::new(
-            1,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            0,
-            None,
-        );
+        let snapshot = KernelSnapshot::new(1, vec![], vec![], vec![], vec![], vec![], 0, None);
         let snap_bytes = serde_cbor::to_vec(&snapshot).unwrap();
         let snap_hash = store.put_blob(&snap_bytes).unwrap();
 

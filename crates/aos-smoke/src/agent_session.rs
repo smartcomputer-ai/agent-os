@@ -107,7 +107,11 @@ pub fn run(example_root: &Path) -> Result<()> {
     );
 
     // Run #2: request + explicit completion.
-    host.send_event(&run_requested_event_with_config(7, "anthropic", "claude-sonnet-4-5"))?;
+    host.send_event(&run_requested_event_with_config(
+        7,
+        "anthropic",
+        "claude-sonnet-4-5",
+    ))?;
     let run2 = host.read_state::<SessionState>()?;
     ensure!(
         matches!(

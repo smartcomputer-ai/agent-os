@@ -2,7 +2,7 @@ use serde_json::json;
 use std::panic::{self, AssertUnwindSafe};
 
 use super::assert_json_schema;
-use crate::{DefModule, ModuleAbi, ModuleKind, WorkflowAbi, SchemaRef};
+use crate::{DefModule, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
 
 #[test]
 fn parses_workflow_module_with_cap_slots() {

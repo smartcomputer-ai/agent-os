@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aos_air_types::{
-    DefModule, DefSchema, Manifest, ModuleAbi, NamedRef, WorkflowAbi, Routing, RoutingEvent,
-    SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveNat, TypePrimitiveUnit, TypeRecord, TypeRef,
-    TypeVariant, catalog::EffectCatalog,
+    DefModule, DefSchema, Manifest, ModuleAbi, NamedRef, Routing, RoutingEvent, SchemaRef,
+    TypeExpr, TypePrimitive, TypePrimitiveNat, TypePrimitiveUnit, TypeRecord, TypeRef, TypeVariant,
+    WorkflowAbi, catalog::EffectCatalog,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_host::testhost::TestHost;
@@ -496,7 +496,8 @@ async fn testhost_timer_effect_flow() {
     });
 
     // Build manifest with routing
-    let mut loaded = fixtures::build_loaded_manifest(vec![module],
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![module],
         vec![fixtures::routing_event(
             "test/TimerEvent@1",
             "test/TimerWorkflow@1",
@@ -581,7 +582,8 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
-    let mut loaded = fixtures::build_loaded_manifest(vec![module],
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![module],
         vec![fixtures::routing_event(
             "test/TimerEvent@1",
             "test/TimerWorkflow@1",
@@ -640,7 +642,8 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
-    let mut loaded = fixtures::build_loaded_manifest(vec![module],
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![module],
         vec![fixtures::routing_event(
             "test/TimerEvent@1",
             "test/TimerWorkflow@1",

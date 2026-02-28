@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent_sdk::{
     LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionState, ToolBatchId, ToolCallStatus,
-    WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
+    SessionIngressKind, SessionState, ToolBatchId, ToolCallStatus, WorkspaceApplyMode,
+    WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
     materialize_llm_generate_params_with_workspace,
 };
 use aos_cbor::Hash;
@@ -122,7 +122,8 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     );
 
     let mut event_clock = 0_u64;
-    let workspace_root_hash = seed_workspace_commit(&mut host, &fixture_root.join(AGENT_WORKSPACE_DIR))?;
+    let workspace_root_hash =
+        seed_workspace_commit(&mut host, &fixture_root.join(AGENT_WORKSPACE_DIR))?;
     let workspace_binding = WorkspaceBinding {
         workspace: AGENT_WORKSPACE_NAME.into(),
         version: None,
@@ -405,7 +406,11 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         stats.tool_calls
     );
 
-    send_session_event(&mut host, &mut event_clock, SessionIngressKind::RunCompleted)?;
+    send_session_event(
+        &mut host,
+        &mut event_clock,
+        SessionIngressKind::RunCompleted,
+    )?;
 
     let final_state: SessionState = host.read_state()?;
     ensure!(

@@ -13,7 +13,9 @@ use aos_air_types::{
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
-use aos_wasm_abi::{ABI_VERSION, DomainEvent, PureInput, PureOutput, WorkflowInput, WorkflowOutput};
+use aos_wasm_abi::{
+    ABI_VERSION, DomainEvent, PureInput, PureOutput, WorkflowInput, WorkflowOutput,
+};
 use getrandom::getrandom;
 use serde::Serialize;
 use serde_cbor;
@@ -39,25 +41,25 @@ use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::pure::PureRegistry;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::WorkflowEffectContext;
-use crate::workflow::WorkflowRegistry;
 use crate::schema_value::cbor_to_expr_value;
 use crate::secret::{PlaceholderSecretResolver, SharedSecretResolver};
 use crate::shadow::{
     DeltaKind, LedgerDelta, LedgerKind, ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary,
 };
 use crate::snapshot::{
-    EffectIntentSnapshot, KernelSnapshot, WorkflowReceiptSnapshot, WorkflowStateEntry,
-    SnapshotRootCompleteness, WorkflowInflightIntentSnapshot, WorkflowInstanceSnapshot,
-    WorkflowStatusSnapshot, receipts_to_vecdeque,
+    EffectIntentSnapshot, KernelSnapshot, SnapshotRootCompleteness, WorkflowInflightIntentSnapshot,
+    WorkflowInstanceSnapshot, WorkflowReceiptSnapshot, WorkflowStateEntry, WorkflowStatusSnapshot,
+    receipts_to_vecdeque,
 };
+use crate::workflow::WorkflowRegistry;
 use std::sync::Mutex;
 
 mod bootstrap;
 mod event_flow;
 pub(crate) mod governance_runtime;
 mod manifest_runtime;
-mod runtime;
 mod query_api;
+mod runtime;
 mod snapshot_replay;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -680,10 +682,9 @@ impl<S: Store + 'static> Kernel<S> {
             .module_defs
             .get(workflow)
             .ok_or_else(|| KernelError::WorkflowNotFound(workflow.to_string()))?;
-        let workflow_abi =
-            module.abi.workflow.as_ref().ok_or_else(|| {
-                KernelError::Manifest(format!("module '{workflow}' is not a workflow"))
-            })?;
+        let workflow_abi = module.abi.workflow.as_ref().ok_or_else(|| {
+            KernelError::Manifest(format!("module '{workflow}' is not a workflow"))
+        })?;
         let schema = self
             .schema_index
             .get(workflow_abi.state.as_str())

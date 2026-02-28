@@ -1,7 +1,7 @@
 use aos_air_types::{
     DefModule, DefPolicy, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind, OriginKind,
-    PolicyDecision, PolicyMatch, PolicyRule, WorkflowAbi, TypeExpr, TypeRecord, TypeRef,
-    TypeVariant,
+    PolicyDecision, PolicyMatch, PolicyRule, TypeExpr, TypeRecord, TypeRef, TypeVariant,
+    WorkflowAbi,
 };
 use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use wat::parse_str;
 
-use helpers::fixtures::{self, TestWorld, START_SCHEMA};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 
 mod helpers;
 use helpers::{attach_default_policy, timer_manifest};
@@ -66,7 +66,9 @@ fn workflow_timer_receipt_replays_from_journal() {
     .unwrap();
 
     assert_eq!(
-        replay_world.kernel.workflow_state("com.acme/TimerEmitter@1"),
+        replay_world
+            .kernel
+            .workflow_state("com.acme/TimerEmitter@1"),
         Some(final_state)
     );
 }
@@ -354,9 +356,11 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
 
     let pending_after_rejected = world.kernel.pending_workflow_receipts_snapshot();
     assert_eq!(pending_after_rejected.len(), 1);
-    assert!(pending_after_rejected
-        .iter()
-        .any(|entry| entry.intent_hash == timer_intent.intent_hash));
+    assert!(
+        pending_after_rejected
+            .iter()
+            .any(|entry| entry.intent_hash == timer_intent.intent_hash)
+    );
 
     let timer_receipt = EffectReceipt {
         intent_hash: timer_intent.intent_hash,

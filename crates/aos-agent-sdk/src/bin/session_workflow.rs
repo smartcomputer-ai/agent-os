@@ -9,7 +9,7 @@ use aos_agent_sdk::{
     SessionEffectCommand, SessionReduceError, SessionState, SessionWorkflowEvent,
     apply_session_workflow_event,
 };
-use aos_wasm_sdk::{ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
+use aos_wasm_sdk::{ReduceError, Value, Workflow, WorkflowCtx, aos_workflow};
 
 #[cfg(target_arch = "wasm32")]
 fn main() {}

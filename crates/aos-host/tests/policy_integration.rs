@@ -6,7 +6,7 @@ use aos_effects::builtins::HttpRequestParams;
 use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
 use aos_wasm_abi::{PureOutput, WorkflowEffect, WorkflowOutput};
-use helpers::fixtures::{self, zero_hash, TestStore, TestWorld};
+use helpers::fixtures::{self, TestStore, TestWorld, zero_hash};
 use indexmap::IndexMap;
 
 mod helpers;
@@ -140,8 +140,11 @@ fn build_introspect_workflow_manifest(
 fn workflow_http_effect_is_denied() {
     let store = fixtures::new_mem_store();
     let workflow_name = "com.acme/HttpWorkflow@1";
-    let mut loaded =
-        build_http_workflow_manifest(&store, workflow_name, http_workflow_output("https://denied"));
+    let mut loaded = build_http_workflow_manifest(
+        &store,
+        workflow_name,
+        http_workflow_output("https://denied"),
+    );
 
     let policy = DefPolicy {
         name: "com.acme/policy@1".into(),

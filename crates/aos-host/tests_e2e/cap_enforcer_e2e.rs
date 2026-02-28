@@ -11,8 +11,8 @@ mod helpers;
 
 use aos_air_types::{
     CapEnforcer, CapGrant, CapType, DefCap, EffectKind as AirEffectKind, EmptyObject, NamedRef,
-    WorkflowAbi, TypeExpr, TypeList, TypeOption, TypePrimitive, TypePrimitiveNat, TypePrimitiveText,
-    TypeRecord, TypeSet, ValueList, ValueLiteral, ValueRecord, ValueSet, ValueText,
+    TypeExpr, TypeList, TypeOption, TypePrimitive, TypePrimitiveNat, TypePrimitiveText, TypeRecord,
+    TypeSet, ValueList, ValueLiteral, ValueRecord, ValueSet, ValueText, WorkflowAbi,
 };
 use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs};
 use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
@@ -60,7 +60,10 @@ fn http_enforcer_module_denies_host() {
 
     let mut loaded = fixtures::build_loaded_manifest(
         vec![workflow, enforcer],
-        vec![fixtures::routing_event(fixtures::START_SCHEMA, workflow_name)],
+        vec![fixtures::routing_event(
+            fixtures::START_SCHEMA,
+            workflow_name,
+        )],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -90,7 +93,10 @@ fn http_enforcer_module_denies_host() {
 
     let mut world = TestWorld::with_store(store, loaded).expect("world");
     world
-        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "start" }))
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
         .expect("submit start event");
     let err = world.kernel.tick().expect_err("expected denial");
     assert!(
@@ -160,7 +166,10 @@ fn llm_enforcer_module_denies_model() {
 
     let mut loaded = fixtures::build_loaded_manifest(
         vec![workflow, enforcer],
-        vec![fixtures::routing_event(fixtures::START_SCHEMA, workflow_name)],
+        vec![fixtures::routing_event(
+            fixtures::START_SCHEMA,
+            workflow_name,
+        )],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -195,7 +204,10 @@ fn llm_enforcer_module_denies_model() {
 
     let mut world = TestWorld::with_store(store, loaded).expect("world");
     world
-        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "start" }))
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
         .expect("submit start event");
     let err = world.kernel.tick().expect_err("expected denial");
     assert!(
@@ -250,7 +262,10 @@ fn workspace_enforcer_module_denies_workspace() {
 
     let mut loaded = fixtures::build_loaded_manifest(
         vec![workflow, enforcer],
-        vec![fixtures::routing_event(fixtures::START_SCHEMA, workflow_name)],
+        vec![fixtures::routing_event(
+            fixtures::START_SCHEMA,
+            workflow_name,
+        )],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -287,7 +302,10 @@ fn workspace_enforcer_module_denies_workspace() {
 
     let mut world = TestWorld::with_store(store, loaded).expect("world");
     world
-        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "start" }))
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
         .expect("submit start event");
     let err = world.kernel.tick().expect_err("expected denial");
     assert!(

@@ -1,7 +1,7 @@
 # P1: Effect Runtime Contract and Gap Analysis (as implemented)
 
 **Priority**: P1  
-**Status**: In Progress (baseline + partial implementation)  
+**Status**: Complete  
 **Date**: 2026-02-28
 
 ## Goal
@@ -19,8 +19,9 @@ The current control surface is still split:
 2. External execution is host wiring (`aos-host` adapter registry).
 3. Internal effects are kernel-handled (`workspace.*`, `introspect.*`, `governance.*`).
 
-That split is valid, but today there is still no governed world-level adapter
-route **enforcement** in host dispatch/preflight.
+That split is valid. As of this update, manifest-level route metadata is
+enforced at host open (preflight) and consumed at dispatch with compatibility
+fallback.
 
 ## Current Behavior (Code Reality)
 
@@ -95,7 +96,7 @@ References:
 - `crates/aos-kernel/src/world/event_flow.rs:483`
 - `crates/aos-kernel/src/effects.rs:236`
 
-## 5) Adapter dispatch is still kind-keyed host registry wiring
+## 5) Adapter dispatch now resolves route id, with kind-fallback compatibility
 
 `WorldHost::run_cycle` partitions internal vs timer vs external intents, then
 dispatches external intents through `AdapterRegistry`:
@@ -105,13 +106,15 @@ dispatches external intents through `AdapterRegistry`:
 - `crates/aos-host/src/host.rs:400`
 - `crates/aos-host/src/host.rs:411`
 
-Registry lookup is by effect `kind`; missing adapter returns `adapter.missing`
-error receipt:
+Registry now supports route ids (`adapter_id -> adapter kind`) while preserving
+legacy kind-based lookup as compatibility fallback when no binding is present.
+Missing route still yields `adapter.missing` error receipts at dispatch time:
 
 - `crates/aos-host/src/adapters/registry.rs:47`
 - `crates/aos-host/src/adapters/registry.rs:71`
 
-Default adapter wiring remains hardcoded + feature-flag driven:
+Default adapter wiring remains hardcoded + feature-flag driven, now with
+compatibility aliases such as `http.default` and `llm.default`:
 
 - `crates/aos-host/src/host.rs:522`
 - `crates/aos-host/src/host.rs:526`
@@ -143,21 +146,27 @@ enforces key invariants:
 - `crates/aos-air-types/src/model.rs:657`
 - `crates/aos-air-types/src/validate.rs:256`
 
-However, host dispatch is still kind-keyed (`intent.kind`) and does not yet
-route by `adapter_id` from `effect_bindings`.
+Host dispatch now resolves effective route by:
 
-## 8) No startup compatibility preflight for required external kinds
+1. manifest binding (`kind -> adapter_id`) when present,
+2. fallback to legacy `kind` route when absent (compat mode).
 
-`WorldHost::open`/`open_dir` load manifest, build kernel, build default registry,
-and return host; there is no fail-fast compatibility check for required external
-effect routes:
+## 8) Startup compatibility preflight is now implemented
+
+`WorldHost::open`/`open_dir` now performs fail-fast preflight for required
+external effect routes before kernel construction:
 
 - `crates/aos-host/src/host.rs:75`
 - `crates/aos-host/src/host.rs:139`
 - `crates/aos-host/src/host.rs:160`
 - `crates/aos-host/src/host.rs:258`
 
-Result: missing routes surface late as runtime `adapter.missing` receipts.
+Preflight semantics:
+
+1. enumerate non-internal kinds from loaded effect defs,
+2. resolve effective route (`binding` or `kind` fallback),
+3. fail startup with diagnostics when route is unavailable,
+4. include required kind/route and host-provided routes in diagnostics.
 
 ## 9) `agent-live` still includes direct harness-side live LLM execution
 
@@ -191,8 +200,7 @@ Main mismatches now:
 
 1. Validator accepts built-in kinds globally, but runtime catalog only includes
    defs that were actually loaded via `manifest.effects`.
-2. Adapter-route availability is not checked at startup.
-3. `origin_scope` exists in type model, but is not currently enforced in
+2. `origin_scope` exists in type model, but is not currently enforced in
    enqueue/dispatch paths.
 
 ## Decision for v0.12 P1
@@ -214,14 +222,18 @@ Completed:
    duplicate prevention, internal-kind rejection), with tests.
 3. Baseline fixtures/manifest constructors across workspace were updated for the
    new manifest field.
+4. Host startup preflight now fails open when required external routes are
+   missing, with route diagnostics.
+5. Host dispatch now resolves `kind -> adapter_id` via manifest bindings, with
+   legacy kind fallback preserved.
+6. Host conformance tests cover:
+   - startup failure for missing bound route,
+   - startup success for available bound route,
+   - internal kinds ignored by preflight.
 
 Still open for P1:
 
-1. Host preflight at world-open for required external route availability.
-2. Startup diagnostics for required routes vs provided routes.
-3. Conformance coverage for startup missing-route failure path.
-4. Any host/runtime use of `effect_bindings` for dispatch (still kind-keyed;
-   adapter-id routing remains P2/P3 runtime work).
+1. None.
 
 ## P1 Deliverables
 

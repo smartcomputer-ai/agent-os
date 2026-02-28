@@ -66,8 +66,10 @@ pub fn run(example_root: &Path) -> Result<()> {
         ));
     }
     let http_ctx = requests.into_iter().next().unwrap();
-    let document = "AOS keeps workflows and workflows separate. Summaries should be deterministic so"
-        .to_string() + " reviewers can trust the replay path.";
+    let document =
+        "AOS keeps workflows and workflows separate. Summaries should be deterministic so"
+            .to_string()
+            + " reviewers can trust the replay path.";
     let store = host.store();
     http.respond_with_body(
         host.kernel_mut(),

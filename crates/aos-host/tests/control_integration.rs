@@ -81,7 +81,8 @@ async fn control_channel_round_trip() {
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let mut manifest = fixtures::build_loaded_manifest(vec![workflow, session_workflow],
+    let mut manifest = fixtures::build_loaded_manifest(
+        vec![workflow, session_workflow],
         vec![
             fixtures::routing_event(START_SCHEMA, "com.acme/Echo@1"),
             fixtures::routing_event(SESSION_EVENT_SCHEMA, "com.acme/SessionEventEcho@1"),

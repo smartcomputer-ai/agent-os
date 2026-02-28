@@ -1,6 +1,6 @@
 mod helpers;
 use aos_air_types::{
-    schema_index::SchemaIndex, value_normalize::normalize_cbor_by_name, DefSchema, WorkflowAbi,
+    DefSchema, WorkflowAbi, schema_index::SchemaIndex, value_normalize::normalize_cbor_by_name,
 };
 use aos_kernel::{Consistency, StateReader};
 use aos_wasm_abi::WorkflowOutput;

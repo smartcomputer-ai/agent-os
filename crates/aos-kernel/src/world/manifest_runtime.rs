@@ -13,7 +13,7 @@ use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use crate::policy::{AllowAllPolicy, PolicyGate, RulePolicy};
 
-use super::{EventWrap, WorkflowSchema, RouteBinding};
+use super::{EventWrap, RouteBinding, WorkflowSchema};
 
 pub(super) struct RuntimeAssembly {
     pub schema_index: Arc<SchemaIndex>,

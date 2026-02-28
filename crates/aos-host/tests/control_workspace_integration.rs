@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use aos_air_types::{WorkflowAbi, RoutingEvent};
+use aos_air_types::{RoutingEvent, WorkflowAbi};
 use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
 use aos_host::{WorldHost, config::HostConfig};
 use aos_kernel::Kernel;

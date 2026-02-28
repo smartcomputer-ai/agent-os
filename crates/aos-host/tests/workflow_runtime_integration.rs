@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use aos_air_types::{
-    DefModule, DefSchema, HashRef, ModuleAbi, ModuleKind, WorkflowAbi, TypeExpr, TypeRecord,
-    TypeRef, TypeVariant,
+    DefModule, DefSchema, HashRef, ModuleAbi, ModuleKind, TypeExpr, TypeRecord, TypeRef,
+    TypeVariant, WorkflowAbi,
 };
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, HttpRequestParams,
@@ -15,7 +15,7 @@ use aos_kernel::error::KernelError;
 use aos_kernel::snapshot::WorkflowStatusSnapshot;
 use aos_store::Store;
 use aos_wasm_abi::{DomainEvent, WorkflowEffect, WorkflowOutput};
-use helpers::fixtures::{self, effect_params_text, fake_hash, TestStore, TestWorld, START_SCHEMA};
+use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld, effect_params_text, fake_hash};
 use indexmap::IndexMap;
 use wat::parse_str;
 

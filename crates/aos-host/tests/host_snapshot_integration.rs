@@ -13,7 +13,7 @@ use serde_cbor;
 use serde_json;
 use tempfile::TempDir;
 
-use aos_air_types::{DefSchema, WorkflowAbi, TypeExpr, TypeRef, TypeVariant};
+use aos_air_types::{DefSchema, TypeExpr, TypeRef, TypeVariant, WorkflowAbi};
 use indexmap::IndexMap;
 
 use helpers::{def_text_record_schema, insert_test_schemas, text_type};
@@ -87,7 +87,8 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
-    let mut loaded = fixtures::build_loaded_manifest(vec![module],
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![module],
         vec![fixtures::routing_event(
             "demo/TimerEvent@1",
             "demo/TimerWorkflow@1",
