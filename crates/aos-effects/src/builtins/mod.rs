@@ -84,6 +84,132 @@ pub struct TimerSetReceipt {
     pub key: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessMount {
+    pub host_path: String,
+    pub guest_path: String,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessLocalTarget {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mounts: Option<Vec<ProcessMount>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workdir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<IndexMap<String, String>>,
+    pub network_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessTarget {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<ProcessLocalTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessSessionOpenParams {
+    pub target: ProcessTarget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_ttl_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<IndexMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessSessionOpenReceipt {
+    pub session_id: String,
+    pub status: String,
+    pub started_at_ns: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessInlineText {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessInlineBytes {
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessBlobOutput {
+    pub blob_ref: HashRef,
+    pub size_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_bytes: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ProcessOutput {
+    InlineText { inline_text: ProcessInlineText },
+    InlineBytes { inline_bytes: ProcessInlineBytes },
+    Blob { blob: ProcessBlobOutput },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessExecParams {
+    pub session_id: String,
+    pub argv: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_patch: Option<IndexMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdin_ref: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessExecReceipt {
+    pub exit_code: i32,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<ProcessOutput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<ProcessOutput>,
+    pub started_at_ns: u64,
+    pub ended_at_ns: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessSessionSignalParams {
+    pub session_id: String,
+    pub signal: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grace_timeout_ns: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessSessionSignalReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmRuntimeArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]

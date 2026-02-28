@@ -197,6 +197,17 @@ mod tests {
         assert!(names.contains(&"sys/TimerSetParams@1"));
         assert!(names.contains(&"sys/TimerSetReceipt@1"));
         assert!(names.contains(&"sys/TimerFired@1"));
+        assert!(names.contains(&"sys/ProcessMount@1"));
+        assert!(names.contains(&"sys/ProcessLocalTarget@1"));
+        assert!(names.contains(&"sys/ProcessTarget@1"));
+        assert!(names.contains(&"sys/ProcessSessionOpenParams@1"));
+        assert!(names.contains(&"sys/ProcessSessionOpenReceipt@1"));
+        assert!(names.contains(&"sys/ProcessOutput@1"));
+        assert!(names.contains(&"sys/ProcessExecParams@1"));
+        assert!(names.contains(&"sys/ProcessExecReceipt@1"));
+        assert!(names.contains(&"sys/ProcessSessionSignalParams@1"));
+        assert!(names.contains(&"sys/ProcessSessionSignalReceipt@1"));
+        assert!(names.contains(&"sys/ProcessCapParams@1"));
         assert!(names.contains(&"sys/BlobPutParams@1"));
         assert!(names.contains(&"sys/BlobEdge@1"));
         assert!(names.contains(&"sys/BlobPutReceipt@1"));
@@ -300,6 +311,7 @@ mod tests {
             "sys/blob@1",
             "sys/http.out@1",
             "sys/llm.basic@1",
+            "sys/process@1",
             "sys/secret@1",
             "sys/workspace@1",
             "sys/governance@1",
@@ -317,6 +329,7 @@ mod tests {
         for name in [
             "sys/CapEnforceHttpOut@1",
             "sys/CapEnforceLlmBasic@1",
+            "sys/CapEnforceProcess@1",
             "sys/CapEnforceGovernance@1",
             "sys/CapEnforceWorkspace@1",
             "sys/Workspace@1",

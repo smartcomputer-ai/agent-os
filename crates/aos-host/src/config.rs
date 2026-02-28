@@ -113,6 +113,24 @@ fn default_adapter_routes() -> HashMap<String, AdapterProviderSpec> {
         },
     );
     routes.insert(
+        "process.session.open.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "process.session.open".into(),
+        },
+    );
+    routes.insert(
+        "process.exec.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "process.exec".into(),
+        },
+    );
+    routes.insert(
+        "process.session.signal.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "process.session.signal".into(),
+        },
+    );
+    routes.insert(
         "vault.put.default".into(),
         AdapterProviderSpec {
             adapter_kind: "vault.put".into(),
@@ -288,6 +306,15 @@ mod tests {
         let cfg = HostConfig::default();
         assert!(cfg.adapter_routes.contains_key("http.default"));
         assert!(cfg.adapter_routes.contains_key("llm.default"));
+        assert!(
+            cfg.adapter_routes
+                .contains_key("process.session.open.default")
+        );
+        assert!(cfg.adapter_routes.contains_key("process.exec.default"));
+        assert!(
+            cfg.adapter_routes
+                .contains_key("process.session.signal.default")
+        );
         assert!(cfg.adapter_routes.contains_key("timer.default"));
         assert!(cfg.adapter_routes.contains_key("vault.put.default"));
         assert!(cfg.adapter_routes.contains_key("vault.rotate.default"));

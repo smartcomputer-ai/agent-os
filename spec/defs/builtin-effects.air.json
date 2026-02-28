@@ -35,6 +35,33 @@
     "cap_type": "timer",
     "origin_scope": "both"
   },
+  {
+    "$kind": "defeffect",
+    "name": "sys/process.session.open@1",
+    "kind": "process.session.open",
+    "params_schema": "sys/ProcessSessionOpenParams@1",
+    "receipt_schema": "sys/ProcessSessionOpenReceipt@1",
+    "cap_type": "process",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/process.exec@1",
+    "kind": "process.exec",
+    "params_schema": "sys/ProcessExecParams@1",
+    "receipt_schema": "sys/ProcessExecReceipt@1",
+    "cap_type": "process",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/process.session.signal@1",
+    "kind": "process.session.signal",
+    "params_schema": "sys/ProcessSessionSignalParams@1",
+    "receipt_schema": "sys/ProcessSessionSignalReceipt@1",
+    "cap_type": "process",
+    "origin_scope": "both"
+  },
 
   {
     "$kind": "defeffect",

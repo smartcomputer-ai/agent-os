@@ -27,6 +27,19 @@
   },
   {
     "$kind": "defmodule",
+    "name": "sys/CapEnforceProcess@1",
+    "module_kind": "pure",
+    "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "abi": {
+      "pure": {
+        "input": "sys/CapCheckInput@1",
+        "output": "sys/CapCheckOutput@1"
+      }
+    },
+    "$comment": "Built-in cap enforcer module; wasm_hash patched at load time in examples."
+  },
+  {
+    "$kind": "defmodule",
     "name": "sys/CapEnforceGovernance@1",
     "module_kind": "pure",
     "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",

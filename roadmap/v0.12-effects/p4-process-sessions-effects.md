@@ -1,8 +1,8 @@
 # P4: Process Sessions Effects (Essential)
 
 **Priority**: P4  
-**Status**: Proposed  
-**Date**: 2026-02-27
+**Status**: Complete  
+**Date**: 2026-02-28
 
 ## Goal
 
@@ -217,3 +217,25 @@ Adopt a capability-gated `process.session` effect family where `open` defines
 the security boundary, `exec` performs work inside that boundary, and outcomes
 flow through strict receipt-first journaling (with streaming as a follow-up
 API extension).
+
+## Completion Notes (2026-02-28)
+
+1. Added built-in effect definitions and schemas for:
+   - `process.session.open`
+   - `process.exec`
+   - `process.session.signal`
+2. Added new built-in capability `sys/process@1` (`cap_type: "process"`) with
+   `sys/ProcessCapParams@1` schema and pure cap enforcer module
+   `sys/CapEnforceProcess@1`.
+3. Implemented `cap_enforce_process` in `aos-sys` and wired default kernel
+   cap-type-to-enforcer mapping (`process -> sys/CapEnforceProcess@1`).
+4. Implemented in-process host adapters for local process sessions:
+   - open adapter (`process.session.open`)
+   - exec adapter (`process.exec`)
+   - signal adapter (`process.session.signal`)
+5. `process.exec` output contract is live:
+   - `output_mode=auto`: inline small outputs, CAS blob refs for large outputs
+   - `output_mode=require_inline`: returns payload `status:error` with
+     `error_code=inline_required_too_large` when output cannot be safely inlined.
+6. Host profile defaults and startup route preflight include process kinds the
+   same way as other external effects, with compatibility routing retained.

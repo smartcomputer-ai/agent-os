@@ -38,6 +38,187 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/ProcessMount@1",
+    "type": {
+      "record": {
+        "host_path": { "text": {} },
+        "guest_path": { "text": {} },
+        "mode": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessLocalTarget@1",
+    "type": {
+      "record": {
+        "mounts": { "option": { "list": { "ref": "sys/ProcessMount@1" } } },
+        "workdir": { "option": { "text": {} } },
+        "env": {
+          "option": {
+            "map": {
+              "key": { "text": {} },
+              "value": { "text": {} }
+            }
+          }
+        },
+        "network_mode": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessTarget@1",
+    "type": {
+      "variant": {
+        "local": { "ref": "sys/ProcessLocalTarget@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessSessionOpenParams@1",
+    "type": {
+      "record": {
+        "target": { "ref": "sys/ProcessTarget@1" },
+        "session_ttl_ns": { "option": { "nat": {} } },
+        "labels": {
+          "option": {
+            "map": {
+              "key": { "text": {} },
+              "value": { "text": {} }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessSessionOpenReceipt@1",
+    "type": {
+      "record": {
+        "session_id": { "text": {} },
+        "status": { "text": {} },
+        "started_at_ns": { "nat": {} },
+        "expires_at_ns": { "option": { "nat": {} } },
+        "error_code": { "option": { "text": {} } },
+        "error_message": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessOutput@1",
+    "type": {
+      "variant": {
+        "inline_text": {
+          "record": {
+            "text": { "text": {} }
+          }
+        },
+        "inline_bytes": {
+          "record": {
+            "bytes": { "bytes": {} }
+          }
+        },
+        "blob": {
+          "record": {
+            "blob_ref": { "hash": {} },
+            "size_bytes": { "nat": {} },
+            "preview_bytes": { "option": { "bytes": {} } }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessExecParams@1",
+    "type": {
+      "record": {
+        "session_id": { "text": {} },
+        "argv": { "list": { "text": {} } },
+        "cwd": { "option": { "text": {} } },
+        "timeout_ns": { "option": { "nat": {} } },
+        "env_patch": {
+          "option": {
+            "map": {
+              "key": { "text": {} },
+              "value": { "text": {} }
+            }
+          }
+        },
+        "stdin_ref": { "option": { "hash": {} } },
+        "output_mode": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessExecReceipt@1",
+    "type": {
+      "record": {
+        "exit_code": { "int": {} },
+        "status": { "text": {} },
+        "stdout": { "option": { "ref": "sys/ProcessOutput@1" } },
+        "stderr": { "option": { "ref": "sys/ProcessOutput@1" } },
+        "started_at_ns": { "nat": {} },
+        "ended_at_ns": { "nat": {} },
+        "error_code": { "option": { "text": {} } },
+        "error_message": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessSessionSignalParams@1",
+    "type": {
+      "record": {
+        "session_id": { "text": {} },
+        "signal": { "text": {} },
+        "grace_timeout_ns": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessSessionSignalReceipt@1",
+    "type": {
+      "record": {
+        "status": { "text": {} },
+        "exit_code": { "option": { "int": {} } },
+        "ended_at_ns": { "option": { "nat": {} } },
+        "error_code": { "option": { "text": {} } },
+        "error_message": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ProcessCapParams@1",
+    "type": {
+      "record": {
+        "allowed_targets": { "option": { "set": { "text": {} } } },
+        "network_modes": { "option": { "set": { "text": {} } } },
+        "local_mount_roots": { "option": { "list": { "text": {} } } },
+        "local_guest_path_prefixes": { "option": { "list": { "text": {} } } },
+        "local_mount_modes": { "option": { "set": { "text": {} } } },
+        "workdir_prefixes": { "option": { "list": { "text": {} } } },
+        "env_allow": { "option": { "set": { "text": {} } } },
+        "max_mounts": { "option": { "nat": {} } },
+        "max_env_vars": { "option": { "nat": {} } },
+        "max_session_ttl_ns": { "option": { "nat": {} } },
+        "max_exec_timeout_ns": { "option": { "nat": {} } },
+        "max_argv_len": { "option": { "nat": {} } },
+        "max_arg_length": { "option": { "nat": {} } },
+        "allowed_output_modes": { "option": { "set": { "text": {} } } },
+        "allowed_signals": { "option": { "set": { "text": {} } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/WorkflowContext@1",
     "type": {
       "record": {
