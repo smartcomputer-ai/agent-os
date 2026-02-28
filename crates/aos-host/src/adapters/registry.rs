@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -68,6 +68,13 @@ impl AdapterRegistry {
         let mut routes: Vec<String> = self.routes.keys().cloned().collect();
         routes.sort();
         routes
+    }
+
+    pub fn route_mappings(&self) -> BTreeMap<String, String> {
+        self.routes
+            .iter()
+            .map(|(adapter_id, adapter_kind)| (adapter_id.clone(), adapter_kind.clone()))
+            .collect()
     }
 
     pub async fn execute_batch(&self, intents: Vec<EffectIntent>) -> Vec<EffectReceipt> {

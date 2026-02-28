@@ -1,8 +1,8 @@
 # P2: Manifest Effect Bindings and Host Profiles
 
 **Priority**: P2  
-**Status**: Proposed (slimmed)  
-**Date**: 2026-02-27
+**Status**: Complete  
+**Date**: 2026-02-28
 
 ## Goal
 
@@ -123,6 +123,20 @@ Those are always kernel-handled and must not appear in `effect_bindings`.
 3. host preflight compatibility check and diagnostics.
 4. compatibility fallback preserved during rollout.
 5. docs update in `spec/03-air.md` for finalized binding shape.
+
+## Completion Notes (2026-02-28)
+
+1. `manifest.effect_bindings` is implemented in AIR model + schema and validated
+   (declared kinds only, no duplicates, no internal kinds).
+2. Host profile route map is implemented via `HostConfig.adapter_routes`
+   (`adapter_id -> provider spec` where provider spec currently maps to concrete
+   in-process adapter kind).
+3. Host preflight at world-open verifies required external kinds resolve to an
+   available effective route (binding or compatibility fallback) and fails fast
+   when missing.
+4. Runtime dispatch resolves by binding first, then legacy kind fallback.
+5. Compatibility warning is emitted for external kinds without explicit
+   `effect_bindings`.
 
 ## Open Questions
 

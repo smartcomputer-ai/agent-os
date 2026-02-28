@@ -468,17 +468,27 @@ impl<S: Store + 'static> WorldHost<S> {
 
     /// Create a WorldHost from an existing kernel (for TestHost use).
     pub fn from_kernel(kernel: Kernel<S>, store: Arc<S>, config: HostConfig) -> Self {
+        Self::from_kernel_with_effect_routes(kernel, store, config, HashMap::new())
+    }
+
+    /// Create a WorldHost from an existing kernel with explicit effect route map.
+    pub fn from_kernel_with_effect_routes(
+        kernel: Kernel<S>,
+        store: Arc<S>,
+        config: HostConfig,
+        effect_routes: HashMap<String, String>,
+    ) -> Self {
         let adapter_registry = default_registry(store.clone(), &config);
         Self {
             kernel,
             adapter_registry,
-            effect_routes: HashMap::new(),
+            effect_routes,
             config,
             store,
         }
     }
 
-    fn resolve_effect_route_id(&self, effect_kind: &str) -> String {
+    pub(crate) fn resolve_effect_route_id(&self, effect_kind: &str) -> String {
         self.effect_routes
             .get(effect_kind)
             .cloned()
@@ -564,14 +574,14 @@ fn preflight_external_effect_routes(
     effect_routes: &HashMap<String, String>,
     registry: &AdapterRegistry,
 ) -> Result<(), HostError> {
-    let mut required: BTreeSet<String> = BTreeSet::new();
+    let mut required_kinds: BTreeSet<String> = BTreeSet::new();
     for effect in loaded.effects.values() {
         let kind = effect.kind.as_str();
         if !is_internal_effect_kind(kind) {
-            required.insert(kind.to_string());
+            required_kinds.insert(kind.to_string());
         }
     }
-    if required.is_empty() {
+    if required_kinds.is_empty() {
         return Ok(());
     }
 
@@ -592,12 +602,21 @@ fn preflight_external_effect_routes(
         modules.dedup();
     }
 
+    let mut world_requires: BTreeMap<String, String> = BTreeMap::new();
     let mut missing: Vec<(String, String)> = Vec::new();
-    for kind in required {
+    for kind in required_kinds {
         let route_id = effect_routes
             .get(kind.as_str())
             .cloned()
             .unwrap_or_else(|| kind.clone());
+        if !effect_routes.contains_key(kind.as_str()) {
+            log::warn!(
+                "external effect kind '{}' has no explicit manifest.effect_bindings entry; using compatibility fallback route '{}'",
+                kind,
+                route_id
+            );
+        }
+        world_requires.insert(kind.clone(), route_id.clone());
         if !registry.has_route(&route_id) {
             missing.push((kind, route_id));
         }
@@ -607,6 +626,7 @@ fn preflight_external_effect_routes(
         return Ok(());
     }
 
+    let host_provides = registry.route_mappings();
     let mut details = Vec::new();
     for (kind, route_id) in &missing {
         let origin_modules = origins
@@ -617,11 +637,11 @@ fn preflight_external_effect_routes(
             "kind='{kind}' route='{route_id}' origins=[{origin_modules}]"
         ));
     }
-    let provided_routes = registry.route_ids().join(", ");
     Err(HostError::Manifest(format!(
-        "missing adapter routes for external effects: {}; provided_routes=[{}]",
+        "missing adapter routes for external effects: {}; world_requires={}; host_provides={}",
         details.join("; "),
-        provided_routes
+        format_route_map(&world_requires),
+        format_route_map(&host_provides),
     )))
 }
 
@@ -661,14 +681,25 @@ fn default_registry<S: Store + 'static>(store: Arc<S>, config: &HostConfig) -> A
         registry.register(Box::new(StubLlmAdapter));
     }
 
-    // Compatibility aliases for manifest `effect_bindings` adapter IDs.
-    registry.register_route("timer.default", EffectKind::TIMER_SET);
-    registry.register_route("blob.put.default", EffectKind::BLOB_PUT);
-    registry.register_route("blob.get.default", EffectKind::BLOB_GET);
-    registry.register_route("http.default", EffectKind::HTTP_REQUEST);
-    registry.register_route("llm.default", EffectKind::LLM_GENERATE);
+    // Register host profile route ids (`adapter_id`) to concrete adapter kinds.
+    for (adapter_id, provider) in &config.adapter_routes {
+        if !registry.register_route(adapter_id.as_str(), provider.adapter_kind.as_str()) {
+            log::warn!(
+                "host profile route '{}' targets unknown adapter kind '{}'",
+                adapter_id,
+                provider.adapter_kind
+            );
+        }
+    }
 
     registry
+}
+
+fn format_route_map(map: &BTreeMap<String, String>) -> String {
+    map.iter()
+        .map(|(kind, adapter_id)| format!("{kind}->{adapter_id}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn receipts_set(tail: &TailScan) -> HashSet<[u8; 32]> {
@@ -678,6 +709,7 @@ fn receipts_set(tail: &TailScan) -> HashSet<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AdapterProviderSpec;
     use aos_air_types::catalog::EffectCatalog;
     use aos_air_types::{CURRENT_AIR_VERSION, EffectBinding, Manifest, NamedRef, builtins};
     use aos_kernel::LoadedManifest;
@@ -855,6 +887,8 @@ mod tests {
         };
         assert!(message.contains("http.request"));
         assert!(message.contains("http.missing"));
+        assert!(message.contains("world_requires="));
+        assert!(message.contains("host_provides="));
     }
 
     #[test]
@@ -906,5 +940,25 @@ mod tests {
             KernelConfig::default(),
         )
         .expect("missing binding should fallback to legacy kind route");
+    }
+
+    #[test]
+    fn startup_preflight_accepts_custom_host_profile_route() {
+        let tmp = TempDir::new().unwrap();
+        let store = Arc::new(FsStore::open(tmp.path()).expect("fs store"));
+        let loaded = loaded_manifest_with_effect_routes(
+            &[EffectKind::HTTP_REQUEST],
+            &[(EffectKind::HTTP_REQUEST, "http.custom")],
+        );
+        let mut config = HostConfig::default();
+        config.adapter_routes.insert(
+            "http.custom".into(),
+            AdapterProviderSpec {
+                adapter_kind: EffectKind::HTTP_REQUEST.to_string(),
+            },
+        );
+
+        WorldHost::from_loaded_manifest(store, loaded, tmp.path(), config, KernelConfig::default())
+            .expect("custom host profile route should pass preflight");
     }
 }

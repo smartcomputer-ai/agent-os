@@ -62,12 +62,24 @@ impl<S: Store + 'static> TestHost<S> {
         loaded: LoadedManifest,
         host_config: HostConfig,
     ) -> Result<Self, HostError> {
+        let effect_routes = loaded
+            .manifest
+            .effect_bindings
+            .iter()
+            .map(|binding| {
+                (
+                    binding.kind.as_str().to_string(),
+                    binding.adapter_id.clone(),
+                )
+            })
+            .collect();
         let kernel = Kernel::from_loaded_manifest(
             store.clone(),
             loaded,
             Box::new(aos_kernel::journal::mem::MemJournal::new()),
         )?;
-        let host = WorldHost::from_kernel(kernel, store, host_config);
+        let host =
+            WorldHost::from_kernel_with_effect_routes(kernel, store, host_config, effect_routes);
         Ok(Self { host })
     }
 
@@ -142,11 +154,23 @@ impl<S: Store + 'static> TestHost<S> {
     pub async fn drain_and_dispatch(&mut self) -> Result<CycleOutcome, HostError> {
         let intents = self.host.kernel_mut().drain_effects()?;
         let effects_dispatched = intents.len();
-        let receipts = self
+        let mut receipts = Vec::new();
+        let mut external_intents = Vec::new();
+        for intent in intents {
+            if let Some(internal) = self.host.kernel_mut().handle_internal_intent(&intent)? {
+                receipts.push(internal);
+            } else {
+                let route_id = self.host.resolve_effect_route_id(intent.kind.as_str());
+                external_intents.push((intent, route_id));
+            }
+        }
+        let external_receipts = self
             .host
             .adapter_registry_mut()
-            .execute_batch(intents)
+            .execute_batch_routed(external_intents)
             .await;
+        receipts.extend(external_receipts);
+
         let receipts_applied = receipts.len();
         for receipt in receipts {
             self.host.kernel_mut().handle_receipt(receipt)?;

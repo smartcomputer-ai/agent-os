@@ -126,6 +126,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
   "schemas": [{name, hash}],
   "modules": [{name, hash}],
   "effects": [{name, hash}],
+  "effect_bindings"?: [{kind: EffectKind, adapter_id: text}],
   "caps": [{name, hash}],
   "policies": [{name, hash}],
   "secrets"?: [{name, hash} | SecretDecl],
@@ -140,7 +141,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.subscriptions` maps DomainEvents on the bus to workflow modules; **the routed schema must equal the reducer ABI event schema in `defmodule.abi.workflow.event`** (use a variant schema to accept multiple event shapes, including micro-effect receipts; reducers that never emit micro-effects may use a record event schema directly). `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`); when the event schema is a variant, `key_field` typically targets the wrapped value (e.g., `$value.note_id`). The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-in schemas/effects are not auto-included. Built-in caps and modules are available even if omitted from `manifest.caps`/`manifest.modules`. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.subscriptions` maps DomainEvents on the bus to workflow modules; **the routed schema must equal the reducer ABI event schema in `defmodule.abi.workflow.event`** (use a variant schema to accept multiple event shapes, including micro-effect receipts; reducers that never emit micro-effects may use a record event schema directly). `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`); when the event schema is a variant, `key_field` typically targets the wrapped value (e.g., `$value.note_id`). The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-in schemas/effects are not auto-included. Built-in caps and modules are available even if omitted from `manifest.caps`/`manifest.modules`. Tooling may still fill the canonical hash for built-ins when the name is present without a hash. `effect_bindings` maps external effect `kind` to logical `adapter_id`; bindings must reference declared effect kinds, must not duplicate kinds, and must not include internal effect kinds (`workspace.*`, `introspect.*`, `governance.*`).
 
 See: spec/schemas/manifest.schema.json
 
@@ -522,7 +523,7 @@ See: spec/schemas/defcap.schema.json
 - Built-in v1 effects live in `spec/defs/builtin-effects.air.json`; include the ones your world uses (hashes may be filled by tooling for built-ins).
 - Unknown effect kinds (not declared in the manifest or built-ins) are rejected during normalization/dispatch.
 - Reducer receipt translation remains limited to effects whose `origin_scope` allows reducers.
-- (Future) Adapter binding stays out of `defeffect`; a manifest-level `effect_bindings` table can later map kinds to adapters without changing the defkind.
+- Adapter binding stays out of `defeffect`; routing intent lives in manifest `effect_bindings` so logical adapter ids can evolve without redefining effect kinds.
 
 See: spec/schemas/defeffect.schema.json
 
