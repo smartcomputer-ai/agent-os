@@ -158,6 +158,7 @@ fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) ->
                 hash: e.hash_ref.clone(),
             })
             .collect(),
+        effect_bindings: vec![],
         caps: Vec::new(),
         policies: Vec::new(),
         secrets: Vec::new(),

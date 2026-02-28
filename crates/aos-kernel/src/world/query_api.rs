@@ -180,6 +180,7 @@ mod tests {
             modules: vec![],
             caps: vec![],
             effects: vec![],
+            effect_bindings: vec![],
             policies: vec![],
             secrets: vec![],
             module_bindings: IndexMap::new(),

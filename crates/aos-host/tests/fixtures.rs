@@ -130,6 +130,7 @@ pub fn build_loaded_manifest(
                 hash: e.hash_ref.clone(),
             })
             .collect(),
+        effect_bindings: vec![],
         caps: vec![],
         policies: vec![],
         secrets: vec![],
