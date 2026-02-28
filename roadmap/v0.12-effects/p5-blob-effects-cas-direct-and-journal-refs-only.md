@@ -6,138 +6,138 @@
 
 ## Goal
 
-Make `blob.put` / `blob.get` scale for heavy CAS interaction by removing blob bytes
-from the journal path.
+Remove large blob bytes from journal storage without changing the runtime effect/receipt contracts.
 
 Target outcome:
 
-1. journal only refs/metadata for blob effects,
-2. read/write blob bytes directly to CAS,
-3. preserve replay determinism via CAS dependency closure.
+1. `blob.put` / `blob.get` stay on `@1` schemas and behavior,
+2. journal stores refs/metadata for large blob payload bytes instead of inline bytes,
+3. replay loads externalized payload bytes from CAS deterministically,
+4. snapshot+journal roots remain sufficient for future GC reachability.
+
+## Clarification (What Stays the Same)
+
+This slice is an **in-place storage-model change**, not a contract-version change.
+
+1. `sys/BlobPutParams@1` and `sys/BlobGetReceipt@1` remain unchanged.
+2. Workflow/runtime behavior remains unchanged: workflows can still consume `blob.get` bytes.
+3. Adapter input/output contracts remain unchanged.
+
+Only journal persistence changes.
 
 ## Current State (Why Change)
 
-Today blob bytes are duplicated into journal records:
+Today raw blob bytes are duplicated into journal records:
 
-1. `blob.put` intent params include raw `bytes` (`BlobPutParams.bytes`) and are
-   journaled as `EffectIntentRecord.params_cbor`.
-2. `blob.get` receipt payload includes raw `bytes` (`BlobGetReceipt.bytes`) and
-   is journaled as `EffectReceiptRecord.payload_cbor`.
-3. Blob legacy receipt projection also re-embeds requested/receipt payloads.
-4. Host adapters already use CAS for actual blob storage/read.
-
-References:
-
-- `crates/aos-effects/src/builtins/mod.rs:36`
-- `crates/aos-effects/src/builtins/mod.rs:64`
-- `crates/aos-kernel/src/world/mod.rs:1095`
-- `crates/aos-kernel/src/world/mod.rs:1111`
-- `crates/aos-kernel/src/receipts.rs:251`
-- `crates/aos-kernel/src/receipts.rs:271`
-- `crates/aos-host/src/adapters/blob_put.rs:27`
-- `crates/aos-host/src/adapters/blob_get.rs:27`
+1. `blob.put` params include `bytes` and are persisted inline in `EffectIntentRecord.params_cbor`.
+2. `blob.get` receipt includes `bytes` and is persisted inline in `EffectReceiptRecord.payload_cbor`.
+3. This causes journal bloat for heavy blob workloads even though bytes already live in CAS.
 
 ## Design Decision
 
-For blob effects, CAS is the source of truth for bytes. Journal is the source
-of truth for references, ordering, and decisions.
+For blob-heavy payloads, CAS is source of truth for bytes; journal is source of truth for ordering/decisions and refs.
 
-That means:
+Execution path keeps full payloads in-memory for adapter and workflow delivery, but journal persistence externalizes the large CBOR payload bytes.
 
-1. blob bytes are never carried in blob effect intent/receipt schemas,
-2. blob effects carry hash refs + metadata only,
-3. runtime code reads/writes bytes directly to CAS by ref.
+## Journal Externalization Model
 
-## Blob Contract Changes (v2 Schemas)
+### Scope (P5)
 
-## `blob.put`
+Externalize only:
 
-Replace byte-carrying params with ref-carrying params.
+1. `blob.put` **intent params** CBOR,
+2. `blob.get` **receipt payload** CBOR.
 
-1. `sys/BlobPutParams@2`:
-   - `blob_ref: HashRef` (required)
-   - `size: nat` (required)
-   - `refs?: list<HashRef>`
-2. `sys/BlobPutReceipt@2` remains ref/metadata only (`blob_ref`, `edge_ref`, `size`).
+### Record shape changes
 
-## `blob.get`
+Extend journal records with ref metadata:
 
-Make get receipt ref-only.
+1. `EffectIntentRecord` adds:
+   - `params_ref?: hash`
+   - `params_size?: nat`
+   - `params_sha256?: hash`
+2. `EffectReceiptRecord` adds:
+   - `payload_ref?: hash`
+   - `payload_size?: nat`
+   - `payload_sha256?: hash`
 
-1. `sys/BlobGetParams@2` remains `blob_ref`.
-2. `sys/BlobGetReceipt@2`:
-   - `blob_ref: HashRef`
-   - `size: nat`
-   - no `bytes` field.
+Rules:
 
-## Receipt projection
-
-1. Add `sys/BlobPutResult@2` and `sys/BlobGetResult@2` using ref-only
-   requested/receipt schemas.
-2. Do not project raw bytes into these events.
+1. If `*_ref` is present, replay MUST hydrate bytes from CAS using that ref.
+2. When externalized, inline `params_cbor` / `payload_cbor` are not authoritative and may be empty/minimal.
+3. If `*_ref` is absent, replay uses inline bytes (legacy/non-externalized path).
 
 ## Kernel/Host Behavior
 
-## Write path (`blob.put`)
+### Write path (`blob.put` intent journaling)
 
-1. Workflow/runtime submits blob bytes to CAS directly (by hash).
-2. Effect intent uses ref-only params (`blob_ref`, `size`, `refs?`).
-3. Enqueue + cap/policy + journal operate on ref-only canonical CBOR.
+1. Kernel canonicalizes `BlobPutParams@1` as today.
+2. Before appending `EffectIntentRecord`, kernel writes canonical params CBOR to CAS.
+3. Journal record stores `params_ref` metadata and does not store full inline bytes.
 
-## Read path (`blob.get`)
+### Write path (`blob.get` receipt journaling)
 
-1. Effect intent carries `blob_ref` only.
-2. Host/kernel verifies/read metadata from CAS.
-3. Receipt is ref-only (`blob_ref`, `size`) and journaled as such.
-4. If workflow needs bytes, it performs explicit CAS read by `blob_ref`
-   (runtime API path, not byte-carrying effect receipt).
+1. Receipt remains `BlobGetReceipt@1` in execution path.
+2. Before appending `EffectReceiptRecord`, kernel writes canonical receipt payload CBOR to CAS.
+3. Journal record stores `payload_ref` metadata and does not store full inline bytes.
 
-## Replay and Determinism
+### Replay path
+
+1. Replay reads journal records.
+2. If `params_ref` / `payload_ref` present, replay loads bytes from CAS and verifies size/hash metadata.
+3. Hydrated bytes are then processed identically to current inline replay behavior.
+4. Missing or mismatched CAS dependency is a deterministic hard fault (`missing_cas_dependency`).
+
+## Determinism and Faulting
 
 1. Replay never re-executes external effects.
-2. Replay uses journaled refs and metadata exactly as recorded.
-3. Any required CAS blob missing during replay is a deterministic hard fault
-   (`missing_cas_dependency` class).
-4. World export/import tooling must include transitive CAS deps referenced by
-   blob effect intents/receipts/events.
+2. Replay behavior is fully determined by journal order + CAS objects referenced by journal metadata.
+3. Missing CAS object for externalized payload is fatal and deterministic.
 
-## Journal Model Impact
+## GC Readiness (Aligned with `spec/07-gc.md`)
 
-No generic journal-record format change is required for this slice.
+Future GC must retain externalized journal payload blobs.
 
-1. Existing `params_cbor` / `payload_cbor` fields remain.
-2. For blob effects, those CBOR payloads become ref-only by schema.
-3. Optional follow-up: generic large-payload externalization (`*_ref`) for
-   non-blob effects.
+Required reachability contract:
 
-## Migration Plan
+1. `params_ref` and `payload_ref` are typed `hash` fields in journal nodes.
+2. Mark phase traversal over retained journal records MUST follow these refs.
+3. Therefore, externalized payload blobs are reachable from snapshot+journal roots and cannot be collected while needed for replay.
+4. World export/import MUST include transitive CAS closure of externalized journal refs.
 
-## Phase 5.1: Dual-read, v2-write
+Operationally:
 
-1. Introduce `@2` blob schemas and defs.
-2. Accept v1/v2 on read during transition.
-3. Emit/journal v2 ref-only contracts on new worlds.
+1. A retained baseline at height `H` implies replay needs journal tail `>= H`.
+2. GC retention must keep all externalized payload blobs referenced by that retained tail.
+3. Truncated (non-retained) tails may release their externalized payload blobs once unreachable.
 
-## Phase 5.2: Runtime API and SDK alignment
+## Migration Plan (In-Place)
 
-1. Add explicit workflow/runtime CAS read helper by `blob_ref`.
-2. Update SDK helpers and examples to avoid relying on byte-carrying
-   blob effect receipts.
+### Phase 5.1: Journal ref fields + dual-read replay
 
-## Phase 5.3: Remove v1 byte-carrying path
+1. Add `*_ref/*_size/*_sha256` fields to journal records.
+2. Replay supports both inline and ref-based records.
+3. Writer externalizes the P5 blob paths by default.
 
-1. Disable `BlobPutParams@1` / `BlobGetReceipt@1` in strict mode.
-2. Remove legacy blob projection that embeds bytes.
+### Phase 5.2: Tooling closure and diagnostics
+
+1. Export/import include externalized journal payload CAS closure.
+2. Add diagnostics for missing externalized dependencies.
+
+### Phase 5.3: Optional generalization
+
+1. Reuse same externalization mechanism for other large effect payloads.
 
 ## Risks
 
-1. Migration breakage for workflows that parse v1 blob receipt payload bytes.
-2. Replay failures if CAS dependency closure is incomplete.
-3. Operator confusion if v1/v2 coexist without clear diagnostics.
+1. Incomplete export/import CAS closure causing replay faults.
+2. Incorrect fallback rules between inline vs `*_ref` replay.
+3. GC implementation later ignoring journal `*_ref` fields.
 
 ## Deliverables / DoD
 
-1. `blob.put` and `blob.get` effect journals are ref-only (no inline bytes).
-2. `sys/Blob*Result@2` events are ref-only.
-3. Replay-or-die still holds with explicit missing-CAS fault behavior.
-4. Smoke/integration fixtures cover heavy blob workloads without journal bloat.
+1. `blob.put` / `blob.get` effect+receipt schemas remain `@1` and behavior unchanged.
+2. Journal no longer stores blob-heavy bytes inline for P5 paths.
+3. Replay hydrates externalized payload bytes from CAS and preserves behavior.
+4. Missing externalized CAS object fails deterministically (`missing_cas_dependency`).
+5. Externalized journal payload refs are explicitly reachable from snapshot+journal for future GC.
