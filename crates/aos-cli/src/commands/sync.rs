@@ -746,7 +746,7 @@ mod tests {
             imports: vec![AirImport {
                 path: Some(PathBuf::from("../sdk/air")),
                 cargo: Some(CargoAirImport {
-                    package: "aos-agent-sdk".into(),
+                    package: "aos-agent".into(),
                     version: None,
                     source: None,
                     air_dir: None,
@@ -770,14 +770,14 @@ mod tests {
         let default_air = workspace_root.join("air");
 
         let mut config = empty_config();
-        let import_root = workspace_root.join("crates/aos-agent-sdk/air");
+        let import_root = workspace_root.join("crates/aos-agent/air");
         let lock_hash = import_defs_hash(&import_root).expect("import hash");
         config.air = Some(AirSync {
             dir: Some(PathBuf::from("apps/demiurge/air")),
             imports: vec![AirImport {
                 path: None,
                 cargo: Some(CargoAirImport {
-                    package: "aos-agent-sdk".into(),
+                    package: "aos-agent".into(),
                     version: None,
                     source: None,
                     air_dir: Some(PathBuf::from("air")),
@@ -791,7 +791,7 @@ mod tests {
             resolve_air_sources(&world_root, &map_root, &config, &default_air, &workflow_dir)
                 .expect("resolve");
         let actual = std::fs::canonicalize(&resolved.import_dirs[0]).expect("canonical actual");
-        let expected = std::fs::canonicalize(workspace_root.join("crates/aos-agent-sdk/air"))
+        let expected = std::fs::canonicalize(workspace_root.join("crates/aos-agent/air"))
             .expect("canonical expected");
         assert_eq!(actual, expected);
     }

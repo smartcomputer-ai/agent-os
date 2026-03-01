@@ -222,7 +222,7 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
     load_world_env(&asset_root).context("load demiurge .env")?;
     let asset_root = asset_root.as_path();
 
-    let sdk_air_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../aos-agent-sdk/air");
+    let sdk_air_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../aos-agent/air");
     let import_roots = vec![sdk_air_root];
     let mut loaded =
         manifest_loader::load_from_assets_with_imports(store.clone(), asset_root, &import_roots)

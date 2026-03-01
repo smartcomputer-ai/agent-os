@@ -40,4 +40,4 @@ Live smoke notes:
 - Reads secrets from process env or `.env` files at repo root.
 - Runs a multi-tool agent flow (`echo_payload`, `sum_pair`) plus a follow-up user turn.
 - Ends with replay verification.
-- `fixtures/22-agent-live` uses `aos.agent/*` schemas + `aos-agent-sdk` workflow helpers and runs a dynamic tool-traversal flow (`search_step`) to completion, then follow-up + replay verification.
+- `fixtures/22-agent-live` uses `aos.agent/*` schemas + `aos-agent` workflow helpers and runs a dynamic tool-traversal flow (`search_step`) to completion, then follow-up + replay verification.

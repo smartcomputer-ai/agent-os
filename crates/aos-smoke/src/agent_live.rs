@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, ensure};
-use aos_agent_sdk::{
-    LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionState, ToolAvailabilityRule, ToolCallStatus, ToolExecutor,
-    ToolParallelismHint, ToolSpec, WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
-    WorkspaceSnapshotReady, materialize_llm_generate_params_with_workspace,
+use aos_agent::{
+    LlmToolCallList, SessionConfig, SessionId, SessionIngress, SessionIngressKind, SessionState,
+    ToolAvailabilityRule, ToolCallStatus, ToolExecutor, ToolParallelismHint, ToolSpec,
+    WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
 };
+use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope};
+use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolChoice};
 use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_host::adapters::llm::LlmAdapter;
 use aos_host::adapters::traits::AsyncEffectAdapter;
@@ -28,8 +28,8 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
-const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
-const SDK_WASM_PACKAGE: &str = "aos-agent-sdk";
+const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
+const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
 const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 const AGENT_WORKSPACE_NAME: &str = "agent-live";
@@ -89,6 +89,21 @@ enum SearchPhase {
     Done,
 }
 
+#[derive(Debug, Clone, Default)]
+struct StepContext {
+    correlation_id: Option<String>,
+    message_refs: Vec<String>,
+    temperature: Option<String>,
+    top_p: Option<String>,
+    tool_refs: Option<Vec<String>>,
+    tool_choice: Option<LlmToolChoice>,
+    stop_sequences: Option<Vec<String>>,
+    metadata: Option<indexmap::IndexMap<String, String>>,
+    provider_options_ref: Option<String>,
+    response_format_ref: Option<String>,
+    api_key: Option<String>,
+}
+
 pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()> {
     let provider = resolve_provider(provider, model_override)?;
     let fixture_root = crate::workspace_root().join(FIXTURE_ROOT);
@@ -118,7 +133,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let world = SearchWorld::new();
 
     println!(
-        "→ Agent Live smoke (sdk) (provider={} model={})",
+        "→ Agent Live smoke (provider={} model={})",
         provider.provider_id, provider.model
     );
 
@@ -231,7 +246,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         } else {
             None
         };
-        let step_ctx = LlmStepContext {
+        let step_ctx = StepContext {
             correlation_id: Some(format!("live-run-turn-{llm_turn}")),
             message_refs: vec![history_ref],
             temperature: None,
@@ -431,7 +446,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         .verify_replay()?;
 
     println!(
-        "   sdk agent live smoke: OK (tool_rounds={} tool_calls={})",
+        "   agent live smoke: OK (tool_rounds={} tool_calls={})",
         stats.tool_rounds, stats.tool_calls
     );
 
@@ -498,20 +513,84 @@ fn configure_search_tool_registry(
 }
 
 fn to_core_llm_params(
-    run_config: &aos_agent_sdk::RunConfig,
-    active_workspace_snapshot: Option<&aos_agent_sdk::WorkspaceSnapshot>,
-    step_ctx: &LlmStepContext,
+    run_config: &aos_agent::RunConfig,
+    active_workspace_snapshot: Option<&aos_agent::WorkspaceSnapshot>,
+    step_ctx: &StepContext,
 ) -> Result<LlmGenerateParams> {
-    let mapped = materialize_llm_generate_params_with_workspace(
-        run_config,
-        active_workspace_snapshot,
-        step_ctx.clone(),
-    )
-    .map_err(|err| anyhow!("map llm params via sdk helpers: {err}"))?;
-    let cbor = serde_cbor::to_vec(&mapped).context("encode mapped sys llm params")?;
-    let core: LlmGenerateParams =
-        serde_cbor::from_slice(&cbor).context("decode mapped params into core llm params")?;
-    Ok(core)
+    let provider = run_config.provider.trim();
+    ensure!(!provider.is_empty(), "run provider missing");
+    let model = run_config.model.trim();
+    ensure!(!model.is_empty(), "run model missing");
+
+    let mut message_refs = if let Some(explicit) = &run_config.prompt_refs {
+        explicit.clone()
+    } else if let Some(prompt_pack_ref) = active_workspace_snapshot
+        .and_then(|snapshot| snapshot.prompt_pack_ref.clone())
+    {
+        vec![prompt_pack_ref]
+    } else {
+        Vec::new()
+    };
+    message_refs.extend(step_ctx.message_refs.clone());
+    ensure!(!message_refs.is_empty(), "message_refs must not be empty");
+
+    let message_refs = message_refs
+        .into_iter()
+        .map(|value| HashRef::new(value).map_err(|err| anyhow!("invalid message ref: {err}")))
+        .collect::<Result<Vec<_>>>()?;
+
+    let tool_refs = step_ctx
+        .tool_refs
+        .clone()
+        .map(|values| {
+            values
+                .into_iter()
+                .map(|value| HashRef::new(value).map_err(|err| anyhow!("invalid tool ref: {err}")))
+                .collect::<Result<Vec<_>>>()
+        })
+        .transpose()?;
+    let provider_options_ref = step_ctx
+        .provider_options_ref
+        .clone()
+        .map(|value| {
+            HashRef::new(value).map_err(|err| anyhow!("invalid provider_options_ref: {err}"))
+        })
+        .transpose()?;
+    let response_format_ref = step_ctx
+        .response_format_ref
+        .clone()
+        .map(|value| {
+            HashRef::new(value).map_err(|err| anyhow!("invalid response_format_ref: {err}"))
+        })
+        .transpose()?;
+
+    Ok(LlmGenerateParams {
+        correlation_id: step_ctx.correlation_id.clone(),
+        provider: provider.into(),
+        model: model.into(),
+        message_refs,
+        runtime: LlmRuntimeArgs {
+            temperature: step_ctx.temperature.clone(),
+            top_p: step_ctx.top_p.clone(),
+            max_tokens: run_config.max_tokens,
+            tool_refs,
+            tool_choice: step_ctx.tool_choice.clone(),
+            reasoning_effort: run_config.reasoning_effort.map(reasoning_effort_text),
+            stop_sequences: step_ctx.stop_sequences.clone(),
+            metadata: step_ctx.metadata.clone(),
+            provider_options_ref,
+            response_format_ref,
+        },
+        api_key: step_ctx.api_key.clone(),
+    })
+}
+
+fn reasoning_effort_text(value: aos_agent::ReasoningEffort) -> String {
+    match value {
+        aos_agent::ReasoningEffort::Low => "low".into(),
+        aos_agent::ReasoningEffort::Medium => "medium".into(),
+        aos_agent::ReasoningEffort::High => "high".into(),
+    }
 }
 
 fn execute_llm(

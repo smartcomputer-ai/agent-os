@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use aos_agent_sdk::SessionWorkflowEvent;
+use aos_agent::SessionWorkflowEvent;
 use aos_wasm_abi::PureContext;
 use aos_wasm_sdk::{PureError, PureModule, aos_pure};
 

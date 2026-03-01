@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow, ensure};
-use aos_agent_sdk::{
+use aos_agent::{
     HostCommand, HostCommandKind, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
     SessionLifecycle, SessionState, ToolCallObserved, ToolCallStatus,
 };
@@ -11,8 +11,8 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
-const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
-const SDK_WASM_PACKAGE: &str = "aos-agent-sdk";
+const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
+const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
 const SESSION_ID: &str = "11111111-1111-1111-1111-111111111111";
 

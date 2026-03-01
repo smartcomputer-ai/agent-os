@@ -17,11 +17,11 @@ This document is the umbrella index. Implementation is split into staged docs (`
 
 ## Repository Placement and Test Runner Decisions
 
-1. SDK contracts and reusable runtime helpers live in `crates/aos-agent-sdk`.
-2. For v0.10, SDK reducer/pure WASM modules stay in `crates/aos-agent-sdk` (`src/bin/*`) rather than a separate module crate.
-3. Canonical reusable AIR assets for the SDK live under `crates/aos-agent-sdk/air/` (schemas, module defs, plan templates, capability/policy templates), but only for `aos.agent/*` ownership.
+1. SDK contracts and reusable runtime helpers live in `crates/aos-agent`.
+2. For v0.10, SDK reducer/pure WASM modules stay in `crates/aos-agent` (`src/bin/*`) rather than a separate module crate.
+3. Canonical reusable AIR assets for the SDK live under `crates/aos-agent/air/` (schemas, module defs, plan templates, capability/policy templates), but only for `aos.agent/*` ownership.
 4. `apps/demiurge` is a consumer and migration target for SDK contracts, not the source of truth for them.
-5. `crates/aos-smoke` is the single end-to-end runner for SDK flows; do not introduce a parallel e2e harness in `aos-agent-sdk`.
+5. `crates/aos-smoke` is the single end-to-end runner for SDK flows; do not introduce a parallel e2e harness in `aos-agent`.
 6. E2E execution has two lanes:
    - deterministic lane (default/CI, mock or stub adapters, replay parity required),
    - live lane (opt-in with real credentials/providers, validates wiring/interop, not replay-parity gating).

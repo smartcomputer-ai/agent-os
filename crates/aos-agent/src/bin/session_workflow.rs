@@ -5,9 +5,9 @@
 
 extern crate alloc;
 
-use aos_agent_sdk::{
-    SessionEffectCommand, SessionReduceError, SessionState, SessionWorkflowEvent,
-    apply_session_workflow_event,
+use aos_agent::{
+    SessionState, SessionWorkflowEvent,
+    helpers::{SessionEffectCommand, SessionReduceError, apply_session_workflow_event},
 };
 use aos_wasm_sdk::{ReduceError, Value, Workflow, WorkflowCtx, aos_workflow};
 

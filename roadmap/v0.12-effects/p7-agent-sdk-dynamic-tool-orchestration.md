@@ -6,7 +6,7 @@
 
 ## Goal
 
-Evolve `aos-agent-sdk` so tool management is owned by the session workflow
+Evolve `aos-agent` so tool management is owned by the session workflow
 state and reducer logic, not by workspace tool catalogs.
 
 This slice makes dynamic tool availability and tool-batch orchestration the
@@ -24,7 +24,7 @@ refactors are not part of this push.
 
 ## Problem Statement
 
-Current `aos-agent-sdk` behavior is too workspace-centric for tools:
+Current `aos-agent` behavior is too workspace-centric for tools:
 
 1. `WorkspaceSnapshot@1` carries `tool_catalog` + `tool_catalog_ref`.
 2. `RunConfig@1` / `SessionConfig@1` carry `tool_catalog` and `tool_refs`.
@@ -259,9 +259,9 @@ allow them.
 
 ### Phase 7.1: Contract Refactor (Breaking `@1`)
 
-1. Replace affected schemas in `crates/aos-agent-sdk/air/schemas.air.json`.
+1. Replace affected schemas in `crates/aos-agent/air/schemas.air.json`.
 2. Update `module.air.json` and `manifest.air.json` to new schema shape.
-3. Regenerate/align Rust contracts in `crates/aos-agent-sdk/src/contracts/*`.
+3. Regenerate/align Rust contracts in `crates/aos-agent/src/contracts/*`.
 4. Define install-time preload contract for default tool registry + profiles.
 
 ### Phase 7.2: Reducer + Helpers

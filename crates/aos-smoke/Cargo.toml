@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 aos-air-types = { path = "../aos-air-types" }
-aos-agent-sdk = { path = "../aos-agent-sdk" }
+aos-agent = { path = "../aos-agent" }
 aos-cbor = { path = "../aos-cbor" }
 aos-kernel = { path = "../aos-kernel" }
 aos-sys = { path = "../aos-sys" }

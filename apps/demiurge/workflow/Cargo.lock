@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "aos-agent-sdk"
+name = "aos-agent"
 version = "0.1.0"
 dependencies = [
  "aos-wasm-abi",
@@ -73,7 +73,7 @@ dependencies = [
 name = "demiurge-workflow"
 version = "0.1.0"
 dependencies = [
- "aos-agent-sdk",
+ "aos-agent",
  "aos-wasm-sdk",
  "serde",
  "serde_cbor",

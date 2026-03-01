@@ -4,13 +4,13 @@
     "imports": [
       {
         "cargo": {
-          "package": "aos-agent-sdk",
+          "package": "aos-agent",
           "air_dir": "air",
           "manifest_path": "../../Cargo.toml"
         },
         "lock": {
           "source": "cargo",
-          "package": "aos-agent-sdk",
+          "package": "aos-agent",
           "version": "0.1.0",
           "manifest_path": "../../Cargo.toml",
           "air_dir": "air",

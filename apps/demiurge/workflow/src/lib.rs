@@ -3,11 +3,13 @@
 
 extern crate alloc;
 
-use aos_agent_sdk::{
-    EffectReceiptRejected, EffectStreamFrameEnvelope, SessionEffectCommand, SessionId, SessionIngress,
-    SessionIngressKind, SessionReduceError, SessionRuntimeLimits, SessionState, SysLlmGenerateParams,
-    SysLlmRuntimeArgs,
-    SessionWorkflowEvent, ToolBatchId, ToolCallStatus, apply_session_workflow_event_with_catalog_and_limits,
+use aos_agent::{
+    EffectReceiptRejected, EffectStreamFrameEnvelope, SessionId, SessionIngress, SessionIngressKind,
+    SessionState, SessionWorkflowEvent, ToolBatchId, ToolCallStatus,
+    helpers::{
+        SessionEffectCommand, SessionReduceError, SessionRuntimeLimits, SysLlmGenerateParams,
+        SysLlmRuntimeArgs, apply_session_workflow_event_with_catalog_and_limits,
+    },
 };
 use aos_wasm_sdk::{EffectReceiptEnvelope, ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
 use alloc::format;
@@ -519,16 +521,13 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         SessionReduceError::InvalidWorkspacePromptPackJson => {
             ReduceError::new("workspace prompt pack JSON invalid")
         }
-        SessionReduceError::InvalidWorkspaceToolCatalogJson => {
-            ReduceError::new("workspace tool catalog JSON invalid")
-        }
         SessionReduceError::MissingWorkspacePromptPackBytes => {
             ReduceError::new("workspace prompt pack bytes missing for validation")
         }
-        SessionReduceError::MissingWorkspaceToolCatalogBytes => {
-            ReduceError::new("workspace tool catalog bytes missing for validation")
-        }
         SessionReduceError::TooManyPendingIntents => ReduceError::new("too many pending intents"),
+        SessionReduceError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
+        SessionReduceError::UnknownToolOverride => ReduceError::new("unknown tool override"),
+        SessionReduceError::RunNotActive => ReduceError::new("run not active"),
     }
 }
 
