@@ -6,8 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent_sdk::{
     LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionState, ToolCallStatus, WorkspaceApplyMode, WorkspaceBinding,
-    WorkspaceSnapshot, WorkspaceSnapshotReady, materialize_llm_generate_params_with_workspace,
+    SessionIngressKind, SessionState, ToolAvailabilityRule, ToolCallStatus, ToolExecutor,
+    ToolParallelismHint, ToolSpec, WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
+    WorkspaceSnapshotReady, materialize_llm_generate_params_with_workspace,
 };
 use aos_cbor::Hash;
 use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope};
@@ -34,6 +35,8 @@ const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 const AGENT_WORKSPACE_NAME: &str = "agent-live";
 const AGENT_WORKSPACE_DIR: &str = "agent-ws";
 const DEFAULT_PROMPT_PACK: &str = "default";
+const SEARCH_TOOL_NAME: &str = "search_step";
+const SEARCH_TOOL_PROFILE: &str = "search-live";
 
 const SESSION_ID: &str = "22222222-2222-2222-2222-222222222222";
 
@@ -156,6 +159,11 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             mode: WorkspaceApplyMode::NextRun,
         },
     )?;
+    configure_search_tool_registry(
+        &mut host,
+        &mut event_clock,
+        &fixture_root.join(AGENT_WORKSPACE_DIR),
+    )?;
 
     send_session_event(
         &mut host,
@@ -170,7 +178,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 workspace_binding: Some(workspace_binding),
                 default_prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
                 default_prompt_refs: None,
-                default_tool_profile: None,
+                default_tool_profile: Some(SEARCH_TOOL_PROFILE.into()),
                 default_tool_enable: None,
                 default_tool_disable: None,
                 default_tool_force: None,
@@ -218,12 +226,17 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         );
 
         let history_ref = store_history_blob(&host, &history)?;
+        let turn_tool_refs = if matches!(phase, SearchPhase::Looking) {
+            state.effective_tools.tool_refs()
+        } else {
+            None
+        };
         let step_ctx = LlmStepContext {
             correlation_id: Some(format!("live-run-turn-{llm_turn}")),
             message_refs: vec![history_ref],
             temperature: None,
             top_p: None,
-            tool_refs: None,
+            tool_refs: turn_tool_refs,
             tool_choice: Some(match phase {
                 SearchPhase::Looking => LlmToolChoice::Required,
                 SearchPhase::NeedPrimaryAnswer | SearchPhase::NeedFollowUp | SearchPhase::Done => {
@@ -437,6 +450,51 @@ fn send_session_event(
         ingress: kind,
     };
     host.send_event(&event)
+}
+
+fn configure_search_tool_registry(
+    host: &mut ExampleHost,
+    clock: &mut u64,
+    workspace_dir: &Path,
+) -> Result<()> {
+    let tool_catalog_path = workspace_dir.join("tools/catalogs/default.json");
+    let tool_catalog_bytes = fs::read(&tool_catalog_path)
+        .with_context(|| format!("read tool catalog {}", tool_catalog_path.display()))?;
+    let tool_ref = host
+        .store()
+        .put_blob(&tool_catalog_bytes)
+        .context("store search tool catalog blob")?
+        .to_hex();
+
+    let mut registry = BTreeMap::new();
+    registry.insert(
+        SEARCH_TOOL_NAME.into(),
+        ToolSpec {
+            tool_name: SEARCH_TOOL_NAME.into(),
+            tool_ref,
+            executor: ToolExecutor::HostLoop {
+                bridge: SEARCH_TOOL_NAME.into(),
+            },
+            availability_rules: vec![ToolAvailabilityRule::Always],
+            parallelism_hint: ToolParallelismHint {
+                parallel_safe: true,
+                resource_key: None,
+            },
+        },
+    );
+
+    let mut profiles = BTreeMap::new();
+    profiles.insert(SEARCH_TOOL_PROFILE.into(), vec![SEARCH_TOOL_NAME.into()]);
+
+    send_session_event(
+        host,
+        clock,
+        SessionIngressKind::ToolRegistrySet {
+            registry,
+            profiles: Some(profiles),
+            default_profile: Some(SEARCH_TOOL_PROFILE.into()),
+        },
+    )
 }
 
 fn to_core_llm_params(
