@@ -767,6 +767,15 @@ impl EffectKind {
     pub const HOST_SESSION_OPEN: &'static str = "host.session.open";
     pub const HOST_EXEC: &'static str = "host.exec";
     pub const HOST_SESSION_SIGNAL: &'static str = "host.session.signal";
+    pub const HOST_FS_READ_FILE: &'static str = "host.fs.read_file";
+    pub const HOST_FS_WRITE_FILE: &'static str = "host.fs.write_file";
+    pub const HOST_FS_EDIT_FILE: &'static str = "host.fs.edit_file";
+    pub const HOST_FS_APPLY_PATCH: &'static str = "host.fs.apply_patch";
+    pub const HOST_FS_GREP: &'static str = "host.fs.grep";
+    pub const HOST_FS_GLOB: &'static str = "host.fs.glob";
+    pub const HOST_FS_STAT: &'static str = "host.fs.stat";
+    pub const HOST_FS_EXISTS: &'static str = "host.fs.exists";
+    pub const HOST_FS_LIST_DIR: &'static str = "host.fs.list_dir";
     pub const LLM_GENERATE: &'static str = "llm.generate";
     pub const VAULT_PUT: &'static str = "vault.put";
     pub const VAULT_ROTATE: &'static str = "vault.rotate";
@@ -819,6 +828,42 @@ impl EffectKind {
 
     pub fn host_session_signal() -> Self {
         Self::new(Self::HOST_SESSION_SIGNAL)
+    }
+
+    pub fn host_fs_read_file() -> Self {
+        Self::new(Self::HOST_FS_READ_FILE)
+    }
+
+    pub fn host_fs_write_file() -> Self {
+        Self::new(Self::HOST_FS_WRITE_FILE)
+    }
+
+    pub fn host_fs_edit_file() -> Self {
+        Self::new(Self::HOST_FS_EDIT_FILE)
+    }
+
+    pub fn host_fs_apply_patch() -> Self {
+        Self::new(Self::HOST_FS_APPLY_PATCH)
+    }
+
+    pub fn host_fs_grep() -> Self {
+        Self::new(Self::HOST_FS_GREP)
+    }
+
+    pub fn host_fs_glob() -> Self {
+        Self::new(Self::HOST_FS_GLOB)
+    }
+
+    pub fn host_fs_stat() -> Self {
+        Self::new(Self::HOST_FS_STAT)
+    }
+
+    pub fn host_fs_exists() -> Self {
+        Self::new(Self::HOST_FS_EXISTS)
+    }
+
+    pub fn host_fs_list_dir() -> Self {
+        Self::new(Self::HOST_FS_LIST_DIR)
     }
 
     pub fn llm_generate() -> Self {

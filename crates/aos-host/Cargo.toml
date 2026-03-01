@@ -21,6 +21,8 @@ aos-sys = { path = "../aos-sys" }
 aos-llm = { path = "../aos-llm", optional = true }
 
 walkdir = "2"
+globset = "0.4"
+regex = "1"
 log = "0.4"
 
 # Optional dependencies for e2e-tests feature

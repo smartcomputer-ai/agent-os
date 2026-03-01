@@ -62,6 +62,87 @@
     "cap_type": "host",
     "origin_scope": "both"
   },
+  {
+    "$kind": "defeffect",
+    "name": "sys/host.fs.read_file@1",
+    "kind": "host.fs.read_file",
+    "params_schema": "sys/HostFsReadFileParams@1",
+    "receipt_schema": "sys/HostFsReadFileReceipt@1",
+    "cap_type": "host",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/host.fs.write_file@1",
+    "kind": "host.fs.write_file",
+    "params_schema": "sys/HostFsWriteFileParams@1",
+    "receipt_schema": "sys/HostFsWriteFileReceipt@1",
+    "cap_type": "host",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/host.fs.edit_file@1",
+    "kind": "host.fs.edit_file",
+    "params_schema": "sys/HostFsEditFileParams@1",
+    "receipt_schema": "sys/HostFsEditFileReceipt@1",
+    "cap_type": "host",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/host.fs.apply_patch@1",
+    "kind": "host.fs.apply_patch",
+    "params_schema": "sys/HostFsApplyPatchParams@1",
+    "receipt_schema": "sys/HostFsApplyPatchReceipt@1",
+    "cap_type": "host",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/host.fs.grep@1",
+    "kind": "host.fs.grep",
+    "params_schema": "sys/HostFsGrepParams@1",
+    "receipt_schema": "sys/HostFsGrepReceipt@1",
+    "cap_type": "host",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/host.fs.glob@1",
+    "kind": "host.fs.glob",
+    "params_schema": "sys/HostFsGlobParams@1",
+    "receipt_schema": "sys/HostFsGlobReceipt@1",
+    "cap_type": "host",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/host.fs.stat@1",
+    "kind": "host.fs.stat",
+    "params_schema": "sys/HostFsStatParams@1",
+    "receipt_schema": "sys/HostFsStatReceipt@1",
+    "cap_type": "host",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/host.fs.exists@1",
+    "kind": "host.fs.exists",
+    "params_schema": "sys/HostFsExistsParams@1",
+    "receipt_schema": "sys/HostFsExistsReceipt@1",
+    "cap_type": "host",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/host.fs.list_dir@1",
+    "kind": "host.fs.list_dir",
+    "params_schema": "sys/HostFsListDirParams@1",
+    "receipt_schema": "sys/HostFsListDirReceipt@1",
+    "cap_type": "host",
+    "origin_scope": "both"
+  },
 
   {
     "$kind": "defeffect",

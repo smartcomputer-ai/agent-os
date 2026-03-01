@@ -68,7 +68,7 @@
     "cap_type": "host",
     "schema": { "ref": "sys/HostCapParams@1" },
     "enforcer": { "module": "sys/CapEnforceHost@1" },
-    "$comment": "Grants host.session.open/host.exec/host.session.signal under session and operational constraints."
+    "$comment": "Grants host.session.open/host.exec/host.session.signal and host.fs.* operations under session and operational constraints."
   },
   {
     "$kind": "defcap",

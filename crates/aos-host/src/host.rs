@@ -15,7 +15,7 @@ use aos_store::{FsStore, Store};
 
 use crate::adapters::blob_get::BlobGetAdapter;
 use crate::adapters::blob_put::BlobPutAdapter;
-use crate::adapters::host::make_host_adapters;
+use crate::adapters::host::make_host_adapter_set;
 use crate::adapters::registry::AdapterRegistry;
 use crate::adapters::registry::AdapterRegistryConfig;
 #[cfg(not(feature = "adapter-http"))]
@@ -745,10 +745,19 @@ fn default_registry<S: Store + 'static>(store: Arc<S>, config: &HostConfig) -> A
     registry.register(Box::new(StubVaultRotateAdapter));
     registry.register(Box::new(BlobPutAdapter::new(store.clone())));
     registry.register(Box::new(BlobGetAdapter::new(store.clone())));
-    let (process_open, process_exec, process_signal) = make_host_adapters(store.clone());
-    registry.register(Box::new(process_open));
-    registry.register(Box::new(process_exec));
-    registry.register(Box::new(process_signal));
+    let host_adapters = make_host_adapter_set(store.clone());
+    registry.register(Box::new(host_adapters.session_open));
+    registry.register(Box::new(host_adapters.exec));
+    registry.register(Box::new(host_adapters.session_signal));
+    registry.register(Box::new(host_adapters.fs_read_file));
+    registry.register(Box::new(host_adapters.fs_write_file));
+    registry.register(Box::new(host_adapters.fs_edit_file));
+    registry.register(Box::new(host_adapters.fs_apply_patch));
+    registry.register(Box::new(host_adapters.fs_grep));
+    registry.register(Box::new(host_adapters.fs_glob));
+    registry.register(Box::new(host_adapters.fs_stat));
+    registry.register(Box::new(host_adapters.fs_exists));
+    registry.register(Box::new(host_adapters.fs_list_dir));
 
     #[cfg(feature = "adapter-http")]
     {

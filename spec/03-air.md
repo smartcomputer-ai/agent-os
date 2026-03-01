@@ -14,6 +14,7 @@ AIR (Agent Intermediate Representation) is a small, typed, canonical control‑p
 
 **Built-in catalogs** (data files; loaded by the kernel):
 - spec/defs/builtin-schemas.air.json
+- spec/defs/builtin-schemas-host.air.json
 - spec/defs/builtin-effects.air.json
 - spec/defs/builtin-caps.air.json
 - spec/defs/builtin-modules.air.json
@@ -260,7 +261,7 @@ See: spec/schemas/defmodule.schema.json
 
 ## 7) Effect Catalog (Built-in v1)
 
-`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` so workflow modules, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions by deriving enums from the `defeffect` set.
+`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so workflow modules, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions by deriving enums from the `defeffect` set.
 
 `origin_scope` on each `defeffect` gates who may emit it. The current schema uses compatibility labels: `"reducer"` means workflow-module reducer ABI emission, `"plan"` means non-reducer orchestration origins (system/governance/tooling), and `"both"` allows either. “Micro-effects” are those whose `origin_scope` allows reducers (currently `blob.put`, `blob.get`, `timer.set` in v1).
 
@@ -379,7 +380,7 @@ Workflow modules that emit effects receive normalized receipt events. AIR v1 res
 
 Workflow reducers should include `sys/EffectReceiptEnvelope@1` in ABI event variants as the primary receipt path. `sys/EffectReceiptRejected@1` is optional; if absent and a receipt is malformed, the kernel settles that receipt, marks the instance failed, and drops remaining pending receipts for that instance to avoid clogging execution. Legacy typed receipt events (`sys/TimerFired@1`, `sys/BlobPutResult@1`, `sys/BlobGetResult@1`) are compatibility fallbacks when reducer event schemas still expect those shapes.
 
-Canonical JSON definitions for these schemas (plus their parameter/receipt companions) live in `spec/defs/builtin-schemas.air.json` so manifests can hash and reference them directly.
+Canonical JSON definitions for these schemas (plus their parameter/receipt companions) live in `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so manifests can hash and reference them directly.
 
 ## 8) Effect Intents and Receipts
 

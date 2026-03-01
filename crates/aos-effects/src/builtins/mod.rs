@@ -210,6 +210,262 @@ pub struct HostSessionSignalReceipt {
     pub error_message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostBlobRefInput {
+    pub blob_ref: HashRef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum HostFileContentInput {
+    InlineText { inline_text: HostInlineText },
+    InlineBytes { inline_bytes: HostInlineBytes },
+    BlobRef { blob_ref: HostBlobRefInput },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsReadFileParams {
+    pub session_id: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsReadFileReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<HostOutput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsWriteFileParams {
+    pub session_id: String,
+    pub path: String,
+    pub content: HostFileContentInput,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub create_parents: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsWriteFileReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_mtime_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsEditFileParams {
+    pub session_id: String,
+    pub path: String,
+    pub old_string: String,
+    pub new_string: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replace_all: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsEditFileReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacements: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum HostPatchInput {
+    InlineText { inline_text: HostInlineText },
+    BlobRef { blob_ref: HostBlobRefInput },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostPatchOpsSummary {
+    pub add: u64,
+    pub update: u64,
+    pub delete: u64,
+    pub r#move: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsApplyPatchParams {
+    pub session_id: String,
+    pub patch: HostPatchInput,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsApplyPatchReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_changed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_paths: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ops: Option<HostPatchOpsSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub errors: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum HostTextOutput {
+    InlineText { inline_text: HostInlineText },
+    Blob { blob: HostBlobOutput },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsGrepParams {
+    pub session_id: String,
+    pub pattern: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glob_filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_insensitive: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsGrepReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matches: Option<HostTextOutput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsGlobParams {
+    pub session_id: String,
+    pub pattern: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsGlobReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<HostTextOutput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsStatParams {
+    pub session_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsStatReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exists: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_dir: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtime_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsExistsParams {
+    pub session_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsExistsReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exists: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsListDirParams {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostFsListDirReceipt {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entries: Option<HostTextOutput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmRuntimeArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]

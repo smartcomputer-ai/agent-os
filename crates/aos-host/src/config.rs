@@ -131,6 +131,60 @@ fn default_adapter_routes() -> HashMap<String, AdapterProviderSpec> {
         },
     );
     routes.insert(
+        "host.fs.read_file.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.read_file".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.write_file.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.write_file".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.edit_file.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.edit_file".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.apply_patch.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.apply_patch".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.grep.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.grep".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.glob.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.glob".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.stat.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.stat".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.exists.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.exists".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.list_dir.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.list_dir".into(),
+        },
+    );
+    routes.insert(
         "vault.put.default".into(),
         AdapterProviderSpec {
             adapter_kind: "vault.put".into(),
@@ -312,6 +366,21 @@ mod tests {
             cfg.adapter_routes
                 .contains_key("host.session.signal.default")
         );
+        assert!(cfg.adapter_routes.contains_key("host.fs.read_file.default"));
+        assert!(
+            cfg.adapter_routes
+                .contains_key("host.fs.write_file.default")
+        );
+        assert!(cfg.adapter_routes.contains_key("host.fs.edit_file.default"));
+        assert!(
+            cfg.adapter_routes
+                .contains_key("host.fs.apply_patch.default")
+        );
+        assert!(cfg.adapter_routes.contains_key("host.fs.grep.default"));
+        assert!(cfg.adapter_routes.contains_key("host.fs.glob.default"));
+        assert!(cfg.adapter_routes.contains_key("host.fs.stat.default"));
+        assert!(cfg.adapter_routes.contains_key("host.fs.exists.default"));
+        assert!(cfg.adapter_routes.contains_key("host.fs.list_dir.default"));
         assert!(cfg.adapter_routes.contains_key("timer.default"));
         assert!(cfg.adapter_routes.contains_key("vault.put.default"));
         assert!(cfg.adapter_routes.contains_key("vault.rotate.default"));
