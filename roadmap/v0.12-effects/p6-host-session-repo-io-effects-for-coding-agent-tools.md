@@ -235,42 +235,61 @@ Behavior contract:
 Params:
 
 1. `session_id`
-2. `pattern`
-3. `path?`
-4. `glob_filter?`
-5. `case_insensitive?`
-6. `max_results?`
+2. `pattern` (required regex pattern)
+3. `path?` (file or directory; default: session working dir)
+4. `glob_filter?` (optional file filter, e.g. `*.rs`)
+5. `case_insensitive?` (optional, default `false`)
+6. `max_results?` (optional, default `100`)
 7. `output_mode?` (`auto|require_inline`)
 
 Receipt:
 
-1. `status`: `ok|forbidden|error`
+1. `status`: `ok|invalid_regex|not_found|forbidden|error`
 2. `matches?` variant:
    - `inline_text { text }`
    - `blob { blob_ref, size_bytes, preview_bytes? }`
 3. `match_count?`
 4. `truncated?` bool
 5. `error_code?`
+6. `summary_text?` (optional tool UX for empty/non-empty summary strings)
+
+Behavior contract:
+
+1. Primary backend is `ripgrep` when available; deterministic native regex
+   fallback is required when `ripgrep` is unavailable.
+2. Successful output represents matching lines with file paths + line numbers.
+3. Empty match set is represented as `status: ok` with `match_count: 0`; SDK/tool
+   adapters may map this to provider-facing text such as `No matches found`.
+4. Results must be deterministic for identical inputs on the same host/session.
 
 ### `host.fs.glob`
 
 Params:
 
 1. `session_id`
-2. `pattern`
-3. `path?`
-4. `max_results?`
+2. `pattern` (required glob pattern, e.g. `**/*.ts`)
+3. `path?` (base directory; default: session working dir)
+4. `max_results?` (optional; adapter default applies if omitted)
 5. `output_mode?` (`auto|require_inline`)
 
 Receipt:
 
-1. `status`: `ok|forbidden|error`
+1. `status`: `ok|invalid_pattern|not_found|forbidden|error`
 2. `paths?` variant:
    - `inline_text { text }`
    - `blob { blob_ref, size_bytes, preview_bytes? }`
 3. `count?`
 4. `truncated?` bool
 5. `error_code?`
+6. `summary_text?` (optional tool UX for empty/non-empty summary strings)
+
+Behavior contract:
+
+1. Uses host-native filesystem globbing/walk.
+2. Result ordering is deterministic and sorted by mtime descending (newest
+   first), with stable path tie-break for equal mtimes.
+3. Empty match set is represented as `status: ok` with `count: 0`; SDK/tool
+   adapters may map this to provider-facing text such as `No files matched`.
 
 ## Capability and Policy
 
