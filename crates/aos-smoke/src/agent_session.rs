@@ -61,13 +61,15 @@ pub fn run(example_root: &Path) -> Result<()> {
                 ToolCallObserved {
                     call_id: "call_a".into(),
                     tool_name: "host.session.open".into(),
-                    arguments_ref: fake_hash('d'),
+                    arguments_json: "{\"target\":{\"local\":{\"network_mode\":\"off\"}}}".into(),
+                    arguments_ref: Some(fake_hash('d')),
                     provider_call_id: None,
                 },
                 ToolCallObserved {
                     call_id: "call_b".into(),
                     tool_name: "host.session.open".into(),
-                    arguments_ref: fake_hash('e'),
+                    arguments_json: "{\"target\":{\"local\":{\"network_mode\":\"off\"}}}".into(),
+                    arguments_ref: Some(fake_hash('e')),
                     provider_call_id: None,
                 },
             ],

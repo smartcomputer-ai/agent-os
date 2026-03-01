@@ -10,5 +10,7 @@ extern crate alloc;
 pub mod contracts;
 #[doc(hidden)]
 pub mod helpers;
+#[doc(hidden)]
+pub mod tools;
 
 pub use contracts::*;

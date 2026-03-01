@@ -8,9 +8,24 @@
       "workflow": {
         "state": "aos.agent/SessionState@1",
         "event": "aos.agent/SessionWorkflowEvent@1",
-        "effects_emitted": ["llm.generate"],
+        "effects_emitted": [
+          "llm.generate",
+          "host.session.open",
+          "host.exec",
+          "host.session.signal",
+          "host.fs.read_file",
+          "host.fs.write_file",
+          "host.fs.edit_file",
+          "host.fs.apply_patch",
+          "host.fs.grep",
+          "host.fs.glob",
+          "host.fs.stat",
+          "host.fs.exists",
+          "host.fs.list_dir"
+        ],
         "cap_slots": {
-          "llm": "llm.basic"
+          "llm": "llm.basic",
+          "host": "host.cap"
         }
       }
     }

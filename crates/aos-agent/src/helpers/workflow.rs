@@ -9,7 +9,11 @@ use crate::contracts::{
     ToolExecutionPlan, ToolOverrideScope, ToolSpec, WorkspaceApplyMode, WorkspaceBinding,
     WorkspaceSnapshot, default_tool_profile_for_provider,
 };
+use crate::tools::{
+    ToolEffectKind, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
+};
 use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -24,6 +28,12 @@ use super::llm::{
 pub enum SessionEffectCommand {
     LlmGenerate {
         params: SysLlmGenerateParams,
+        cap_slot: Option<String>,
+        params_hash: String,
+    },
+    ToolEffect {
+        kind: ToolEffectKind,
+        params_json: String,
         cap_slot: Option<String>,
         params_hash: String,
     },
@@ -206,12 +216,14 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     intent_id,
                     params_hash,
                     calls,
-                } => on_tool_calls_observed(state, intent_id, params_hash.as_ref(), calls)?,
+                } => {
+                    on_tool_calls_observed(state, intent_id, params_hash.as_ref(), calls, &mut out)?
+                }
                 SessionIngressKind::ToolCallSettled {
                     tool_batch_id,
                     call_id,
                     status,
-                } => on_tool_call_settled(state, tool_batch_id, call_id, status)?,
+                } => on_tool_call_settled(state, tool_batch_id, call_id, status, &mut out)?,
                 SessionIngressKind::ToolBatchSettled {
                     tool_batch_id,
                     results_ref,
@@ -234,8 +246,10 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                 SessionIngressKind::Noop => {}
             }
         }
-        SessionWorkflowEvent::Receipt(receipt) => on_receipt_envelope(state, receipt)?,
-        SessionWorkflowEvent::ReceiptRejected(rejected) => on_receipt_rejected(state, rejected)?,
+        SessionWorkflowEvent::Receipt(receipt) => on_receipt_envelope(state, receipt, &mut out)?,
+        SessionWorkflowEvent::ReceiptRejected(rejected) => {
+            on_receipt_rejected(state, rejected, &mut out)?
+        }
         SessionWorkflowEvent::StreamFrame(_frame) => {}
         SessionWorkflowEvent::Noop => {}
     }
@@ -602,6 +616,7 @@ fn on_tool_calls_observed(
     intent_id: &str,
     params_hash: Option<&String>,
     calls: &[ToolCallObserved],
+    out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
     if state
         .active_tool_batch
@@ -626,9 +641,13 @@ fn on_tool_calls_observed(
         params_hash: params_hash.cloned(),
         plan,
         call_status,
+        pending_by_params_hash: BTreeMap::new(),
+        next_group_index: 0,
+        llm_results: BTreeMap::new(),
         results_ref: None,
     });
 
+    dispatch_next_ready_tool_group(state, out)?;
     Ok(())
 }
 
@@ -644,20 +663,24 @@ fn plan_tool_batch(
             planned_calls.push(PlannedToolCall {
                 call_id: call.call_id.clone(),
                 tool_name: call.tool_name.clone(),
+                arguments_json: call.arguments_json.clone(),
                 arguments_ref: call.arguments_ref.clone(),
                 provider_call_id: call.provider_call_id.clone(),
+                mapper: tool.mapper,
                 executor: tool.executor.clone(),
                 parallel_safe: tool.parallel_safe,
                 resource_key: tool.resource_key.clone(),
                 accepted: true,
             });
-            call_status.insert(call.call_id.clone(), ToolCallStatus::Pending);
+            call_status.insert(call.call_id.clone(), ToolCallStatus::Queued);
         } else {
             planned_calls.push(PlannedToolCall {
                 call_id: call.call_id.clone(),
                 tool_name: call.tool_name.clone(),
+                arguments_json: call.arguments_json.clone(),
                 arguments_ref: call.arguments_ref.clone(),
                 provider_call_id: call.provider_call_id.clone(),
+                mapper: crate::contracts::ToolMapper::HostSessionOpen,
                 executor: crate::contracts::ToolExecutor::default(),
                 parallel_safe: false,
                 resource_key: None,
@@ -714,11 +737,195 @@ fn flush_group(
     }
 }
 
+fn dispatch_next_ready_tool_group(
+    state: &mut SessionState,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    loop {
+        let Some(batch) = state.active_tool_batch.as_mut() else {
+            return Ok(());
+        };
+        let idx = batch.next_group_index as usize;
+        if idx >= batch.plan.execution_plan.groups.len() {
+            if batch.is_settled() && batch.results_ref.is_none() {
+                let results = batch
+                    .llm_results
+                    .values()
+                    .cloned()
+                    .collect::<Vec<crate::contracts::ToolCallLlmResult>>();
+                batch.results_ref = Some(hash_cbor(&results));
+            }
+            return Ok(());
+        }
+
+        let previous_groups_settled =
+            batch
+                .plan
+                .execution_plan
+                .groups
+                .iter()
+                .take(idx)
+                .all(|group| {
+                    group.iter().all(|call_id| {
+                        batch
+                            .call_status
+                            .get(call_id)
+                            .is_some_and(ToolCallStatus::is_terminal)
+                    })
+                });
+        if !previous_groups_settled {
+            return Ok(());
+        }
+
+        let group = batch.plan.execution_plan.groups[idx].clone();
+        batch.next_group_index = batch.next_group_index.saturating_add(1);
+
+        let runtime_ctx = state.tool_runtime_context.clone();
+        let mut emitted_for_group = 0usize;
+        for call_id in group {
+            let Some(status) = batch.call_status.get(&call_id).cloned() else {
+                continue;
+            };
+            if status != ToolCallStatus::Queued {
+                continue;
+            }
+
+            let Some(planned) = batch
+                .plan
+                .planned_calls
+                .iter()
+                .find(|call| call.call_id == call_id)
+                .cloned()
+            else {
+                continue;
+            };
+
+            let cap_slot = match &planned.executor {
+                crate::contracts::ToolExecutor::Effect { cap_slot, .. } => cap_slot.clone(),
+                _ => None,
+            };
+
+            let params_json = match map_tool_arguments_to_effect_params(
+                planned.mapper,
+                planned.arguments_json.as_str(),
+                &runtime_ctx,
+            ) {
+                Ok(params) => params,
+                Err(err) => {
+                    batch
+                        .call_status
+                        .insert(call_id.clone(), err.to_failed_status());
+                    batch.llm_results.insert(
+                        call_id.clone(),
+                        crate::contracts::ToolCallLlmResult {
+                            call_id: call_id.clone(),
+                            tool_name: planned.tool_name.clone(),
+                            is_error: true,
+                            output_json: format!(
+                                "{{\"ok\":false,\"error\":\"{}\",\"detail\":{}}}",
+                                err.to_code_text(),
+                                serde_json::to_string(&err.detail)
+                                    .unwrap_or_else(|_| "\"\"".into())
+                            ),
+                        },
+                    );
+                    continue;
+                }
+            };
+
+            let params_hash = hash_cbor(&params_json);
+            batch
+                .pending_by_params_hash
+                .entry(params_hash.clone())
+                .or_default()
+                .push(call_id.clone());
+            batch
+                .call_status
+                .insert(call_id.clone(), ToolCallStatus::Pending);
+            emitted_for_group = emitted_for_group.saturating_add(1);
+
+            out.effects.push(SessionEffectCommand::ToolEffect {
+                kind: crate::tools::effect_kind_for_mapper(planned.mapper),
+                params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
+                cap_slot,
+                params_hash,
+            });
+        }
+
+        if emitted_for_group > 0 {
+            return Ok(());
+        }
+    }
+}
+
+fn settle_tool_call_from_receipt(
+    state: &mut SessionState,
+    envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
+    out: &mut SessionReduceOutput,
+) -> Result<bool, SessionReduceError> {
+    let Some(batch) = state.active_tool_batch.as_mut() else {
+        return Ok(false);
+    };
+    let Some(params_hash) = envelope.params_hash.as_ref() else {
+        return Ok(false);
+    };
+    let Some(call_ids) = batch.pending_by_params_hash.get_mut(params_hash) else {
+        return Ok(false);
+    };
+    if call_ids.is_empty() {
+        return Ok(false);
+    }
+    let call_id = call_ids.remove(0);
+    let remove_entry = call_ids.is_empty();
+    if remove_entry {
+        batch.pending_by_params_hash.remove(params_hash);
+    }
+
+    let Some(planned) = batch
+        .plan
+        .planned_calls
+        .iter()
+        .find(|call| call.call_id == call_id)
+        .cloned()
+    else {
+        return Ok(false);
+    };
+
+    let mapped = map_tool_receipt_to_llm_result(
+        planned.mapper,
+        planned.tool_name.as_str(),
+        envelope.status.as_str(),
+        envelope.receipt_payload.as_slice(),
+    );
+    batch
+        .call_status
+        .insert(call_id.clone(), mapped.status.clone());
+    batch.llm_results.insert(
+        call_id.clone(),
+        crate::contracts::ToolCallLlmResult {
+            call_id: call_id.clone(),
+            tool_name: planned.tool_name,
+            is_error: mapped.is_error,
+            output_json: mapped.llm_output_json,
+        },
+    );
+    if let Some(host_session_id) = mapped.runtime_delta.host_session_id {
+        state.tool_runtime_context.host_session_id = Some(host_session_id);
+    }
+    if let Some(host_session_status) = mapped.runtime_delta.host_session_status {
+        state.tool_runtime_context.host_session_status = Some(host_session_status);
+    }
+
+    dispatch_next_ready_tool_group(state, out)?;
+    Ok(true)
+}
+
 fn on_tool_call_settled(
     state: &mut SessionState,
     tool_batch_id: &crate::contracts::ToolBatchId,
     call_id: &str,
     status: &ToolCallStatus,
+    out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
     let batch = state
         .active_tool_batch
@@ -732,6 +939,7 @@ fn on_tool_call_settled(
     }
 
     batch.call_status.insert(call_id.into(), status.clone());
+    dispatch_next_ready_tool_group(state, out)?;
     Ok(())
 }
 
@@ -757,7 +965,13 @@ fn on_tool_batch_settled(
 fn on_receipt_envelope(
     state: &mut SessionState,
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
+    out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
+    if settle_tool_call_from_receipt(state, envelope, out)? {
+        state.in_flight_effects = state.pending_intents.len() as u64;
+        return Ok(());
+    }
+
     if let Some(params_hash) = &envelope.params_hash {
         if let Some(mut intent) = state.pending_intents.remove(params_hash) {
             intent.intent_id = Some(envelope.intent_id.clone());
@@ -773,12 +987,12 @@ fn on_receipt_envelope(
 
     state.in_flight_effects = state.pending_intents.len() as u64;
 
-    if envelope.status == "ok" {
+    if envelope.effect_kind == "llm.generate" && envelope.status == "ok" {
         if matches!(state.lifecycle, SessionLifecycle::Running) {
             transition_lifecycle(state, SessionLifecycle::WaitingInput)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
         }
-    } else {
+    } else if envelope.effect_kind == "llm.generate" {
         transition_lifecycle(state, SessionLifecycle::Failed)
             .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
         clear_active_run(state);
@@ -790,7 +1004,38 @@ fn on_receipt_envelope(
 fn on_receipt_rejected(
     state: &mut SessionState,
     rejected: &crate::contracts::EffectReceiptRejected,
+    out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
+    if let Some(params_hash) = rejected.params_hash.as_ref() {
+        let should_handle_as_tool = state
+            .active_tool_batch
+            .as_ref()
+            .is_some_and(|batch| batch.pending_by_params_hash.contains_key(params_hash));
+        if should_handle_as_tool {
+            let payload = serde_json::json!({
+                "status": "error",
+                "error_code": rejected.error_code,
+                "error_message": rejected.error_message,
+            });
+            let envelope = aos_wasm_sdk::EffectReceiptEnvelope {
+                origin_module_id: rejected.origin_module_id.clone(),
+                origin_instance_key: rejected.origin_instance_key.clone(),
+                intent_id: rejected.intent_id.clone(),
+                effect_kind: rejected.effect_kind.clone(),
+                params_hash: rejected.params_hash.clone(),
+                receipt_payload: serde_cbor::to_vec(&payload).unwrap_or_default(),
+                status: rejected.status.clone(),
+                emitted_at_seq: rejected.emitted_at_seq,
+                adapter_id: rejected.adapter_id.clone(),
+                cost_cents: None,
+                signature: Vec::new(),
+            };
+            let _ = settle_tool_call_from_receipt(state, &envelope, out)?;
+            state.in_flight_effects = state.pending_intents.len() as u64;
+            return Ok(());
+        }
+    }
+
     if let Some(params_hash) = &rejected.params_hash {
         state.pending_intents.remove(params_hash);
     } else if let Some((key, _intent)) = state
@@ -905,6 +1150,9 @@ fn refresh_effective_tools(
         ordered_tools.push(EffectiveTool {
             tool_name: spec.tool_name.clone(),
             tool_ref: spec.tool_ref.clone(),
+            description: spec.description.clone(),
+            args_schema_json: spec.args_schema_json.clone(),
+            mapper: spec.mapper,
             executor: spec.executor.clone(),
             parallel_safe: spec.parallelism_hint.parallel_safe,
             resource_key: spec.parallelism_hint.resource_key.clone(),
@@ -1162,19 +1410,22 @@ mod tests {
             ToolCallObserved {
                 call_id: "c1".into(),
                 tool_name: "host.fs.write_file".into(),
-                arguments_ref: fake_hash('w'),
+                arguments_json: "{\"path\":\"a.txt\",\"text\":\"x\"}".into(),
+                arguments_ref: Some(fake_hash('w')),
                 provider_call_id: None,
             },
             ToolCallObserved {
                 call_id: "c2".into(),
                 tool_name: "host.fs.apply_patch".into(),
-                arguments_ref: fake_hash('p'),
+                arguments_json: "{\"patch\":\"*** Begin Patch\\n*** End Patch\\n\"}".into(),
+                arguments_ref: Some(fake_hash('p')),
                 provider_call_id: None,
             },
             ToolCallObserved {
                 call_id: "c3".into(),
                 tool_name: "host.exec".into(),
-                arguments_ref: fake_hash('e'),
+                arguments_json: "{\"argv\":[\"ls\"]}".into(),
+                arguments_ref: Some(fake_hash('e')),
                 provider_call_id: None,
             },
         ];

@@ -11,7 +11,9 @@ use aos_agent::{
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolChoice};
+use aos_effects::builtins::{
+    LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolChoice,
+};
 use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_host::adapters::llm::LlmAdapter;
 use aos_host::adapters::traits::AsyncEffectAdapter;
@@ -310,7 +312,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                         "type": "tool_call",
                         "id": call.call_id,
                         "name": call.tool_name,
-                        "arguments": load_json_blob(host.store().as_ref(), &call.arguments_ref).unwrap_or_else(|_| json!({}))
+                        "arguments": tool_call_args_json(&host, call)
                     })
                 }).collect::<Vec<_>>()
             }));
@@ -318,7 +320,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             let mut tool_results = Vec::new();
             let mut found_target = false;
             for (idx, call) in calls.iter().enumerate() {
-                let args = load_json_blob(host.store().as_ref(), &call.arguments_ref)?;
+                let args = tool_call_args_json(&host, call);
                 let output = execute_search_tool(&world, &call.tool_name, &args)?;
                 if output.get("found").and_then(Value::as_bool) == Some(true) {
                     found_target = true;
@@ -453,6 +455,16 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     Ok(())
 }
 
+fn tool_call_args_json(host: &ExampleHost, call: &aos_agent::ToolCallObserved) -> Value {
+    if let Some(arguments_ref) = call.arguments_ref.as_ref()
+        && let Ok(value) = load_json_blob(host.store().as_ref(), arguments_ref)
+    {
+        return value;
+    }
+
+    serde_json::from_str(&call.arguments_json).unwrap_or_else(|_| json!({}))
+}
+
 fn send_session_event(
     host: &mut ExampleHost,
     clock: &mut u64,
@@ -487,6 +499,9 @@ fn configure_search_tool_registry(
         ToolSpec {
             tool_name: SEARCH_TOOL_NAME.into(),
             tool_ref,
+            description: "Traverse one hop in the search graph.".into(),
+            args_schema_json: "{\"type\":\"object\",\"properties\":{\"cursor\":{\"type\":\"string\"}},\"required\":[\"cursor\"]}".into(),
+            mapper: aos_agent::ToolMapper::HostExec,
             executor: ToolExecutor::HostLoop {
                 bridge: SEARCH_TOOL_NAME.into(),
             },
@@ -524,8 +539,8 @@ fn to_core_llm_params(
 
     let mut message_refs = if let Some(explicit) = &run_config.prompt_refs {
         explicit.clone()
-    } else if let Some(prompt_pack_ref) = active_workspace_snapshot
-        .and_then(|snapshot| snapshot.prompt_pack_ref.clone())
+    } else if let Some(prompt_pack_ref) =
+        active_workspace_snapshot.and_then(|snapshot| snapshot.prompt_pack_ref.clone())
     {
         vec![prompt_pack_ref]
     } else {

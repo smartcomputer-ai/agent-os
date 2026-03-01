@@ -40,6 +40,17 @@ impl Workflow for SessionWorkflow {
                 } => ctx
                     .effects()
                     .emit_raw("llm.generate", &params, cap_slot.as_deref()),
+                SessionEffectCommand::ToolEffect {
+                    kind,
+                    params_json,
+                    cap_slot,
+                    ..
+                } => {
+                    let params: serde_json::Value =
+                        serde_json::from_str(&params_json).unwrap_or(serde_json::Value::Null);
+                    ctx.effects()
+                        .emit_raw(kind.as_str(), &params, cap_slot.as_deref());
+                }
             }
         }
         Ok(())

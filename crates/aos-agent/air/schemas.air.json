@@ -29,11 +29,32 @@
     "name": "aos.agent/ToolCallStatus@1",
     "type": {
       "variant": {
+        "Queued": { "unit": {} },
         "Pending": { "unit": {} },
         "Succeeded": { "unit": {} },
         "Failed": { "record": { "code": { "text": {} }, "detail": { "text": {} } } },
         "Ignored": { "unit": {} },
         "Cancelled": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolMapper@1",
+    "type": {
+      "variant": {
+        "HostSessionOpen": { "unit": {} },
+        "HostExec": { "unit": {} },
+        "HostSessionSignal": { "unit": {} },
+        "HostFsReadFile": { "unit": {} },
+        "HostFsWriteFile": { "unit": {} },
+        "HostFsEditFile": { "unit": {} },
+        "HostFsApplyPatch": { "unit": {} },
+        "HostFsGrep": { "unit": {} },
+        "HostFsGlob": { "unit": {} },
+        "HostFsStat": { "unit": {} },
+        "HostFsExists": { "unit": {} },
+        "HostFsListDir": { "unit": {} }
       }
     }
   },
@@ -83,6 +104,9 @@
       "record": {
         "tool_name": { "text": {} },
         "tool_ref": { "hash": {} },
+        "description": { "text": {} },
+        "args_schema_json": { "text": {} },
+        "mapper": { "ref": "aos.agent/ToolMapper@1" },
         "executor": { "ref": "aos.agent/ToolExecutor@1" },
         "availability_rules": { "list": { "ref": "aos.agent/ToolAvailabilityRule@1" } },
         "parallelism_hint": { "ref": "aos.agent/ToolParallelismHint@1" }
@@ -118,6 +142,9 @@
       "record": {
         "tool_name": { "text": {} },
         "tool_ref": { "hash": {} },
+        "description": { "text": {} },
+        "args_schema_json": { "text": {} },
+        "mapper": { "ref": "aos.agent/ToolMapper@1" },
         "executor": { "ref": "aos.agent/ToolExecutor@1" },
         "parallel_safe": { "bool": {} },
         "resource_key": { "option": { "text": {} } }
@@ -141,8 +168,21 @@
       "record": {
         "call_id": { "text": {} },
         "tool_name": { "text": {} },
-        "arguments_ref": { "hash": {} },
+        "arguments_json": { "text": {} },
+        "arguments_ref": { "option": { "hash": {} } },
         "provider_call_id": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallLlmResult@1",
+    "type": {
+      "record": {
+        "call_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "is_error": { "bool": {} },
+        "output_json": { "text": {} }
       }
     }
   },
@@ -153,8 +193,10 @@
       "record": {
         "call_id": { "text": {} },
         "tool_name": { "text": {} },
-        "arguments_ref": { "hash": {} },
+        "arguments_json": { "text": {} },
+        "arguments_ref": { "option": { "hash": {} } },
         "provider_call_id": { "option": { "text": {} } },
+        "mapper": { "ref": "aos.agent/ToolMapper@1" },
         "executor": { "ref": "aos.agent/ToolExecutor@1" },
         "parallel_safe": { "bool": {} },
         "resource_key": { "option": { "text": {} } },
@@ -195,6 +237,19 @@
           "map": {
             "key": { "text": {} },
             "value": { "ref": "aos.agent/ToolCallStatus@1" }
+          }
+        },
+        "pending_by_params_hash": {
+          "map": {
+            "key": { "hash": {} },
+            "value": { "list": { "text": {} } }
+          }
+        },
+        "next_group_index": { "nat": {} },
+        "llm_results": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "ref": "aos.agent/ToolCallLlmResult@1" }
           }
         },
         "results_ref": { "option": { "hash": {} } }

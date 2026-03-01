@@ -1,9 +1,7 @@
 use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
-use alloc::vec;
+use alloc::string::String;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "$tag", content = "$value")]
@@ -25,6 +23,24 @@ impl Default for ToolExecutor {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum ToolMapper {
+    #[default]
+    HostSessionOpen,
+    HostExec,
+    HostSessionSignal,
+    HostFsReadFile,
+    HostFsWriteFile,
+    HostFsEditFile,
+    HostFsApplyPatch,
+    HostFsGrep,
+    HostFsGlob,
+    HostFsStat,
+    HostFsExists,
+    HostFsListDir,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(tag = "$tag", content = "$value")]
 pub enum ToolAvailabilityRule {
@@ -43,6 +59,9 @@ pub struct ToolParallelismHint {
 pub struct ToolSpec {
     pub tool_name: String,
     pub tool_ref: String,
+    pub description: String,
+    pub args_schema_json: String,
+    pub mapper: ToolMapper,
     pub executor: ToolExecutor,
     pub availability_rules: Vec<ToolAvailabilityRule>,
     pub parallelism_hint: ToolParallelismHint,
@@ -68,6 +87,9 @@ pub struct ToolRuntimeContext {
 pub struct EffectiveTool {
     pub tool_name: String,
     pub tool_ref: String,
+    pub description: String,
+    pub args_schema_json: String,
+    pub mapper: ToolMapper,
     pub executor: ToolExecutor,
     pub parallel_safe: bool,
     pub resource_key: Option<String>,
@@ -104,18 +126,31 @@ impl EffectiveToolSet {
 pub struct ToolCallObserved {
     pub call_id: String,
     pub tool_name: String,
-    pub arguments_ref: String,
+    #[serde(default)]
+    pub arguments_json: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arguments_ref: Option<String>,
     pub provider_call_id: Option<String>,
 }
 
 pub type ToolCallObservedList = Vec<ToolCallObserved>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ToolCallLlmResult {
+    pub call_id: String,
+    pub tool_name: String,
+    pub is_error: bool,
+    pub output_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct PlannedToolCall {
     pub call_id: String,
     pub tool_name: String,
-    pub arguments_ref: String,
+    pub arguments_json: String,
+    pub arguments_ref: Option<String>,
     pub provider_call_id: Option<String>,
+    pub mapper: ToolMapper,
     pub executor: ToolExecutor,
     pub parallel_safe: bool,
     pub resource_key: Option<String>,
@@ -142,175 +177,14 @@ pub enum ToolOverrideScope {
     Run,
 }
 
-fn pseudo_hash(seed: &str) -> String {
-    let mut out = String::from("sha256:");
-    let digest = Sha256::digest(seed.as_bytes());
-    for byte in digest {
-        let hi = byte >> 4;
-        let lo = byte & 0x0f;
-        out.push(nibble_to_hex(hi));
-        out.push(nibble_to_hex(lo));
-    }
-    out
-}
-
-const fn nibble_to_hex(n: u8) -> char {
-    match n {
-        0..=9 => (b'0' + n) as char,
-        _ => (b'a' + (n - 10)) as char,
-    }
-}
-
-fn host_tool(tool_name: &str, requires_host_session: bool, hint: ToolParallelismHint) -> ToolSpec {
-    ToolSpec {
-        tool_name: tool_name.to_string(),
-        tool_ref: pseudo_hash(tool_name),
-        executor: ToolExecutor::HostLoop {
-            bridge: "host.tool".into(),
-        },
-        availability_rules: if requires_host_session {
-            vec![ToolAvailabilityRule::HostSessionReady]
-        } else {
-            vec![ToolAvailabilityRule::Always]
-        },
-        parallelism_hint: hint,
-    }
-}
-
 pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
-    let mut registry = BTreeMap::new();
-    let tools = [
-        host_tool(
-            "host.session.open",
-            false,
-            ToolParallelismHint {
-                parallel_safe: false,
-                resource_key: Some("host.session".into()),
-            },
-        ),
-        host_tool(
-            "host.exec",
-            true,
-            ToolParallelismHint {
-                parallel_safe: false,
-                resource_key: Some("host.exec".into()),
-            },
-        ),
-        host_tool(
-            "host.fs.read_file",
-            true,
-            ToolParallelismHint {
-                parallel_safe: true,
-                resource_key: None,
-            },
-        ),
-        host_tool(
-            "host.fs.write_file",
-            true,
-            ToolParallelismHint {
-                parallel_safe: true,
-                resource_key: Some("host.fs.write".into()),
-            },
-        ),
-        host_tool(
-            "host.fs.edit_file",
-            true,
-            ToolParallelismHint {
-                parallel_safe: true,
-                resource_key: Some("host.fs.write".into()),
-            },
-        ),
-        host_tool(
-            "host.fs.apply_patch",
-            true,
-            ToolParallelismHint {
-                parallel_safe: true,
-                resource_key: Some("host.fs.write".into()),
-            },
-        ),
-        host_tool(
-            "host.fs.grep",
-            true,
-            ToolParallelismHint {
-                parallel_safe: true,
-                resource_key: None,
-            },
-        ),
-        host_tool(
-            "host.fs.glob",
-            true,
-            ToolParallelismHint {
-                parallel_safe: true,
-                resource_key: None,
-            },
-        ),
-        host_tool(
-            "host.fs.stat",
-            true,
-            ToolParallelismHint {
-                parallel_safe: true,
-                resource_key: None,
-            },
-        ),
-        host_tool(
-            "host.fs.exists",
-            true,
-            ToolParallelismHint {
-                parallel_safe: true,
-                resource_key: None,
-            },
-        ),
-        host_tool(
-            "host.fs.list_dir",
-            true,
-            ToolParallelismHint {
-                parallel_safe: true,
-                resource_key: None,
-            },
-        ),
-    ];
-
-    for tool in tools {
-        registry.insert(tool.tool_name.clone(), tool);
-    }
-    registry
+    crate::tools::registry::default_tool_registry()
 }
 
 pub fn default_tool_profiles() -> BTreeMap<String, Vec<String>> {
-    let common = vec![
-        "host.session.open".into(),
-        "host.exec".into(),
-        "host.fs.read_file".into(),
-        "host.fs.write_file".into(),
-        "host.fs.grep".into(),
-        "host.fs.glob".into(),
-        "host.fs.stat".into(),
-        "host.fs.exists".into(),
-        "host.fs.list_dir".into(),
-    ];
-
-    let mut profiles = BTreeMap::new();
-
-    let mut openai = common.clone();
-    openai.push("host.fs.apply_patch".into());
-    profiles.insert("openai".into(), openai.clone());
-    profiles.insert("default".into(), openai);
-
-    let mut anthropic = common.clone();
-    anthropic.push("host.fs.edit_file".into());
-    profiles.insert("anthropic".into(), anthropic.clone());
-    profiles.insert("gemini".into(), anthropic);
-
-    profiles
+    crate::tools::registry::default_tool_profiles()
 }
 
 pub fn default_tool_profile_for_provider(provider: &str) -> String {
-    let normalized = provider.trim().to_ascii_lowercase();
-    if normalized.contains("anthropic") {
-        "anthropic".into()
-    } else if normalized.contains("gemini") {
-        "gemini".into()
-    } else {
-        "openai".into()
-    }
+    crate::tools::registry::default_tool_profile_for_provider(provider)
 }

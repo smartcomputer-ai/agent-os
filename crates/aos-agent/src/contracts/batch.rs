@@ -1,11 +1,13 @@
 use super::{ToolBatchId, ToolBatchPlan};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "$tag", content = "$value")]
 pub enum ToolCallStatus {
+    Queued,
     Pending,
     Succeeded,
     Failed { code: String, detail: String },
@@ -29,6 +31,9 @@ pub struct ActiveToolBatch {
     pub params_hash: Option<String>,
     pub plan: ToolBatchPlan,
     pub call_status: BTreeMap<String, ToolCallStatus>,
+    pub pending_by_params_hash: BTreeMap<String, Vec<String>>,
+    pub next_group_index: u64,
+    pub llm_results: BTreeMap<String, super::ToolCallLlmResult>,
     pub results_ref: Option<String>,
 }
 
