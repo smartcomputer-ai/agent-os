@@ -21,8 +21,10 @@ pub struct SessionConfig {
     pub workspace_binding: Option<WorkspaceBinding>,
     pub default_prompt_pack: Option<String>,
     pub default_prompt_refs: Option<Vec<String>>,
-    pub default_tool_catalog: Option<String>,
-    pub default_tool_refs: Option<Vec<String>>,
+    pub default_tool_profile: Option<String>,
+    pub default_tool_enable: Option<Vec<String>>,
+    pub default_tool_disable: Option<Vec<String>>,
+    pub default_tool_force: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -34,6 +36,8 @@ pub struct RunConfig {
     pub workspace_binding: Option<WorkspaceBinding>,
     pub prompt_pack: Option<String>,
     pub prompt_refs: Option<Vec<String>>,
-    pub tool_catalog: Option<String>,
-    pub tool_refs: Option<Vec<String>>,
+    pub tool_profile: Option<String>,
+    pub tool_enable: Option<Vec<String>>,
+    pub tool_disable: Option<Vec<String>>,
+    pub tool_force: Option<Vec<String>>,
 }

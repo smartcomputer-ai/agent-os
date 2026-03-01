@@ -26,8 +26,10 @@ export interface SessionConfig {
   workspace_binding?: WorkspaceBinding | null;
   default_prompt_pack?: string | null;
   default_prompt_refs?: string[] | null;
-  default_tool_catalog?: string | null;
-  default_tool_refs?: string[] | null;
+  default_tool_profile?: string | null;
+  default_tool_enable?: string[] | null;
+  default_tool_disable?: string[] | null;
+  default_tool_force?: string[] | null;
 }
 
 export interface SessionState {

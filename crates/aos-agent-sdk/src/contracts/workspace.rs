@@ -22,7 +22,5 @@ pub struct WorkspaceSnapshot {
     pub root_hash: Option<String>,
     pub index_ref: Option<String>,
     pub prompt_pack: Option<String>,
-    pub tool_catalog: Option<String>,
     pub prompt_pack_ref: Option<String>,
-    pub tool_catalog_ref: Option<String>,
 }

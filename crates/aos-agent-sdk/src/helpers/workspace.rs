@@ -5,19 +5,16 @@ use alloc::vec::Vec;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WorkspaceStepInputs {
     pub message_refs: Vec<alloc::string::String>,
-    pub tool_refs: Option<Vec<alloc::string::String>>,
 }
 
-/// Build LLM step refs from active workspace snapshot plus per-step inputs.
+/// Build LLM message refs from active workspace snapshot plus per-step prompt refs.
 ///
 /// - `history_message_refs` should be ordered oldest -> newest.
 /// - `explicit_prompt_refs`, when provided, override workspace prompt-pack refs.
-/// - `explicit_tool_refs`, when provided, override workspace tool catalog refs.
 pub fn materialize_workspace_step_inputs(
     active_snapshot: Option<&WorkspaceSnapshot>,
     history_message_refs: Vec<alloc::string::String>,
     explicit_prompt_refs: Option<Vec<alloc::string::String>>,
-    explicit_tool_refs: Option<Vec<alloc::string::String>>,
 ) -> WorkspaceStepInputs {
     let mut message_refs = if let Some(explicit) = explicit_prompt_refs {
         explicit
@@ -28,18 +25,7 @@ pub fn materialize_workspace_step_inputs(
     };
     message_refs.extend(history_message_refs);
 
-    let tool_refs = if explicit_tool_refs.is_some() {
-        explicit_tool_refs
-    } else {
-        active_snapshot
-            .and_then(|snap| snap.tool_catalog_ref.clone())
-            .map(|reference| vec![reference])
-    };
-
-    WorkspaceStepInputs {
-        message_refs,
-        tool_refs,
-    }
+    WorkspaceStepInputs { message_refs }
 }
 
 #[cfg(test)]
@@ -54,12 +40,8 @@ mod tests {
             root_hash: None,
             index_ref: None,
             prompt_pack: Some("default".into()),
-            tool_catalog: Some("default".into()),
             prompt_pack_ref: Some(
                 "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-            ),
-            tool_catalog_ref: Some(
-                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
             ),
         }
     }
@@ -69,7 +51,6 @@ mod tests {
         let inputs = materialize_workspace_step_inputs(
             Some(&snapshot()),
             vec!["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into()],
-            None,
             None,
         );
         assert_eq!(inputs.message_refs.len(), 2);
@@ -84,17 +65,6 @@ mod tests {
     }
 
     #[test]
-    fn uses_workspace_tool_catalog_ref_when_no_explicit_tool_refs() {
-        let inputs = materialize_workspace_step_inputs(Some(&snapshot()), vec![], None, None);
-        assert_eq!(
-            inputs.tool_refs,
-            Some(vec![
-                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into()
-            ])
-        );
-    }
-
-    #[test]
     fn explicit_prompt_refs_override_workspace_prompt_pack_ref() {
         let inputs = materialize_workspace_step_inputs(
             Some(&snapshot()),
@@ -102,7 +72,6 @@ mod tests {
             Some(vec![
                 "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".into(),
             ]),
-            None,
         );
         assert_eq!(
             inputs.message_refs,
@@ -114,24 +83,6 @@ mod tests {
                     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                 ),
             ]
-        );
-    }
-
-    #[test]
-    fn explicit_tool_refs_override_workspace_catalog_ref() {
-        let inputs = materialize_workspace_step_inputs(
-            Some(&snapshot()),
-            vec![],
-            None,
-            Some(vec![
-                "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".into(),
-            ]),
-        );
-        assert_eq!(
-            inputs.tool_refs,
-            Some(vec![
-                "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".into()
-            ])
         );
     }
 }

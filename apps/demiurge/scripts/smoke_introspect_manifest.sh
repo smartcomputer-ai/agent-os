@@ -122,8 +122,8 @@ AOS_BIN="${REPO_DIR}/target/debug/aos"
 export AOS_MODE=batch
 
 # 1) Workspace snapshot apply + run.
-send_session_ingress '{"$tag":"WorkspaceSyncRequested","$value":{"workspace_binding":{"workspace":"demiurge","version":null},"prompt_pack":"default","tool_catalog":"default"}}'
-send_session_ingress '{"$tag":"WorkspaceSnapshotReady","$value":{"snapshot":{"workspace":"demiurge","version":null,"root_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index_ref":null,"prompt_pack":"default","tool_catalog":"default","prompt_pack_ref":null,"tool_catalog_ref":null},"prompt_pack_bytes":null,"tool_catalog_bytes":null}}'
+send_session_ingress '{"$tag":"WorkspaceSyncRequested","$value":{"workspace_binding":{"workspace":"demiurge","version":null},"prompt_pack":"default"}}'
+send_session_ingress '{"$tag":"WorkspaceSnapshotReady","$value":{"snapshot":{"workspace":"demiurge","version":null,"root_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index_ref":null,"prompt_pack":"default","prompt_pack_ref":null},"prompt_pack_bytes":null}}'
 
 HAS_PENDING="no"
 for _ in $(seq 1 10); do
@@ -165,16 +165,19 @@ print(json.dumps({
 PY
 )"
 
-TOOL_BATCH_INGRESS="$(python3 - <<'PY' "${TOOL_BATCH_JSON}"
-import json,sys
-tool_batch_id=json.loads(sys.argv[1])
+TOOL_BATCH_INGRESS="$(python3 - <<'PY'
+import json
 print(json.dumps({
-  '$tag':'ToolBatchStarted',
+  '$tag':'ToolCallsObserved',
   '$value':{
-    'tool_batch_id': tool_batch_id,
     'intent_id': 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     'params_hash': None,
-    'expected_call_ids': ['call_1']
+    'calls': [{
+      'call_id': 'call_1',
+      'tool_name': 'host.session.open',
+      'arguments_ref': 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+      'provider_call_id': None
+    }]
   }
 }, separators=(',',':')))
 PY
@@ -218,21 +221,18 @@ state=(obj.get('data') or {}).get('session') or {}
 batch=state.get('active_tool_batch') or {}
 status=((batch.get('call_status') or {}).get('call_1') or {}).get('$tag')
 prompt_pack=((state.get('active_workspace_snapshot') or {}).get('prompt_pack'))
-tool_catalog=((state.get('active_workspace_snapshot') or {}).get('tool_catalog'))
 ok='yes' if status == 'Succeeded' else 'no'
-print(f"{ok}|{prompt_pack or ''}|{tool_catalog or ''}")
+print(f"{ok}|{prompt_pack or ''}")
 PY
 )"
 OK_FLAG="${CHECK_RESULT%%|*}"
-REMAINDER="${CHECK_RESULT#*|}"
-ACTIVE_PROMPT="${REMAINDER%%|*}"
-ACTIVE_TOOL="${REMAINDER#*|}"
+ACTIVE_PROMPT="${CHECK_RESULT#*|}"
 
 if [ "${OK_FLAG}" != "yes" ]; then
   echo "${STATE_JSON}" >&2
   fail "tool batch was not settled with a successful call"
 fi
-if [ "${ACTIVE_PROMPT}" != "default" ] || [ "${ACTIVE_TOOL}" != "default" ]; then
+if [ "${ACTIVE_PROMPT}" != "default" ]; then
   echo "${STATE_JSON}" >&2
   fail "workspace snapshot defaults were not applied to active run"
 fi
@@ -246,17 +246,9 @@ PY
 )"
 rm -f "${PROMPT_FILE}"
 
-TOOL_FILE="$(run_json_file "${AOS_BIN}" --json --quiet -w "${WORLD_DIR}" blob put "@${WORLD_DIR}/agent-ws/tools/catalogs/default.json")"
-TOOL_HASH="$(python3 - <<'PY' "${TOOL_FILE}"
+DIRECT_RUN_INGRESS="$(python3 - <<'PY' "${INPUT_REF}" "${PROMPT_HASH}"
 import json,sys
-print(json.load(open(sys.argv[1], 'r', encoding='utf-8'))['data']['hash'])
-PY
-)"
-rm -f "${TOOL_FILE}"
-
-DIRECT_RUN_INGRESS="$(python3 - <<'PY' "${INPUT_REF}" "${PROMPT_HASH}" "${TOOL_HASH}"
-import json,sys
-input_ref,prompt_hash,tool_hash=sys.argv[1],sys.argv[2],sys.argv[3]
+input_ref,prompt_hash=sys.argv[1],sys.argv[2]
 print(json.dumps({
   '$tag':'RunRequested',
   '$value':{
@@ -269,8 +261,10 @@ print(json.dumps({
       'workspace_binding': None,
       'default_prompt_pack': None,
       'default_prompt_refs': [prompt_hash],
-      'default_tool_catalog': None,
-      'default_tool_refs': [tool_hash],
+      'default_tool_profile': 'openai',
+      'default_tool_enable': ['host.session.open'],
+      'default_tool_disable': None,
+      'default_tool_force': None,
     }
   }
 }, separators=(',',':')))
@@ -290,9 +284,9 @@ obj=json.loads(raw[start:])
 session=((obj.get('data') or {}).get('session') or {})
 cfg=session.get('active_run_config') or {}
 prompt_refs=cfg.get('prompt_refs') or []
-tool_refs=cfg.get('tool_refs') or []
 workspace_binding=cfg.get('workspace_binding')
-strict=(len(prompt_refs)==1 and prompt_refs[0].startswith('sha256:') and len(tool_refs)==1 and tool_refs[0].startswith('sha256:') and workspace_binding is None)
+tool_profile=cfg.get('tool_profile')
+strict=(len(prompt_refs)==1 and prompt_refs[0].startswith('sha256:') and workspace_binding is None and tool_profile in {'openai','anthropic','gemini'})
 lifecycle=((session.get('lifecycle') or {}).get('$tag'))
 next_run_seq=session.get('next_run_seq') or 0
 weak=(next_run_seq >= 1 and lifecycle in {'Running','WaitingInput','Failed'})

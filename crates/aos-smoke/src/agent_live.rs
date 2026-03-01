@@ -6,9 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent_sdk::{
     LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionState, ToolBatchId, ToolCallStatus, WorkspaceApplyMode,
-    WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
-    materialize_llm_generate_params_with_workspace,
+    SessionIngressKind, SessionState, ToolCallStatus, WorkspaceApplyMode, WorkspaceBinding,
+    WorkspaceSnapshot, WorkspaceSnapshotReady, materialize_llm_generate_params_with_workspace,
 };
 use aos_cbor::Hash;
 use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope};
@@ -35,7 +34,6 @@ const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 const AGENT_WORKSPACE_NAME: &str = "agent-live";
 const AGENT_WORKSPACE_DIR: &str = "agent-ws";
 const DEFAULT_PROMPT_PACK: &str = "default";
-const DEFAULT_TOOL_CATALOG: &str = "default";
 
 const SESSION_ID: &str = "22222222-2222-2222-2222-222222222222";
 
@@ -134,7 +132,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         SessionIngressKind::WorkspaceSyncRequested {
             workspace_binding: workspace_binding.clone(),
             prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
-            tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
         },
     )?;
     let snapshot_ready = build_workspace_snapshot_ready(
@@ -173,8 +170,10 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 workspace_binding: Some(workspace_binding),
                 default_prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
                 default_prompt_refs: None,
-                default_tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
-                default_tool_refs: None,
+                default_tool_profile: None,
+                default_tool_enable: None,
+                default_tool_disable: None,
+                default_tool_force: None,
             }),
         },
     )?;
@@ -260,25 +259,21 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 calls.len()
             );
 
-            let run_id = state
-                .active_run_id
-                .clone()
-                .ok_or_else(|| anyhow!("missing active_run_id"))?;
-            let batch_id = ToolBatchId {
-                run_id,
-                batch_seq: 1,
-            };
-
             send_session_event(
                 &mut host,
                 &mut event_clock,
-                SessionIngressKind::ToolBatchStarted {
-                    tool_batch_id: batch_id.clone(),
+                SessionIngressKind::ToolCallsObserved {
                     intent_id: fake_hash('b'),
                     params_hash: None,
-                    expected_call_ids: calls.iter().map(|call| call.call_id.clone()).collect(),
+                    calls: calls.clone(),
                 },
             )?;
+            let batch_id = host
+                .read_state::<SessionState>()?
+                .active_tool_batch
+                .clone()
+                .ok_or_else(|| anyhow!("missing active tool batch"))?
+                .tool_batch_id;
 
             history.push(json!({
                 "role": "assistant",
@@ -586,14 +581,11 @@ fn build_workspace_snapshot_ready(
 ) -> Result<WorkspaceSnapshotReady> {
     let index_path = workspace_dir.join("agent.workspace.json");
     let prompt_pack_path = workspace_dir.join("prompts/packs/default.json");
-    let tool_catalog_path = workspace_dir.join("tools/catalogs/default.json");
 
     let index_bytes = fs::read(&index_path)
         .with_context(|| format!("read workspace index {}", index_path.display()))?;
     let prompt_pack_bytes = fs::read(&prompt_pack_path)
         .with_context(|| format!("read prompt pack {}", prompt_pack_path.display()))?;
-    let tool_catalog_bytes = fs::read(&tool_catalog_path)
-        .with_context(|| format!("read tool catalog {}", tool_catalog_path.display()))?;
 
     let store = host.store();
     let index_ref = store
@@ -604,10 +596,6 @@ fn build_workspace_snapshot_ready(
         .put_blob(&prompt_pack_bytes)
         .context("store workspace prompt pack blob")?
         .to_hex();
-    let tool_catalog_ref = store
-        .put_blob(&tool_catalog_bytes)
-        .context("store workspace tool catalog blob")?
-        .to_hex();
 
     Ok(WorkspaceSnapshotReady {
         snapshot: WorkspaceSnapshot {
@@ -616,12 +604,9 @@ fn build_workspace_snapshot_ready(
             root_hash: Some(root_hash),
             index_ref: Some(index_ref),
             prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
-            tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
             prompt_pack_ref: Some(prompt_pack_ref),
-            tool_catalog_ref: Some(tool_catalog_ref),
         },
         prompt_pack_bytes: Some(prompt_pack_bytes),
-        tool_catalog_bytes: Some(tool_catalog_bytes),
     })
 }
 

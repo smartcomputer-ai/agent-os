@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow, ensure};
 use aos_agent_sdk::{
     HostCommand, HostCommandKind, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, ToolBatchId, ToolCallStatus,
+    SessionLifecycle, SessionState, ToolCallObserved, ToolCallStatus,
 };
 use aos_host::config::HostConfig;
 
@@ -51,20 +51,40 @@ pub fn run(example_root: &Path) -> Result<()> {
         "expected run1 lifecycle Running|WaitingInput, got {:?}",
         run1.lifecycle
     );
-    let batch1 = active_batch_id(&run1, 1)?;
+
     host.send_event(&session_event(
         2,
-        SessionIngressKind::ToolBatchStarted {
-            tool_batch_id: batch1.clone(),
+        SessionIngressKind::ToolCallsObserved {
             intent_id: fake_hash('b'),
             params_hash: None,
-            expected_call_ids: vec!["call_a".into(), "call_b".into()],
+            calls: vec![
+                ToolCallObserved {
+                    call_id: "call_a".into(),
+                    tool_name: "host.session.open".into(),
+                    arguments_ref: fake_hash('d'),
+                    provider_call_id: None,
+                },
+                ToolCallObserved {
+                    call_id: "call_b".into(),
+                    tool_name: "host.session.open".into(),
+                    arguments_ref: fake_hash('e'),
+                    provider_call_id: None,
+                },
+            ],
         },
     ))?;
+
+    let batch_id = host
+        .read_state::<SessionState>()?
+        .active_tool_batch
+        .clone()
+        .ok_or_else(|| anyhow!("missing active tool batch"))?
+        .tool_batch_id;
+
     host.send_event(&session_event(
         3,
         SessionIngressKind::ToolCallSettled {
-            tool_batch_id: batch1.clone(),
+            tool_batch_id: batch_id.clone(),
             call_id: "call_a".into(),
             status: ToolCallStatus::Succeeded,
         },
@@ -72,7 +92,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     host.send_event(&session_event(
         4,
         SessionIngressKind::ToolCallSettled {
-            tool_batch_id: batch1.clone(),
+            tool_batch_id: batch_id.clone(),
             call_id: "call_b".into(),
             status: ToolCallStatus::Succeeded,
         },
@@ -80,7 +100,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     host.send_event(&session_event(
         5,
         SessionIngressKind::ToolBatchSettled {
-            tool_batch_id: batch1,
+            tool_batch_id: batch_id,
             results_ref: Some(fake_hash('c')),
         },
     ))?;
@@ -225,8 +245,10 @@ fn run_requested_event_with_config(
                 workspace_binding: None,
                 default_prompt_pack: None,
                 default_prompt_refs: Some(vec![fake_hash('e')]),
-                default_tool_catalog: None,
-                default_tool_refs: Some(vec![fake_hash('f')]),
+                default_tool_profile: None,
+                default_tool_enable: Some(vec!["host.session.open".into()]),
+                default_tool_disable: None,
+                default_tool_force: None,
             }),
         },
     )
@@ -238,14 +260,6 @@ fn session_event(observed_at_ns: u64, ingress: SessionIngressKind) -> SessionIng
         observed_at_ns,
         ingress,
     }
-}
-
-fn active_batch_id(state: &SessionState, batch_seq: u64) -> Result<ToolBatchId> {
-    let run_id = state
-        .active_run_id
-        .clone()
-        .ok_or_else(|| anyhow!("missing active run id"))?;
-    Ok(ToolBatchId { run_id, batch_seq })
 }
 
 fn fake_hash(ch: char) -> String {

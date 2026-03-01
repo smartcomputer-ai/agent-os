@@ -62,18 +62,15 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),
         SessionReduceError::UnknownModel => ReduceError::new("run config model unknown"),
         SessionReduceError::RunAlreadyActive => ReduceError::new("run already active"),
+        SessionReduceError::RunNotActive => ReduceError::new("run not active"),
         SessionReduceError::InvalidWorkspacePromptPackJson => {
             ReduceError::new("workspace prompt pack JSON invalid")
-        }
-        SessionReduceError::InvalidWorkspaceToolCatalogJson => {
-            ReduceError::new("workspace tool catalog JSON invalid")
         }
         SessionReduceError::MissingWorkspacePromptPackBytes => {
             ReduceError::new("workspace prompt pack bytes missing for validation")
         }
-        SessionReduceError::MissingWorkspaceToolCatalogBytes => {
-            ReduceError::new("workspace tool catalog bytes missing for validation")
-        }
         SessionReduceError::TooManyPendingIntents => ReduceError::new("too many pending intents"),
+        SessionReduceError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
+        SessionReduceError::UnknownToolOverride => ReduceError::new("unknown tool override"),
     }
 }

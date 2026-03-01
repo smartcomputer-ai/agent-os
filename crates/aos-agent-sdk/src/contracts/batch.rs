@@ -1,5 +1,5 @@
-use super::ToolBatchId;
-use alloc::collections::{BTreeMap, BTreeSet};
+use super::{ToolBatchId, ToolBatchPlan};
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
@@ -27,17 +27,24 @@ pub struct ActiveToolBatch {
     pub tool_batch_id: ToolBatchId,
     pub intent_id: String,
     pub params_hash: Option<String>,
-    pub expected_call_ids: BTreeSet<String>,
+    pub plan: ToolBatchPlan,
     pub call_status: BTreeMap<String, ToolCallStatus>,
     pub results_ref: Option<String>,
 }
 
 impl ActiveToolBatch {
     pub fn is_settled(&self) -> bool {
-        self.expected_call_ids.iter().all(|call_id| {
+        self.plan.observed_calls.iter().all(|call| {
             self.call_status
-                .get(call_id)
+                .get(&call.call_id)
                 .is_some_and(ToolCallStatus::is_terminal)
         })
+    }
+
+    pub fn contains_call(&self, call_id: &str) -> bool {
+        self.plan
+            .observed_calls
+            .iter()
+            .any(|call| call.call_id == call_id)
     }
 }

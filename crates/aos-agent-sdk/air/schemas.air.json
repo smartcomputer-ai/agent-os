@@ -39,13 +39,158 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/ToolExecutor@1",
+    "type": {
+      "variant": {
+        "Effect": {
+          "record": {
+            "effect_kind": { "text": {} },
+            "cap_slot": { "option": { "text": {} } }
+          }
+        },
+        "HostLoop": {
+          "record": {
+            "bridge": { "text": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolAvailabilityRule@1",
+    "type": {
+      "variant": {
+        "Always": { "unit": {} },
+        "HostSessionReady": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolParallelismHint@1",
+    "type": {
+      "record": {
+        "parallel_safe": { "bool": {} },
+        "resource_key": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolSpec@1",
+    "type": {
+      "record": {
+        "tool_name": { "text": {} },
+        "tool_ref": { "hash": {} },
+        "executor": { "ref": "aos.agent/ToolExecutor@1" },
+        "availability_rules": { "list": { "ref": "aos.agent/ToolAvailabilityRule@1" } },
+        "parallelism_hint": { "ref": "aos.agent/ToolParallelismHint@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostSessionStatus@1",
+    "type": {
+      "variant": {
+        "Ready": { "unit": {} },
+        "Closed": { "unit": {} },
+        "Expired": { "unit": {} },
+        "Error": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolRuntimeContext@1",
+    "type": {
+      "record": {
+        "host_session_id": { "option": { "text": {} } },
+        "host_session_status": { "option": { "ref": "aos.agent/HostSessionStatus@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/EffectiveTool@1",
+    "type": {
+      "record": {
+        "tool_name": { "text": {} },
+        "tool_ref": { "hash": {} },
+        "executor": { "ref": "aos.agent/ToolExecutor@1" },
+        "parallel_safe": { "bool": {} },
+        "resource_key": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/EffectiveToolSet@1",
+    "type": {
+      "record": {
+        "profile_id": { "text": {} },
+        "ordered_tools": { "list": { "ref": "aos.agent/EffectiveTool@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallObserved@1",
+    "type": {
+      "record": {
+        "call_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "arguments_ref": { "hash": {} },
+        "provider_call_id": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PlannedToolCall@1",
+    "type": {
+      "record": {
+        "call_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "arguments_ref": { "hash": {} },
+        "provider_call_id": { "option": { "text": {} } },
+        "executor": { "ref": "aos.agent/ToolExecutor@1" },
+        "parallel_safe": { "bool": {} },
+        "resource_key": { "option": { "text": {} } },
+        "accepted": { "bool": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolExecutionPlan@1",
+    "type": {
+      "record": {
+        "groups": { "list": { "list": { "text": {} } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolBatchPlan@1",
+    "type": {
+      "record": {
+        "observed_calls": { "list": { "ref": "aos.agent/ToolCallObserved@1" } },
+        "planned_calls": { "list": { "ref": "aos.agent/PlannedToolCall@1" } },
+        "execution_plan": { "ref": "aos.agent/ToolExecutionPlan@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/ActiveToolBatch@1",
     "type": {
       "record": {
         "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
         "intent_id": { "hash": {} },
         "params_hash": { "option": { "hash": {} } },
-        "expected_call_ids": { "set": { "text": {} } },
+        "plan": { "ref": "aos.agent/ToolBatchPlan@1" },
         "call_status": {
           "map": {
             "key": { "text": {} },
@@ -53,6 +198,16 @@
           }
         },
         "results_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolOverrideScope@1",
+    "type": {
+      "variant": {
+        "Session": { "unit": {} },
+        "Run": { "unit": {} }
       }
     }
   },
@@ -97,9 +252,7 @@
         "root_hash": { "option": { "hash": {} } },
         "index_ref": { "option": { "hash": {} } },
         "prompt_pack": { "option": { "text": {} } },
-        "tool_catalog": { "option": { "text": {} } },
-        "prompt_pack_ref": { "option": { "hash": {} } },
-        "tool_catalog_ref": { "option": { "hash": {} } }
+        "prompt_pack_ref": { "option": { "hash": {} } }
       }
     }
   },
@@ -109,8 +262,7 @@
     "type": {
       "record": {
         "snapshot": { "ref": "aos.agent/WorkspaceSnapshot@1" },
-        "prompt_pack_bytes": { "option": { "bytes": {} } },
-        "tool_catalog_bytes": { "option": { "bytes": {} } }
+        "prompt_pack_bytes": { "option": { "bytes": {} } }
       }
     }
   },
@@ -126,8 +278,10 @@
         "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
         "default_prompt_pack": { "option": { "text": {} } },
         "default_prompt_refs": { "option": { "list": { "hash": {} } } },
-        "default_tool_catalog": { "option": { "text": {} } },
-        "default_tool_refs": { "option": { "list": { "hash": {} } } }
+        "default_tool_profile": { "option": { "text": {} } },
+        "default_tool_enable": { "option": { "list": { "text": {} } } },
+        "default_tool_disable": { "option": { "list": { "text": {} } } },
+        "default_tool_force": { "option": { "list": { "text": {} } } }
       }
     }
   },
@@ -143,8 +297,10 @@
         "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
         "prompt_pack": { "option": { "text": {} } },
         "prompt_refs": { "option": { "list": { "hash": {} } } },
-        "tool_catalog": { "option": { "text": {} } },
-        "tool_refs": { "option": { "list": { "hash": {} } } }
+        "tool_profile": { "option": { "text": {} } },
+        "tool_enable": { "option": { "list": { "text": {} } } },
+        "tool_disable": { "option": { "list": { "text": {} } } },
+        "tool_force": { "option": { "list": { "text": {} } } }
       }
     }
   },
@@ -186,23 +342,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/LlmToolCall@1",
-    "type": {
-      "record": {
-        "call_id": { "text": {} },
-        "tool_name": { "text": {} },
-        "arguments_ref": { "hash": {} },
-        "provider_call_id": { "option": { "text": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/LlmToolCallList@1",
-    "type": { "list": { "ref": "aos.agent/LlmToolCall@1" } }
-  },
-  {
-    "$kind": "defschema",
     "name": "aos.agent/SessionIngressKind@1",
     "type": {
       "variant": {
@@ -216,8 +355,7 @@
         "WorkspaceSyncRequested": {
           "record": {
             "workspace_binding": { "ref": "aos.agent/WorkspaceBinding@1" },
-            "prompt_pack": { "option": { "text": {} } },
-            "tool_catalog": { "option": { "text": {} } }
+            "prompt_pack": { "option": { "text": {} } }
           }
         },
         "WorkspaceSyncUnchanged": {
@@ -239,12 +377,51 @@
             "mode": { "ref": "aos.agent/WorkspaceApplyMode@1" }
           }
         },
-        "ToolBatchStarted": {
+        "ToolRegistrySet": {
           "record": {
-            "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+            "registry": {
+              "map": {
+                "key": { "text": {} },
+                "value": { "ref": "aos.agent/ToolSpec@1" }
+              }
+            },
+            "profiles": {
+              "option": {
+                "map": {
+                  "key": { "text": {} },
+                  "value": { "list": { "text": {} } }
+                }
+              }
+            },
+            "default_profile": { "option": { "text": {} } }
+          }
+        },
+        "ToolProfileSelected": {
+          "record": {
+            "profile_id": { "text": {} }
+          }
+        },
+        "ToolOverridesSet": {
+          "record": {
+            "scope": { "ref": "aos.agent/ToolOverrideScope@1" },
+            "enable": { "option": { "list": { "text": {} } } },
+            "disable": { "option": { "list": { "text": {} } } },
+            "force": { "option": { "list": { "text": {} } } }
+          }
+        },
+        "HostSessionUpdated": {
+          "record": {
+            "host_session_id": { "option": { "text": {} } },
+            "host_session_status": {
+              "option": { "ref": "aos.agent/HostSessionStatus@1" }
+            }
+          }
+        },
+        "ToolCallsObserved": {
+          "record": {
             "intent_id": { "hash": {} },
             "params_hash": { "option": { "hash": {} } },
-            "expected_call_ids": { "list": { "text": {} } }
+            "calls": { "list": { "ref": "aos.agent/ToolCallObserved@1" } }
           }
         },
         "ToolCallSettled": {
@@ -260,7 +437,6 @@
             "results_ref": { "option": { "hash": {} } }
           }
         },
-        "ActiveToolBatchReplaced": { "ref": "aos.agent/ActiveToolBatch@1" },
         "RunCompleted": { "unit": {} },
         "RunFailed": {
           "record": { "code": { "text": {} }, "detail": { "text": {} } }
@@ -321,6 +497,22 @@
         "pending_workspace_apply_mode": {
           "option": { "ref": "aos.agent/WorkspaceApplyMode@1" }
         },
+        "tool_registry": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "ref": "aos.agent/ToolSpec@1" }
+          }
+        },
+        "tool_profiles": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "list": { "text": {} } }
+          }
+        },
+        "tool_profile": { "text": {} },
+        "tool_runtime_context": { "ref": "aos.agent/ToolRuntimeContext@1" },
+        "effective_tools": { "ref": "aos.agent/EffectiveToolSet@1" },
+        "last_tool_plan_hash": { "option": { "hash": {} } },
         "pending_steer": { "list": { "text": {} } },
         "pending_follow_up": { "list": { "text": {} } },
         "created_at": { "time": {} },

@@ -1,11 +1,13 @@
 use super::{
-    allocate_run_id, can_apply_host_command, enqueue_host_text, pop_follow_up_if_ready,
-    transition_lifecycle,
+    allocate_run_id, allocate_tool_batch_id, can_apply_host_command, enqueue_host_text,
+    pop_follow_up_if_ready, transition_lifecycle,
 };
 use crate::contracts::{
-    ActiveToolBatch, HostCommandKind, PendingIntent, RunConfig, SessionConfig, SessionIngressKind,
-    SessionLifecycle, SessionState, SessionWorkflowEvent, ToolCallStatus, WorkspaceApplyMode,
-    WorkspaceBinding, WorkspaceSnapshot,
+    ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommandKind, PendingIntent,
+    PlannedToolCall, RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle, SessionState,
+    SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallObserved, ToolCallStatus,
+    ToolExecutionPlan, ToolOverrideScope, ToolSpec, WorkspaceApplyMode, WorkspaceBinding,
+    WorkspaceSnapshot, default_tool_profile_for_provider,
 };
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
@@ -14,7 +16,7 @@ use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
 
 use super::llm::{
-    LlmStepContext, LlmToolChoice, SysLlmGenerateParams,
+    LlmMappingError, LlmStepContext, LlmToolChoice, SysLlmGenerateParams,
     materialize_llm_generate_params_with_workspace,
 };
 
@@ -51,11 +53,12 @@ pub enum SessionReduceError {
     UnknownProvider,
     UnknownModel,
     RunAlreadyActive,
+    RunNotActive,
     InvalidWorkspacePromptPackJson,
-    InvalidWorkspaceToolCatalogJson,
     MissingWorkspacePromptPackBytes,
-    MissingWorkspaceToolCatalogBytes,
     TooManyPendingIntents,
+    ToolProfileUnknown,
+    UnknownToolOverride,
 }
 
 impl SessionReduceError {
@@ -73,15 +76,14 @@ impl SessionReduceError {
             Self::UnknownProvider => "run config provider unknown",
             Self::UnknownModel => "run config model unknown",
             Self::RunAlreadyActive => "run already active",
+            Self::RunNotActive => "run not active",
             Self::InvalidWorkspacePromptPackJson => "workspace prompt pack JSON invalid",
-            Self::InvalidWorkspaceToolCatalogJson => "workspace tool catalog JSON invalid",
             Self::MissingWorkspacePromptPackBytes => {
                 "workspace prompt pack bytes missing for validation"
             }
-            Self::MissingWorkspaceToolCatalogBytes => {
-                "workspace tool catalog bytes missing for validation"
-            }
             Self::TooManyPendingIntents => "too many pending intents",
+            Self::ToolProfileUnknown => "tool profile unknown",
+            Self::UnknownToolOverride => "unknown tool override",
         }
     }
 }
@@ -156,13 +158,7 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                 SessionIngressKind::WorkspaceSyncRequested {
                     workspace_binding,
                     prompt_pack,
-                    tool_catalog,
-                } => on_workspace_sync_requested(
-                    state,
-                    workspace_binding,
-                    prompt_pack.as_ref(),
-                    tool_catalog.as_ref(),
-                ),
+                } => on_workspace_sync_requested(state, workspace_binding, prompt_pack.as_ref()),
                 SessionIngressKind::WorkspaceSyncUnchanged { workspace, version } => {
                     on_workspace_sync_unchanged(state, workspace, *version)
                 }
@@ -170,24 +166,47 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     state,
                     &ready.snapshot,
                     ready.prompt_pack_bytes.as_deref(),
-                    ready.tool_catalog_bytes.as_deref(),
                 )?,
                 SessionIngressKind::WorkspaceSyncFailed { .. } => {}
                 SessionIngressKind::WorkspaceApplyRequested { mode } => {
                     on_workspace_apply_requested(state, *mode)
                 }
-                SessionIngressKind::ToolBatchStarted {
-                    tool_batch_id,
+                SessionIngressKind::ToolRegistrySet {
+                    registry,
+                    profiles,
+                    default_profile,
+                } => on_tool_registry_set(
+                    state,
+                    registry,
+                    profiles.as_ref(),
+                    default_profile.as_ref(),
+                )?,
+                SessionIngressKind::ToolProfileSelected { profile_id } => {
+                    on_tool_profile_selected(state, profile_id)?
+                }
+                SessionIngressKind::ToolOverridesSet {
+                    scope,
+                    enable,
+                    disable,
+                    force,
+                } => on_tool_overrides_set(
+                    state,
+                    *scope,
+                    enable.as_deref(),
+                    disable.as_deref(),
+                    force.as_deref(),
+                )?,
+                SessionIngressKind::HostSessionUpdated {
+                    host_session_id,
+                    host_session_status,
+                } => {
+                    on_host_session_updated(state, host_session_id.as_ref(), *host_session_status)?
+                }
+                SessionIngressKind::ToolCallsObserved {
                     intent_id,
                     params_hash,
-                    expected_call_ids,
-                } => on_tool_batch_started(
-                    state,
-                    tool_batch_id,
-                    intent_id,
-                    params_hash.as_ref(),
-                    expected_call_ids,
-                )?,
+                    calls,
+                } => on_tool_calls_observed(state, intent_id, params_hash.as_ref(), calls)?,
                 SessionIngressKind::ToolCallSettled {
                     tool_batch_id,
                     call_id,
@@ -197,9 +216,6 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     tool_batch_id,
                     results_ref,
                 } => on_tool_batch_settled(state, tool_batch_id, results_ref.clone())?,
-                SessionIngressKind::ActiveToolBatchReplaced(batch) => {
-                    state.active_tool_batch = Some(batch.clone())
-                }
                 SessionIngressKind::RunCompleted => {
                     transition_lifecycle(state, SessionLifecycle::Completed)
                         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
@@ -320,12 +336,14 @@ fn on_run_requested(
     state.active_run_config = Some(requested.clone());
     state.active_tool_batch = None;
 
+    refresh_effective_tools(state, Some(&requested))?;
+
     let step_ctx = LlmStepContext {
         correlation_id: Some(alloc::format!("run-{}-initial", run_id.run_seq)),
         message_refs: vec![input_ref.into()],
         temperature: None,
         top_p: None,
-        tool_refs: None,
+        tool_refs: state.effective_tools.tool_refs(),
         tool_choice: Some(LlmToolChoice::Auto),
         stop_sequences: None,
         metadata: None,
@@ -339,7 +357,7 @@ fn on_run_requested(
         state.active_workspace_snapshot.as_ref(),
         step_ctx,
     )
-    .map_err(|_| SessionReduceError::MissingProvider)?;
+    .map_err(map_llm_mapping_error)?;
 
     let params_hash = hash_llm_params(&params);
     state.pending_intents.insert(
@@ -361,6 +379,14 @@ fn on_run_requested(
     });
 
     Ok(())
+}
+
+fn map_llm_mapping_error(err: LlmMappingError) -> SessionReduceError {
+    match err {
+        LlmMappingError::MissingProvider => SessionReduceError::MissingProvider,
+        LlmMappingError::MissingModel => SessionReduceError::MissingModel,
+        LlmMappingError::EmptyMessageRefs => SessionReduceError::InvalidWorkspacePromptPackJson,
+    }
 }
 
 fn on_host_command(
@@ -403,11 +429,9 @@ fn on_workspace_sync_requested(
     state: &mut SessionState,
     workspace_binding: &WorkspaceBinding,
     prompt_pack: Option<&String>,
-    tool_catalog: Option<&String>,
 ) {
     state.session_config.workspace_binding = Some(workspace_binding.clone());
     state.session_config.default_prompt_pack = prompt_pack.cloned();
-    state.session_config.default_tool_catalog = tool_catalog.cloned();
 }
 
 fn on_workspace_sync_unchanged(state: &mut SessionState, workspace: &str, version: Option<u64>) {
@@ -427,9 +451,8 @@ fn on_workspace_snapshot_ready(
     state: &mut SessionState,
     snapshot: &WorkspaceSnapshot,
     prompt_pack_bytes: Option<&[u8]>,
-    tool_catalog_bytes: Option<&[u8]>,
 ) -> Result<(), SessionReduceError> {
-    validate_workspace_snapshot_json(snapshot, prompt_pack_bytes, tool_catalog_bytes)?;
+    validate_workspace_snapshot_json(snapshot, prompt_pack_bytes)?;
     state.pending_workspace_snapshot = Some(snapshot.clone());
     if state.pending_workspace_apply_mode == Some(WorkspaceApplyMode::ImmediateIfIdle)
         && state.active_run_id.is_none()
@@ -442,16 +465,10 @@ fn on_workspace_snapshot_ready(
 fn validate_workspace_snapshot_json(
     snapshot: &WorkspaceSnapshot,
     prompt_pack_bytes: Option<&[u8]>,
-    tool_catalog_bytes: Option<&[u8]>,
 ) -> Result<(), SessionReduceError> {
     if snapshot.prompt_pack_ref.is_some() {
         let bytes = prompt_pack_bytes.ok_or(SessionReduceError::MissingWorkspacePromptPackBytes)?;
         validate_prompt_pack_json(bytes)?;
-    }
-    if snapshot.tool_catalog_ref.is_some() {
-        let bytes =
-            tool_catalog_bytes.ok_or(SessionReduceError::MissingWorkspaceToolCatalogBytes)?;
-        validate_tool_catalog_json(bytes)?;
     }
     Ok(())
 }
@@ -483,55 +500,6 @@ fn validate_prompt_pack_json(bytes: &[u8]) -> Result<(), SessionReduceError> {
     }
 }
 
-fn validate_tool_catalog_json(bytes: &[u8]) -> Result<(), SessionReduceError> {
-    let value: serde_json::Value = serde_json::from_slice(bytes)
-        .map_err(|_| SessionReduceError::InvalidWorkspaceToolCatalogJson)?;
-
-    fn looks_like_tool_def(value: &serde_json::Value) -> bool {
-        let Some(obj) = value.as_object() else {
-            return false;
-        };
-        if obj
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .is_some()
-        {
-            return true;
-        }
-        obj.get("function")
-            .and_then(serde_json::Value::as_object)
-            .and_then(|function| function.get("name"))
-            .and_then(serde_json::Value::as_str)
-            .is_some()
-    }
-
-    match value {
-        serde_json::Value::Array(items) => {
-            if items.iter().all(looks_like_tool_def) {
-                Ok(())
-            } else {
-                Err(SessionReduceError::InvalidWorkspaceToolCatalogJson)
-            }
-        }
-        serde_json::Value::Object(obj) => {
-            if let Some(items) = obj.get("tools").and_then(serde_json::Value::as_array) {
-                if items.iter().all(looks_like_tool_def) {
-                    return Ok(());
-                }
-                return Err(SessionReduceError::InvalidWorkspaceToolCatalogJson);
-            }
-            if obj.contains_key("tool_choice") {
-                return Ok(());
-            }
-            if looks_like_tool_def(&serde_json::Value::Object(obj)) {
-                return Ok(());
-            }
-            Err(SessionReduceError::InvalidWorkspaceToolCatalogJson)
-        }
-        _ => Err(SessionReduceError::InvalidWorkspaceToolCatalogJson),
-    }
-}
-
 fn on_workspace_apply_requested(state: &mut SessionState, mode: WorkspaceApplyMode) {
     match mode {
         WorkspaceApplyMode::ImmediateIfIdle => {
@@ -555,12 +523,85 @@ fn apply_pending_workspace_snapshot(state: &mut SessionState) -> bool {
     true
 }
 
-fn on_tool_batch_started(
+fn on_tool_registry_set(
     state: &mut SessionState,
-    tool_batch_id: &crate::contracts::ToolBatchId,
+    registry: &BTreeMap<String, ToolSpec>,
+    profiles: Option<&BTreeMap<String, Vec<String>>>,
+    default_profile: Option<&String>,
+) -> Result<(), SessionReduceError> {
+    state.tool_registry = registry.clone();
+    if let Some(profiles) = profiles {
+        state.tool_profiles = profiles.clone();
+    }
+    if let Some(default_profile) = default_profile {
+        state.tool_profile = default_profile.clone();
+    }
+
+    let active = state.active_run_config.clone();
+    refresh_effective_tools(state, active.as_ref())
+}
+
+fn on_tool_profile_selected(
+    state: &mut SessionState,
+    profile_id: &str,
+) -> Result<(), SessionReduceError> {
+    if !state.tool_profiles.contains_key(profile_id) {
+        return Err(SessionReduceError::ToolProfileUnknown);
+    }
+    state.tool_profile = profile_id.into();
+    let active = state.active_run_config.clone();
+    refresh_effective_tools(state, active.as_ref())
+}
+
+fn on_tool_overrides_set(
+    state: &mut SessionState,
+    scope: ToolOverrideScope,
+    enable: Option<&[String]>,
+    disable: Option<&[String]>,
+    force: Option<&[String]>,
+) -> Result<(), SessionReduceError> {
+    validate_known_tool_names(state, enable)?;
+    validate_known_tool_names(state, disable)?;
+    validate_known_tool_names(state, force)?;
+
+    match scope {
+        ToolOverrideScope::Session => {
+            state.session_config.default_tool_enable = enable.map(|items| items.to_vec());
+            state.session_config.default_tool_disable = disable.map(|items| items.to_vec());
+            state.session_config.default_tool_force = force.map(|items| items.to_vec());
+        }
+        ToolOverrideScope::Run => {
+            let active = state
+                .active_run_config
+                .as_mut()
+                .ok_or(SessionReduceError::RunNotActive)?;
+            active.tool_enable = enable.map(|items| items.to_vec());
+            active.tool_disable = disable.map(|items| items.to_vec());
+            active.tool_force = force.map(|items| items.to_vec());
+        }
+    }
+
+    let active = state.active_run_config.clone();
+    refresh_effective_tools(state, active.as_ref())
+}
+
+fn on_host_session_updated(
+    state: &mut SessionState,
+    host_session_id: Option<&String>,
+    host_session_status: Option<crate::contracts::HostSessionStatus>,
+) -> Result<(), SessionReduceError> {
+    state.tool_runtime_context.host_session_id = host_session_id.cloned();
+    state.tool_runtime_context.host_session_status = host_session_status;
+
+    let active = state.active_run_config.clone();
+    refresh_effective_tools(state, active.as_ref())
+}
+
+fn on_tool_calls_observed(
+    state: &mut SessionState,
     intent_id: &str,
     params_hash: Option<&String>,
-    expected_call_ids: &[String],
+    calls: &[ToolCallObserved],
 ) -> Result<(), SessionReduceError> {
     if state
         .active_tool_batch
@@ -570,21 +611,107 @@ fn on_tool_batch_started(
         return Err(SessionReduceError::ToolBatchAlreadyActive);
     }
 
-    let expected_set: BTreeSet<String> = expected_call_ids.iter().cloned().collect();
-    let mut call_status = BTreeMap::new();
-    for call_id in &expected_set {
-        call_status.insert(call_id.clone(), ToolCallStatus::Pending);
-    }
+    let run_id = state
+        .active_run_id
+        .clone()
+        .ok_or(SessionReduceError::RunNotActive)?;
+    let tool_batch_id = allocate_tool_batch_id(state, &run_id);
+
+    let (plan, call_status) = plan_tool_batch(state, calls);
+    state.last_tool_plan_hash = Some(hash_tool_plan(&plan));
 
     state.active_tool_batch = Some(ActiveToolBatch {
-        tool_batch_id: tool_batch_id.clone(),
+        tool_batch_id,
         intent_id: intent_id.into(),
         params_hash: params_hash.cloned(),
-        expected_call_ids: expected_set,
+        plan,
         call_status,
         results_ref: None,
     });
+
     Ok(())
+}
+
+fn plan_tool_batch(
+    state: &SessionState,
+    calls: &[ToolCallObserved],
+) -> (ToolBatchPlan, BTreeMap<String, ToolCallStatus>) {
+    let mut planned_calls = Vec::with_capacity(calls.len());
+    let mut call_status = BTreeMap::new();
+
+    for call in calls {
+        if let Some(tool) = state.effective_tools.tool_by_name(&call.tool_name) {
+            planned_calls.push(PlannedToolCall {
+                call_id: call.call_id.clone(),
+                tool_name: call.tool_name.clone(),
+                arguments_ref: call.arguments_ref.clone(),
+                provider_call_id: call.provider_call_id.clone(),
+                executor: tool.executor.clone(),
+                parallel_safe: tool.parallel_safe,
+                resource_key: tool.resource_key.clone(),
+                accepted: true,
+            });
+            call_status.insert(call.call_id.clone(), ToolCallStatus::Pending);
+        } else {
+            planned_calls.push(PlannedToolCall {
+                call_id: call.call_id.clone(),
+                tool_name: call.tool_name.clone(),
+                arguments_ref: call.arguments_ref.clone(),
+                provider_call_id: call.provider_call_id.clone(),
+                executor: crate::contracts::ToolExecutor::default(),
+                parallel_safe: false,
+                resource_key: None,
+                accepted: false,
+            });
+            call_status.insert(call.call_id.clone(), ToolCallStatus::Ignored);
+        }
+    }
+
+    let mut groups: Vec<Vec<String>> = Vec::new();
+    let mut current_group: Vec<String> = Vec::new();
+    let mut current_resources: BTreeSet<String> = BTreeSet::new();
+
+    for call in &planned_calls {
+        if !call.accepted {
+            continue;
+        }
+
+        if !call.parallel_safe {
+            flush_group(&mut groups, &mut current_group, &mut current_resources);
+            groups.push(vec![call.call_id.clone()]);
+            continue;
+        }
+
+        if let Some(resource_key) = call.resource_key.as_ref() {
+            if current_resources.contains(resource_key) {
+                flush_group(&mut groups, &mut current_group, &mut current_resources);
+            }
+            current_resources.insert(resource_key.clone());
+        }
+
+        current_group.push(call.call_id.clone());
+    }
+    flush_group(&mut groups, &mut current_group, &mut current_resources);
+
+    (
+        ToolBatchPlan {
+            observed_calls: calls.to_vec(),
+            planned_calls,
+            execution_plan: ToolExecutionPlan { groups },
+        },
+        call_status,
+    )
+}
+
+fn flush_group(
+    groups: &mut Vec<Vec<String>>,
+    current_group: &mut Vec<String>,
+    current_resources: &mut BTreeSet<String>,
+) {
+    if !current_group.is_empty() {
+        groups.push(core::mem::take(current_group));
+        current_resources.clear();
+    }
 }
 
 fn on_tool_call_settled(
@@ -600,7 +727,7 @@ fn on_tool_call_settled(
     if batch.tool_batch_id != *tool_batch_id {
         return Err(SessionReduceError::ToolBatchIdMismatch);
     }
-    if !batch.expected_call_ids.contains(call_id) {
+    if !batch.contains_call(call_id) {
         return Err(SessionReduceError::ToolCallUnknown);
     }
 
@@ -683,6 +810,139 @@ fn on_receipt_rejected(
     Ok(())
 }
 
+fn refresh_effective_tools(
+    state: &mut SessionState,
+    run_config: Option<&RunConfig>,
+) -> Result<(), SessionReduceError> {
+    let provider = run_config
+        .map(|cfg| cfg.provider.as_str())
+        .or_else(|| {
+            if state.session_config.provider.trim().is_empty() {
+                None
+            } else {
+                Some(state.session_config.provider.as_str())
+            }
+        })
+        .unwrap_or("openai");
+
+    let profile_id = run_config
+        .and_then(|cfg| cfg.tool_profile.clone())
+        .or_else(|| state.session_config.default_tool_profile.clone())
+        .or_else(|| {
+            if state.tool_profile.trim().is_empty() {
+                None
+            } else {
+                Some(state.tool_profile.clone())
+            }
+        })
+        .unwrap_or_else(|| default_tool_profile_for_provider(provider));
+
+    let base_profile = state
+        .tool_profiles
+        .get(&profile_id)
+        .ok_or(SessionReduceError::ToolProfileUnknown)?;
+
+    validate_known_tool_names(state, Some(base_profile.as_slice()))?;
+
+    let enabled_session = state.session_config.default_tool_enable.as_deref();
+    let disabled_session = state.session_config.default_tool_disable.as_deref();
+    let force_session = state.session_config.default_tool_force.as_deref();
+
+    let enabled_run = run_config.and_then(|cfg| cfg.tool_enable.as_deref());
+    let disabled_run = run_config.and_then(|cfg| cfg.tool_disable.as_deref());
+    let force_run = run_config.and_then(|cfg| cfg.tool_force.as_deref());
+
+    validate_known_tool_names(state, enabled_session)?;
+    validate_known_tool_names(state, disabled_session)?;
+    validate_known_tool_names(state, force_session)?;
+    validate_known_tool_names(state, enabled_run)?;
+    validate_known_tool_names(state, disabled_run)?;
+    validate_known_tool_names(state, force_run)?;
+
+    let mut denied = BTreeSet::new();
+    for source in [disabled_session, disabled_run] {
+        if let Some(items) = source {
+            denied.extend(items.iter().cloned());
+        }
+    }
+
+    let mut enabled = BTreeSet::new();
+    enabled.extend(base_profile.iter().cloned());
+    for source in [enabled_session, force_session, enabled_run, force_run] {
+        if let Some(items) = source {
+            enabled.extend(items.iter().cloned());
+        }
+    }
+
+    for denied_name in denied {
+        enabled.remove(&denied_name);
+    }
+
+    let mut ordered_names = Vec::new();
+    let mut seen = BTreeSet::new();
+    for name in base_profile {
+        if enabled.contains(name) {
+            ordered_names.push(name.clone());
+            seen.insert(name.clone());
+        }
+    }
+
+    let mut extras: Vec<String> = enabled
+        .into_iter()
+        .filter(|name| !seen.contains(name))
+        .collect();
+    extras.sort();
+    ordered_names.extend(extras);
+
+    let mut ordered_tools = Vec::new();
+    for tool_name in ordered_names {
+        let Some(spec) = state.tool_registry.get(&tool_name) else {
+            return Err(SessionReduceError::UnknownToolOverride);
+        };
+        if !is_tool_available(spec, &state.tool_runtime_context) {
+            continue;
+        }
+        ordered_tools.push(EffectiveTool {
+            tool_name: spec.tool_name.clone(),
+            tool_ref: spec.tool_ref.clone(),
+            executor: spec.executor.clone(),
+            parallel_safe: spec.parallelism_hint.parallel_safe,
+            resource_key: spec.parallelism_hint.resource_key.clone(),
+        });
+    }
+
+    state.tool_profile = profile_id.clone();
+    state.effective_tools = EffectiveToolSet {
+        profile_id,
+        ordered_tools,
+    };
+
+    Ok(())
+}
+
+fn is_tool_available(spec: &ToolSpec, runtime: &crate::contracts::ToolRuntimeContext) -> bool {
+    spec.availability_rules.iter().all(|rule| match rule {
+        ToolAvailabilityRule::Always => true,
+        ToolAvailabilityRule::HostSessionReady => {
+            runtime.host_session_status == Some(crate::contracts::HostSessionStatus::Ready)
+        }
+    })
+}
+
+fn validate_known_tool_names(
+    state: &SessionState,
+    names: Option<&[String]>,
+) -> Result<(), SessionReduceError> {
+    if let Some(names) = names {
+        for tool_name in names {
+            if !state.tool_registry.contains_key(tool_name) {
+                return Err(SessionReduceError::UnknownToolOverride);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfig>) -> RunConfig {
     let source = override_cfg.unwrap_or(session);
     RunConfig {
@@ -693,8 +953,10 @@ fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfi
         workspace_binding: source.workspace_binding.clone(),
         prompt_pack: source.default_prompt_pack.clone(),
         prompt_refs: source.default_prompt_refs.clone(),
-        tool_catalog: source.default_tool_catalog.clone(),
-        tool_refs: source.default_tool_refs.clone(),
+        tool_profile: source.default_tool_profile.clone(),
+        tool_enable: source.default_tool_enable.clone(),
+        tool_disable: source.default_tool_disable.clone(),
+        tool_force: source.default_tool_force.clone(),
     }
 }
 
@@ -744,7 +1006,15 @@ fn stamp_timestamps(state: &mut SessionState, event: &SessionWorkflowEvent) {
 }
 
 fn hash_llm_params(params: &SysLlmGenerateParams) -> String {
-    let bytes = serde_cbor::to_vec(params).unwrap_or_default();
+    hash_cbor(params)
+}
+
+fn hash_tool_plan(plan: &ToolBatchPlan) -> String {
+    hash_cbor(plan)
+}
+
+fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
+    let bytes = serde_cbor::to_vec(value).unwrap_or_default();
     let digest = Sha256::digest(bytes);
     let mut out = String::from("sha256:");
     for byte in digest {
@@ -766,15 +1036,31 @@ fn nibble_to_hex(n: u8) -> char {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::{SessionId, SessionIngress};
+    use crate::contracts::{
+        HostSessionStatus, SessionId, SessionIngress, ToolCallObserved, ToolOverrideScope,
+    };
 
-    fn run_request_event() -> SessionWorkflowEvent {
+    fn fake_hash(ch: char) -> String {
+        let mut out = String::from("sha256:");
+        for _ in 0..64 {
+            out.push(ch);
+        }
+        out
+    }
+
+    fn ingress(observed_at_ns: u64, ingress: SessionIngressKind) -> SessionWorkflowEvent {
         SessionWorkflowEvent::Ingress(SessionIngress {
             session_id: SessionId("s-1".into()),
-            observed_at_ns: 1,
-            ingress: SessionIngressKind::RunRequested {
-                input_ref:
-                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            observed_at_ns,
+            ingress,
+        })
+    }
+
+    fn run_request_event(ts: u64) -> SessionWorkflowEvent {
+        ingress(
+            ts,
+            SessionIngressKind::RunRequested {
+                input_ref: fake_hash('a'),
                 run_overrides: Some(SessionConfig {
                     provider: "openai".into(),
                     model: "gpt-5.2".into(),
@@ -783,11 +1069,13 @@ mod tests {
                     workspace_binding: None,
                     default_prompt_pack: None,
                     default_prompt_refs: None,
-                    default_tool_catalog: None,
-                    default_tool_refs: None,
+                    default_tool_profile: None,
+                    default_tool_enable: None,
+                    default_tool_disable: None,
+                    default_tool_force: None,
                 }),
             },
-        })
+        )
     }
 
     #[test]
@@ -795,40 +1083,126 @@ mod tests {
         let mut state = SessionState::default();
         state.session_id = SessionId("s-1".into());
 
-        let out = apply_session_workflow_event(&mut state, &run_request_event()).expect("reduce");
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
         assert_eq!(state.lifecycle, SessionLifecycle::Running);
         assert_eq!(out.effects.len(), 1);
         assert_eq!(state.pending_intents.len(), 1);
         assert_eq!(state.in_flight_effects, 1);
+        assert_eq!(state.effective_tools.profile_id, "openai");
+        assert_eq!(
+            state
+                .effective_tools
+                .ordered_tools
+                .iter()
+                .map(|tool| tool.tool_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["host.session.open"]
+        );
     }
 
     #[test]
-    fn receipt_ok_moves_running_to_waiting_input() {
+    fn host_session_ready_enables_host_fs_and_exec_tools() {
         let mut state = SessionState::default();
-        state.session_id = SessionId("s-1".into());
-        let out = apply_session_workflow_event(&mut state, &run_request_event()).expect("reduce");
-        let params_hash = match &out.effects[0] {
-            SessionEffectCommand::LlmGenerate { params_hash, .. } => params_hash.clone(),
-        };
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                1,
+                SessionIngressKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )
+        .expect("host session ready");
 
-        let receipt = aos_wasm_sdk::EffectReceiptEnvelope {
-            origin_module_id: "demo/Session@1".into(),
-            origin_instance_key: None,
-            intent_id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                .into(),
-            effect_kind: "llm.generate".into(),
-            params_hash: Some(params_hash),
-            receipt_payload: vec![],
-            status: "ok".into(),
-            emitted_at_seq: 2,
-            adapter_id: "llm".into(),
-            cost_cents: None,
-            signature: vec![],
-        };
+        apply_session_workflow_event(&mut state, &run_request_event(2)).expect("run");
 
-        let event = SessionWorkflowEvent::Receipt(receipt);
-        apply_session_workflow_event(&mut state, &event).expect("receipt");
-        assert_eq!(state.lifecycle, SessionLifecycle::WaitingInput);
-        assert_eq!(state.pending_intents.len(), 0);
+        let tools: Vec<&str> = state
+            .effective_tools
+            .ordered_tools
+            .iter()
+            .map(|tool| tool.tool_name.as_str())
+            .collect();
+        assert!(tools.contains(&"host.exec"));
+        assert!(tools.contains(&"host.fs.apply_patch"));
+    }
+
+    #[test]
+    fn tool_calls_observed_builds_deterministic_plan_and_ignores_disabled() {
+        let mut state = SessionState::default();
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                1,
+                SessionIngressKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )
+        .expect("host session ready");
+        apply_session_workflow_event(&mut state, &run_request_event(2)).expect("run");
+
+        // Deny exec so it gets ignored even when host session is ready.
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                3,
+                SessionIngressKind::ToolOverridesSet {
+                    scope: ToolOverrideScope::Run,
+                    enable: None,
+                    disable: Some(vec!["host.exec".into()]),
+                    force: None,
+                },
+            ),
+        )
+        .expect("overrides");
+
+        let calls = vec![
+            ToolCallObserved {
+                call_id: "c1".into(),
+                tool_name: "host.fs.write_file".into(),
+                arguments_ref: fake_hash('w'),
+                provider_call_id: None,
+            },
+            ToolCallObserved {
+                call_id: "c2".into(),
+                tool_name: "host.fs.apply_patch".into(),
+                arguments_ref: fake_hash('p'),
+                provider_call_id: None,
+            },
+            ToolCallObserved {
+                call_id: "c3".into(),
+                tool_name: "host.exec".into(),
+                arguments_ref: fake_hash('e'),
+                provider_call_id: None,
+            },
+        ];
+
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                4,
+                SessionIngressKind::ToolCallsObserved {
+                    intent_id: fake_hash('i'),
+                    params_hash: Some(fake_hash('h')),
+                    calls,
+                },
+            ),
+        )
+        .expect("plan");
+
+        let batch = state.active_tool_batch.as_ref().expect("active batch");
+        assert_eq!(
+            batch.plan.execution_plan.groups,
+            vec![
+                vec![String::from("c1")],
+                vec![String::from("c2")]
+            ]
+        );
+        assert!(matches!(
+            batch.call_status.get("c3"),
+            Some(ToolCallStatus::Ignored)
+        ));
     }
 }

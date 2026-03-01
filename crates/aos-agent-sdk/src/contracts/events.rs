@@ -1,7 +1,8 @@
 use super::{
-    ActiveToolBatch, HostCommand, SessionConfig, SessionId, ToolBatchId, ToolCallStatus,
-    WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
+    HostCommand, HostSessionStatus, SessionConfig, SessionId, ToolCallObserved, ToolCallStatus,
+    ToolOverrideScope, ToolSpec, WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
 };
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_wasm_sdk::EffectReceiptEnvelope;
@@ -57,12 +58,6 @@ pub struct WorkspaceSnapshotReady {
         skip_serializing_if = "Option::is_none"
     )]
     pub prompt_pack_bytes: Option<Vec<u8>>,
-    #[serde(
-        default,
-        with = "serde_bytes_opt",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub tool_catalog_bytes: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -120,7 +115,6 @@ pub enum SessionIngressKind {
     WorkspaceSyncRequested {
         workspace_binding: WorkspaceBinding,
         prompt_pack: Option<String>,
-        tool_catalog: Option<String>,
     },
     WorkspaceSyncUnchanged {
         workspace: String,
@@ -135,22 +129,38 @@ pub enum SessionIngressKind {
     WorkspaceApplyRequested {
         mode: WorkspaceApplyMode,
     },
-    ToolBatchStarted {
-        tool_batch_id: ToolBatchId,
+    ToolRegistrySet {
+        registry: BTreeMap<String, ToolSpec>,
+        profiles: Option<BTreeMap<String, Vec<String>>>,
+        default_profile: Option<String>,
+    },
+    ToolProfileSelected {
+        profile_id: String,
+    },
+    ToolOverridesSet {
+        scope: ToolOverrideScope,
+        enable: Option<Vec<String>>,
+        disable: Option<Vec<String>>,
+        force: Option<Vec<String>>,
+    },
+    HostSessionUpdated {
+        host_session_id: Option<String>,
+        host_session_status: Option<HostSessionStatus>,
+    },
+    ToolCallsObserved {
         intent_id: String,
         params_hash: Option<String>,
-        expected_call_ids: Vec<String>,
+        calls: Vec<ToolCallObserved>,
     },
     ToolCallSettled {
-        tool_batch_id: ToolBatchId,
+        tool_batch_id: super::ToolBatchId,
         call_id: String,
         status: ToolCallStatus,
     },
     ToolBatchSettled {
-        tool_batch_id: ToolBatchId,
+        tool_batch_id: super::ToolBatchId,
         results_ref: Option<String>,
     },
-    ActiveToolBatchReplaced(ActiveToolBatch),
     RunCompleted,
     RunFailed {
         code: String,
