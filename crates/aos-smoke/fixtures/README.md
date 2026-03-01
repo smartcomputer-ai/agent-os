@@ -23,6 +23,7 @@ Grouping:
 | 20  | agent-session  | SDK session lifecycle replay |
 | 21  | chat-live (opt-in) | Live provider tool orchestration smoke |
 | 22  | agent-live (opt-in) | SDK-driven live agent with iterative tools + follow-up |
+| 23  | agent-tools  | SDK built-in tool mapping e2e + replay |
 
 Run with:
 - `cargo run -p aos-smoke --`
@@ -34,6 +35,7 @@ Run with:
 - `cargo run -p aos-smoke -- chat-live --provider openai --model gpt-5-mini`
 - `cargo run -p aos-smoke -- agent-live` (opt-in live SDK agent smoke; default `--provider openai`)
 - `cargo run -p aos-smoke -- agent-live --provider anthropic`
+- `cargo run -p aos-smoke -- agent-tools` (scripted built-in host tools e2e smoke)
 
 Live smoke notes:
 - Uses `fixtures/21-chat-live` AIR with secret-injected API keys (`env:OPENAI_API_KEY`, `env:ANTHROPIC_API_KEY`).

@@ -16,6 +16,7 @@ const CLI_SMOKE_TESTS: &[&str] = &[
     "safe-upgrade",
     "llm-summarizer",
     "agent-session",
+    "agent-tools",
     "trace-failure-classification",
     "workflow-runtime-hardening",
     "all-agent",
@@ -73,6 +74,12 @@ fn llm_summarizer_cli_runs() {
 #[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
 fn agent_session_cli_runs() {
     run_cli_smoke("agent-session");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn agent_tools_cli_runs() {
+    run_cli_smoke("agent-tools");
 }
 
 #[test]

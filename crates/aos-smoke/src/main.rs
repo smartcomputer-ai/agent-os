@@ -1,3 +1,4 @@
+mod agent_tools;
 mod agent_live;
 mod agent_session;
 mod aggregator;
@@ -82,6 +83,8 @@ enum Commands {
         #[arg(long, help = "Override provider model for this run")]
         model: Option<String>,
     },
+    /// Run SDK built-in tools e2e smoke (scripted llm + host tool mapping)
+    AgentTools,
     /// Run core fixtures (00-19) sequentially
     All,
     /// Run Agent SDK fixtures (20+) sequentially
@@ -223,6 +226,15 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "crates/aos-smoke/fixtures/20-agent-session",
         runner: agent_session::run,
     },
+    ExampleMeta {
+        number: "23",
+        slug: "agent-tools",
+        title: "Agent Tools",
+        summary: "SDK built-in tool mapping e2e + replay parity",
+        group: ExampleGroup::Agent,
+        dir: "crates/aos-smoke/fixtures/23-agent-tools",
+        runner: agent_tools::run,
+    },
 ];
 
 fn main() {
@@ -264,6 +276,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::WorkflowRuntimeHardening) => run_single("workflow-runtime-hardening"),
         Some(Commands::ChatLive { provider, model }) => chat_live::run(provider, model),
         Some(Commands::AgentLive { provider, model }) => agent_live::run(provider, model),
+        Some(Commands::AgentTools) => run_single("agent-tools"),
         Some(Commands::All) => run_group(ExampleGroup::Core),
         Some(Commands::AllAgent) => run_group(ExampleGroup::Agent),
         None => {
