@@ -50,6 +50,8 @@ This model has two issues:
    workflow the source-of-truth for what is executable.
 5. Provider-aligned: allow provider-specific preferences (OpenAI
    `apply_patch`, Anthropic/Gemini `edit_file`) without duplicating core logic.
+6. Zero-setup startup: default tool registry + profiles must be preloaded at
+   agent install/push time so a new session can run without bootstrap events.
 
 ## High-Level Architecture
 
@@ -67,7 +69,22 @@ Each entry maps:
 5. `parallelism_hint` (`parallel_safe` + optional `resource_key`).
 
 The source of inventory is no longer workspace tool catalog blobs. Inventory is
-provided by agent profile/bootstrap events and can be updated explicitly.
+preloaded from agent package defaults at install/push time, and may be updated
+explicitly via override events.
+
+## 1.1) Install-Time Profile Preload (Required)
+
+Agent installation into a world must materialize default tool registry and
+provider profiles with zero runtime setup choreography.
+
+Requirements:
+
+1. Fresh session state already contains a valid registry and default profiles.
+2. `RunRequested` can emit `llm.generate` immediately without prior
+   `ToolRegistrySet`.
+3. Override events remain optional for customization, not mandatory bootstraps.
+4. World push/install flow carries profile/tool blobs or embedded defaults
+   deterministically with the agent module package.
 
 ## 2) Tool Runtime Layer (dynamic per turn)
 
@@ -161,7 +178,7 @@ Extend `SessionState@1` with workflow-owned tool manager state:
 
 Add/replace `SessionIngressKind@1` variants:
 
-1. `ToolRegistrySet` (bootstrap full registry)
+1. `ToolRegistrySet` (optional full replacement override)
 2. `ToolProfileSelected` (switch profile)
 3. `ToolOverridesSet` (enable/disable lists for run/session scope)
 4. `HostSessionUpdated` (session context updates for gating)
@@ -173,6 +190,7 @@ Keep and evolve:
 2. `ToolBatchSettled`
 
 Deprecate/remove workspace tool catalog sync fields/events.
+`ToolRegistrySet` is not part of required startup flow.
 
 ## Reducer Logic Evolution
 
@@ -244,6 +262,7 @@ allow them.
 1. Replace affected schemas in `crates/aos-agent-sdk/air/schemas.air.json`.
 2. Update `module.air.json` and `manifest.air.json` to new schema shape.
 3. Regenerate/align Rust contracts in `crates/aos-agent-sdk/src/contracts/*`.
+4. Define install-time preload contract for default tool registry + profiles.
 
 ### Phase 7.2: Reducer + Helpers
 
@@ -260,7 +279,7 @@ allow them.
 ### Phase 7.4: Smoke/E2E Adoption
 
 1. Update `aos-smoke` agent live fixture to use workflow-owned tool registry
-   rather than workspace tool catalog.
+   preloaded at install time (no required registry bootstrap ingress).
 2. Add coding-agent oriented smoke scenario with host session gating.
 3. Verify replay identity with planned/settled tool batches.
 
@@ -278,14 +297,16 @@ allow them.
 5. Provider profile switching:
    - OpenAI defaults include `apply_patch` preference.
    - Anthropic defaults include `edit_file` preference.
-6. Replay:
+6. Install-time preload:
+   - first `RunRequested` succeeds without prior tool-registry setup events.
+7. Replay:
    - same ingress stream yields byte-identical `SessionState`.
 
 ## Risks
 
 1. Bridge complexity if host loops execute calls without honoring workflow plan.
 2. Migration churn from replacing `@1` contracts in place.
-3. Tool definition lifecycle drift if registry bootstrap protocol is underspecified.
+3. Drift between packaged defaults and optional override payloads.
 
 ## Non-Goals
 
@@ -297,6 +318,8 @@ allow them.
 
 1. Tool inventory and availability are workflow-owned state.
 2. Workspace no longer acts as tool catalog source.
-3. Dynamic host-session gating works (host tools off until session ready).
-4. Parallel tool-batch execution plans are produced deterministically by reducer.
-5. Host bridge shuttles LLM tool calls/results through explicit SDK events.
+3. New sessions run with preloaded tool registry/profiles without bootstrap
+   setup events.
+4. Dynamic host-session gating works (host tools off until session ready).
+5. Parallel tool-batch execution plans are produced deterministically by reducer.
+6. Host bridge shuttles LLM tool calls/results through explicit SDK events.
