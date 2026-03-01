@@ -156,17 +156,47 @@ Receipt:
 Params:
 
 1. `session_id`
-2. `path`
-3. `old_string`
-4. `new_string`
-5. `replace_all?`
+2. `path` (SDK tool arg `file_path` maps here)
+3. `old_string` (required, must be non-empty)
+4. `new_string` (required)
+5. `replace_all?` (optional, default `false`)
 
 Receipt:
 
 1. `status`: `ok|not_found|ambiguous|forbidden|error`
 2. `replacements?`
 3. `applied?` bool
-4. `error_code?` (for ambiguous/not-found semantics)
+4. `summary_text?` (for tool UX, e.g. `Updated <path> (<N> replacements)`)
+5. `error_code?` (for ambiguous/not-found semantics)
+
+Behavior contract (aligned in spirit with common coding-agent `edit_file` tools):
+
+1. Read full file text, apply edit in-memory, then write full file back on
+   success.
+2. Match strategy is deterministic:
+   - first attempt exact match search,
+   - if no exact match is found, attempt deterministic fuzzy matching.
+3. Fuzzy matching for v0.12 should include:
+   - whitespace-normalized comparison,
+   - quote/dash normalization equivalence.
+4. If multiple candidate matches exist and `replace_all=false`, return
+   `status: ambiguous` with a precise `error_code`.
+5. If `replace_all=true`, replace all exact matches; if exact has zero matches,
+   replace all accepted fuzzy matches.
+6. If no match exists, return `status: not_found`.
+7. If `old_string` is empty, return `status: error` with
+   `error_code: invalid_input_empty_old_string`.
+8. `replacements` is the number of applied replacements and MUST be stable for
+   the same file content + params.
+9. Adapter should use atomic write/rename semantics where possible to avoid
+   partial writes.
+
+Tool-facing adapter mapping guidance:
+
+1. On success, SDK/tool layer may present `summary_text` as a plain success
+   string for provider compatibility.
+2. On failure, surface effect fault/error rather than fabricating a success
+   payload.
 
 ### `host.fs.apply_patch`
 
