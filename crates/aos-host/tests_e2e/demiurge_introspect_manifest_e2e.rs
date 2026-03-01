@@ -218,7 +218,7 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
     let tmp = tempfile::tempdir().context("tempdir")?;
     let store = Arc::new(FsStore::open(tmp.path()).context("open store")?);
 
-    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/demiurge");
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../worlds/demiurge");
     load_world_env(&asset_root).context("load demiurge .env")?;
     let asset_root = asset_root.as_path();
 

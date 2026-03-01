@@ -24,9 +24,9 @@ send -> respond.
 
 ## Decision Summary
 
-1) [x] **Backend lives as a real app** under `apps/demiurge/`:
-   - `apps/demiurge/air/` for schemas, plan, caps, policy, manifest, secrets.
-   - `apps/demiurge/reducer/` for the WASM reducer crate.
+1) [x] **Backend lives as a real app** under `worlds/demiurge/`:
+   - `worlds/demiurge/air/` for schemas, plan, caps, policy, manifest, secrets.
+   - `worlds/demiurge/reducer/` for the WASM reducer crate.
 2) [ ] **Frontend lives in the shell** under `shell/src/features/demiurge/`.
 3) [x] **Reducer is keyed by `chat_id`** to support multiple chats; creation is explicit.
 4) [x] **Reducer owns chat state**; plans only orchestrate `llm.generate`.

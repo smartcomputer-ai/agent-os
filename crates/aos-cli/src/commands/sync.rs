@@ -766,14 +766,14 @@ mod tests {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let world_root = workspace_root.clone();
         let map_root = workspace_root.clone();
-        let workflow_dir = workspace_root.join("apps/demiurge/workflow");
+        let workflow_dir = workspace_root.join("worlds/demiurge/workflow");
         let default_air = workspace_root.join("air");
 
         let mut config = empty_config();
         let import_root = workspace_root.join("crates/aos-agent/air");
         let lock_hash = import_defs_hash(&import_root).expect("import hash");
         config.air = Some(AirSync {
-            dir: Some(PathBuf::from("apps/demiurge/air")),
+            dir: Some(PathBuf::from("worlds/demiurge/air")),
             imports: vec![AirImport {
                 path: None,
                 cargo: Some(CargoAirImport {

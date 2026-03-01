@@ -1150,7 +1150,7 @@ mod tests {
         fs::create_dir_all(root.join(".git")).expect("git dir");
         fs::create_dir_all(root.join(".venv-cbor")).expect("venv dir");
         fs::write(root.join(".venv-cbor/.gitignore"), "*\n").expect("venv ignore");
-        let scope = root.join("apps/demiurge/tools");
+        let scope = root.join("worlds/demiurge/tools");
         fs::create_dir_all(&scope).expect("scope dir");
         fs::write(scope.join("tool.json"), "{}").expect("tool file");
 

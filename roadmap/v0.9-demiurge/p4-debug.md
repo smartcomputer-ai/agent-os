@@ -123,7 +123,7 @@ Add deterministic test coverage for the new debug surfaces:
 - Host/control integration tests for full journal tail and trace query.
 - Replay parity test: trace derived from replayed world matches original terminal classification.
 - Demiurge e2e test assertions based on trace status (not only final state shape).
-- Update `apps/demiurge/scripts/smoke_introspect_manifest.sh` to optionally fail with emitted trace artifact on timeout.
+- Update `worlds/demiurge/scripts/smoke_introspect_manifest.sh` to optionally fail with emitted trace artifact on timeout.
 
 ## What We Should Not Do Yet
 
@@ -168,7 +168,7 @@ Completed:
   - Drawer fetches `/api/debug/trace` using generic correlation fields.
   - Shows timeline, wait state, copyable hashes, and basic failure hints.
 - Phase 4 initial smoke artifact support:
-  - `apps/demiurge/scripts/smoke_introspect_manifest.sh` now emits debug artifacts on failure:
+  - `worlds/demiurge/scripts/smoke_introspect_manifest.sh` now emits debug artifacts on failure:
     - `journal-tail.json`
     - best-effort `trace.json` for latest Demiurge domain event
 - Phase 4 replay parity guardrail:
