@@ -529,6 +529,77 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/PendingBlobGetKind@1",
+    "type": {
+      "variant": {
+        "LlmOutputEnvelope": { "unit": {} },
+        "LlmToolCalls": { "unit": {} },
+        "ToolCallArguments": {
+          "record": {
+            "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+            "call_id": { "text": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobGet@1",
+    "type": {
+      "record": {
+        "kind": { "ref": "aos.agent/PendingBlobGetKind@1" },
+        "emitted_at_ns": { "time": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobPutKind@1",
+    "type": {
+      "variant": {
+        "ToolDefinition": {
+          "record": {
+            "tool_name": { "text": {} }
+          }
+        },
+        "FollowUpMessage": {
+          "record": {
+            "index": { "nat": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobPut@1",
+    "type": {
+      "record": {
+        "kind": { "ref": "aos.agent/PendingBlobPutKind@1" },
+        "emitted_at_ns": { "time": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingFollowUpTurn@1",
+    "type": {
+      "record": {
+        "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+        "base_message_refs": { "list": { "hash": {} } },
+        "expected_messages": { "nat": {} },
+        "blob_refs_by_index": {
+          "map": {
+            "key": { "nat": {} },
+            "value": { "hash": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/SessionState@1",
     "type": {
       "record": {
@@ -546,6 +617,24 @@
             "value": { "ref": "aos.agent/PendingIntent@1" }
           }
         },
+        "pending_blob_gets": {
+          "map": {
+            "key": { "hash": {} },
+            "value": { "list": { "ref": "aos.agent/PendingBlobGet@1" } }
+          }
+        },
+        "pending_blob_puts": {
+          "map": {
+            "key": { "hash": {} },
+            "value": { "list": { "ref": "aos.agent/PendingBlobPut@1" } }
+          }
+        },
+        "pending_follow_up_turn": {
+          "option": { "ref": "aos.agent/PendingFollowUpTurn@1" }
+        },
+        "queued_llm_message_refs": { "option": { "list": { "hash": {} } } },
+        "conversation_message_refs": { "list": { "hash": {} } },
+        "tool_refs_materialized": { "bool": {} },
         "in_flight_effects": { "nat": {} },
         "active_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },
         "pending_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },

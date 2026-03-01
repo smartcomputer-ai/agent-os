@@ -3,20 +3,26 @@ use super::{
     pop_follow_up_if_ready, transition_lifecycle,
 };
 use crate::contracts::{
-    ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommandKind, PendingIntent,
+    ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommandKind, PendingBlobGet,
+    PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, PendingFollowUpTurn, PendingIntent,
     PlannedToolCall, RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle, SessionState,
     SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallObserved, ToolCallStatus,
-    ToolExecutionPlan, ToolOverrideScope, ToolSpec, WorkspaceApplyMode, WorkspaceBinding,
-    WorkspaceSnapshot, default_tool_profile_for_provider,
+    ToolExecutionPlan, ToolExecutor, ToolOverrideScope, ToolSpec, WorkspaceApplyMode,
+    WorkspaceBinding, WorkspaceSnapshot, default_tool_profile_for_provider,
 };
 use crate::tools::{
     ToolEffectKind, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
 };
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use aos_air_types::HashRef;
+use aos_effects::builtins::{
+    BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, LlmGenerateReceipt,
+    LlmOutputEnvelope, LlmToolCallList,
+};
 use sha2::{Digest, Sha256};
 
 use super::llm::{
@@ -34,6 +40,16 @@ pub enum SessionEffectCommand {
     ToolEffect {
         kind: ToolEffectKind,
         params_json: String,
+        cap_slot: Option<String>,
+        params_hash: String,
+    },
+    BlobPut {
+        params: BlobPutParams,
+        cap_slot: Option<String>,
+        params_hash: String,
+    },
+    BlobGet {
+        params: BlobGetParams,
         cap_slot: Option<String>,
         params_hash: String,
     },
@@ -254,6 +270,7 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
         SessionWorkflowEvent::Noop => {}
     }
 
+    recompute_in_flight_effects(state);
     enforce_runtime_limits(state, limits)?;
     Ok(out)
 }
@@ -349,50 +366,15 @@ fn on_run_requested(
     state.active_run_id = Some(run_id.clone());
     state.active_run_config = Some(requested.clone());
     state.active_tool_batch = None;
+    state.pending_blob_gets.clear();
+    state.pending_blob_puts.clear();
+    state.pending_follow_up_turn = None;
+    state.queued_llm_message_refs = None;
+    state.conversation_message_refs.clear();
 
     refresh_effective_tools(state, Some(&requested))?;
-
-    let step_ctx = LlmStepContext {
-        correlation_id: Some(alloc::format!("run-{}-initial", run_id.run_seq)),
-        message_refs: vec![input_ref.into()],
-        temperature: None,
-        top_p: None,
-        tool_refs: state.effective_tools.tool_refs(),
-        tool_choice: Some(LlmToolChoice::Auto),
-        stop_sequences: None,
-        metadata: None,
-        provider_options_ref: None,
-        response_format_ref: None,
-        api_key: None,
-    };
-
-    let params = materialize_llm_generate_params_with_workspace(
-        &requested,
-        state.active_workspace_snapshot.as_ref(),
-        step_ctx,
-    )
-    .map_err(map_llm_mapping_error)?;
-
-    let params_hash = hash_llm_params(&params);
-    state.pending_intents.insert(
-        params_hash.clone(),
-        PendingIntent {
-            effect_kind: "llm.generate".into(),
-            params_hash: params_hash.clone(),
-            intent_id: None,
-            cap_slot: Some("llm".into()),
-            emitted_at_ns: state.updated_at,
-        },
-    );
-    state.in_flight_effects = state.pending_intents.len() as u64;
-
-    out.effects.push(SessionEffectCommand::LlmGenerate {
-        params,
-        cap_slot: Some("llm".into()),
-        params_hash,
-    });
-
-    Ok(())
+    state.conversation_message_refs.push(input_ref.into());
+    queue_llm_turn(state, state.conversation_message_refs.clone(), out)
 }
 
 fn map_llm_mapping_error(err: LlmMappingError) -> SessionReduceError {
@@ -742,19 +724,16 @@ fn dispatch_next_ready_tool_group(
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
     loop {
-        let Some(batch) = state.active_tool_batch.as_mut() else {
+        let Some(mut batch) = state.active_tool_batch.take() else {
             return Ok(());
         };
         let idx = batch.next_group_index as usize;
         if idx >= batch.plan.execution_plan.groups.len() {
             if batch.is_settled() && batch.results_ref.is_none() {
-                let results = batch
-                    .llm_results
-                    .values()
-                    .cloned()
-                    .collect::<Vec<crate::contracts::ToolCallLlmResult>>();
-                batch.results_ref = Some(hash_cbor(&results));
+                start_follow_up_for_settled_batch(state, &mut batch, out)?;
             }
+            state.active_tool_batch = Some(batch);
+            recompute_in_flight_effects(state);
             return Ok(());
         }
 
@@ -774,6 +753,8 @@ fn dispatch_next_ready_tool_group(
                     })
                 });
         if !previous_groups_settled {
+            state.active_tool_batch = Some(batch);
+            recompute_in_flight_effects(state);
             return Ok(());
         }
 
@@ -800,14 +781,108 @@ fn dispatch_next_ready_tool_group(
                 continue;
             };
 
-            let cap_slot = match &planned.executor {
-                crate::contracts::ToolExecutor::Effect { cap_slot, .. } => cap_slot.clone(),
-                _ => None,
+            match &planned.executor {
+                ToolExecutor::HostLoop { .. } => {
+                    batch
+                        .call_status
+                        .insert(call_id.clone(), ToolCallStatus::Pending);
+                    continue;
+                }
+                ToolExecutor::Effect { .. } => {}
+            }
+
+            let (effect_kind, cap_slot) = match &planned.executor {
+                ToolExecutor::Effect {
+                    effect_kind,
+                    cap_slot,
+                } => (effect_kind.clone(), cap_slot.clone()),
+                ToolExecutor::HostLoop { .. } => unreachable!(),
+            };
+            let kind = if let Some(mapper) =
+                crate::tools::mapper_for_effect_kind(effect_kind.as_str())
+            {
+                crate::tools::effect_kind_for_mapper(mapper)
+            } else {
+                batch.call_status.insert(
+                    call_id.clone(),
+                    ToolCallStatus::Failed {
+                        code: "executor_unsupported".into(),
+                        detail: format!("unsupported effect kind for wasm emit_raw: {effect_kind}"),
+                    },
+                );
+                continue;
+            };
+
+            let arguments_json = if !planned.arguments_json.trim().is_empty() {
+                planned.arguments_json.clone()
+            } else if let Some(arguments_ref) = planned.arguments_ref.clone() {
+                let blob_ref = match HashRef::new(arguments_ref) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        batch.call_status.insert(
+                            call_id.clone(),
+                            ToolCallStatus::Failed {
+                                code: "tool_invalid_args_ref".into(),
+                                detail: format!(
+                                    "invalid arguments_ref for {}: {err}",
+                                    planned.tool_name
+                                ),
+                            },
+                        );
+                        continue;
+                    }
+                };
+                let blob_get = BlobGetParams { blob_ref };
+                let blob_get_hash = hash_cbor(&blob_get);
+                let already_pending = state.pending_blob_gets.contains_key(&blob_get_hash);
+                state
+                    .pending_blob_gets
+                    .entry(blob_get_hash.clone())
+                    .or_default()
+                    .push(PendingBlobGet {
+                        kind: PendingBlobGetKind::ToolCallArguments {
+                            tool_batch_id: batch.tool_batch_id.clone(),
+                            call_id: call_id.clone(),
+                        },
+                        emitted_at_ns: state.updated_at,
+                    });
+                if !already_pending
+                    && !out.effects.iter().any(|effect| {
+                        matches!(
+                            effect,
+                            SessionEffectCommand::BlobGet { params_hash, .. }
+                                if params_hash == &blob_get_hash
+                        )
+                    })
+                {
+                    out.effects.push(SessionEffectCommand::BlobGet {
+                        params: blob_get,
+                        cap_slot: Some("blob".into()),
+                        params_hash: blob_get_hash,
+                    });
+                    emitted_for_group = emitted_for_group.saturating_add(1);
+                }
+                batch
+                    .call_status
+                    .insert(call_id.clone(), ToolCallStatus::Pending);
+                continue;
+            } else {
+                batch.call_status.insert(
+                    call_id.clone(),
+                    ToolCallStatus::Failed {
+                        code: "tool_invalid_args".into(),
+                        detail: format!(
+                            "tool {} missing arguments_json and arguments_ref",
+                            planned.tool_name
+                        ),
+                    },
+                );
+                continue;
             };
 
             let params_json = match map_tool_arguments_to_effect_params(
                 planned.mapper,
-                planned.arguments_json.as_str(),
+                arguments_json.as_str(),
                 &runtime_ctx,
             ) {
                 Ok(params) => params,
@@ -845,13 +920,15 @@ fn dispatch_next_ready_tool_group(
             emitted_for_group = emitted_for_group.saturating_add(1);
 
             out.effects.push(SessionEffectCommand::ToolEffect {
-                kind: crate::tools::effect_kind_for_mapper(planned.mapper),
+                kind,
                 params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
                 cap_slot,
                 params_hash,
             });
         }
 
+        state.active_tool_batch = Some(batch);
+        recompute_in_flight_effects(state);
         if emitted_for_group > 0 {
             return Ok(());
         }
@@ -967,37 +1044,57 @@ fn on_receipt_envelope(
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
+    if handle_pending_blob_get_receipt(state, envelope, out)? {
+        recompute_in_flight_effects(state);
+        return Ok(());
+    }
+    if handle_pending_blob_put_receipt(state, envelope, out)? {
+        recompute_in_flight_effects(state);
+        return Ok(());
+    }
     if settle_tool_call_from_receipt(state, envelope, out)? {
-        state.in_flight_effects = state.pending_intents.len() as u64;
+        recompute_in_flight_effects(state);
         return Ok(());
     }
 
-    if let Some(params_hash) = &envelope.params_hash {
-        if let Some(mut intent) = state.pending_intents.remove(params_hash) {
-            intent.intent_id = Some(envelope.intent_id.clone());
-        }
-    } else if let Some((key, _intent)) = state
-        .pending_intents
-        .iter()
-        .find(|(_, pending)| pending.intent_id.as_deref() == Some(envelope.intent_id.as_str()))
-        .map(|(k, v)| (k.clone(), v.clone()))
-    {
-        state.pending_intents.remove(&key);
-    }
+    remove_pending_intent_for_receipt(
+        state,
+        envelope.params_hash.as_ref(),
+        envelope.intent_id.as_str(),
+    );
 
-    state.in_flight_effects = state.pending_intents.len() as u64;
-
-    if envelope.effect_kind == "llm.generate" && envelope.status == "ok" {
-        if matches!(state.lifecycle, SessionLifecycle::Running) {
-            transition_lifecycle(state, SessionLifecycle::WaitingInput)
+    if envelope.effect_kind == "llm.generate" {
+        if envelope.status != "ok" {
+            transition_lifecycle(state, SessionLifecycle::Failed)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+            clear_active_run(state);
+            recompute_in_flight_effects(state);
+            return Ok(());
         }
-    } else if envelope.effect_kind == "llm.generate" {
-        transition_lifecycle(state, SessionLifecycle::Failed)
-            .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
-        clear_active_run(state);
+
+        let parsed = serde_cbor::from_slice::<LlmGenerateReceipt>(&envelope.receipt_payload);
+        let Ok(receipt) = parsed else {
+            transition_lifecycle(state, SessionLifecycle::Failed)
+                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+            clear_active_run(state);
+            recompute_in_flight_effects(state);
+            return Ok(());
+        };
+        if let Err(_err) = enqueue_blob_get(
+            state,
+            receipt.output_ref,
+            PendingBlobGetKind::LlmOutputEnvelope,
+            out,
+        ) {
+            transition_lifecycle(state, SessionLifecycle::Failed)
+                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+            clear_active_run(state);
+            recompute_in_flight_effects(state);
+            return Ok(());
+        }
     }
 
+    recompute_in_flight_effects(state);
     Ok(())
 }
 
@@ -1006,52 +1103,622 @@ fn on_receipt_rejected(
     rejected: &crate::contracts::EffectReceiptRejected,
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
-    if let Some(params_hash) = rejected.params_hash.as_ref() {
-        let should_handle_as_tool = state
-            .active_tool_batch
-            .as_ref()
-            .is_some_and(|batch| batch.pending_by_params_hash.contains_key(params_hash));
-        if should_handle_as_tool {
-            let payload = serde_json::json!({
-                "status": "error",
-                "error_code": rejected.error_code,
-                "error_message": rejected.error_message,
-            });
-            let envelope = aos_wasm_sdk::EffectReceiptEnvelope {
-                origin_module_id: rejected.origin_module_id.clone(),
-                origin_instance_key: rejected.origin_instance_key.clone(),
-                intent_id: rejected.intent_id.clone(),
-                effect_kind: rejected.effect_kind.clone(),
-                params_hash: rejected.params_hash.clone(),
-                receipt_payload: serde_cbor::to_vec(&payload).unwrap_or_default(),
-                status: rejected.status.clone(),
-                emitted_at_seq: rejected.emitted_at_seq,
-                adapter_id: rejected.adapter_id.clone(),
-                cost_cents: None,
-                signature: Vec::new(),
-            };
-            let _ = settle_tool_call_from_receipt(state, &envelope, out)?;
-            state.in_flight_effects = state.pending_intents.len() as u64;
-            return Ok(());
-        }
-    }
-
-    if let Some(params_hash) = &rejected.params_hash {
-        state.pending_intents.remove(params_hash);
-    } else if let Some((key, _intent)) = state
-        .pending_intents
-        .iter()
-        .find(|(_, pending)| pending.intent_id.as_deref() == Some(rejected.intent_id.as_str()))
-        .map(|(k, v)| (k.clone(), v.clone()))
+    let payload = serde_json::json!({
+        "status": "error",
+        "error_code": rejected.error_code,
+        "error_message": rejected.error_message,
+    });
+    let envelope = aos_wasm_sdk::EffectReceiptEnvelope {
+        origin_module_id: rejected.origin_module_id.clone(),
+        origin_instance_key: rejected.origin_instance_key.clone(),
+        intent_id: rejected.intent_id.clone(),
+        effect_kind: rejected.effect_kind.clone(),
+        params_hash: rejected.params_hash.clone(),
+        receipt_payload: serde_cbor::to_vec(&payload).unwrap_or_default(),
+        status: rejected.status.clone(),
+        emitted_at_seq: rejected.emitted_at_seq,
+        adapter_id: rejected.adapter_id.clone(),
+        cost_cents: None,
+        signature: Vec::new(),
+    };
+    if handle_pending_blob_get_receipt(state, &envelope, out)?
+        || handle_pending_blob_put_receipt(state, &envelope, out)?
+        || settle_tool_call_from_receipt(state, &envelope, out)?
     {
-        state.pending_intents.remove(&key);
+        remove_pending_intent_for_receipt(
+            state,
+            rejected.params_hash.as_ref(),
+            rejected.intent_id.as_str(),
+        );
+        recompute_in_flight_effects(state);
+        return Ok(());
     }
 
-    state.in_flight_effects = state.pending_intents.len() as u64;
+    remove_pending_intent_for_receipt(
+        state,
+        rejected.params_hash.as_ref(),
+        rejected.intent_id.as_str(),
+    );
 
     transition_lifecycle(state, SessionLifecycle::Failed)
         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
     clear_active_run(state);
+    recompute_in_flight_effects(state);
+    Ok(())
+}
+
+fn pop_pending_blob_get(state: &mut SessionState, params_hash: &str) -> Option<PendingBlobGet> {
+    let mut should_remove = false;
+    let next = if let Some(items) = state.pending_blob_gets.get_mut(params_hash) {
+        let value = if items.is_empty() {
+            None
+        } else {
+            Some(items.remove(0))
+        };
+        should_remove = items.is_empty();
+        value
+    } else {
+        None
+    };
+    if should_remove {
+        state.pending_blob_gets.remove(params_hash);
+    }
+    next
+}
+
+fn pop_pending_blob_put(state: &mut SessionState, params_hash: &str) -> Option<PendingBlobPut> {
+    let mut should_remove = false;
+    let next = if let Some(items) = state.pending_blob_puts.get_mut(params_hash) {
+        let value = if items.is_empty() {
+            None
+        } else {
+            Some(items.remove(0))
+        };
+        should_remove = items.is_empty();
+        value
+    } else {
+        None
+    };
+    if should_remove {
+        state.pending_blob_puts.remove(params_hash);
+    }
+    next
+}
+
+fn remove_pending_intent_for_receipt(
+    state: &mut SessionState,
+    params_hash: Option<&String>,
+    intent_id: &str,
+) {
+    if let Some(params_hash) = params_hash {
+        state.pending_intents.remove(params_hash);
+        return;
+    }
+
+    if let Some((key, _intent)) = state
+        .pending_intents
+        .iter()
+        .find(|(_, pending)| pending.intent_id.as_deref() == Some(intent_id))
+        .map(|(k, v)| (k.clone(), v.clone()))
+    {
+        state.pending_intents.remove(&key);
+    }
+}
+
+fn recompute_in_flight_effects(state: &mut SessionState) {
+    let pending_blob_gets = state
+        .pending_blob_gets
+        .values()
+        .map(|items| items.len())
+        .sum::<usize>();
+    let pending_blob_puts = state
+        .pending_blob_puts
+        .values()
+        .map(|items| items.len())
+        .sum::<usize>();
+    let pending_tool_effect_receipts = state
+        .active_tool_batch
+        .as_ref()
+        .map(|batch| {
+            batch
+                .pending_by_params_hash
+                .values()
+                .map(|items| items.len())
+                .sum::<usize>()
+        })
+        .unwrap_or(0);
+    let pending_host_loop_calls = state
+        .active_tool_batch
+        .as_ref()
+        .map(|batch| {
+            batch
+                .call_status
+                .values()
+                .filter(|status| matches!(status, ToolCallStatus::Pending))
+                .count()
+        })
+        .unwrap_or(0);
+
+    let total = state.pending_intents.len()
+        + pending_blob_gets
+        + pending_blob_puts
+        + pending_tool_effect_receipts
+        + pending_host_loop_calls;
+    state.in_flight_effects = total as u64;
+}
+
+fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
+    state.pending_blob_puts.values().any(|items| {
+        items
+            .iter()
+            .any(|pending| matches!(pending.kind, PendingBlobPutKind::ToolDefinition { .. }))
+    })
+}
+
+fn enqueue_blob_get(
+    state: &mut SessionState,
+    blob_ref: HashRef,
+    kind: PendingBlobGetKind,
+    out: &mut SessionReduceOutput,
+) -> Result<String, SessionReduceError> {
+    let params = BlobGetParams { blob_ref };
+    let params_hash = hash_cbor(&params);
+    let already_pending = state.pending_blob_gets.contains_key(&params_hash);
+    state
+        .pending_blob_gets
+        .entry(params_hash.clone())
+        .or_default()
+        .push(PendingBlobGet {
+            kind,
+            emitted_at_ns: state.updated_at,
+        });
+    if !already_pending {
+        out.effects.push(SessionEffectCommand::BlobGet {
+            params,
+            cap_slot: Some("blob".into()),
+            params_hash: params_hash.clone(),
+        });
+    }
+    Ok(params_hash)
+}
+
+fn enqueue_blob_put(
+    state: &mut SessionState,
+    bytes: Vec<u8>,
+    kind: PendingBlobPutKind,
+    out: &mut SessionReduceOutput,
+) -> String {
+    let params = BlobPutParams {
+        bytes,
+        blob_ref: None,
+        refs: None,
+    };
+    let params_hash = hash_cbor(&params);
+    let already_pending = state.pending_blob_puts.contains_key(&params_hash);
+    state
+        .pending_blob_puts
+        .entry(params_hash.clone())
+        .or_default()
+        .push(PendingBlobPut {
+            kind,
+            emitted_at_ns: state.updated_at,
+        });
+    if !already_pending {
+        out.effects.push(SessionEffectCommand::BlobPut {
+            params,
+            cap_slot: Some("blob".into()),
+            params_hash: params_hash.clone(),
+        });
+    }
+    params_hash
+}
+
+fn fail_run(state: &mut SessionState) -> Result<(), SessionReduceError> {
+    transition_lifecycle(state, SessionLifecycle::Failed)
+        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+    clear_active_run(state);
+    Ok(())
+}
+
+fn handle_pending_blob_get_receipt(
+    state: &mut SessionState,
+    envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
+    out: &mut SessionReduceOutput,
+) -> Result<bool, SessionReduceError> {
+    let Some(params_hash) = envelope.params_hash.as_ref() else {
+        return Ok(false);
+    };
+    let Some(pending) = pop_pending_blob_get(state, params_hash.as_str()) else {
+        return Ok(false);
+    };
+
+    let failed = envelope.status != "ok";
+    let receipt = if failed {
+        None
+    } else {
+        serde_cbor::from_slice::<BlobGetReceipt>(&envelope.receipt_payload).ok()
+    };
+
+    match pending.kind {
+        PendingBlobGetKind::LlmOutputEnvelope => {
+            let Some(receipt) = receipt else {
+                fail_run(state)?;
+                return Ok(true);
+            };
+            let output: LlmOutputEnvelope = match serde_json::from_slice(&receipt.bytes) {
+                Ok(value) => value,
+                Err(_) => {
+                    fail_run(state)?;
+                    return Ok(true);
+                }
+            };
+            if let Some(tool_calls_ref) = output.tool_calls_ref {
+                enqueue_blob_get(state, tool_calls_ref, PendingBlobGetKind::LlmToolCalls, out)?;
+            } else if matches!(state.lifecycle, SessionLifecycle::Running) {
+                transition_lifecycle(state, SessionLifecycle::WaitingInput)
+                    .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+            }
+            Ok(true)
+        }
+        PendingBlobGetKind::LlmToolCalls => {
+            let Some(receipt) = receipt else {
+                fail_run(state)?;
+                return Ok(true);
+            };
+            let calls: LlmToolCallList = match serde_json::from_slice(&receipt.bytes) {
+                Ok(value) => value,
+                Err(_) => {
+                    fail_run(state)?;
+                    return Ok(true);
+                }
+            };
+            if calls.is_empty() {
+                if matches!(state.lifecycle, SessionLifecycle::Running) {
+                    transition_lifecycle(state, SessionLifecycle::WaitingInput)
+                        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                }
+                return Ok(true);
+            }
+            let observed = calls
+                .into_iter()
+                .map(|call| ToolCallObserved {
+                    call_id: call.call_id,
+                    tool_name: call.tool_name,
+                    arguments_json: String::new(),
+                    arguments_ref: Some(call.arguments_ref.as_str().to_string()),
+                    provider_call_id: call.provider_call_id,
+                })
+                .collect::<Vec<_>>();
+            on_tool_calls_observed(state, envelope.intent_id.as_str(), None, &observed, out)?;
+            Ok(true)
+        }
+        PendingBlobGetKind::ToolCallArguments {
+            tool_batch_id,
+            call_id,
+        } => {
+            if failed {
+                if let Some(batch) = state.active_tool_batch.as_mut()
+                    && batch.tool_batch_id == tool_batch_id
+                {
+                    batch.call_status.insert(
+                        call_id.clone(),
+                        ToolCallStatus::Failed {
+                            code: "tool_arguments_ref_failed".into(),
+                            detail: "blob.get for tool arguments failed".into(),
+                        },
+                    );
+                }
+                dispatch_next_ready_tool_group(state, out)?;
+                return Ok(true);
+            }
+
+            let Some(receipt) = receipt else {
+                if let Some(batch) = state.active_tool_batch.as_mut()
+                    && batch.tool_batch_id == tool_batch_id
+                {
+                    batch.call_status.insert(
+                        call_id.clone(),
+                        ToolCallStatus::Failed {
+                            code: "tool_arguments_ref_decode_failed".into(),
+                            detail: "failed to decode blob.get receipt payload".into(),
+                        },
+                    );
+                }
+                dispatch_next_ready_tool_group(state, out)?;
+                return Ok(true);
+            };
+
+            let args_json = match serde_json::from_slice::<serde_json::Value>(&receipt.bytes)
+                .and_then(|value| serde_json::to_string(&value))
+            {
+                Ok(value) => value,
+                Err(_) => {
+                    if let Some(batch) = state.active_tool_batch.as_mut()
+                        && batch.tool_batch_id == tool_batch_id
+                    {
+                        batch.call_status.insert(
+                            call_id.clone(),
+                            ToolCallStatus::Failed {
+                                code: "tool_arguments_not_json".into(),
+                                detail: "tool arguments blob must contain JSON".into(),
+                            },
+                        );
+                    }
+                    dispatch_next_ready_tool_group(state, out)?;
+                    return Ok(true);
+                }
+            };
+
+            if let Some(batch) = state.active_tool_batch.as_mut()
+                && batch.tool_batch_id == tool_batch_id
+            {
+                if let Some(planned) = batch
+                    .plan
+                    .planned_calls
+                    .iter_mut()
+                    .find(|planned| planned.call_id == call_id)
+                {
+                    planned.arguments_json = args_json;
+                }
+                batch
+                    .call_status
+                    .insert(call_id.clone(), ToolCallStatus::Queued);
+                if let Some(group_idx) = batch
+                    .plan
+                    .execution_plan
+                    .groups
+                    .iter()
+                    .position(|group| group.iter().any(|id| id == &call_id))
+                {
+                    batch.next_group_index = group_idx as u64;
+                }
+            }
+            dispatch_next_ready_tool_group(state, out)?;
+            Ok(true)
+        }
+    }
+}
+
+fn handle_pending_blob_put_receipt(
+    state: &mut SessionState,
+    envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
+    out: &mut SessionReduceOutput,
+) -> Result<bool, SessionReduceError> {
+    let Some(params_hash) = envelope.params_hash.as_ref() else {
+        return Ok(false);
+    };
+    let Some(pending) = pop_pending_blob_put(state, params_hash.as_str()) else {
+        return Ok(false);
+    };
+
+    let failed = envelope.status != "ok";
+    let receipt = if failed {
+        None
+    } else {
+        serde_cbor::from_slice::<BlobPutReceipt>(&envelope.receipt_payload).ok()
+    };
+
+    match pending.kind {
+        PendingBlobPutKind::ToolDefinition { tool_name } => {
+            let Some(receipt) = receipt else {
+                fail_run(state)?;
+                return Ok(true);
+            };
+            let blob_ref = receipt.blob_ref.as_str().to_string();
+            if let Some(spec) = state.tool_registry.get_mut(&tool_name) {
+                spec.tool_ref = blob_ref.clone();
+            }
+            for tool in &mut state.effective_tools.ordered_tools {
+                if tool.tool_name == tool_name {
+                    tool.tool_ref = blob_ref.clone();
+                }
+            }
+            if !has_pending_tool_definition_puts(state) {
+                state.tool_refs_materialized = true;
+                dispatch_queued_llm_turn(state, out)?;
+            }
+            Ok(true)
+        }
+        PendingBlobPutKind::FollowUpMessage { index } => {
+            let Some(receipt) = receipt else {
+                fail_run(state)?;
+                return Ok(true);
+            };
+            if let Some(turn) = state.pending_follow_up_turn.as_mut() {
+                turn.blob_refs_by_index
+                    .insert(index, receipt.blob_ref.as_str().to_string());
+                if turn.blob_refs_by_index.len() as u64 >= turn.expected_messages {
+                    let mut refs = Vec::new();
+                    for idx in 0..turn.expected_messages {
+                        if let Some(value) = turn.blob_refs_by_index.get(&idx) {
+                            refs.push(value.clone());
+                        }
+                    }
+                    let mut next_refs = turn.base_message_refs.clone();
+                    next_refs.extend(refs);
+                    state.conversation_message_refs = next_refs.clone();
+                    state.pending_follow_up_turn = None;
+                    queue_llm_turn(state, next_refs, out)?;
+                }
+            }
+            Ok(true)
+        }
+    }
+}
+
+fn queue_llm_turn(
+    state: &mut SessionState,
+    message_refs: Vec<String>,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    state.queued_llm_message_refs = Some(message_refs);
+    dispatch_queued_llm_turn(state, out)
+}
+
+fn dispatch_queued_llm_turn(
+    state: &mut SessionState,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    if state.queued_llm_message_refs.is_none() {
+        return Ok(());
+    }
+    if !state.pending_intents.is_empty() || state.pending_follow_up_turn.is_some() {
+        return Ok(());
+    }
+
+    if !state.tool_refs_materialized {
+        for tool in state.effective_tools.ordered_tools.clone() {
+            let bytes = crate::tools::registry::tool_definition_bytes(
+                tool.tool_name.as_str(),
+                tool.description.as_str(),
+                tool.args_schema_json.as_str(),
+            );
+            enqueue_blob_put(
+                state,
+                bytes,
+                PendingBlobPutKind::ToolDefinition {
+                    tool_name: tool.tool_name,
+                },
+                out,
+            );
+        }
+        if has_pending_tool_definition_puts(state) {
+            return Ok(());
+        }
+        state.tool_refs_materialized = true;
+    }
+
+    let Some(message_refs) = state.queued_llm_message_refs.take() else {
+        return Ok(());
+    };
+    let Some(run_config) = state.active_run_config.clone() else {
+        return Ok(());
+    };
+    let run_seq = state
+        .active_run_id
+        .as_ref()
+        .map(|id| id.run_seq)
+        .unwrap_or(0);
+
+    let step_ctx = LlmStepContext {
+        correlation_id: Some(alloc::format!(
+            "run-{run_seq}-turn-{}",
+            state.next_tool_batch_seq + 1
+        )),
+        message_refs,
+        temperature: None,
+        top_p: None,
+        tool_refs: state.effective_tools.tool_refs(),
+        tool_choice: Some(LlmToolChoice::Auto),
+        stop_sequences: None,
+        metadata: None,
+        provider_options_ref: None,
+        response_format_ref: None,
+        api_key: None,
+    };
+
+    let params = materialize_llm_generate_params_with_workspace(
+        &run_config,
+        state.active_workspace_snapshot.as_ref(),
+        step_ctx,
+    )
+    .map_err(map_llm_mapping_error)?;
+    let params_hash = hash_llm_params(&params);
+    state.pending_intents.insert(
+        params_hash.clone(),
+        PendingIntent {
+            effect_kind: "llm.generate".into(),
+            params_hash: params_hash.clone(),
+            intent_id: None,
+            cap_slot: Some("llm".into()),
+            emitted_at_ns: state.updated_at,
+        },
+    );
+    out.effects.push(SessionEffectCommand::LlmGenerate {
+        params,
+        cap_slot: Some("llm".into()),
+        params_hash,
+    });
+    Ok(())
+}
+
+fn start_follow_up_for_settled_batch(
+    state: &mut SessionState,
+    batch: &mut ActiveToolBatch,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    let mut ordered_results = Vec::new();
+    for observed in &batch.plan.observed_calls {
+        if let Some(result) = batch.llm_results.get(&observed.call_id) {
+            ordered_results.push(result.clone());
+        }
+    }
+    batch.results_ref = Some(hash_cbor(&ordered_results));
+
+    let accepted_calls = batch
+        .plan
+        .planned_calls
+        .iter()
+        .filter(|planned| planned.accepted)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut messages = Vec::new();
+    if !accepted_calls.is_empty() {
+        let tool_calls = accepted_calls
+            .iter()
+            .map(|call| {
+                let parsed_args = serde_json::from_str::<serde_json::Value>(&call.arguments_json)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                serde_json::json!({
+                    "id": call.call_id,
+                    "name": call.tool_name,
+                    "arguments": parsed_args,
+                })
+            })
+            .collect::<Vec<_>>();
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "tool_calls": tool_calls,
+        }));
+    }
+
+    for result in ordered_results {
+        let output = serde_json::from_str::<serde_json::Value>(&result.output_json)
+            .unwrap_or_else(|_| serde_json::Value::String(result.output_json.clone()));
+        messages.push(serde_json::json!({
+            "type": "function_call_output",
+            "call_id": result.call_id,
+            "output": output,
+            "is_error": result.is_error,
+        }));
+    }
+
+    if messages.is_empty() {
+        if matches!(state.lifecycle, SessionLifecycle::Running) {
+            transition_lifecycle(state, SessionLifecycle::WaitingInput)
+                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+        }
+        return Ok(());
+    }
+
+    let mut expected_messages = 0_u64;
+    for (idx, message) in messages.into_iter().enumerate() {
+        let bytes = serde_json::to_vec(&message).unwrap_or_else(|_| b"{}".to_vec());
+        enqueue_blob_put(
+            state,
+            bytes,
+            PendingBlobPutKind::FollowUpMessage { index: idx as u64 },
+            out,
+        );
+        expected_messages = expected_messages.saturating_add(1);
+    }
+    state.pending_follow_up_turn = Some(PendingFollowUpTurn {
+        tool_batch_id: batch.tool_batch_id.clone(),
+        base_message_refs: state.conversation_message_refs.clone(),
+        expected_messages,
+        blob_refs_by_index: BTreeMap::new(),
+    });
     Ok(())
 }
 
@@ -1164,6 +1831,7 @@ fn refresh_effective_tools(
         profile_id,
         ordered_tools,
     };
+    state.tool_refs_materialized = state.effective_tools.ordered_tools.is_empty();
 
     Ok(())
 }
@@ -1223,6 +1891,12 @@ fn clear_active_run(state: &mut SessionState) {
     state.active_run_config = None;
     state.active_tool_batch = None;
     state.pending_intents.clear();
+    state.pending_blob_gets.clear();
+    state.pending_blob_puts.clear();
+    state.pending_follow_up_turn = None;
+    state.queued_llm_message_refs = None;
+    state.conversation_message_refs.clear();
+    state.tool_refs_materialized = false;
     state.in_flight_effects = 0;
 }
 
@@ -1287,6 +1961,11 @@ mod tests {
     use crate::contracts::{
         HostSessionStatus, SessionId, SessionIngress, ToolCallObserved, ToolOverrideScope,
     };
+    use aos_air_types::HashRef;
+    use aos_effects::builtins::{
+        BlobGetReceipt, BlobPutReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
+        LlmToolCall, TokenUsage,
+    };
 
     fn fake_hash(ch: char) -> String {
         let mut out = String::from("sha256:");
@@ -1301,6 +1980,39 @@ mod tests {
             session_id: SessionId("s-1".into()),
             observed_at_ns,
             ingress,
+        })
+    }
+
+    fn hash_ref(ch: char) -> HashRef {
+        HashRef::new(fake_hash(ch)).expect("valid hash ref")
+    }
+
+    fn hash_ref_for_index(idx: usize) -> HashRef {
+        let alphabet = [
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd',
+        ];
+        hash_ref(alphabet[idx % alphabet.len()])
+    }
+
+    fn receipt_event<T: serde::Serialize>(
+        emitted_at_seq: u64,
+        effect_kind: &str,
+        params_hash: Option<String>,
+        status: &str,
+        payload: &T,
+    ) -> SessionWorkflowEvent {
+        SessionWorkflowEvent::Receipt(aos_wasm_sdk::EffectReceiptEnvelope {
+            origin_module_id: "aos.agent/SessionWorkflow@1".into(),
+            origin_instance_key: None,
+            intent_id: fake_hash('i'),
+            effect_kind: effect_kind.into(),
+            params_hash,
+            receipt_payload: serde_cbor::to_vec(payload).expect("encode payload"),
+            status: status.into(),
+            emitted_at_seq,
+            adapter_id: "adapter.mock".into(),
+            cost_cents: None,
+            signature: Vec::new(),
         })
     }
 
@@ -1334,7 +2046,13 @@ mod tests {
         let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
         assert_eq!(state.lifecycle, SessionLifecycle::Running);
         assert_eq!(out.effects.len(), 1);
-        assert_eq!(state.pending_intents.len(), 1);
+        assert!(matches!(
+            out.effects.first(),
+            Some(SessionEffectCommand::BlobPut { .. })
+        ));
+        assert_eq!(state.pending_intents.len(), 0);
+        assert!(!state.pending_blob_puts.is_empty());
+        assert!(state.queued_llm_message_refs.is_some());
         assert_eq!(state.in_flight_effects, 1);
         assert_eq!(state.effective_tools.profile_id, "openai");
         assert_eq!(
@@ -1452,5 +2170,245 @@ mod tests {
             batch.call_status.get("c3"),
             Some(ToolCallStatus::Ignored)
         ));
+    }
+
+    #[test]
+    fn run_request_materializes_tool_refs_before_llm_generate() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let blob_put_hash = match out.effects.first() {
+            Some(SessionEffectCommand::BlobPut { params_hash, .. }) => params_hash.clone(),
+            _ => panic!("expected blob.put effect"),
+        };
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                2,
+                "blob.put",
+                Some(blob_put_hash),
+                "ok",
+                &BlobPutReceipt {
+                    blob_ref: hash_ref('a'),
+                    edge_ref: hash_ref('b'),
+                    size: 42,
+                },
+            ),
+        )
+        .expect("blob.put receipt");
+
+        assert!(matches!(
+            out.effects.first(),
+            Some(SessionEffectCommand::LlmGenerate { .. })
+        ));
+        assert_eq!(state.pending_intents.len(), 1);
+    }
+
+    #[test]
+    fn llm_tool_calls_are_resolved_executed_and_queued_for_follow_up() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        let out1 = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let tool_def_put_hash = match out1.effects.first() {
+            Some(SessionEffectCommand::BlobPut { params_hash, .. }) => params_hash.clone(),
+            _ => panic!("expected initial blob.put"),
+        };
+
+        let out2 = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                2,
+                "blob.put",
+                Some(tool_def_put_hash),
+                "ok",
+                &BlobPutReceipt {
+                    blob_ref: hash_ref('c'),
+                    edge_ref: hash_ref('d'),
+                    size: 111,
+                },
+            ),
+        )
+        .expect("tool def put receipt");
+        let llm_params_hash = match out2.effects.first() {
+            Some(SessionEffectCommand::LlmGenerate { params_hash, .. }) => params_hash.clone(),
+            _ => panic!("expected llm.generate"),
+        };
+
+        let out3 = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                3,
+                "llm.generate",
+                Some(llm_params_hash),
+                "ok",
+                &LlmGenerateReceipt {
+                    output_ref: hash_ref('e'),
+                    raw_output_ref: None,
+                    provider_response_id: None,
+                    finish_reason: LlmFinishReason {
+                        reason: "tool_calls".into(),
+                        raw: None,
+                    },
+                    token_usage: TokenUsage {
+                        prompt: 0,
+                        completion: 0,
+                        total: Some(0),
+                    },
+                    usage_details: None,
+                    warnings_ref: None,
+                    rate_limit_ref: None,
+                    cost_cents: None,
+                    provider_id: "openai-responses".into(),
+                },
+            ),
+        )
+        .expect("llm receipt");
+        let output_blob_get_hash = match out3.effects.first() {
+            Some(SessionEffectCommand::BlobGet { params_hash, .. }) => params_hash.clone(),
+            _ => panic!("expected blob.get for llm output"),
+        };
+
+        let output_bytes = serde_json::to_vec(&LlmOutputEnvelope {
+            assistant_text: None,
+            tool_calls_ref: Some(hash_ref('c')),
+            reasoning_ref: None,
+        })
+        .expect("encode output envelope");
+        let out4 = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                4,
+                "blob.get",
+                Some(output_blob_get_hash),
+                "ok",
+                &BlobGetReceipt {
+                    blob_ref: hash_ref('e'),
+                    size: output_bytes.len() as u64,
+                    bytes: output_bytes,
+                },
+            ),
+        )
+        .expect("output blob.get receipt");
+        let calls_blob_get_hash = match out4.effects.first() {
+            Some(SessionEffectCommand::BlobGet { params_hash, .. }) => params_hash.clone(),
+            _ => panic!("expected blob.get for tool calls"),
+        };
+
+        let call_list = vec![LlmToolCall {
+            call_id: "call-1".into(),
+            tool_name: "host.session.open".into(),
+            arguments_ref: hash_ref('d'),
+            provider_call_id: None,
+        }];
+        let calls_bytes = serde_json::to_vec(&call_list).expect("encode tool calls");
+        let out5 = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                5,
+                "blob.get",
+                Some(calls_blob_get_hash),
+                "ok",
+                &BlobGetReceipt {
+                    blob_ref: hash_ref('c'),
+                    size: calls_bytes.len() as u64,
+                    bytes: calls_bytes,
+                },
+            ),
+        )
+        .expect("tool calls blob.get receipt");
+        let args_blob_get_hash = match out5.effects.first() {
+            Some(SessionEffectCommand::BlobGet { params_hash, .. }) => params_hash.clone(),
+            _ => panic!("expected blob.get for tool arguments"),
+        };
+
+        let args_bytes = br#"{"target":{"local":{"network_mode":"off"}}}"#.to_vec();
+        let out6 = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                6,
+                "blob.get",
+                Some(args_blob_get_hash),
+                "ok",
+                &BlobGetReceipt {
+                    blob_ref: hash_ref('d'),
+                    size: args_bytes.len() as u64,
+                    bytes: args_bytes,
+                },
+            ),
+        )
+        .expect("tool args blob.get receipt");
+        let tool_effect_hash = out6
+            .effects
+            .iter()
+            .find_map(|effect| {
+                if let SessionEffectCommand::ToolEffect { params_hash, .. } = effect {
+                    Some(params_hash.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("expected tool effect");
+
+        let out7 = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                7,
+                "host.session.open",
+                Some(tool_effect_hash),
+                "ok",
+                &serde_json::json!({
+                    "status": "ready",
+                    "session_id": "hs_1"
+                }),
+            ),
+        )
+        .expect("tool receipt");
+        assert!(
+            out7.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. })),
+            "expected follow-up blob.put effects"
+        );
+
+        let followup_hashes = out7
+            .effects
+            .iter()
+            .filter_map(|effect| {
+                if let SessionEffectCommand::BlobPut { params_hash, .. } = effect {
+                    Some(params_hash.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(!followup_hashes.is_empty());
+
+        let mut emitted_llm = false;
+        for (idx, hash) in followup_hashes.iter().enumerate() {
+            let out = apply_session_workflow_event(
+                &mut state,
+                &receipt_event(
+                    8 + idx as u64,
+                    "blob.put",
+                    Some(hash.clone()),
+                    "ok",
+                    &BlobPutReceipt {
+                        blob_ref: hash_ref_for_index(idx),
+                        edge_ref: hash_ref_for_index(idx + 1),
+                        size: 32,
+                    },
+                ),
+            )
+            .expect("follow-up blob.put receipt");
+            emitted_llm = emitted_llm
+                || out
+                    .effects
+                    .iter()
+                    .any(|effect| matches!(effect, SessionEffectCommand::LlmGenerate { .. }));
+        }
+        assert!(emitted_llm, "expected queued follow-up llm.generate");
     }
 }

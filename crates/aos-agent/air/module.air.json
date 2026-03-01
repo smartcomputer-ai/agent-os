@@ -9,6 +9,8 @@
         "state": "aos.agent/SessionState@1",
         "event": "aos.agent/SessionWorkflowEvent@1",
         "effects_emitted": [
+          "blob.put",
+          "blob.get",
           "llm.generate",
           "host.session.open",
           "host.exec",
@@ -24,6 +26,7 @@
           "host.fs.list_dir"
         ],
         "cap_slots": {
+          "blob": "blob.cap",
           "llm": "llm.basic",
           "host": "host.cap"
         }

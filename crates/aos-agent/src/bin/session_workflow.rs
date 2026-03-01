@@ -51,6 +51,16 @@ impl Workflow for SessionWorkflow {
                     ctx.effects()
                         .emit_raw(kind.as_str(), &params, cap_slot.as_deref());
                 }
+                SessionEffectCommand::BlobPut {
+                    params, cap_slot, ..
+                } => ctx
+                    .effects()
+                    .emit_raw("blob.put", &params, cap_slot.as_deref()),
+                SessionEffectCommand::BlobGet {
+                    params, cap_slot, ..
+                } => ctx
+                    .effects()
+                    .emit_raw("blob.get", &params, cap_slot.as_deref()),
             }
         }
         Ok(())

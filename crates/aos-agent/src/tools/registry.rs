@@ -5,11 +5,12 @@ use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-fn pseudo_hash(seed: &str) -> String {
+fn sha256_text(bytes: &[u8]) -> String {
     let mut out = String::from("sha256:");
-    let digest = Sha256::digest(seed.as_bytes());
+    let digest = Sha256::digest(bytes);
     for byte in digest {
         let hi = byte >> 4;
         let lo = byte & 0x0f;
@@ -26,6 +27,28 @@ const fn nibble_to_hex(n: u8) -> char {
     }
 }
 
+pub fn tool_definition_json(tool_name: &str, description: &str, args_schema_json: &str) -> Value {
+    let parameters = serde_json::from_str::<Value>(args_schema_json).unwrap_or_else(|_| json!({}));
+    json!({
+        "name": tool_name,
+        "description": description,
+        "parameters": parameters,
+    })
+}
+
+pub fn tool_definition_bytes(
+    tool_name: &str,
+    description: &str,
+    args_schema_json: &str,
+) -> Vec<u8> {
+    serde_json::to_vec(&tool_definition_json(
+        tool_name,
+        description,
+        args_schema_json,
+    ))
+    .unwrap_or_else(|_| b"{}".to_vec())
+}
+
 fn host_tool(
     tool_name: &str,
     description: &str,
@@ -34,9 +57,10 @@ fn host_tool(
     requires_host_session: bool,
     hint: ToolParallelismHint,
 ) -> ToolSpec {
+    let tool_def_bytes = tool_definition_bytes(tool_name, description, args_schema_json);
     ToolSpec {
         tool_name: tool_name.to_string(),
-        tool_ref: pseudo_hash(tool_name),
+        tool_ref: sha256_text(&tool_def_bytes),
         description: description.to_string(),
         args_schema_json: args_schema_json.to_string(),
         mapper,

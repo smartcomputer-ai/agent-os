@@ -16,6 +16,8 @@ name = "session_event_echo"
 path = "src/bin/session_event_echo.rs"
 
 [dependencies]
+aos-air-types = { path = "../aos-air-types" }
+aos-effects = { path = "../aos-effects" }
 aos-wasm-sdk = { path = "../aos-wasm-sdk" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 serde = { version = "1", features = ["derive"] }
@@ -23,6 +25,3 @@ serde_bytes = "0.11"
 serde_cbor = "0.11"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.10", default-features = false }
-
-[dev-dependencies]
-aos-effects = { path = "../aos-effects" }

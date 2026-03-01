@@ -1,7 +1,7 @@
 use super::{
     ActiveToolBatch, EffectiveToolSet, RunConfig, RunId, SessionConfig, SessionId,
-    SessionLifecycle, ToolRuntimeContext, ToolSpec, WorkspaceApplyMode, WorkspaceSnapshot,
-    default_tool_profiles, default_tool_registry,
+    SessionLifecycle, ToolBatchId, ToolRuntimeContext, ToolSpec, WorkspaceApplyMode,
+    WorkspaceSnapshot, default_tool_profiles, default_tool_registry,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -17,6 +17,53 @@ pub struct PendingIntent {
     pub emitted_at_ns: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum PendingBlobGetKind {
+    #[default]
+    LlmOutputEnvelope,
+    LlmToolCalls,
+    ToolCallArguments {
+        tool_batch_id: ToolBatchId,
+        call_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PendingBlobGet {
+    pub kind: PendingBlobGetKind,
+    pub emitted_at_ns: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum PendingBlobPutKind {
+    ToolDefinition { tool_name: String },
+    FollowUpMessage { index: u64 },
+}
+
+impl Default for PendingBlobPutKind {
+    fn default() -> Self {
+        Self::ToolDefinition {
+            tool_name: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PendingBlobPut {
+    pub kind: PendingBlobPutKind,
+    pub emitted_at_ns: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PendingFollowUpTurn {
+    pub tool_batch_id: ToolBatchId,
+    pub base_message_refs: Vec<String>,
+    pub expected_messages: u64,
+    pub blob_refs_by_index: BTreeMap<u64, String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionState {
     pub session_id: SessionId,
@@ -28,6 +75,12 @@ pub struct SessionState {
     pub active_run_config: Option<RunConfig>,
     pub active_tool_batch: Option<ActiveToolBatch>,
     pub pending_intents: BTreeMap<String, PendingIntent>,
+    pub pending_blob_gets: BTreeMap<String, Vec<PendingBlobGet>>,
+    pub pending_blob_puts: BTreeMap<String, Vec<PendingBlobPut>>,
+    pub pending_follow_up_turn: Option<PendingFollowUpTurn>,
+    pub queued_llm_message_refs: Option<Vec<String>>,
+    pub conversation_message_refs: Vec<String>,
+    pub tool_refs_materialized: bool,
     pub in_flight_effects: u64,
     pub active_workspace_snapshot: Option<WorkspaceSnapshot>,
     pub pending_workspace_snapshot: Option<WorkspaceSnapshot>,
@@ -56,6 +109,12 @@ impl Default for SessionState {
             active_run_config: None,
             active_tool_batch: None,
             pending_intents: BTreeMap::new(),
+            pending_blob_gets: BTreeMap::new(),
+            pending_blob_puts: BTreeMap::new(),
+            pending_follow_up_turn: None,
+            queued_llm_message_refs: None,
+            conversation_message_refs: Vec::new(),
+            tool_refs_materialized: false,
             in_flight_effects: 0,
             active_workspace_snapshot: None,
             pending_workspace_snapshot: None,
