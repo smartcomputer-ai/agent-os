@@ -10,6 +10,7 @@ Focused roadmap slice for effect runtime clarity and adapter pluggability.
 - `roadmap/v0.12-effects/p4-host-sessions-effects.md`
 - `roadmap/v0.12-effects/p5-blob-effects-cas-direct-and-journal-refs-only.md`
 - `roadmap/v0.12-effects/p6-host-session-repo-io-effects-for-coding-agent-tools.md`
+- `roadmap/v0.12-effects/p7-agent-sdk-dynamic-tool-orchestration.md`
 
 ## Scope
 
