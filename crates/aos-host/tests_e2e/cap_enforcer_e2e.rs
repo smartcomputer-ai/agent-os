@@ -14,7 +14,10 @@ use aos_air_types::{
     TypeExpr, TypeList, TypeOption, TypePrimitive, TypePrimitiveNat, TypePrimitiveText, TypeRecord,
     TypeSet, ValueList, ValueLiteral, ValueRecord, ValueSet, ValueText, WorkflowAbi,
 };
-use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs};
+use aos_effects::builtins::{
+    HostFileContentInput, HostFsWriteFileParams, HostInlineText, HttpRequestParams,
+    LlmGenerateParams, LlmRuntimeArgs,
+};
 use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use helpers::fixtures::{self, TestWorld};
 use indexmap::IndexMap;
@@ -321,6 +324,109 @@ fn workspace_enforcer_module_denies_workspace() {
     );
 }
 
+#[test]
+fn host_enforcer_module_denies_disallowed_fs_op() {
+    let store = fixtures::new_mem_store();
+    let workflow_name = "com.acme/HostWorkflow@1";
+
+    let output = WorkflowOutput {
+        state: None,
+        domain_events: vec![],
+        effects: vec![WorkflowEffect::with_cap_slot(
+            aos_effects::EffectKind::HOST_FS_WRITE_FILE,
+            serde_cbor::to_vec(&HostFsWriteFileParams {
+                session_id: "sess-1".into(),
+                path: "src/main.rs".into(),
+                content: HostFileContentInput::InlineText {
+                    inline_text: HostInlineText {
+                        text: "fn main() {}\n".into(),
+                    },
+                },
+                create_parents: Some(true),
+                mode: Some("overwrite".into()),
+            })
+            .unwrap(),
+            "host",
+        )],
+        ann: None,
+    };
+    let mut workflow = fixtures::stub_workflow_module(&store, workflow_name, &output);
+    workflow.abi.workflow = Some(WorkflowAbi {
+        state: fixtures::schema("com.acme/HostState@1"),
+        event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::HOST_FS_WRITE_FILE.into()],
+        cap_slots: Default::default(),
+    });
+
+    let enforcer = fixtures::pure_module_from_target(
+        &store,
+        "sys/CapEnforceHost@1",
+        "cap_enforce_host.wasm",
+        "sys/CapCheckInput@1",
+        "sys/CapCheckOutput@1",
+    );
+
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![workflow, enforcer],
+        vec![fixtures::routing_event(
+            fixtures::START_SCHEMA,
+            workflow_name,
+        )],
+    );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            helpers::def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", helpers::text_type())],
+            ),
+            helpers::def_text_record_schema("com.acme/HostState@1", vec![]),
+        ],
+    );
+    if let Some(defaults) = loaded.manifest.defaults.as_mut() {
+        defaults.cap_grants.push(CapGrant {
+            name: "cap_host".into(),
+            cap: "sys/host@1".into(),
+            params: host_cap_params(&["read"], &["src/"]),
+            expiry_ns: None,
+        });
+    }
+    loaded.manifest.caps.push(NamedRef {
+        name: "sys/host@1".into(),
+        hash: fixtures::zero_hash(),
+    });
+    loaded.caps.insert("sys/host@1".into(), host_defcap());
+    loaded
+        .manifest
+        .module_bindings
+        .get_mut(workflow_name)
+        .expect("module binding")
+        .slots
+        .insert("host".into(), "cap_host".into());
+
+    let mut world = TestWorld::with_store(store, loaded).expect("world");
+    world
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
+        .expect("submit start event");
+    let err = world.kernel.tick().expect_err("expected denial");
+    assert!(
+        matches!(
+            err,
+            aos_kernel::error::KernelError::CapabilityDenied {
+                cap: ref cap_name,
+                effect_kind: ref kind,
+                ..
+            } if cap_name == "cap_host" && kind == AirEffectKind::HOST_FS_WRITE_FILE
+        ),
+        "unexpected error: {err:?}"
+    );
+}
+
 fn http_defcap() -> DefCap {
     DefCap {
         name: "sys/http.out@1".into(),
@@ -375,6 +481,23 @@ fn workspace_defcap() -> DefCap {
     }
 }
 
+fn host_defcap() -> DefCap {
+    DefCap {
+        name: "sys/host@1".into(),
+        cap_type: CapType::host(),
+        schema: TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([
+                ("allowed_fs_ops".into(), opt_text_list()),
+                ("fs_roots".into(), opt_text_list()),
+                ("allowed_output_modes".into(), opt_text_list()),
+            ]),
+        }),
+        enforcer: CapEnforcer {
+            module: "sys/CapEnforceHost@1".into(),
+        },
+    }
+}
+
 fn hosts_param(hosts: &[&str]) -> ValueLiteral {
     ValueLiteral::Record(ValueRecord {
         record: IndexMap::from([(
@@ -420,6 +543,47 @@ fn workspace_cap_params(workspaces: &[&str], ops: &[&str]) -> ValueLiteral {
                             })
                         })
                         .collect(),
+                }),
+            ),
+        ]),
+    })
+}
+
+fn host_cap_params(allowed_fs_ops: &[&str], fs_roots: &[&str]) -> ValueLiteral {
+    ValueLiteral::Record(ValueRecord {
+        record: IndexMap::from([
+            (
+                "allowed_fs_ops".into(),
+                ValueLiteral::List(ValueList {
+                    list: allowed_fs_ops
+                        .iter()
+                        .map(|op| {
+                            ValueLiteral::Text(ValueText {
+                                text: (*op).to_string(),
+                            })
+                        })
+                        .collect(),
+                }),
+            ),
+            (
+                "fs_roots".into(),
+                ValueLiteral::List(ValueList {
+                    list: fs_roots
+                        .iter()
+                        .map(|root| {
+                            ValueLiteral::Text(ValueText {
+                                text: (*root).to_string(),
+                            })
+                        })
+                        .collect(),
+                }),
+            ),
+            (
+                "allowed_output_modes".into(),
+                ValueLiteral::List(ValueList {
+                    list: vec![ValueLiteral::Text(ValueText {
+                        text: "auto".into(),
+                    })],
                 }),
             ),
         ]),

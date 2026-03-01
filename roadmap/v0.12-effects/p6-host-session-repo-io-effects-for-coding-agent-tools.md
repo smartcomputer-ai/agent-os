@@ -1,7 +1,7 @@
 # P6: Host-Session Repo I/O Effects for Coding Agent Tools
 
 **Priority**: P6  
-**Status**: Proposed  
+**Status**: Complete  
 **Date**: 2026-02-28
 
 ## Goal
@@ -361,27 +361,27 @@ Implementation guidance:
 
 ### Phase 6.1: Contracts + Capability
 
-1. Add `defeffect` + schemas for `host.fs.*` minimal set.
-2. Extend `sys/HostCapParams@1` and `sys/CapEnforceHost@1` with fs constraints.
-3. Wire built-ins and validation.
+1. [x] Add `defeffect` + schemas for `host.fs.*` minimal set.
+2. [x] Extend `sys/HostCapParams@1` and `sys/CapEnforceHost@1` with fs constraints.
+3. [x] Wire built-ins and validation.
 
 ### Phase 6.2: Host Adapters
 
-1. Add adapters for `host.fs.read_file/write_file/edit_file/apply_patch/grep/glob`.
-2. Share session registry and route defaults.
-3. Enforce path canonicalization and symlink policy.
+1. [x] Add adapters for `host.fs.read_file/write_file/edit_file/apply_patch/grep/glob`.
+2. [x] Share session registry and route defaults.
+3. [x] Enforce path canonicalization and symlink policy.
 
 ### Phase 6.3: Agent SDK Integration
 
-1. Extend SDK tool catalog/runtime mapping to use `host.fs.*` + `host.exec`.
-2. Add provider-aligned profile mapping:
+1. [x] Extend SDK tool catalog/runtime mapping to use `host.fs.*` + `host.exec`.
+2. [x] Add provider-aligned profile mapping:
    - OpenAI: prefer `apply_patch`
    - Anthropic/Gemini: prefer `edit_file`
-3. Keep existing session/tool-batch state machine semantics.
+3. [x] Keep existing session/tool-batch state machine semantics.
 
 ### Phase 6.4: Verification
 
-1. Add integration tests under `crates/aos-host/tests` for each effect:
+1. [x] Add integration tests under `crates/aos-host/tests` for each effect:
    - `host.fs.read_file`: `inline_text`, `inline_bytes`, `blob`, `require_inline`
      overflow behavior, not-found/forbidden.
    - `host.fs.write_file`: `inline_text`, `inline_bytes`, `blob_ref`, mode
@@ -394,18 +394,18 @@ Implementation guidance:
      empty result (`match_count=0`), output truncation/inline-vs-blob.
    - `host.fs.glob`: invalid pattern, not-found, deterministic ordering, empty
      result (`count=0`), inline-vs-blob.
-2. Add e2e tests under `crates/aos-host/tests_e2e` on a real checkout/session:
+2. [x] Add e2e tests under `crates/aos-host/tests_e2e` on a real checkout/session:
    - open one `host.session`, run read/edit/write/apply_patch/grep/glob/exec in
      one flow.
    - assert cap/policy denials are enforced for out-of-root or disallowed ops.
    - assert large outputs use blob refs under `auto` and error deterministically
      under `require_inline` when configured limits are exceeded.
-3. Add replay-or-die coverage in kernel/host test flows:
+3. [x] Add replay-or-die coverage in kernel/host test flows:
    - execute run, persist journal/snapshot, replay from genesis, assert
      byte-identical snapshot.
    - ensure CAS refs referenced by receipts remain reachable from
      snapshot+journal.
-4. Add limit-configuration tests (when limits are set) and permissive baseline
+4. [x] Add limit-configuration tests (when limits are set) and permissive baseline
    tests (when limits are omitted) to validate optional-limit behavior.
 
 ## Risks
@@ -429,3 +429,29 @@ Implementation guidance:
 3. Cap/policy can constrain repo roots and fs operations deterministically.
 4. SDK tool runtime can execute factory core coding flows end-to-end on real repos.
 5. Integration + e2e + replay tests pass.
+
+## Completion Notes (2026-03-01)
+
+1. Added and wired built-in effect kinds, schemas, and capability constraints for
+   `host.fs.read_file`, `host.fs.write_file`, `host.fs.edit_file`,
+   `host.fs.apply_patch`, `host.fs.grep`, `host.fs.glob`, plus
+   `host.fs.stat`, `host.fs.exists`, and `host.fs.list_dir`.
+2. Split host-related schemas into `spec/defs/builtin-schemas-host.air.json`
+   and merged host/core schema loading in built-in schema resolution.
+3. Refactored host adapter internals into `crates/aos-host/src/adapters/host/`
+   with isolated modules for path resolution, output materialization, session
+   state, and patch parse/apply/edit internals.
+4. Registered host fs adapters in default host routing and adapter registry so
+   host session + repo I/O tools run under a shared `session_id` boundary.
+5. Added focused host fs integration coverage in
+   `crates/aos-host/tests/adapters_host_fs_integration.rs` covering:
+   read/write/edit/apply_patch/grep/glob/stat/exists/list_dir status paths,
+   output-mode behavior (`auto` inline/blob and `require_inline` errors), and
+   deterministic/atomic behavior expectations.
+6. Added end-to-end host fs flow coverage in
+   `crates/aos-host/tests_e2e/host_fs_adapter_e2e.rs` and wired test target in
+   `crates/aos-host/Cargo.toml`.
+7. Added host capability-enforcer denial coverage in
+   `crates/aos-host/tests_e2e/cap_enforcer_e2e.rs`
+   (`host_enforcer_module_denies_disallowed_fs_op`) to verify disallowed
+   host-fs operations are rejected through `sys/CapEnforceHost@1`.

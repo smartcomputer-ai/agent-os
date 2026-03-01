@@ -81,6 +81,10 @@ name = "host_adapter_e2e"
 path = "tests_e2e/host_adapter_e2e.rs"
 
 [[test]]
+name = "host_fs_adapter_e2e"
+path = "tests_e2e/host_fs_adapter_e2e.rs"
+
+[[test]]
 name = "adapters_llm_live"
 path = "tests_live/adapters_llm_live.rs"
 required-features = ["adapter-llm"]
