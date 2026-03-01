@@ -70,10 +70,6 @@ pub enum SessionReduceError {
     InvalidLifecycleTransition,
     HostCommandRejected,
     ToolBatchAlreadyActive,
-    ToolBatchNotActive,
-    ToolBatchIdMismatch,
-    ToolCallUnknown,
-    ToolBatchNotSettled,
     MissingProvider,
     MissingModel,
     UnknownProvider,
@@ -93,10 +89,6 @@ impl SessionReduceError {
             Self::InvalidLifecycleTransition => "invalid lifecycle transition",
             Self::HostCommandRejected => "host command rejected",
             Self::ToolBatchAlreadyActive => "tool batch already active",
-            Self::ToolBatchNotActive => "tool batch not active",
-            Self::ToolBatchIdMismatch => "tool batch id mismatch",
-            Self::ToolCallUnknown => "tool call id not expected in active batch",
-            Self::ToolBatchNotSettled => "tool batch not settled",
             Self::MissingProvider => "run config provider missing",
             Self::MissingModel => "run config model missing",
             Self::UnknownProvider => "run config provider unknown",
@@ -228,22 +220,6 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                 } => {
                     on_host_session_updated(state, host_session_id.as_ref(), *host_session_status)?
                 }
-                SessionIngressKind::ToolCallsObserved {
-                    intent_id,
-                    params_hash,
-                    calls,
-                } => {
-                    on_tool_calls_observed(state, intent_id, params_hash.as_ref(), calls, &mut out)?
-                }
-                SessionIngressKind::ToolCallSettled {
-                    tool_batch_id,
-                    call_id,
-                    status,
-                } => on_tool_call_settled(state, tool_batch_id, call_id, status, &mut out)?,
-                SessionIngressKind::ToolBatchSettled {
-                    tool_batch_id,
-                    results_ref,
-                } => on_tool_batch_settled(state, tool_batch_id, results_ref.clone())?,
                 SessionIngressKind::RunCompleted => {
                     transition_lifecycle(state, SessionLifecycle::Completed)
                         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
@@ -995,48 +971,6 @@ fn settle_tool_call_from_receipt(
 
     dispatch_next_ready_tool_group(state, out)?;
     Ok(true)
-}
-
-fn on_tool_call_settled(
-    state: &mut SessionState,
-    tool_batch_id: &crate::contracts::ToolBatchId,
-    call_id: &str,
-    status: &ToolCallStatus,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
-    let batch = state
-        .active_tool_batch
-        .as_mut()
-        .ok_or(SessionReduceError::ToolBatchNotActive)?;
-    if batch.tool_batch_id != *tool_batch_id {
-        return Err(SessionReduceError::ToolBatchIdMismatch);
-    }
-    if !batch.contains_call(call_id) {
-        return Err(SessionReduceError::ToolCallUnknown);
-    }
-
-    batch.call_status.insert(call_id.into(), status.clone());
-    dispatch_next_ready_tool_group(state, out)?;
-    Ok(())
-}
-
-fn on_tool_batch_settled(
-    state: &mut SessionState,
-    tool_batch_id: &crate::contracts::ToolBatchId,
-    results_ref: Option<String>,
-) -> Result<(), SessionReduceError> {
-    let batch = state
-        .active_tool_batch
-        .as_mut()
-        .ok_or(SessionReduceError::ToolBatchNotActive)?;
-    if batch.tool_batch_id != *tool_batch_id {
-        return Err(SessionReduceError::ToolBatchIdMismatch);
-    }
-    if !batch.is_settled() {
-        return Err(SessionReduceError::ToolBatchNotSettled);
-    }
-    batch.results_ref = results_ref;
-    Ok(())
 }
 
 fn on_receipt_envelope(
@@ -2148,16 +2082,14 @@ mod tests {
             },
         ];
 
-        apply_session_workflow_event(
+        let mut out = SessionReduceOutput::default();
+        let params_hash = fake_hash('h');
+        on_tool_calls_observed(
             &mut state,
-            &ingress(
-                4,
-                SessionIngressKind::ToolCallsObserved {
-                    intent_id: fake_hash('i'),
-                    params_hash: Some(fake_hash('h')),
-                    calls,
-                },
-            ),
+            fake_hash('i').as_str(),
+            Some(&params_hash),
+            &calls,
+            &mut out,
         )
         .expect("plan");
 

@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Result, ensure};
 use aos_agent::{
     HostCommand, HostCommandKind, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, ToolCallObserved, ToolCallStatus,
+    SessionLifecycle, SessionState,
 };
 use aos_host::config::HostConfig;
 
@@ -40,7 +40,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     println!("→ Agent Session demo");
 
-    // Run #1: request -> tool batch settle -> cancel.
+    // Run #1: request -> cancel.
     host.send_event(&run_requested_event_with_config(1, "openai", "gpt-5.2"))?;
     let run1 = host.read_state::<SessionState>()?;
     ensure!(
@@ -54,63 +54,9 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     host.send_event(&session_event(
         2,
-        SessionIngressKind::ToolCallsObserved {
-            intent_id: fake_hash('b'),
-            params_hash: None,
-            calls: vec![
-                ToolCallObserved {
-                    call_id: "call_a".into(),
-                    tool_name: "host.session.open".into(),
-                    arguments_json: "{\"target\":{\"local\":{\"network_mode\":\"off\"}}}".into(),
-                    arguments_ref: Some(fake_hash('d')),
-                    provider_call_id: None,
-                },
-                ToolCallObserved {
-                    call_id: "call_b".into(),
-                    tool_name: "host.session.open".into(),
-                    arguments_json: "{\"target\":{\"local\":{\"network_mode\":\"off\"}}}".into(),
-                    arguments_ref: Some(fake_hash('e')),
-                    provider_call_id: None,
-                },
-            ],
-        },
-    ))?;
-
-    let batch_id = host
-        .read_state::<SessionState>()?
-        .active_tool_batch
-        .clone()
-        .ok_or_else(|| anyhow!("missing active tool batch"))?
-        .tool_batch_id;
-
-    host.send_event(&session_event(
-        3,
-        SessionIngressKind::ToolCallSettled {
-            tool_batch_id: batch_id.clone(),
-            call_id: "call_a".into(),
-            status: ToolCallStatus::Succeeded,
-        },
-    ))?;
-    host.send_event(&session_event(
-        4,
-        SessionIngressKind::ToolCallSettled {
-            tool_batch_id: batch_id.clone(),
-            call_id: "call_b".into(),
-            status: ToolCallStatus::Succeeded,
-        },
-    ))?;
-    host.send_event(&session_event(
-        5,
-        SessionIngressKind::ToolBatchSettled {
-            tool_batch_id: batch_id,
-            results_ref: Some(fake_hash('c')),
-        },
-    ))?;
-    host.send_event(&session_event(
-        6,
         SessionIngressKind::HostCommandReceived(HostCommand {
             command_id: "cmd-cancel".into(),
-            issued_at: 6,
+            issued_at: 2,
             command: HostCommandKind::Cancel {
                 reason: Some("operator stop".into()),
             },
@@ -130,7 +76,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     // Run #2: request + explicit completion.
     host.send_event(&run_requested_event_with_config(
-        7,
+        3,
         "anthropic",
         "claude-sonnet-4-5",
     ))?;
@@ -149,7 +95,7 @@ pub fn run(example_root: &Path) -> Result<()> {
             .is_some_and(|cfg| cfg.provider == "anthropic" && cfg.model == "claude-sonnet-4-5"),
         "unexpected run2 active_run_config"
     );
-    host.send_event(&session_event(8, SessionIngressKind::RunCompleted))?;
+    host.send_event(&session_event(4, SessionIngressKind::RunCompleted))?;
 
     let state = host.read_state::<SessionState>()?;
     ensure!(
@@ -167,8 +113,8 @@ pub fn run(example_root: &Path) -> Result<()> {
         state.next_run_seq
     );
     ensure!(
-        state.updated_at == 8,
-        "expected updated_at=8, got {}",
+        state.updated_at == 4,
+        "expected updated_at=4, got {}",
         state.updated_at
     );
 

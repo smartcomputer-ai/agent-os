@@ -74,10 +74,6 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         }
         SessionReduceError::HostCommandRejected => ReduceError::new("host command rejected"),
         SessionReduceError::ToolBatchAlreadyActive => ReduceError::new("tool batch already active"),
-        SessionReduceError::ToolBatchNotActive => ReduceError::new("tool batch not active"),
-        SessionReduceError::ToolBatchIdMismatch => ReduceError::new("tool batch id mismatch"),
-        SessionReduceError::ToolCallUnknown => ReduceError::new("tool call id not expected"),
-        SessionReduceError::ToolBatchNotSettled => ReduceError::new("tool batch not settled"),
         SessionReduceError::MissingProvider => ReduceError::new("run config provider missing"),
         SessionReduceError::MissingModel => ReduceError::new("run config model missing"),
         SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),

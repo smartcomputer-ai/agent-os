@@ -1,6 +1,6 @@
 use super::{
-    HostCommand, HostSessionStatus, SessionConfig, SessionId, ToolCallObserved, ToolCallStatus,
-    ToolOverrideScope, ToolSpec, WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
+    HostCommand, HostSessionStatus, SessionConfig, SessionId, ToolOverrideScope, ToolSpec,
+    WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -146,20 +146,6 @@ pub enum SessionIngressKind {
     HostSessionUpdated {
         host_session_id: Option<String>,
         host_session_status: Option<HostSessionStatus>,
-    },
-    ToolCallsObserved {
-        intent_id: String,
-        params_hash: Option<String>,
-        calls: Vec<ToolCallObserved>,
-    },
-    ToolCallSettled {
-        tool_batch_id: super::ToolBatchId,
-        call_id: String,
-        status: ToolCallStatus,
-    },
-    ToolBatchSettled {
-        tool_batch_id: super::ToolBatchId,
-        results_ref: Option<String>,
     },
     RunCompleted,
     RunFailed {

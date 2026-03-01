@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent::{
     LlmToolCallList, SessionConfig, SessionId, SessionIngress, SessionIngressKind, SessionState,
-    ToolAvailabilityRule, ToolCallStatus, ToolExecutor, ToolParallelismHint, ToolSpec,
-    WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
+    ToolAvailabilityRule, ToolExecutor, ToolParallelismHint, ToolSpec, WorkspaceApplyMode,
+    WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
@@ -289,22 +289,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 calls.len()
             );
 
-            send_session_event(
-                &mut host,
-                &mut event_clock,
-                SessionIngressKind::ToolCallsObserved {
-                    intent_id: fake_hash('b'),
-                    params_hash: None,
-                    calls: calls.clone(),
-                },
-            )?;
-            let batch_id = host
-                .read_state::<SessionState>()?
-                .active_tool_batch
-                .clone()
-                .ok_or_else(|| anyhow!("missing active tool batch"))?
-                .tool_batch_id;
-
             history.push(json!({
                 "role": "assistant",
                 "content": calls.iter().map(|call| {
@@ -317,7 +301,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 }).collect::<Vec<_>>()
             }));
 
-            let mut tool_results = Vec::new();
             let mut found_target = false;
             for (idx, call) in calls.iter().enumerate() {
                 let args = tool_call_args_json(&host, call);
@@ -337,31 +320,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                     "call_id": call.call_id,
                     "output": output.clone()
                 }));
-                tool_results.push(json!({
-                    "call_id": call.call_id,
-                    "output": output
-                }));
-
-                send_session_event(
-                    &mut host,
-                    &mut event_clock,
-                    SessionIngressKind::ToolCallSettled {
-                        tool_batch_id: batch_id.clone(),
-                        call_id: call.call_id.clone(),
-                        status: ToolCallStatus::Succeeded,
-                    },
-                )?;
             }
-
-            let results_ref = store_json_blob(&host, &Value::Array(tool_results))?;
-            send_session_event(
-                &mut host,
-                &mut event_clock,
-                SessionIngressKind::ToolBatchSettled {
-                    tool_batch_id: batch_id,
-                    results_ref: Some(results_ref),
-                },
-            )?;
             if found_target && matches!(phase, SearchPhase::Looking) {
                 let nudge = "Tool output is now found=true. Stop calling tools and answer now in the format: TARGET=<value>; SECOND_CLUE=<text>; STEPS=<n>.";
                 println!("   turn {} user: {}", llm_turn + 1, preview(nudge));

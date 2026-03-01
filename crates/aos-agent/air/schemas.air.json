@@ -472,26 +472,6 @@
             }
           }
         },
-        "ToolCallsObserved": {
-          "record": {
-            "intent_id": { "hash": {} },
-            "params_hash": { "option": { "hash": {} } },
-            "calls": { "list": { "ref": "aos.agent/ToolCallObserved@1" } }
-          }
-        },
-        "ToolCallSettled": {
-          "record": {
-            "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
-            "call_id": { "text": {} },
-            "status": { "ref": "aos.agent/ToolCallStatus@1" }
-          }
-        },
-        "ToolBatchSettled": {
-          "record": {
-            "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
-            "results_ref": { "option": { "hash": {} } }
-          }
-        },
         "RunCompleted": { "unit": {} },
         "RunFailed": {
           "record": { "code": { "text": {} }, "detail": { "text": {} } }
