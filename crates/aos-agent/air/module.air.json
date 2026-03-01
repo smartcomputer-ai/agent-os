@@ -26,9 +26,9 @@
           "host.fs.list_dir"
         ],
         "cap_slots": {
-          "blob": "blob.cap",
+          "blob": "blob",
           "llm": "llm.basic",
-          "host": "host.cap"
+          "host": "host"
         }
       }
     }

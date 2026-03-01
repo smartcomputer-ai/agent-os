@@ -10,11 +10,13 @@
     { "name": "aos.agent/ToolAvailabilityRule@1" },
     { "name": "aos.agent/ToolParallelismHint@1" },
     { "name": "aos.agent/ToolSpec@1" },
+    { "name": "aos.agent/ToolMapper@1" },
     { "name": "aos.agent/HostSessionStatus@1" },
     { "name": "aos.agent/ToolRuntimeContext@1" },
     { "name": "aos.agent/EffectiveTool@1" },
     { "name": "aos.agent/EffectiveToolSet@1" },
     { "name": "aos.agent/ToolCallObserved@1" },
+    { "name": "aos.agent/ToolCallLlmResult@1" },
     { "name": "aos.agent/PlannedToolCall@1" },
     { "name": "aos.agent/ToolExecutionPlan@1" },
     { "name": "aos.agent/ToolBatchPlan@1" },
@@ -31,6 +33,11 @@
     { "name": "aos.agent/HostCommand@1" },
     { "name": "aos.agent/SessionIngressKind@1" },
     { "name": "aos.agent/SessionIngress@1" },
+    { "name": "aos.agent/PendingBlobPutKind@1" },
+    { "name": "aos.agent/PendingBlobPut@1" },
+    { "name": "aos.agent/PendingBlobGetKind@1" },
+    { "name": "aos.agent/PendingBlobGet@1" },
+    { "name": "aos.agent/PendingFollowUpTurn@1" },
     { "name": "aos.agent/PendingIntent@1" },
     { "name": "aos.agent/SessionState@1" },
     { "name": "aos.agent/SessionNoop@1" },
@@ -95,6 +102,13 @@
             }
           }
         }
+      },
+      {
+        "name": "blob",
+        "cap": "sys/blob@1",
+        "params": {
+          "record": {}
+        }
       }
     ]
   },
@@ -116,14 +130,22 @@
   "module_bindings": {
     "aos.agent/SessionWorkflow@1": {
       "slots": {
+        "blob": "blob",
         "llm": "llm"
       }
     }
   },
   "effects": [
+    { "name": "sys/blob.put@1" },
+    { "name": "sys/blob.get@1" },
     { "name": "sys/llm.generate@1" },
     { "name": "sys/workspace.resolve@1" },
     { "name": "sys/workspace.read_ref@1" },
     { "name": "sys/workspace.read_bytes@1" }
+  ],
+  "effect_bindings": [
+    { "kind": "blob.put", "adapter_id": "blob.put" },
+    { "kind": "blob.get", "adapter_id": "blob.get" },
+    { "kind": "llm.generate", "adapter_id": "llm.generate" }
   ]
 }

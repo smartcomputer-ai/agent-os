@@ -673,11 +673,6 @@ fn preflight_external_effect_routes(
             continue;
         } else {
             let fallback = kind.clone();
-            log::warn!(
-                "external effect kind '{}' has no explicit manifest.effect_bindings entry; using compatibility fallback route '{}'",
-                kind,
-                fallback
-            );
             compatibility_fallback_kinds.push(kind.clone());
             fallback
         };
@@ -690,6 +685,12 @@ fn preflight_external_effect_routes(
 
     compatibility_fallback_kinds.sort();
     compatibility_fallback_kinds.dedup();
+    if !compatibility_fallback_kinds.is_empty() {
+        log::debug!(
+            "using compatibility fallback routes for external effects without manifest.effect_bindings: {}",
+            compatibility_fallback_kinds.join(", ")
+        );
+    }
 
     if !missing_bindings.is_empty() {
         let missing_kinds = missing_bindings.join(", ");
@@ -726,7 +727,7 @@ fn preflight_external_effect_routes(
         host_provides,
         compatibility_fallback_kinds,
     };
-    log::info!(
+    log::debug!(
         "effect route diagnostics: strict_effect_bindings={} world_requires={} host_provides={} compatibility_fallback_kinds={}",
         diagnostics.strict_effect_bindings,
         format_route_map(&diagnostics.world_requires),
