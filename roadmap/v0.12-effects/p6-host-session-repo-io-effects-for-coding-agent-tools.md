@@ -86,21 +86,49 @@ Those are orchestration/runtime concerns in session state + host loop.
 
 All new `host.fs.*` params include `session_id`.
 
+Cross-effect alignment with P4:
+
+1. For read/search/list style outputs, use `output_mode?: auto|require_inline`.
+2. Under `auto`, adapters may return inline payloads for small data and `blob`
+   payloads for large data.
+3. Under `require_inline`, adapters must return inline payloads or fail with
+   `status: error` and machine-readable `error_code` (for example
+   `inline_required_too_large`).
+4. Keep payload arms aligned with P4 `host.exec`:
+   - `inline_text { text }`
+   - `inline_bytes { bytes }`
+   - `blob { blob_ref, size_bytes, preview_bytes? }`
+
+LLM-facing default posture:
+
+1. Default `output_mode` is `auto`.
+2. For small UTF-8 payloads, prefer `inline_text` so tool results can be sent to
+   the model without an extra blob fetch.
+3. For large or non-inline-safe payloads, return `blob` deterministically.
+4. Any future `host.fs.*` effect returning potentially large content should adopt
+   this same `output_mode` contract.
+
 ### `host.fs.read_file`
 
 Params:
 
 1. `session_id`
 2. `path` (session-relative or canonicalized under allowed roots)
-3. `offset?` (line or byte offset; choose one mode for v0.12 and keep stable)
-4. `limit?`
+3. `offset_bytes?`
+4. `max_bytes?`
 5. `encoding?` (`utf8|bytes`)
+6. `output_mode?` (`auto|require_inline`)
 
 Receipt:
 
-1. `content` variant: `inline_text | inline_bytes | blob`
-2. `truncated` bool
-3. `size_bytes`
+1. `status`: `ok|not_found|is_directory|forbidden|error`
+2. `content?` variant:
+   - `inline_text { text }`
+   - `inline_bytes { bytes }`
+   - `blob { blob_ref, size_bytes, preview_bytes? }`
+3. `truncated?` bool
+4. `size_bytes?`
+5. `error_code?`
 
 ### `host.fs.write_file`
 
@@ -108,15 +136,20 @@ Params:
 
 1. `session_id`
 2. `path`
-3. `content` variant: `text | bytes | blob_ref`
+3. `content` variant:
+   - `inline_text { text }`
+   - `inline_bytes { bytes }`
+   - `blob_ref { blob_ref }`
 4. `create_parents?`
 5. `mode?` (`overwrite|create_new`)
 
 Receipt:
 
-1. `written_bytes`
-2. `created` bool
-3. `new_mtime_ns?`
+1. `status`: `ok|conflict|forbidden|error`
+2. `written_bytes?`
+3. `created?` bool
+4. `new_mtime_ns?`
+5. `error_code?`
 
 ### `host.fs.edit_file`
 
@@ -130,23 +163,28 @@ Params:
 
 Receipt:
 
-1. `replacements`
-2. `applied` bool
-3. `error_code?` (for ambiguous/not-found semantics)
+1. `status`: `ok|not_found|ambiguous|forbidden|error`
+2. `replacements?`
+3. `applied?` bool
+4. `error_code?` (for ambiguous/not-found semantics)
 
 ### `host.fs.apply_patch`
 
 Params:
 
 1. `session_id`
-2. `patch_text` (v4a-compatible in v0.12)
+2. `patch` variant:
+   - `inline_text { text }`
+   - `blob_ref { blob_ref }`
 3. `dry_run?`
 
 Receipt:
 
-1. `files_changed`
-2. `ops` summary (add/update/delete/move counts)
-3. `errors?`
+1. `status`: `ok|reject|forbidden|error`
+2. `files_changed?`
+3. `ops?` summary (add/update/delete/move counts)
+4. `errors?`
+5. `error_code?`
 
 ### `host.fs.grep`
 
@@ -158,12 +196,17 @@ Params:
 4. `glob_filter?`
 5. `case_insensitive?`
 6. `max_results?`
+7. `output_mode?` (`auto|require_inline`)
 
 Receipt:
 
-1. `matches` variant: `inline_text | blob`
-2. `match_count`
-3. `truncated` bool
+1. `status`: `ok|forbidden|error`
+2. `matches?` variant:
+   - `inline_text { text }`
+   - `blob { blob_ref, size_bytes, preview_bytes? }`
+3. `match_count?`
+4. `truncated?` bool
+5. `error_code?`
 
 ### `host.fs.glob`
 
@@ -173,12 +216,17 @@ Params:
 2. `pattern`
 3. `path?`
 4. `max_results?`
+5. `output_mode?` (`auto|require_inline`)
 
 Receipt:
 
-1. `paths` variant: `inline_text | blob`
-2. `count`
-3. `truncated` bool
+1. `status`: `ok|forbidden|error`
+2. `paths?` variant:
+   - `inline_text { text }`
+   - `blob { blob_ref, size_bytes, preview_bytes? }`
+3. `count?`
+4. `truncated?` bool
+5. `error_code?`
 
 ## Capability and Policy
 
@@ -204,7 +252,9 @@ Implement new in-process adapters that share host session state:
 1. resolve session and validate active/not expired,
 2. canonicalize path against session workdir + allowed roots,
 3. perform operation with deterministic receipt encoding,
-4. return large payloads as blob refs (consistent with host output + P5 posture).
+4. follow P4 `output_mode` behavior: `auto` may inline-or-blob; `require_inline`
+   must fail deterministically when limits would be exceeded.
+5. return large payloads as blob refs (consistent with host output + P5 posture).
 
 Implementation guidance:
 
