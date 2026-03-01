@@ -113,21 +113,21 @@ fn default_adapter_routes() -> HashMap<String, AdapterProviderSpec> {
         },
     );
     routes.insert(
-        "process.session.open.default".into(),
+        "host.session.open.default".into(),
         AdapterProviderSpec {
-            adapter_kind: "process.session.open".into(),
+            adapter_kind: "host.session.open".into(),
         },
     );
     routes.insert(
-        "process.exec.default".into(),
+        "host.exec.default".into(),
         AdapterProviderSpec {
-            adapter_kind: "process.exec".into(),
+            adapter_kind: "host.exec".into(),
         },
     );
     routes.insert(
-        "process.session.signal.default".into(),
+        "host.session.signal.default".into(),
         AdapterProviderSpec {
-            adapter_kind: "process.session.signal".into(),
+            adapter_kind: "host.session.signal".into(),
         },
     );
     routes.insert(
@@ -306,14 +306,11 @@ mod tests {
         let cfg = HostConfig::default();
         assert!(cfg.adapter_routes.contains_key("http.default"));
         assert!(cfg.adapter_routes.contains_key("llm.default"));
+        assert!(cfg.adapter_routes.contains_key("host.session.open.default"));
+        assert!(cfg.adapter_routes.contains_key("host.exec.default"));
         assert!(
             cfg.adapter_routes
-                .contains_key("process.session.open.default")
-        );
-        assert!(cfg.adapter_routes.contains_key("process.exec.default"));
-        assert!(
-            cfg.adapter_routes
-                .contains_key("process.session.signal.default")
+                .contains_key("host.session.signal.default")
         );
         assert!(cfg.adapter_routes.contains_key("timer.default"));
         assert!(cfg.adapter_routes.contains_key("vault.put.default"));

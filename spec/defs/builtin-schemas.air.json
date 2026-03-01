@@ -38,7 +38,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessMount@1",
+    "name": "sys/HostMount@1",
     "type": {
       "record": {
         "host_path": { "text": {} },
@@ -49,10 +49,10 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessLocalTarget@1",
+    "name": "sys/HostLocalTarget@1",
     "type": {
       "record": {
-        "mounts": { "option": { "list": { "ref": "sys/ProcessMount@1" } } },
+        "mounts": { "option": { "list": { "ref": "sys/HostMount@1" } } },
         "workdir": { "option": { "text": {} } },
         "env": {
           "option": {
@@ -68,19 +68,19 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessTarget@1",
+    "name": "sys/HostTarget@1",
     "type": {
       "variant": {
-        "local": { "ref": "sys/ProcessLocalTarget@1" }
+        "local": { "ref": "sys/HostLocalTarget@1" }
       }
     }
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessSessionOpenParams@1",
+    "name": "sys/HostSessionOpenParams@1",
     "type": {
       "record": {
-        "target": { "ref": "sys/ProcessTarget@1" },
+        "target": { "ref": "sys/HostTarget@1" },
         "session_ttl_ns": { "option": { "nat": {} } },
         "labels": {
           "option": {
@@ -95,7 +95,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessSessionOpenReceipt@1",
+    "name": "sys/HostSessionOpenReceipt@1",
     "type": {
       "record": {
         "session_id": { "text": {} },
@@ -109,7 +109,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessOutput@1",
+    "name": "sys/HostOutput@1",
     "type": {
       "variant": {
         "inline_text": {
@@ -134,7 +134,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessExecParams@1",
+    "name": "sys/HostExecParams@1",
     "type": {
       "record": {
         "session_id": { "text": {} },
@@ -156,13 +156,13 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessExecReceipt@1",
+    "name": "sys/HostExecReceipt@1",
     "type": {
       "record": {
         "exit_code": { "int": {} },
         "status": { "text": {} },
-        "stdout": { "option": { "ref": "sys/ProcessOutput@1" } },
-        "stderr": { "option": { "ref": "sys/ProcessOutput@1" } },
+        "stdout": { "option": { "ref": "sys/HostOutput@1" } },
+        "stderr": { "option": { "ref": "sys/HostOutput@1" } },
         "started_at_ns": { "nat": {} },
         "ended_at_ns": { "nat": {} },
         "error_code": { "option": { "text": {} } },
@@ -172,7 +172,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessSessionSignalParams@1",
+    "name": "sys/HostSessionSignalParams@1",
     "type": {
       "record": {
         "session_id": { "text": {} },
@@ -183,7 +183,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessSessionSignalReceipt@1",
+    "name": "sys/HostSessionSignalReceipt@1",
     "type": {
       "record": {
         "status": { "text": {} },
@@ -196,7 +196,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ProcessCapParams@1",
+    "name": "sys/HostCapParams@1",
     "type": {
       "record": {
         "allowed_targets": { "option": { "set": { "text": {} } } },

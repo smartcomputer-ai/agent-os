@@ -85,16 +85,16 @@ pub struct TimerSetReceipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessMount {
+pub struct HostMount {
     pub host_path: String,
     pub guest_path: String,
     pub mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessLocalTarget {
+pub struct HostLocalTarget {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mounts: Option<Vec<ProcessMount>>,
+    pub mounts: Option<Vec<HostMount>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workdir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -103,14 +103,14 @@ pub struct ProcessLocalTarget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessTarget {
+pub struct HostTarget {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local: Option<ProcessLocalTarget>,
+    pub local: Option<HostLocalTarget>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessSessionOpenParams {
-    pub target: ProcessTarget,
+pub struct HostSessionOpenParams {
+    pub target: HostTarget,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_ttl_ns: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -118,7 +118,7 @@ pub struct ProcessSessionOpenParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessSessionOpenReceipt {
+pub struct HostSessionOpenReceipt {
     pub session_id: String,
     pub status: String,
     pub started_at_ns: u64,
@@ -131,18 +131,18 @@ pub struct ProcessSessionOpenReceipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessInlineText {
+pub struct HostInlineText {
     pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessInlineBytes {
+pub struct HostInlineBytes {
     #[serde(with = "serde_bytes")]
     pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessBlobOutput {
+pub struct HostBlobOutput {
     pub blob_ref: HashRef,
     pub size_bytes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -151,14 +151,14 @@ pub struct ProcessBlobOutput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
-pub enum ProcessOutput {
-    InlineText { inline_text: ProcessInlineText },
-    InlineBytes { inline_bytes: ProcessInlineBytes },
-    Blob { blob: ProcessBlobOutput },
+pub enum HostOutput {
+    InlineText { inline_text: HostInlineText },
+    InlineBytes { inline_bytes: HostInlineBytes },
+    Blob { blob: HostBlobOutput },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessExecParams {
+pub struct HostExecParams {
     pub session_id: String,
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -174,13 +174,13 @@ pub struct ProcessExecParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessExecReceipt {
+pub struct HostExecReceipt {
     pub exit_code: i32,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stdout: Option<ProcessOutput>,
+    pub stdout: Option<HostOutput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stderr: Option<ProcessOutput>,
+    pub stderr: Option<HostOutput>,
     pub started_at_ns: u64,
     pub ended_at_ns: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -190,7 +190,7 @@ pub struct ProcessExecReceipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessSessionSignalParams {
+pub struct HostSessionSignalParams {
     pub session_id: String,
     pub signal: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,7 +198,7 @@ pub struct ProcessSessionSignalParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessSessionSignalReceipt {
+pub struct HostSessionSignalReceipt {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,

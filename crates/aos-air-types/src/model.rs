@@ -536,7 +536,7 @@ impl CapType {
     pub const BLOB: &'static str = "blob";
     pub const TIMER: &'static str = "timer";
     pub const LLM_BASIC: &'static str = "llm.basic";
-    pub const PROCESS: &'static str = "process";
+    pub const HOST: &'static str = "host";
     pub const SECRET: &'static str = "secret";
     pub const QUERY: &'static str = "query";
     pub const WORKSPACE: &'static str = "workspace";
@@ -565,8 +565,8 @@ impl CapType {
         Self::new(Self::LLM_BASIC)
     }
 
-    pub fn process() -> Self {
-        Self::new(Self::PROCESS)
+    pub fn host() -> Self {
+        Self::new(Self::HOST)
     }
 
     pub fn secret() -> Self {
@@ -764,9 +764,9 @@ impl EffectKind {
     pub const BLOB_PUT: &'static str = "blob.put";
     pub const BLOB_GET: &'static str = "blob.get";
     pub const TIMER_SET: &'static str = "timer.set";
-    pub const PROCESS_SESSION_OPEN: &'static str = "process.session.open";
-    pub const PROCESS_EXEC: &'static str = "process.exec";
-    pub const PROCESS_SESSION_SIGNAL: &'static str = "process.session.signal";
+    pub const HOST_SESSION_OPEN: &'static str = "host.session.open";
+    pub const HOST_EXEC: &'static str = "host.exec";
+    pub const HOST_SESSION_SIGNAL: &'static str = "host.session.signal";
     pub const LLM_GENERATE: &'static str = "llm.generate";
     pub const VAULT_PUT: &'static str = "vault.put";
     pub const VAULT_ROTATE: &'static str = "vault.rotate";
@@ -809,16 +809,16 @@ impl EffectKind {
         Self::new(Self::TIMER_SET)
     }
 
-    pub fn process_session_open() -> Self {
-        Self::new(Self::PROCESS_SESSION_OPEN)
+    pub fn host_session_open() -> Self {
+        Self::new(Self::HOST_SESSION_OPEN)
     }
 
-    pub fn process_exec() -> Self {
-        Self::new(Self::PROCESS_EXEC)
+    pub fn host_exec() -> Self {
+        Self::new(Self::HOST_EXEC)
     }
 
-    pub fn process_session_signal() -> Self {
-        Self::new(Self::PROCESS_SESSION_SIGNAL)
+    pub fn host_session_signal() -> Self {
+        Self::new(Self::HOST_SESSION_SIGNAL)
     }
 
     pub fn llm_generate() -> Self {

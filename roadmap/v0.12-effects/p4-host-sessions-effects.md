@@ -1,4 +1,4 @@
-# P4: Process Sessions Effects (Essential)
+# P4: Host Sessions Effects (Essential)
 
 **Priority**: P4  
 **Status**: Complete  
@@ -6,7 +6,7 @@
 
 ## Goal
 
-Add an essential process-execution effect family for agent workloads (coding,
+Add an essential host-execution effect family for agent workloads (coding,
 build/test, repo operations) using a session model that is:
 
 1. capability-gated at session acquisition time,
@@ -31,28 +31,28 @@ References:
 
 ## Design Summary
 
-Introduce a process-session effect family:
+Introduce a host-session effect family:
 
-1. `process.session.open`
-2. `process.exec`
-3. `process.session.signal`
+1. `host.session.open`
+2. `host.exec`
+3. `host.session.signal`
 
-Primary security boundary is session definition (`process.session.open`).
+Primary security boundary is session definition (`host.session.open`).
 Per-command gating is operational (timeouts/size limits), not semantic command allowlisting.
 
 ## Minimal Interface (v0.12)
 
 The minimal interface for this slice is exactly these three effects:
 
-1. `process.session.open`
-2. `process.exec`
-3. `process.session.signal`
+1. `host.session.open`
+2. `host.exec`
+3. `host.session.signal`
 
-`process.session.close` is deferred; use `process.session.signal` with `term`.
+`host.session.close` is deferred; use `host.session.signal` with `term`.
 
 ## Effect Contracts (Minimal v1)
 
-## `process.session.open`
+## `host.session.open`
 
 Purpose: create a sandboxed execution session.
 
@@ -74,7 +74,7 @@ Receipt (minimal):
 3. `started_at_ns`
 4. `expires_at_ns?`
 
-## `process.exec`
+## `host.exec`
 
 Purpose: execute a command in an existing session.
 
@@ -111,7 +111,7 @@ Adapter chooses arm based on `output_mode` and size/encoding constraints. This
 avoids mandatory follow-up blob reads for common small textual outputs while
 keeping large outputs CAS-backed under `auto`.
 
-## `process.session.signal`
+## `host.session.signal`
 
 Purpose: terminate or gracefully stop a session.
 
@@ -131,12 +131,12 @@ Receipt (minimal):
 
 ## New cap type
 
-Add cap type: `process`.
+Add cap type: `host`.
 
 Add built-in cap + enforcer pair:
 
-1. `sys/process@1` (`cap_type: "process"`)
-2. `sys/CapEnforceProcess@1` (pure enforcer module)
+1. `sys/host@1` (`cap_type: "host"`)
+2. `sys/CapEnforceHost@1` (pure enforcer module)
 
 Cap schema should constrain session-open envelope:
 
@@ -150,8 +150,8 @@ with canonical schema normalization and current cap-enforcer mechanics.
 
 ## Gating posture
 
-1. Main gate is `process.session.open`.
-2. `process.exec`/signal operations are authorized within opened-session scope + operational limits.
+1. Main gate is `host.session.open`.
+2. `host.exec`/signal operations are authorized within opened-session scope + operational limits.
 3. Policy remains origin-aware and can force broker workflows.
 
 Note: `origin_scope` is part of `defeffect`, but current runtime enforcement focus is module allowlist + cap/policy checks. Do not rely on `origin_scope` alone as the security boundary in this phase.
@@ -182,19 +182,19 @@ This keeps v0.12 grounded while preserving the target UX.
 
 ## Routing and Host Integration
 
-1. P2/P3 route process kinds via optional `effect_bindings` (`kind -> adapter_id`).
+1. P2/P3 route host kinds via optional `effect_bindings` (`kind -> adapter_id`).
 2. Compatibility fallback remains kind-keyed in rollout mode.
-3. P1 preflight should treat required external process kinds like any other external effect.
+3. P1 preflight should treat required external host kinds like any other external effect.
 
 ## v0.12 Implementation Slice
 
 ## In scope
 
-1. Add `process` cap type + cap enforcer contract.
+1. Add `host` cap type + cap enforcer contract.
 2. Add `defeffect`/schemas for:
-   - `process.session.open`
-   - `process.exec`
-   - `process.session.signal`
+   - `host.session.open`
+   - `host.exec`
+   - `host.session.signal`
 3. In-process adapter implementation for local runtime.
 4. Receipt-first output contract: inline for small UTF-8/bytes, blob refs for large outputs.
 
@@ -213,7 +213,7 @@ This keeps v0.12 grounded while preserving the target UX.
 
 ## Decision in One Sentence
 
-Adopt a capability-gated `process.session` effect family where `open` defines
+Adopt a capability-gated `host.session` effect family where `open` defines
 the security boundary, `exec` performs work inside that boundary, and outcomes
 flow through strict receipt-first journaling (with streaming as a follow-up
 API extension).
@@ -221,21 +221,21 @@ API extension).
 ## Completion Notes (2026-02-28)
 
 1. Added built-in effect definitions and schemas for:
-   - `process.session.open`
-   - `process.exec`
-   - `process.session.signal`
-2. Added new built-in capability `sys/process@1` (`cap_type: "process"`) with
-   `sys/ProcessCapParams@1` schema and pure cap enforcer module
-   `sys/CapEnforceProcess@1`.
-3. Implemented `cap_enforce_process` in `aos-sys` and wired default kernel
-   cap-type-to-enforcer mapping (`process -> sys/CapEnforceProcess@1`).
-4. Implemented in-process host adapters for local process sessions:
-   - open adapter (`process.session.open`)
-   - exec adapter (`process.exec`)
-   - signal adapter (`process.session.signal`)
-5. `process.exec` output contract is live:
+   - `host.session.open`
+   - `host.exec`
+   - `host.session.signal`
+2. Added new built-in capability `sys/host@1` (`cap_type: "host"`) with
+   `sys/HostCapParams@1` schema and pure cap enforcer module
+   `sys/CapEnforceHost@1`.
+3. Implemented `cap_enforce_host` in `aos-sys` and wired default kernel
+   cap-type-to-enforcer mapping (`host -> sys/CapEnforceHost@1`).
+4. Implemented in-process host adapters for local host sessions:
+   - open adapter (`host.session.open`)
+   - exec adapter (`host.exec`)
+   - signal adapter (`host.session.signal`)
+5. `host.exec` output contract is live:
    - `output_mode=auto`: inline small outputs, CAS blob refs for large outputs
    - `output_mode=require_inline`: returns payload `status:error` with
      `error_code=inline_required_too_large` when output cannot be safely inlined.
-6. Host profile defaults and startup route preflight include process kinds the
+6. Host profile defaults and startup route preflight include host kinds the
    same way as other external effects, with compatibility routing retained.

@@ -361,8 +361,8 @@ const SYS_MODULES: &[SysModuleSpec] = &[
         bin: "cap_enforce_workspace",
     },
     SysModuleSpec {
-        name: "sys/CapEnforceProcess@1",
-        bin: "cap_enforce_process",
+        name: "sys/CapEnforceHost@1",
+        bin: "cap_enforce_host",
     },
 ];
 

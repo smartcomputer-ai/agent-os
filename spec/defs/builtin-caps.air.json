@@ -64,11 +64,11 @@
   },
   {
     "$kind": "defcap",
-    "name": "sys/process@1",
-    "cap_type": "process",
-    "schema": { "ref": "sys/ProcessCapParams@1" },
-    "enforcer": { "module": "sys/CapEnforceProcess@1" },
-    "$comment": "Grants process.session.open/process.exec/process.session.signal under session and operational constraints."
+    "name": "sys/host@1",
+    "cap_type": "host",
+    "schema": { "ref": "sys/HostCapParams@1" },
+    "enforcer": { "module": "sys/CapEnforceHost@1" },
+    "$comment": "Grants host.session.open/host.exec/host.session.signal under session and operational constraints."
   },
   {
     "$kind": "defcap",

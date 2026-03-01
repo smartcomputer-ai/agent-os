@@ -27,7 +27,7 @@
   },
   {
     "$kind": "defmodule",
-    "name": "sys/CapEnforceProcess@1",
+    "name": "sys/CapEnforceHost@1",
     "module_kind": "pure",
     "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "abi": {

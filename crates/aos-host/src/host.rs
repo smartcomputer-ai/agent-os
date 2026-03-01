@@ -15,7 +15,7 @@ use aos_store::{FsStore, Store};
 
 use crate::adapters::blob_get::BlobGetAdapter;
 use crate::adapters::blob_put::BlobPutAdapter;
-use crate::adapters::process::make_process_adapters;
+use crate::adapters::host::make_host_adapters;
 use crate::adapters::registry::AdapterRegistry;
 use crate::adapters::registry::AdapterRegistryConfig;
 #[cfg(not(feature = "adapter-http"))]
@@ -745,7 +745,7 @@ fn default_registry<S: Store + 'static>(store: Arc<S>, config: &HostConfig) -> A
     registry.register(Box::new(StubVaultRotateAdapter));
     registry.register(Box::new(BlobPutAdapter::new(store.clone())));
     registry.register(Box::new(BlobGetAdapter::new(store.clone())));
-    let (process_open, process_exec, process_signal) = make_process_adapters(store.clone());
+    let (process_open, process_exec, process_signal) = make_host_adapters(store.clone());
     registry.register(Box::new(process_open));
     registry.register(Box::new(process_exec));
     registry.register(Box::new(process_signal));

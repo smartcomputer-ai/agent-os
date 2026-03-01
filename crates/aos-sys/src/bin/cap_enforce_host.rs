@@ -1,4 +1,4 @@
-//! Cap enforcer for process effects (`sys/CapEnforceProcess@1`).
+//! Cap enforcer for host effects (`sys/CapEnforceHost@1`).
 
 #![allow(improper_ctypes_definitions)]
 #![no_std]
@@ -23,13 +23,13 @@ fn main() {}
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {}
 
-aos_pure!(CapEnforceProcess);
+aos_pure!(CapEnforceHost);
 
 #[derive(Default)]
-struct CapEnforceProcess;
+struct CapEnforceHost;
 
 #[derive(Deserialize)]
-struct ProcessCapParams {
+struct HostCapParams {
     allowed_targets: Option<Vec<String>>,
     network_modes: Option<Vec<String>>,
     local_mount_roots: Option<Vec<String>>,
@@ -49,33 +49,33 @@ struct ProcessCapParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ProcessTarget {
-    local: Option<ProcessLocalTarget>,
+struct HostTarget {
+    local: Option<HostLocalTarget>,
 }
 
 #[derive(Deserialize)]
-struct ProcessLocalTarget {
-    mounts: Option<Vec<ProcessMount>>,
+struct HostLocalTarget {
+    mounts: Option<Vec<HostMount>>,
     workdir: Option<String>,
     env: Option<BTreeMap<String, String>>,
     network_mode: String,
 }
 
 #[derive(Deserialize)]
-struct ProcessMount {
+struct HostMount {
     host_path: String,
     guest_path: String,
     mode: String,
 }
 
 #[derive(Deserialize)]
-struct ProcessSessionOpenParams {
-    target: ProcessTarget,
+struct HostSessionOpenParams {
+    target: HostTarget,
     session_ttl_ns: Option<u64>,
 }
 
 #[derive(Deserialize)]
-struct ProcessExecParams {
+struct HostExecParams {
     argv: Vec<String>,
     cwd: Option<String>,
     timeout_ns: Option<u64>,
@@ -84,11 +84,11 @@ struct ProcessExecParams {
 }
 
 #[derive(Deserialize)]
-struct ProcessSignalParams {
+struct HostSignalParams {
     signal: String,
 }
 
-impl PureModule for CapEnforceProcess {
+impl PureModule for CapEnforceHost {
     type Input = CapCheckInput;
     type Output = CapCheckOutput;
 
@@ -97,7 +97,7 @@ impl PureModule for CapEnforceProcess {
         input: Self::Input,
         _ctx: Option<&PureContext>,
     ) -> Result<Self::Output, PureError> {
-        let cap_params: ProcessCapParams = match decode_cbor(&input.cap_params) {
+        let cap_params: HostCapParams = match decode_cbor(&input.cap_params) {
             Ok(value) => value,
             Err(err) => {
                 return Ok(deny("cap_params_invalid", err.to_string()));
@@ -105,8 +105,8 @@ impl PureModule for CapEnforceProcess {
         };
 
         match input.effect_kind.as_str() {
-            "process.session.open" => {
-                let params: ProcessSessionOpenParams = match decode_cbor(&input.effect_params) {
+            "host.session.open" => {
+                let params: HostSessionOpenParams = match decode_cbor(&input.effect_params) {
                     Ok(value) => value,
                     Err(err) => {
                         return Ok(deny("effect_params_invalid", err.to_string()));
@@ -114,8 +114,8 @@ impl PureModule for CapEnforceProcess {
                 };
                 validate_open(&cap_params, params)
             }
-            "process.exec" => {
-                let params: ProcessExecParams = match decode_cbor(&input.effect_params) {
+            "host.exec" => {
+                let params: HostExecParams = match decode_cbor(&input.effect_params) {
                     Ok(value) => value,
                     Err(err) => {
                         return Ok(deny("effect_params_invalid", err.to_string()));
@@ -123,8 +123,8 @@ impl PureModule for CapEnforceProcess {
                 };
                 validate_exec(&cap_params, params)
             }
-            "process.session.signal" => {
-                let params: ProcessSignalParams = match decode_cbor(&input.effect_params) {
+            "host.session.signal" => {
+                let params: HostSignalParams = match decode_cbor(&input.effect_params) {
                     Ok(value) => value,
                     Err(err) => {
                         return Ok(deny("effect_params_invalid", err.to_string()));
@@ -134,18 +134,15 @@ impl PureModule for CapEnforceProcess {
             }
             other => Ok(deny(
                 "effect_kind_mismatch",
-                format!(
-                    "enforcer 'sys/CapEnforceProcess@1' cannot handle '{}'",
-                    other
-                ),
+                format!("enforcer 'sys/CapEnforceHost@1' cannot handle '{}'", other),
             )),
         }
     }
 }
 
 fn validate_open(
-    cap: &ProcessCapParams,
-    params: ProcessSessionOpenParams,
+    cap: &HostCapParams,
+    params: HostSessionOpenParams,
 ) -> Result<CapCheckOutput, PureError> {
     if !allowlist_contains(&cap.allowed_targets, "local", |v| v.to_ascii_lowercase()) {
         return Ok(deny(
@@ -243,10 +240,7 @@ fn validate_open(
     Ok(allow())
 }
 
-fn validate_exec(
-    cap: &ProcessCapParams,
-    params: ProcessExecParams,
-) -> Result<CapCheckOutput, PureError> {
+fn validate_exec(cap: &HostCapParams, params: HostExecParams) -> Result<CapCheckOutput, PureError> {
     if params.argv.is_empty() {
         return Ok(deny("argv_invalid", "argv must not be empty"));
     }
@@ -325,8 +319,8 @@ fn validate_exec(
 }
 
 fn validate_signal(
-    cap: &ProcessCapParams,
-    params: ProcessSignalParams,
+    cap: &HostCapParams,
+    params: HostSignalParams,
 ) -> Result<CapCheckOutput, PureError> {
     if !allowlist_contains(&cap.allowed_signals, &params.signal, |v| {
         v.to_ascii_lowercase()

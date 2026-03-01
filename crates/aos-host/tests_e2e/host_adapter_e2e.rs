@@ -1,5 +1,5 @@
-//! End-to-end tests for real process adapters (`process.session.open`,
-//! `process.exec`, `process.session.signal`).
+//! End-to-end tests for real process adapters (`host.session.open`,
+//! `host.exec`, `host.session.signal`).
 
 #![cfg(feature = "e2e-tests")]
 
@@ -8,14 +8,12 @@ use std::sync::Arc;
 
 use aos_cbor::Hash;
 use aos_effects::builtins::{
-    ProcessExecParams, ProcessExecReceipt, ProcessLocalTarget, ProcessOutput,
-    ProcessSessionOpenParams, ProcessSessionOpenReceipt, ProcessSessionSignalParams,
-    ProcessSessionSignalReceipt, ProcessTarget,
+    HostExecParams, HostExecReceipt, HostLocalTarget, HostOutput, HostSessionOpenParams,
+    HostSessionOpenReceipt, HostSessionSignalParams, HostSessionSignalReceipt, HostTarget,
 };
 use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
-use aos_host::adapters::process::{
-    ProcessExecAdapter, ProcessSessionOpenAdapter, ProcessSessionSignalAdapter,
-    make_process_adapters,
+use aos_host::adapters::host::{
+    HostExecAdapter, HostSessionOpenAdapter, HostSessionSignalAdapter, make_host_adapters,
 };
 use aos_host::adapters::traits::AsyncEffectAdapter;
 use aos_store::{MemStore, Store};
@@ -28,10 +26,10 @@ fn shell_available() -> bool {
     Path::new("/bin/sh").exists()
 }
 
-fn open_params() -> ProcessSessionOpenParams {
-    ProcessSessionOpenParams {
-        target: ProcessTarget {
-            local: Some(ProcessLocalTarget {
+fn open_params() -> HostSessionOpenParams {
+    HostSessionOpenParams {
+        target: HostTarget {
+            local: Some(HostLocalTarget {
                 mounts: None,
                 workdir: None,
                 env: None,
@@ -43,34 +41,34 @@ fn open_params() -> ProcessSessionOpenParams {
     }
 }
 
-async fn open_session(open: &ProcessSessionOpenAdapter) -> String {
+async fn open_session(open: &HostSessionOpenAdapter) -> String {
     let receipt = open
         .execute(&build_intent(
-            EffectKind::process_session_open(),
+            EffectKind::host_session_open(),
             serde_cbor::to_vec(&open_params()).unwrap(),
             1,
         ))
         .await
         .unwrap();
     assert_eq!(receipt.status, ReceiptStatus::Ok);
-    let payload: ProcessSessionOpenReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    let payload: HostSessionOpenReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
     assert_eq!(payload.status, "ready");
     payload.session_id
 }
 
 async fn signal_session(
-    signal: &ProcessSessionSignalAdapter,
+    signal: &HostSessionSignalAdapter,
     session_id: &str,
     seed: u8,
-) -> ProcessSessionSignalReceipt {
-    let params = ProcessSessionSignalParams {
+) -> HostSessionSignalReceipt {
+    let params = HostSessionSignalParams {
         session_id: session_id.into(),
         signal: "term".into(),
         grace_timeout_ns: None,
     };
     let receipt = signal
         .execute(&build_intent(
-            EffectKind::process_session_signal(),
+            EffectKind::host_session_signal(),
             serde_cbor::to_vec(&params).unwrap(),
             seed,
         ))
@@ -83,11 +81,11 @@ async fn signal_session(
 fn adapters(
     store: Arc<MemStore>,
 ) -> (
-    ProcessSessionOpenAdapter,
-    ProcessExecAdapter<MemStore>,
-    ProcessSessionSignalAdapter,
+    HostSessionOpenAdapter,
+    HostExecAdapter<MemStore>,
+    HostSessionSignalAdapter,
 ) {
-    make_process_adapters(store)
+    make_host_adapters(store)
 }
 
 #[tokio::test]
@@ -106,7 +104,7 @@ async fn process_exec_reads_stdin_and_signal_transitions() {
     let stdin_hash = store.put_blob(b"from-stdin").unwrap();
     let stdin_ref = aos_air_types::HashRef::new(stdin_hash.to_hex()).unwrap();
 
-    let exec_params = ProcessExecParams {
+    let exec_params = HostExecParams {
         session_id: session_id.clone(),
         argv: vec!["/bin/sh".into(), "-lc".into(), "cat".into()],
         cwd: None,
@@ -117,19 +115,18 @@ async fn process_exec_reads_stdin_and_signal_transitions() {
     };
     let exec_receipt = exec
         .execute(&build_intent(
-            EffectKind::process_exec(),
+            EffectKind::host_exec(),
             serde_cbor::to_vec(&exec_params).unwrap(),
             2,
         ))
         .await
         .unwrap();
     assert_eq!(exec_receipt.status, ReceiptStatus::Ok);
-    let exec_payload: ProcessExecReceipt =
-        serde_cbor::from_slice(&exec_receipt.payload_cbor).unwrap();
+    let exec_payload: HostExecReceipt = serde_cbor::from_slice(&exec_receipt.payload_cbor).unwrap();
     assert_eq!(exec_payload.status, "ok");
     assert_eq!(exec_payload.exit_code, 0);
     match exec_payload.stdout {
-        Some(ProcessOutput::InlineText { inline_text }) => {
+        Some(HostOutput::InlineText { inline_text }) => {
             assert_eq!(inline_text.text, "from-stdin")
         }
         other => panic!("expected inline text stdout, got {other:?}"),
@@ -142,15 +139,14 @@ async fn process_exec_reads_stdin_and_signal_transitions() {
 
     let exec_after_close = exec
         .execute(&build_intent(
-            EffectKind::process_exec(),
+            EffectKind::host_exec(),
             serde_cbor::to_vec(&exec_params).unwrap(),
             5,
         ))
         .await
         .unwrap();
     assert_eq!(exec_after_close.status, ReceiptStatus::Error);
-    let payload: ProcessExecReceipt =
-        serde_cbor::from_slice(&exec_after_close.payload_cbor).unwrap();
+    let payload: HostExecReceipt = serde_cbor::from_slice(&exec_after_close.payload_cbor).unwrap();
     assert_eq!(payload.status, "error");
     assert_eq!(payload.error_code.as_deref(), Some("session_closed"));
 }
@@ -166,7 +162,7 @@ async fn process_exec_timeout_maps_timeout_status() {
     let (open, exec, _) = adapters(store);
     let session_id = open_session(&open).await;
 
-    let exec_params = ProcessExecParams {
+    let exec_params = HostExecParams {
         session_id,
         argv: vec!["/bin/sh".into(), "-lc".into(), "sleep 1".into()],
         cwd: None,
@@ -178,14 +174,14 @@ async fn process_exec_timeout_maps_timeout_status() {
 
     let receipt = exec
         .execute(&build_intent(
-            EffectKind::process_exec(),
+            EffectKind::host_exec(),
             serde_cbor::to_vec(&exec_params).unwrap(),
             6,
         ))
         .await
         .unwrap();
     assert_eq!(receipt.status, ReceiptStatus::Timeout);
-    let payload: ProcessExecReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    let payload: HostExecReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
     assert_eq!(payload.status, "timeout");
 }
 
@@ -200,7 +196,7 @@ async fn process_exec_auto_large_output_writes_blob() {
     let (open, exec, _) = adapters(store.clone());
     let session_id = open_session(&open).await;
 
-    let exec_params = ProcessExecParams {
+    let exec_params = HostExecParams {
         session_id,
         argv: vec![
             "/bin/sh".into(),
@@ -216,7 +212,7 @@ async fn process_exec_auto_large_output_writes_blob() {
 
     let receipt = exec
         .execute(&build_intent(
-            EffectKind::process_exec(),
+            EffectKind::host_exec(),
             serde_cbor::to_vec(&exec_params).unwrap(),
             7,
         ))
@@ -224,10 +220,10 @@ async fn process_exec_auto_large_output_writes_blob() {
         .unwrap();
     assert_eq!(receipt.status, ReceiptStatus::Ok);
 
-    let payload: ProcessExecReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    let payload: HostExecReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
     let stdout = payload.stdout.expect("stdout expected");
     match stdout {
-        ProcessOutput::Blob { blob } => {
+        HostOutput::Blob { blob } => {
             let hash = Hash::from_hex_str(blob.blob_ref.as_str()).unwrap();
             let bytes = store.get_blob(hash).unwrap();
             assert_eq!(bytes.len() as u64, blob.size_bytes);
@@ -251,7 +247,7 @@ async fn process_exec_require_inline_rejects_large_output() {
     let (open, exec, signal) = adapters(store);
     let session_id = open_session(&open).await;
 
-    let exec_params = ProcessExecParams {
+    let exec_params = HostExecParams {
         session_id: session_id.clone(),
         argv: vec![
             "/bin/sh".into(),
@@ -267,7 +263,7 @@ async fn process_exec_require_inline_rejects_large_output() {
 
     let receipt = exec
         .execute(&build_intent(
-            EffectKind::process_exec(),
+            EffectKind::host_exec(),
             serde_cbor::to_vec(&exec_params).unwrap(),
             8,
         ))
@@ -275,7 +271,7 @@ async fn process_exec_require_inline_rejects_large_output() {
         .unwrap();
     assert_eq!(receipt.status, ReceiptStatus::Error);
 
-    let payload: ProcessExecReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    let payload: HostExecReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
     assert_eq!(payload.status, "error");
     assert_eq!(
         payload.error_code.as_deref(),

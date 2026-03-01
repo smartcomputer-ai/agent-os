@@ -7,9 +7,9 @@ use anyhow::Context;
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_effects::builtins::{
-    ProcessBlobOutput, ProcessExecParams, ProcessExecReceipt, ProcessInlineBytes,
-    ProcessInlineText, ProcessOutput, ProcessSessionOpenParams, ProcessSessionOpenReceipt,
-    ProcessSessionSignalParams, ProcessSessionSignalReceipt,
+    HostBlobOutput, HostExecParams, HostExecReceipt, HostInlineBytes, HostInlineText, HostOutput,
+    HostSessionOpenParams, HostSessionOpenReceipt, HostSessionSignalParams,
+    HostSessionSignalReceipt,
 };
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_store::Store;
@@ -24,7 +24,7 @@ const INLINE_OUTPUT_LIMIT_BYTES: usize = 16 * 1024;
 const OUTPUT_PREVIEW_BYTES: usize = 512;
 
 #[derive(Default)]
-struct ProcessState {
+struct HostState {
     next_session_id: u64,
     sessions: HashMap<String, SessionRecord>,
 }
@@ -39,51 +39,51 @@ struct SessionRecord {
     last_exit_code: Option<i32>,
 }
 
-pub struct ProcessSessionOpenAdapter {
-    state: Arc<Mutex<ProcessState>>,
+pub struct HostSessionOpenAdapter {
+    state: Arc<Mutex<HostState>>,
 }
 
-pub struct ProcessExecAdapter<S: Store> {
-    state: Arc<Mutex<ProcessState>>,
+pub struct HostExecAdapter<S: Store> {
+    state: Arc<Mutex<HostState>>,
     store: Arc<S>,
 }
 
-pub struct ProcessSessionSignalAdapter {
-    state: Arc<Mutex<ProcessState>>,
+pub struct HostSessionSignalAdapter {
+    state: Arc<Mutex<HostState>>,
 }
 
-pub fn make_process_adapters<S: Store + Send + Sync + 'static>(
+pub fn make_host_adapters<S: Store + Send + Sync + 'static>(
     store: Arc<S>,
 ) -> (
-    ProcessSessionOpenAdapter,
-    ProcessExecAdapter<S>,
-    ProcessSessionSignalAdapter,
+    HostSessionOpenAdapter,
+    HostExecAdapter<S>,
+    HostSessionSignalAdapter,
 ) {
-    let state = Arc::new(Mutex::new(ProcessState::default()));
+    let state = Arc::new(Mutex::new(HostState::default()));
     (
-        ProcessSessionOpenAdapter {
+        HostSessionOpenAdapter {
             state: state.clone(),
         },
-        ProcessExecAdapter {
+        HostExecAdapter {
             state: state.clone(),
             store,
         },
-        ProcessSessionSignalAdapter { state },
+        HostSessionSignalAdapter { state },
     )
 }
 
 #[async_trait]
-impl AsyncEffectAdapter for ProcessSessionOpenAdapter {
+impl AsyncEffectAdapter for HostSessionOpenAdapter {
     fn kind(&self) -> &str {
-        EffectKind::PROCESS_SESSION_OPEN
+        EffectKind::HOST_SESSION_OPEN
     }
 
     async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let started_at_ns = now_wallclock_ns();
-        let params: ProcessSessionOpenParams = match serde_cbor::from_slice(&intent.params_cbor) {
+        let params: HostSessionOpenParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => {
-                let payload = ProcessSessionOpenReceipt {
+                let payload = HostSessionOpenReceipt {
                     session_id: String::new(),
                     status: "error".into(),
                     started_at_ns,
@@ -93,7 +93,7 @@ impl AsyncEffectAdapter for ProcessSessionOpenAdapter {
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.open",
+                    "host.session.open",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
@@ -101,7 +101,7 @@ impl AsyncEffectAdapter for ProcessSessionOpenAdapter {
         };
 
         let Some(target_local) = params.target.local else {
-            let payload = ProcessSessionOpenReceipt {
+            let payload = HostSessionOpenReceipt {
                 session_id: String::new(),
                 status: "error".into(),
                 started_at_ns,
@@ -111,7 +111,7 @@ impl AsyncEffectAdapter for ProcessSessionOpenAdapter {
             };
             return Ok(build_receipt(
                 intent,
-                "host.process.open",
+                "host.session.open",
                 ReceiptStatus::Error,
                 &payload,
             )?);
@@ -136,7 +136,7 @@ impl AsyncEffectAdapter for ProcessSessionOpenAdapter {
             },
         );
 
-        let payload = ProcessSessionOpenReceipt {
+        let payload = HostSessionOpenReceipt {
             session_id,
             status: "ready".into(),
             started_at_ns,
@@ -145,22 +145,22 @@ impl AsyncEffectAdapter for ProcessSessionOpenAdapter {
             error_message: None,
         };
 
-        build_receipt(intent, "host.process.open", ReceiptStatus::Ok, &payload)
+        build_receipt(intent, "host.session.open", ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
-impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter<S> {
+impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostExecAdapter<S> {
     fn kind(&self) -> &str {
-        EffectKind::PROCESS_EXEC
+        EffectKind::HOST_EXEC
     }
 
     async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let started_at_ns = now_wallclock_ns();
-        let params: ProcessExecParams = match serde_cbor::from_slice(&intent.params_cbor) {
+        let params: HostExecParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code: -1,
                     status: "error".into(),
                     stdout: None,
@@ -172,7 +172,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
@@ -182,7 +182,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
         let session = {
             let mut state = self.state.lock().await;
             let Some(session) = state.sessions.get_mut(&params.session_id) else {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code: -1,
                     status: "error".into(),
                     stdout: None,
@@ -194,13 +194,13 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
             };
             if session.closed {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code: -1,
                     status: "error".into(),
                     stdout: None,
@@ -212,7 +212,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
@@ -222,7 +222,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 if now > expires_at_ns {
                     session.closed = true;
                     session.ended_at_ns = Some(now);
-                    let payload = ProcessExecReceipt {
+                    let payload = HostExecReceipt {
                         exit_code: -1,
                         status: "error".into(),
                         stdout: None,
@@ -237,7 +237,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                     };
                     return Ok(build_receipt(
                         intent,
-                        "host.process.exec",
+                        "host.exec",
                         ReceiptStatus::Error,
                         &payload,
                     )?);
@@ -248,7 +248,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
 
         let mode = params.output_mode.as_deref().unwrap_or("auto");
         if mode != "auto" && mode != "require_inline" {
-            let payload = ProcessExecReceipt {
+            let payload = HostExecReceipt {
                 exit_code: -1,
                 status: "error".into(),
                 stdout: None,
@@ -260,7 +260,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
             };
             return Ok(build_receipt(
                 intent,
-                "host.process.exec",
+                "host.exec",
                 ReceiptStatus::Error,
                 &payload,
             )?);
@@ -271,7 +271,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 let hash = match Hash::from_hex_str(stdin_ref.as_str()) {
                     Ok(hash) => hash,
                     Err(err) => {
-                        let payload = ProcessExecReceipt {
+                        let payload = HostExecReceipt {
                             exit_code: -1,
                             status: "error".into(),
                             stdout: None,
@@ -283,7 +283,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                         };
                         return Ok(build_receipt(
                             intent,
-                            "host.process.exec",
+                            "host.exec",
                             ReceiptStatus::Error,
                             &payload,
                         )?);
@@ -292,7 +292,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 match self.store.get_blob(hash) {
                     Ok(bytes) => Some(bytes),
                     Err(err) => {
-                        let payload = ProcessExecReceipt {
+                        let payload = HostExecReceipt {
                             exit_code: -1,
                             status: "error".into(),
                             stdout: None,
@@ -304,7 +304,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                         };
                         return Ok(build_receipt(
                             intent,
-                            "host.process.exec",
+                            "host.exec",
                             ReceiptStatus::Error,
                             &payload,
                         )?);
@@ -315,7 +315,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
         };
 
         if params.argv.is_empty() {
-            let payload = ProcessExecReceipt {
+            let payload = HostExecReceipt {
                 exit_code: -1,
                 status: "error".into(),
                 stdout: None,
@@ -327,7 +327,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
             };
             return Ok(build_receipt(
                 intent,
-                "host.process.exec",
+                "host.exec",
                 ReceiptStatus::Error,
                 &payload,
             )?);
@@ -357,7 +357,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(err) => {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code: -1,
                     status: "error".into(),
                     stdout: None,
@@ -369,7 +369,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
@@ -378,7 +378,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
 
         let mut stdin = child.stdin.take();
         let Some(mut stdout) = child.stdout.take() else {
-            let payload = ProcessExecReceipt {
+            let payload = HostExecReceipt {
                 exit_code: -1,
                 status: "error".into(),
                 stdout: None,
@@ -390,13 +390,13 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
             };
             return Ok(build_receipt(
                 intent,
-                "host.process.exec",
+                "host.exec",
                 ReceiptStatus::Error,
                 &payload,
             )?);
         };
         let Some(mut stderr) = child.stderr.take() else {
-            let payload = ProcessExecReceipt {
+            let payload = HostExecReceipt {
                 exit_code: -1,
                 status: "error".into(),
                 stdout: None,
@@ -408,7 +408,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
             };
             return Ok(build_receipt(
                 intent,
-                "host.process.exec",
+                "host.exec",
                 ReceiptStatus::Error,
                 &payload,
             )?);
@@ -450,7 +450,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
         let (exit_code, status, receipt_status) = match wait_outcome {
             WaitOutcome::TimedOut(Ok(_)) => (-1, "timeout", ReceiptStatus::Timeout),
             WaitOutcome::TimedOut(Err(err)) => {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code: -1,
                     status: "error".into(),
                     stdout: None,
@@ -462,13 +462,13 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
             }
             WaitOutcome::Completed(Err(err)) => {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code: -1,
                     status: "error".into(),
                     stdout: None,
@@ -480,7 +480,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
@@ -497,7 +497,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
         let stdout = match materialize_output(self.store.as_ref(), mode, &stdout_bytes) {
             Ok(output) => output,
             Err(OutputMaterializeError::InlineRequiredTooLarge(len)) => {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code,
                     status: "error".into(),
                     stdout: None,
@@ -512,13 +512,13 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
             }
             Err(OutputMaterializeError::Store(err)) => {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code,
                     status: "error".into(),
                     stdout: None,
@@ -530,7 +530,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
@@ -539,7 +539,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
         let stderr = match materialize_output(self.store.as_ref(), mode, &stderr_bytes) {
             Ok(output) => output,
             Err(OutputMaterializeError::InlineRequiredTooLarge(len)) => {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code,
                     status: "error".into(),
                     stdout,
@@ -554,13 +554,13 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
             }
             Err(OutputMaterializeError::Store(err)) => {
-                let payload = ProcessExecReceipt {
+                let payload = HostExecReceipt {
                     exit_code,
                     status: "error".into(),
                     stdout,
@@ -572,7 +572,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.exec",
+                    "host.exec",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
@@ -586,7 +586,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
             }
         }
 
-        let payload = ProcessExecReceipt {
+        let payload = HostExecReceipt {
             exit_code,
             status: status.into(),
             stdout,
@@ -597,21 +597,21 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for ProcessExecAdapter
             error_message: None,
         };
 
-        build_receipt(intent, "host.process.exec", receipt_status, &payload)
+        build_receipt(intent, "host.exec", receipt_status, &payload)
     }
 }
 
 #[async_trait]
-impl AsyncEffectAdapter for ProcessSessionSignalAdapter {
+impl AsyncEffectAdapter for HostSessionSignalAdapter {
     fn kind(&self) -> &str {
-        EffectKind::PROCESS_SESSION_SIGNAL
+        EffectKind::HOST_SESSION_SIGNAL
     }
 
     async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
-        let params: ProcessSessionSignalParams = match serde_cbor::from_slice(&intent.params_cbor) {
+        let params: HostSessionSignalParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => {
-                let payload = ProcessSessionSignalReceipt {
+                let payload = HostSessionSignalReceipt {
                     status: "error".into(),
                     exit_code: None,
                     ended_at_ns: None,
@@ -620,7 +620,7 @@ impl AsyncEffectAdapter for ProcessSessionSignalAdapter {
                 };
                 return Ok(build_receipt(
                     intent,
-                    "host.process.signal",
+                    "host.session.signal",
                     ReceiptStatus::Error,
                     &payload,
                 )?);
@@ -629,39 +629,39 @@ impl AsyncEffectAdapter for ProcessSessionSignalAdapter {
 
         let mut state = self.state.lock().await;
         let Some(session) = state.sessions.get_mut(&params.session_id) else {
-            let payload = ProcessSessionSignalReceipt {
+            let payload = HostSessionSignalReceipt {
                 status: "not_found".into(),
                 exit_code: None,
                 ended_at_ns: None,
                 error_code: None,
                 error_message: None,
             };
-            return build_receipt(intent, "host.process.signal", ReceiptStatus::Ok, &payload);
+            return build_receipt(intent, "host.session.signal", ReceiptStatus::Ok, &payload);
         };
 
         if session.closed {
-            let payload = ProcessSessionSignalReceipt {
+            let payload = HostSessionSignalReceipt {
                 status: "already_exited".into(),
                 exit_code: session.last_exit_code,
                 ended_at_ns: session.ended_at_ns,
                 error_code: None,
                 error_message: None,
             };
-            return build_receipt(intent, "host.process.signal", ReceiptStatus::Ok, &payload);
+            return build_receipt(intent, "host.session.signal", ReceiptStatus::Ok, &payload);
         }
 
         let ended_at_ns = now_wallclock_ns();
         session.closed = true;
         session.ended_at_ns = Some(ended_at_ns);
 
-        let payload = ProcessSessionSignalReceipt {
+        let payload = HostSessionSignalReceipt {
             status: "signaled".into(),
             exit_code: session.last_exit_code,
             ended_at_ns: Some(ended_at_ns),
             error_code: None,
             error_message: None,
         };
-        build_receipt(intent, "host.process.signal", ReceiptStatus::Ok, &payload)
+        build_receipt(intent, "host.session.signal", ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -679,7 +679,7 @@ fn materialize_output<S: Store>(
     store: &S,
     mode: &str,
     bytes: &[u8],
-) -> Result<Option<ProcessOutput>, OutputMaterializeError> {
+) -> Result<Option<HostOutput>, OutputMaterializeError> {
     if bytes.is_empty() {
         return Ok(None);
     }
@@ -701,8 +701,8 @@ fn materialize_output<S: Store>(
     let blob_ref = HashRef::new(hash.to_hex())
         .map_err(|err| OutputMaterializeError::Store(err.to_string()))?;
     let preview = bytes[..bytes.len().min(OUTPUT_PREVIEW_BYTES)].to_vec();
-    Ok(Some(ProcessOutput::Blob {
-        blob: ProcessBlobOutput {
+    Ok(Some(HostOutput::Blob {
+        blob: HostBlobOutput {
             blob_ref,
             size_bytes: bytes.len() as u64,
             preview_bytes: Some(preview),
@@ -710,15 +710,15 @@ fn materialize_output<S: Store>(
     }))
 }
 
-fn to_inline_output(bytes: &[u8]) -> ProcessOutput {
+fn to_inline_output(bytes: &[u8]) -> HostOutput {
     match std::str::from_utf8(bytes) {
-        Ok(text) => ProcessOutput::InlineText {
-            inline_text: ProcessInlineText {
+        Ok(text) => HostOutput::InlineText {
+            inline_text: HostInlineText {
                 text: text.to_string(),
             },
         },
-        Err(_) => ProcessOutput::InlineBytes {
-            inline_bytes: ProcessInlineBytes {
+        Err(_) => HostOutput::InlineBytes {
+            inline_bytes: HostInlineBytes {
                 bytes: bytes.to_vec(),
             },
         },
@@ -757,14 +757,14 @@ fn build_receipt<T: serde::Serialize>(
 mod tests {
     use super::*;
     use aos_air_types::{builtins::builtin_schemas, schema_index::SchemaIndex};
-    use aos_effects::builtins::{ProcessLocalTarget, ProcessTarget};
+    use aos_effects::builtins::{HostLocalTarget, HostTarget};
     use aos_store::MemStore;
     use std::collections::HashMap;
 
     fn intent_for<T: serde::Serialize>(kind: &str, params: &T, seed: u8) -> EffectIntent {
         EffectIntent::from_raw_params(
             EffectKind::new(kind),
-            "cap_process",
+            "cap_host",
             serde_cbor::to_vec(params).expect("encode params"),
             [seed; 32],
         )
@@ -774,11 +774,11 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn process_session_open_exec_signal_roundtrip() {
         let store = Arc::new(MemStore::new());
-        let (open_adapter, exec_adapter, signal_adapter) = make_process_adapters(store);
+        let (open_adapter, exec_adapter, signal_adapter) = make_host_adapters(store);
 
-        let open_params = ProcessSessionOpenParams {
-            target: ProcessTarget {
-                local: Some(ProcessLocalTarget {
+        let open_params = HostSessionOpenParams {
+            target: HostTarget {
+                local: Some(HostLocalTarget {
                     mounts: None,
                     workdir: None,
                     env: None,
@@ -790,24 +790,17 @@ mod tests {
         };
 
         let open_receipt = open_adapter
-            .execute(&intent_for(
-                EffectKind::PROCESS_SESSION_OPEN,
-                &open_params,
-                1,
-            ))
+            .execute(&intent_for(EffectKind::HOST_SESSION_OPEN, &open_params, 1))
             .await
             .expect("open receipt");
         assert_eq!(open_receipt.status, ReceiptStatus::Ok);
-        assert_schema_normalizes(
-            "sys/ProcessSessionOpenReceipt@1",
-            &open_receipt.payload_cbor,
-        );
-        let open_payload: ProcessSessionOpenReceipt =
+        assert_schema_normalizes("sys/HostSessionOpenReceipt@1", &open_receipt.payload_cbor);
+        let open_payload: HostSessionOpenReceipt =
             serde_cbor::from_slice(&open_receipt.payload_cbor).expect("decode open payload");
         assert_eq!(open_payload.status, "ready");
         assert!(!open_payload.session_id.is_empty());
 
-        let exec_params = ProcessExecParams {
+        let exec_params = HostExecParams {
             session_id: open_payload.session_id.clone(),
             argv: vec!["/bin/sh".into(), "-lc".into(), "printf 'hello'".into()],
             cwd: None,
@@ -817,30 +810,30 @@ mod tests {
             output_mode: Some("require_inline".into()),
         };
         let exec_receipt = exec_adapter
-            .execute(&intent_for(EffectKind::PROCESS_EXEC, &exec_params, 2))
+            .execute(&intent_for(EffectKind::HOST_EXEC, &exec_params, 2))
             .await
             .expect("exec receipt");
         assert_eq!(exec_receipt.status, ReceiptStatus::Ok);
-        assert_schema_normalizes("sys/ProcessExecReceipt@1", &exec_receipt.payload_cbor);
-        let exec_payload: ProcessExecReceipt =
+        assert_schema_normalizes("sys/HostExecReceipt@1", &exec_receipt.payload_cbor);
+        let exec_payload: HostExecReceipt =
             serde_cbor::from_slice(&exec_receipt.payload_cbor).expect("decode exec payload");
         assert_eq!(exec_payload.status, "ok");
         assert_eq!(exec_payload.exit_code, 0);
         match exec_payload.stdout {
-            Some(ProcessOutput::InlineText { inline_text }) => {
+            Some(HostOutput::InlineText { inline_text }) => {
                 assert_eq!(inline_text.text, "hello")
             }
             other => panic!("expected inline_text stdout, got {other:?}"),
         }
 
-        let signal_params = ProcessSessionSignalParams {
+        let signal_params = HostSessionSignalParams {
             session_id: open_payload.session_id.clone(),
             signal: "term".into(),
             grace_timeout_ns: None,
         };
         let signal_receipt = signal_adapter
             .execute(&intent_for(
-                EffectKind::PROCESS_SESSION_SIGNAL,
+                EffectKind::HOST_SESSION_SIGNAL,
                 &signal_params,
                 3,
             ))
@@ -848,19 +841,19 @@ mod tests {
             .expect("signal receipt");
         assert_eq!(signal_receipt.status, ReceiptStatus::Ok);
         assert_schema_normalizes(
-            "sys/ProcessSessionSignalReceipt@1",
+            "sys/HostSessionSignalReceipt@1",
             &signal_receipt.payload_cbor,
         );
-        let signal_payload: ProcessSessionSignalReceipt =
+        let signal_payload: HostSessionSignalReceipt =
             serde_cbor::from_slice(&signal_receipt.payload_cbor).expect("decode signal payload");
         assert_eq!(signal_payload.status, "signaled");
 
         let exec_after_close = exec_adapter
-            .execute(&intent_for(EffectKind::PROCESS_EXEC, &exec_params, 4))
+            .execute(&intent_for(EffectKind::HOST_EXEC, &exec_params, 4))
             .await
             .expect("exec after close receipt");
         assert_eq!(exec_after_close.status, ReceiptStatus::Error);
-        let exec_after_close_payload: ProcessExecReceipt =
+        let exec_after_close_payload: HostExecReceipt =
             serde_cbor::from_slice(&exec_after_close.payload_cbor)
                 .expect("decode exec after close payload");
         assert_eq!(exec_after_close_payload.status, "error");
@@ -873,11 +866,11 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn process_exec_require_inline_rejects_large_output() {
         let store = Arc::new(MemStore::new());
-        let (open_adapter, exec_adapter, _) = make_process_adapters(store);
+        let (open_adapter, exec_adapter, _) = make_host_adapters(store);
 
-        let open_params = ProcessSessionOpenParams {
-            target: ProcessTarget {
-                local: Some(ProcessLocalTarget {
+        let open_params = HostSessionOpenParams {
+            target: HostTarget {
+                local: Some(HostLocalTarget {
                     mounts: None,
                     workdir: None,
                     env: None,
@@ -889,17 +882,13 @@ mod tests {
         };
 
         let open_receipt = open_adapter
-            .execute(&intent_for(
-                EffectKind::PROCESS_SESSION_OPEN,
-                &open_params,
-                10,
-            ))
+            .execute(&intent_for(EffectKind::HOST_SESSION_OPEN, &open_params, 10))
             .await
             .expect("open receipt");
-        let open_payload: ProcessSessionOpenReceipt =
+        let open_payload: HostSessionOpenReceipt =
             serde_cbor::from_slice(&open_receipt.payload_cbor).expect("decode open payload");
 
-        let exec_params = ProcessExecParams {
+        let exec_params = HostExecParams {
             session_id: open_payload.session_id,
             argv: vec![
                 "/bin/sh".into(),
@@ -914,12 +903,12 @@ mod tests {
         };
 
         let exec_receipt = exec_adapter
-            .execute(&intent_for(EffectKind::PROCESS_EXEC, &exec_params, 11))
+            .execute(&intent_for(EffectKind::HOST_EXEC, &exec_params, 11))
             .await
             .expect("exec receipt");
         assert_eq!(exec_receipt.status, ReceiptStatus::Error);
-        assert_schema_normalizes("sys/ProcessExecReceipt@1", &exec_receipt.payload_cbor);
-        let exec_payload: ProcessExecReceipt =
+        assert_schema_normalizes("sys/HostExecReceipt@1", &exec_receipt.payload_cbor);
+        let exec_payload: HostExecReceipt =
             serde_cbor::from_slice(&exec_receipt.payload_cbor).expect("decode exec payload");
         assert_eq!(exec_payload.status, "error");
         assert_eq!(
