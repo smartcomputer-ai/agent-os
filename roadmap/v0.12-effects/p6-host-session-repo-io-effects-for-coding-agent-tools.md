@@ -94,7 +94,8 @@ Cross-effect alignment with P4:
 3. Under `require_inline`, adapters must return inline payloads or fail with
    `status: error` and machine-readable `error_code` (for example
    `inline_required_too_large`).
-4. Keep payload arms aligned with P4 `host.exec`:
+4. Keep payload variant conventions aligned with P4 `host.exec` where
+   applicable:
    - `inline_text { text }`
    - `inline_bytes { bytes }`
    - `blob { blob_ref, size_bytes, preview_bytes? }`
@@ -297,16 +298,40 @@ Extend host capability schema/enforcer to include fs constraints:
 
 1. `allowed_fs_ops` (read/write/edit/patch/search/list/stat)
 2. `fs_roots` (path prefixes)
-3. `max_read_bytes`
-4. `max_write_bytes`
-5. `max_patch_bytes`
-6. `follow_symlinks` policy (`deny|within_root_only|allow`)
+3. `max_read_bytes?`
+4. `max_write_bytes?`
+5. `max_patch_bytes?`
+6. `max_inline_bytes?` (upper bound for inline receipt payloads)
+7. `max_grep_results?`
+8. `max_glob_results?`
+9. `max_scan_files?`
+10. `max_scan_bytes?`
+11. `allowed_patch_formats?` (v0.12 default/required value when set: `v4a`)
+12. `max_changed_files?` (patch blast-radius limit)
+13. `max_edit_replacements?`
+14. `follow_symlinks` policy (`deny|within_root_only|allow`)
+
+Limit fields are intentionally optional in v0.12 for minimal friction. When a
+limit is omitted, that dimension is unbounded by capability policy (subject only
+to adapter/runtime safety behavior).
 
 Enforcer rules:
 
 1. fail closed on path escaping (including symlink traversal outside roots),
 2. validate requested op is allowed,
-3. enforce size limits before expensive operations.
+3. enforce size/count limits only when configured,
+4. when a limit is configured, clamp request-level limits to cap ceilings
+   (`effective = min(request, cap)`),
+5. for `output_mode=require_inline`, fail deterministically when payload would
+   exceed `max_inline_bytes` (when configured).
+
+Policy interaction:
+
+1. Policy may further restrict/deny operations even when capability allows them.
+2. Policy may enforce narrower path scopes per op (for example allow `grep` on
+   repo root but deny `write_file` outside `src/`).
+3. Policy may enforce stricter output posture (for example force blob-only on
+   selected paths/content classes).
 
 ## Adapter Behavior
 
@@ -356,12 +381,32 @@ Implementation guidance:
 
 ### Phase 6.4: Verification
 
-1. Integration tests for each new effect (success + deny + bounds).
-2. E2E coding-agent fixture on a real checked-out repo:
-   - read/edit/write/patch
-   - grep/glob discovery
-   - shell test run
-3. Replay-or-die coverage with snapshots/journal tail.
+1. Add integration tests under `crates/aos-host/tests` for each effect:
+   - `host.fs.read_file`: `inline_text`, `inline_bytes`, `blob`, `require_inline`
+     overflow behavior, not-found/forbidden.
+   - `host.fs.write_file`: `inline_text`, `inline_bytes`, `blob_ref`, mode
+     semantics (`overwrite|create_new`), conflict/forbidden.
+   - `host.fs.edit_file`: exact match, fuzzy match fallback, ambiguous error when
+     `replace_all=false`, replace-all semantics, empty `old_string` error.
+   - `host.fs.apply_patch`: success, parse error, reject/not-found, `dry_run`
+     no-write behavior, no partial-write on failure.
+   - `host.fs.grep`: rg path + native fallback path, invalid regex, not-found,
+     empty result (`match_count=0`), output truncation/inline-vs-blob.
+   - `host.fs.glob`: invalid pattern, not-found, deterministic ordering, empty
+     result (`count=0`), inline-vs-blob.
+2. Add e2e tests under `crates/aos-host/tests_e2e` on a real checkout/session:
+   - open one `host.session`, run read/edit/write/apply_patch/grep/glob/exec in
+     one flow.
+   - assert cap/policy denials are enforced for out-of-root or disallowed ops.
+   - assert large outputs use blob refs under `auto` and error deterministically
+     under `require_inline` when configured limits are exceeded.
+3. Add replay-or-die coverage in kernel/host test flows:
+   - execute run, persist journal/snapshot, replay from genesis, assert
+     byte-identical snapshot.
+   - ensure CAS refs referenced by receipts remain reachable from
+     snapshot+journal.
+4. Add limit-configuration tests (when limits are set) and permissive baseline
+   tests (when limits are omitted) to validate optional-limit behavior.
 
 ## Risks
 
