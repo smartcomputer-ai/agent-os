@@ -1195,10 +1195,7 @@ mod tests {
         let batch = state.active_tool_batch.as_ref().expect("active batch");
         assert_eq!(
             batch.plan.execution_plan.groups,
-            vec![
-                vec![String::from("c1")],
-                vec![String::from("c2")]
-            ]
+            vec![vec![String::from("c1")], vec![String::from("c2")]]
         );
         assert!(matches!(
             batch.call_status.get("c3"),
