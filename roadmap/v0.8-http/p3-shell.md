@@ -14,16 +14,16 @@ Provide a local, interactive shell UI for AgentOS without bundling UI assets in
 ## Decision Summary
 
 1) The shell is a React SPA built outside of AgentOS using a normal toolchain.
-2) The shell lives under `apps/shell/` in the repo; build output goes to
-   `apps/shell/dist/`.
+2) The shell lives under `shell/` in the repo; build output goes to
+   `shell/dist/`.
 3) The shell is installed into a workspace (e.g., `shell`) and published at
    `/` using `sys/HttpPublish@1`.
 4) The kernel is not bundled with UI assets; the CLI handles build + install.
 
 ## Structure
 
-- Source: `apps/shell/`
-- Build output: `apps/shell/dist/` (gitignored)
+- Source: `shell/`
+- Build output: `shell/dist/` (gitignored)
 - Published workspace: `shell` (default; configurable)
 
 ## Install Flow (CLI)
@@ -38,7 +38,7 @@ aos ui install \
 ```
 
 Steps performed by the CLI:
-1) Build the shell (e.g., `apps/shell` -> `apps/shell/dist`).
+1) Build the shell (e.g., `shell` -> `shell/dist`).
 2) Sync `dist/` into the target workspace using `workspace.write_*`.
 3) Apply workspace annotations for HTTP headers (content-type, cache-control).
 4) Create or update the publish rule in `sys/HttpPublish@1`:
