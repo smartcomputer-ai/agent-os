@@ -203,18 +203,32 @@ Tool-facing adapter mapping guidance:
 Params:
 
 1. `session_id`
-2. `patch` variant:
-   - `inline_text { text }`
-   - `blob_ref { blob_ref }`
-3. `dry_run?`
+2. `patch` (required, non-empty) variant:
+   - `inline_text { text }` (SDK tool arg `patch` maps here)
+   - `blob_ref { blob_ref }` (optional path for very large/non-LLM patch input)
+3. `patch_format?` (optional, default `v4a`)
+4. `dry_run?` (optional, default `false`)
 
 Receipt:
 
-1. `status`: `ok|reject|forbidden|error`
+1. `status`: `ok|parse_error|reject|not_found|forbidden|error`
 2. `files_changed?`
-3. `ops?` summary (add/update/delete/move counts)
-4. `errors?`
-5. `error_code?`
+3. `changed_paths?` (ordered list of affected paths)
+4. `ops?` summary (add/update/delete/move counts)
+5. `summary_text?` (tool UX, e.g. `Applied patch: ...`)
+6. `errors?` (bounded diagnostics)
+7. `error_code?`
+
+Behavior contract:
+
+1. Adapter delegates parsing + apply semantics to the shared patch library.
+2. v0.12 does not re-specify full patch grammar here; accepted patch syntax is
+   the syntax accepted by the selected `patch_format` implementation.
+3. `dry_run=true` validates/applies in memory and returns would-change metadata
+   without committing writes.
+4. On parse/verification failure, return non-`ok` status with machine-readable
+   `error_code`; do not emit partial writes.
+5. SDK/tool layer may render `summary_text` as provider-facing success text.
 
 ### `host.fs.grep`
 
