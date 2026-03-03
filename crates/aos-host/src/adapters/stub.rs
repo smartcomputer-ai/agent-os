@@ -165,6 +165,46 @@ impl AsyncEffectAdapter for StubTimerAdapter {
     }
 }
 
+pub struct StubVaultPutAdapter;
+
+#[async_trait]
+impl AsyncEffectAdapter for StubVaultPutAdapter {
+    fn kind(&self) -> &str {
+        "vault.put"
+    }
+
+    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+        Ok(EffectReceipt {
+            intent_hash: intent.intent_hash,
+            adapter_id: "stub.vault.put".to_string(),
+            status: ReceiptStatus::Error,
+            payload_cbor: vec![],
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        })
+    }
+}
+
+pub struct StubVaultRotateAdapter;
+
+#[async_trait]
+impl AsyncEffectAdapter for StubVaultRotateAdapter {
+    fn kind(&self) -> &str {
+        "vault.rotate"
+    }
+
+    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+        Ok(EffectReceipt {
+            intent_hash: intent.intent_hash,
+            adapter_id: "stub.vault.rotate".to_string(),
+            status: ReceiptStatus::Error,
+            payload_cbor: vec![],
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        })
+    }
+}
+
 fn fake_hashref(byte: u8) -> HashRef {
     let hex = format!("{:02x}", byte);
     HashRef::new(format!("sha256:{}", hex.repeat(32))).expect("valid stub hash ref")

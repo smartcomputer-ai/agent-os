@@ -1,0 +1,28 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/PerfCellKey@1",
+    "type": {
+      "text": {}
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/PerfState@1",
+    "type": {
+      "record": {
+        "count": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/PerfEvent@1",
+    "type": {
+      "record": {
+        "cell": { "ref": "demo/PerfCellKey@1" },
+        "inc": { "nat": {} }
+      }
+    }
+  }
+]

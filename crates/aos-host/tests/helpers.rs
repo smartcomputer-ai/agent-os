@@ -5,15 +5,15 @@
 #![allow(dead_code)]
 
 use aos_air_types::{
-    DefPolicy, DefSchema, EmptyObject, ManifestDefaults, NamedRef, WorkflowAbi, TypeExpr,
-    TypePrimitive, TypePrimitiveInt, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant,
+    DefPolicy, DefSchema, EmptyObject, ManifestDefaults, NamedRef, TypeExpr, TypePrimitive,
+    TypePrimitiveInt, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant, WorkflowAbi,
 };
 use aos_effects::builtins::TimerSetParams;
 #[path = "fixtures.rs"]
 pub mod fixtures;
 
 use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
-use fixtures::{zero_hash, TestStore, START_SCHEMA};
+use fixtures::{START_SCHEMA, TestStore, zero_hash};
 use indexmap::IndexMap;
 use std::sync::Arc;
 

@@ -1,0 +1,35 @@
+{
+  "id": "grep-token",
+  "description": "Find a token with host.fs.grep.",
+  "prompt": "Call grep with pattern needle-7711 and path logs. Then answer exactly GREP=needle-7711.",
+  "setup": {
+    "files": [
+      {
+        "path": "logs/app.log",
+        "content": "INFO boot\nINFO needle-7711 reached\nINFO done\n"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.grep"
+    ],
+    "tool_output_contains": [
+      "needle-7711",
+      "match_count"
+    ]
+  },
+  "eval": {
+    "runs": 2,
+    "min_pass_rate": 0.5,
+    "max_steps": 96
+  },
+  "run": {
+    "max_tokens": 768,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.grep"
+    ],
+    "bootstrap_session": true
+  }
+}

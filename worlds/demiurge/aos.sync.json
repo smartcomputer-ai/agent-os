@@ -1,0 +1,41 @@
+{
+  "air": {
+    "dir": "air",
+    "imports": [
+      {
+        "cargo": {
+          "package": "aos-agent",
+          "air_dir": "air",
+          "manifest_path": "../../Cargo.toml"
+        },
+        "lock": {
+          "source": "cargo",
+          "package": "aos-agent",
+          "version": "0.1.0",
+          "manifest_path": "../../Cargo.toml",
+          "air_dir": "air",
+          "defs_hash": "sha256:ba281870769798dfeef8e666850b19cd56c755e529bd9faad849af3fdc48f1e9"
+        }
+      }
+    ]
+  },
+  "build": {
+    "workflow_dir": "workflow"
+  },
+  "modules": {
+    "pull": false
+  },
+  "version": 1,
+  "workspaces": [
+    {
+      "dir": "workflow",
+      "ignore": ["target/", ".git/", ".aos/"],
+      "ref": "workflow"
+    },
+    {
+      "dir": "agent-ws",
+      "ignore": [".git/", ".aos/"],
+      "ref": "demiurge"
+    }
+  ]
+}

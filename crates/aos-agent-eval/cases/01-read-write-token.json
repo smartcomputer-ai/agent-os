@@ -1,0 +1,34 @@
+{
+  "id": "read-write-token",
+  "description": "Read a seeded file and return the exact token.",
+  "prompt": "Call read_file with path notes/secret.txt. Then answer exactly as TOKEN=<value> using the returned content.",
+  "setup": {
+    "files": [
+      {
+        "path": "notes/secret.txt",
+        "content": "alpha-9421"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.read_file"
+    ],
+    "tool_output_contains": [
+      "alpha-9421"
+    ]
+  },
+  "eval": {
+    "runs": 2,
+    "min_pass_rate": 0.5,
+    "max_steps": 96
+  },
+  "run": {
+    "max_tokens": 768,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.read_file"
+    ],
+    "bootstrap_session": true
+  }
+}

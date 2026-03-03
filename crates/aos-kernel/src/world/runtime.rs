@@ -129,7 +129,11 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<(), KernelError> {
         Self::validate_entropy(&stamp.entropy)?;
 
-        let Some(context) = self.pending_workflow_receipts.get(&frame.intent_hash).cloned() else {
+        let Some(context) = self
+            .pending_workflow_receipts
+            .get(&frame.intent_hash)
+            .cloned()
+        else {
             self.record_workflow_stream_drop(
                 &frame,
                 "stream.unknown_intent",
@@ -326,7 +330,9 @@ impl<S: Store + 'static> Kernel<S> {
             .get(workflow_name)
             .ok_or_else(|| KernelError::WorkflowNotFound(workflow_name.to_string()))?;
         let workflow_abi = module_def.abi.workflow.as_ref().ok_or_else(|| {
-            KernelError::Manifest(format!("module '{workflow_name}' is not a workflow/workflow"))
+            KernelError::Manifest(format!(
+                "module '{workflow_name}' is not a workflow/workflow"
+            ))
         })?;
         let workflow_event_schema_name = workflow_abi.event.as_str().to_string();
         let workflow_event_schema = self
@@ -706,7 +712,7 @@ mod tests {
     use super::*;
     use crate::journal::JournalKind;
     use crate::journal::mem::MemJournal;
-    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, WorkflowAbi, SchemaRef};
+    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
     use aos_effects::EffectStreamFrame;
     use aos_store::MemStore;
     use std::sync::Arc;
@@ -781,7 +787,9 @@ mod tests {
             payload_ref: None,
             signature: vec![],
         };
-        kernel.handle_stream_frame(frame.clone()).expect("accept stream");
+        kernel
+            .handle_stream_frame(frame.clone())
+            .expect("accept stream");
         assert_eq!(kernel.workflow_queue.len(), 1);
         let instances = kernel.workflow_instances_snapshot();
         assert_eq!(instances.len(), 1);
@@ -823,15 +831,17 @@ mod tests {
             payload_ref: None,
             signature: vec![],
         };
-        kernel.handle_stream_frame(frame).expect("accept stream gap");
+        kernel
+            .handle_stream_frame(frame)
+            .expect("accept stream gap");
         let entries = kernel.dump_journal().expect("journal");
         let mut has_gap = false;
         for entry in entries {
             if entry.kind != JournalKind::Custom {
                 continue;
             }
-            let record: crate::journal::JournalRecord = serde_cbor::from_slice(&entry.payload)
-                .expect("decode custom record");
+            let record: crate::journal::JournalRecord =
+                serde_cbor::from_slice(&entry.payload).expect("decode custom record");
             if let crate::journal::JournalRecord::Custom(custom) = record
                 && custom.tag == "workflow.stream_gap"
             {

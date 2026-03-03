@@ -8,7 +8,7 @@
 extern crate alloc;
 
 use aos_sys::{HttpPublishRegistry, HttpPublishSet};
-use aos_wasm_sdk::{ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
+use aos_wasm_sdk::{ReduceError, Value, Workflow, WorkflowCtx, aos_workflow};
 
 // Required for WASM binary entry point
 #[cfg(target_arch = "wasm32")]

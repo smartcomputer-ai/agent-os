@@ -1,0 +1,34 @@
+{
+  "id": "exists-file",
+  "description": "Check path existence with host.fs.exists.",
+  "prompt": "Call exists with path notes/present.flag. Then answer exactly EXISTS=TRUE if the tool says the path exists.",
+  "setup": {
+    "files": [
+      {
+        "path": "notes/present.flag",
+        "content": "yes\n"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.exists"
+    ],
+    "tool_output_contains": [
+      "\"exists\":true"
+    ]
+  },
+  "eval": {
+    "runs": 2,
+    "min_pass_rate": 0.5,
+    "max_steps": 96
+  },
+  "run": {
+    "max_tokens": 768,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.exists"
+    ],
+    "bootstrap_session": true
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "edit-file-via-edit-tool",
+  "description": "Edit an existing file with host.fs.edit_file.",
+  "prompt": "Call edit_file with path docs/plan.txt, old_string draft, new_string final, and replace_all false. Then answer exactly EDIT=final.",
+  "setup": {
+    "files": [
+      {
+        "path": "docs/plan.txt",
+        "content": "phase: draft\n"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.edit_file"
+    ],
+    "tool_output_contains": [
+      "\"replacements\":1"
+    ],
+    "files": [
+      {
+        "path": "docs/plan.txt",
+        "contains": "phase: final"
+      }
+    ]
+  },
+  "eval": {
+    "runs": 2,
+    "min_pass_rate": 0.5,
+    "max_steps": 96
+  },
+  "run": {
+    "max_tokens": 768,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.edit_file"
+    ],
+    "bootstrap_session": true
+  }
+}

@@ -3,16 +3,16 @@
 use std::sync::Arc;
 
 use aos_air_types::{
-    AirNode, CapGrant, CapType, DefCap, DefSchema, ManifestDefaults, NamedRef, WorkflowAbi,
-    TypeExpr, TypeRecord, ValueLiteral, ValueRecord,
+    AirNode, CapGrant, CapType, DefCap, DefSchema, ManifestDefaults, NamedRef, TypeExpr,
+    TypeRecord, ValueLiteral, ValueRecord, WorkflowAbi,
 };
-use aos_cbor::{to_canonical_cbor, Hash};
+use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
 use aos_kernel::shadow::ShadowHarness;
 use aos_wasm_abi::WorkflowOutput;
-use helpers::fixtures::{self, TestStore, TestWorld, START_SCHEMA};
+use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use indexmap::IndexMap;
 
 mod helpers;
@@ -229,10 +229,12 @@ fn shadow_upgrade_reports_followup_effect_cap_delta() {
         .kernel
         .run_shadow(proposal_id, Some(ShadowHarness::default()))
         .unwrap();
-    assert!(summary
-        .ledger_deltas
-        .iter()
-        .any(|delta| delta.name == "com.acme/http_followup_cap@1"));
+    assert!(
+        summary
+            .ledger_deltas
+            .iter()
+            .any(|delta| delta.name == "com.acme/http_followup_cap@1")
+    );
 }
 
 fn manifest_with_workflow(

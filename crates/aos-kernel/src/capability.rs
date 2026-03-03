@@ -43,6 +43,7 @@ pub struct CapGrantResolution {
 pub const CAP_ALLOW_ALL_ENFORCER: &str = "sys/CapAllowAll@1";
 pub const CAP_HTTP_ENFORCER: &str = "sys/CapEnforceHttpOut@1";
 pub const CAP_LLM_ENFORCER: &str = "sys/CapEnforceLlmBasic@1";
+pub const CAP_HOST_ENFORCER: &str = "sys/CapEnforceHost@1";
 pub const CAP_WORKSPACE_ENFORCER: &str = "sys/CapEnforceWorkspace@1";
 
 impl CapabilityResolver {
@@ -312,6 +313,7 @@ fn default_enforcer_for_cap_type(cap_type: &CapType) -> CapEnforcer {
     let module = match cap_type.as_str() {
         CapType::HTTP_OUT => CAP_HTTP_ENFORCER,
         CapType::LLM_BASIC => CAP_LLM_ENFORCER,
+        CapType::HOST => CAP_HOST_ENFORCER,
         CapType::WORKSPACE => CAP_WORKSPACE_ENFORCER,
         _ => CAP_ALLOW_ALL_ENFORCER,
     };
@@ -407,6 +409,8 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             effects: vec![],
+            effect_bindings: vec![],
+
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -538,5 +542,19 @@ mod tests {
             err,
             KernelError::CapabilityParamInvalid { cap, .. } if cap == "sys/http.out@1"
         ));
+    }
+
+    #[test]
+    fn process_cap_type_uses_process_enforcer_by_default() {
+        let grant = CapabilityGrant {
+            name: "cap_host".into(),
+            cap: "sys/host@1".into(),
+            params_cbor: vec![],
+            expiry_ns: None,
+        };
+        let resolver =
+            CapabilityResolver::from_runtime_grants(vec![(grant, CapType::host())]).unwrap();
+        let resolved = resolver.resolve_grant("cap_host").unwrap();
+        assert_eq!(resolved.enforcer.module, CAP_HOST_ENFORCER);
     }
 }

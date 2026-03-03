@@ -7,7 +7,7 @@
 
 ## Goal
 
-Bring `apps/demiurge` fully onto the post-plan runtime model:
+Bring `worlds/demiurge` fully onto the post-plan runtime model:
 
 1. No `defplan`, no `triggers`, no `routing.events`.
 2. Keyed workflow subscriptions + receipt-driven continuation.
@@ -24,8 +24,8 @@ Completed in this pass:
      - `aos.agent/SessionIngress@1`,
      - `demiurge/ToolCallRequested@1`.
 2. Removed legacy plan files:
-   - deleted `apps/demiurge/air/session_workspace_sync_wrapper.air.json`,
-   - deleted `apps/demiurge/air/tool_execute_from_request.air.json`.
+   - deleted `worlds/demiurge/air/session_workspace_sync_wrapper.air.json`,
+   - deleted `worlds/demiurge/air/tool_execute_from_request.air.json`.
 3. Replaced reducer ABI/event contract:
    - module now uses `module_kind: "workflow"` + `key_schema`,
    - state schema moved to `demiurge/State@1`,

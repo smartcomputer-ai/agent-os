@@ -14,8 +14,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use aos_air_types::{
-    builtins, catalog::EffectCatalog, schema_index::SchemaIndex, DefSchema, EffectKind,
-    WorkflowAbi, TypeExpr, TypeRef, TypeVariant,
+    DefSchema, EffectKind, TypeExpr, TypeRef, TypeVariant, WorkflowAbi, builtins,
+    catalog::EffectCatalog, schema_index::SchemaIndex,
 };
 
 /// Plan-origin effects with semantically identical params but different CBOR shapes

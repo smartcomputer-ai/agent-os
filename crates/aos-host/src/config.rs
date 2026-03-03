@@ -3,6 +3,12 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
+pub struct AdapterProviderSpec {
+    /// Concrete in-process adapter kind to execute for this logical route.
+    pub adapter_kind: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct HostConfig {
     pub effect_timeout: Duration,
     /// Optional directory for kernel module cache; if None, kernel chooses default.
@@ -17,6 +23,11 @@ pub struct HostConfig {
     pub http_server: HttpServerConfig,
     /// LLM adapter configuration (None disables registration).
     pub llm: Option<LlmAdapterConfig>,
+    /// Host profile route map: adapter_id -> provider spec.
+    pub adapter_routes: HashMap<String, AdapterProviderSpec>,
+    /// Require explicit `manifest.effect_bindings` for all external effect kinds.
+    /// When enabled, legacy kind-based fallback routing is disabled.
+    pub strict_effect_bindings: bool,
 }
 
 impl Default for HostConfig {
@@ -29,6 +40,8 @@ impl Default for HostConfig {
             http: HttpAdapterConfig::default(),
             http_server: HttpServerConfig::default(),
             llm: LlmAdapterConfig::from_env().ok(),
+            adapter_routes: default_adapter_routes(),
+            strict_effect_bindings: false,
         }
     }
 }
@@ -47,7 +60,164 @@ impl HostConfig {
                 cfg.http_server.enabled = false;
             }
         }
+        if let Ok(routes) = std::env::var("AOS_ADAPTER_ROUTES") {
+            apply_adapter_routes_env(&mut cfg, &routes);
+        }
+        if env_truthy("AOS_STRICT_EFFECT_BINDINGS") {
+            cfg.strict_effect_bindings = true;
+        }
         cfg
+    }
+}
+
+fn env_truthy(key: &str) -> bool {
+    matches!(
+        std::env::var(key)
+            .ok()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+fn default_adapter_routes() -> HashMap<String, AdapterProviderSpec> {
+    let mut routes = HashMap::new();
+    routes.insert(
+        "timer.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "timer.set".into(),
+        },
+    );
+    routes.insert(
+        "blob.put.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "blob.put".into(),
+        },
+    );
+    routes.insert(
+        "blob.get.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "blob.get".into(),
+        },
+    );
+    routes.insert(
+        "http.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "http.request".into(),
+        },
+    );
+    routes.insert(
+        "llm.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "llm.generate".into(),
+        },
+    );
+    routes.insert(
+        "host.session.open.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.session.open".into(),
+        },
+    );
+    routes.insert(
+        "host.exec.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.exec".into(),
+        },
+    );
+    routes.insert(
+        "host.session.signal.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.session.signal".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.read_file.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.read_file".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.write_file.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.write_file".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.edit_file.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.edit_file".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.apply_patch.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.apply_patch".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.grep.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.grep".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.glob.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.glob".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.stat.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.stat".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.exists.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.exists".into(),
+        },
+    );
+    routes.insert(
+        "host.fs.list_dir.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "host.fs.list_dir".into(),
+        },
+    );
+    routes.insert(
+        "vault.put.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "vault.put".into(),
+        },
+    );
+    routes.insert(
+        "vault.rotate.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "vault.rotate".into(),
+        },
+    );
+    routes
+}
+
+fn apply_adapter_routes_env(cfg: &mut HostConfig, routes: &str) {
+    // AOS_ADAPTER_ROUTES format: "adapter.id=adapter.kind,adapter.id2=adapter.kind2"
+    for pair in routes.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let Some((adapter_id, adapter_kind)) = pair.split_once('=') else {
+            log::warn!("ignoring malformed AOS_ADAPTER_ROUTES entry: '{pair}'");
+            continue;
+        };
+        let adapter_id = adapter_id.trim();
+        let adapter_kind = adapter_kind.trim();
+        if adapter_id.is_empty() || adapter_kind.is_empty() {
+            log::warn!("ignoring malformed AOS_ADAPTER_ROUTES entry: '{pair}'");
+            continue;
+        }
+        cfg.adapter_routes.insert(
+            adapter_id.to_string(),
+            AdapterProviderSpec {
+                adapter_kind: adapter_kind.to_string(),
+            },
+        );
     }
 }
 
@@ -143,5 +313,107 @@ impl LlmAdapterConfig {
             providers,
             default_provider: "openai-responses".into(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.previous {
+                unsafe {
+                    std::env::set_var(self.key, value);
+                }
+            } else {
+                unsafe {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn host_config_default_includes_default_adapter_routes() {
+        let cfg = HostConfig::default();
+        assert!(cfg.adapter_routes.contains_key("http.default"));
+        assert!(cfg.adapter_routes.contains_key("llm.default"));
+        assert!(cfg.adapter_routes.contains_key("host.session.open.default"));
+        assert!(cfg.adapter_routes.contains_key("host.exec.default"));
+        assert!(
+            cfg.adapter_routes
+                .contains_key("host.session.signal.default")
+        );
+        assert!(cfg.adapter_routes.contains_key("host.fs.read_file.default"));
+        assert!(
+            cfg.adapter_routes
+                .contains_key("host.fs.write_file.default")
+        );
+        assert!(cfg.adapter_routes.contains_key("host.fs.edit_file.default"));
+        assert!(
+            cfg.adapter_routes
+                .contains_key("host.fs.apply_patch.default")
+        );
+        assert!(cfg.adapter_routes.contains_key("host.fs.grep.default"));
+        assert!(cfg.adapter_routes.contains_key("host.fs.glob.default"));
+        assert!(cfg.adapter_routes.contains_key("host.fs.stat.default"));
+        assert!(cfg.adapter_routes.contains_key("host.fs.exists.default"));
+        assert!(cfg.adapter_routes.contains_key("host.fs.list_dir.default"));
+        assert!(cfg.adapter_routes.contains_key("timer.default"));
+        assert!(cfg.adapter_routes.contains_key("vault.put.default"));
+        assert!(cfg.adapter_routes.contains_key("vault.rotate.default"));
+        assert!(!cfg.strict_effect_bindings);
+    }
+
+    #[test]
+    fn host_config_from_env_applies_adapter_routes_override() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::set(
+            "AOS_ADAPTER_ROUTES",
+            "http.custom=http.request,llm.custom=llm.generate",
+        );
+        let cfg = HostConfig::from_env();
+        assert_eq!(
+            cfg.adapter_routes
+                .get("http.custom")
+                .map(|spec| spec.adapter_kind.as_str()),
+            Some("http.request")
+        );
+        assert_eq!(
+            cfg.adapter_routes
+                .get("llm.custom")
+                .map(|spec| spec.adapter_kind.as_str()),
+            Some("llm.generate")
+        );
+    }
+
+    #[test]
+    fn host_config_from_env_enables_strict_effect_bindings() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::set("AOS_STRICT_EFFECT_BINDINGS", "true");
+        let cfg = HostConfig::from_env();
+        assert!(cfg.strict_effect_bindings);
     }
 }

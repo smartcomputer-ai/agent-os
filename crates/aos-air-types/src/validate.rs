@@ -43,6 +43,12 @@ pub enum ValidationError {
     SchemaNotFound { schema: String },
     #[error("effect kind '{kind}' not found in catalog or built-ins")]
     EffectNotFound { kind: String },
+    #[error("effect binding kind '{kind}' is not declared in manifest.effects")]
+    EffectBindingKindNotDeclared { kind: String },
+    #[error("effect binding kind '{kind}' is duplicated")]
+    EffectBindingDuplicateKind { kind: String },
+    #[error("effect binding kind '{kind}' is internal and cannot be bound")]
+    EffectBindingInternalKind { kind: String },
     #[error("capability grant '{cap}' not found")]
     CapabilityNotFound { cap: String },
     #[error("capability grant '{cap}' is duplicated")]
@@ -90,6 +96,10 @@ pub fn validate_manifest(
         .map(|e| e.effect.kind.as_str().to_string())
         .collect();
     known_effect_kinds.extend(effects.values().map(|def| def.kind.as_str().to_string()));
+    let declared_effect_kinds: HashSet<String> = effects
+        .values()
+        .map(|def| def.kind.as_str().to_string())
+        .collect();
 
     let mut defcap_types: HashMap<String, String> = HashMap::new();
     for builtin in builtins::builtin_caps() {
@@ -239,6 +249,26 @@ pub fn validate_manifest(
                     });
                 }
             }
+        }
+    }
+
+    let mut bound_kinds = HashSet::new();
+    for binding in &manifest.effect_bindings {
+        let kind = binding.kind.as_str();
+        if is_internal_effect_kind(kind) {
+            return Err(ValidationError::EffectBindingInternalKind {
+                kind: kind.to_string(),
+            });
+        }
+        if !declared_effect_kinds.contains(kind) {
+            return Err(ValidationError::EffectBindingKindNotDeclared {
+                kind: kind.to_string(),
+            });
+        }
+        if !bound_kinds.insert(kind.to_string()) {
+            return Err(ValidationError::EffectBindingDuplicateKind {
+                kind: kind.to_string(),
+            });
         }
     }
 
@@ -454,6 +484,12 @@ fn receipt_schema_allows_missing_key_field(event_schema: &str) -> bool {
     )
 }
 
+fn is_internal_effect_kind(kind: &str) -> bool {
+    kind.starts_with("workspace.")
+        || kind.starts_with("introspect.")
+        || kind.starts_with("governance.")
+}
+
 fn resolve_type(
     ty: &TypeExpr,
     schema_type: &impl Fn(&str) -> Option<TypeExpr>,
@@ -564,8 +600,8 @@ fn key_type_matches(
 mod tests {
     use super::*;
     use crate::{
-        CapGrant, DefModule, ManifestDefaults, ModuleAbi, ModuleBinding, NamedRef, WorkflowAbi,
-        Routing, SchemaRef, TypePrimitive, TypePrimitiveText, TypeRecord,
+        CapGrant, DefModule, EffectBinding, ManifestDefaults, ModuleAbi, ModuleBinding, NamedRef,
+        Routing, SchemaRef, TypePrimitive, TypePrimitiveText, TypeRecord, WorkflowAbi,
     };
     use indexmap::IndexMap;
 
@@ -594,6 +630,7 @@ mod tests {
             schemas: vec![named_ref("com.acme/Event@1"), named_ref("com.acme/State@1")],
             modules: vec![named_ref("com.acme/workflow@1")],
             effects: Vec::new(),
+            effect_bindings: Vec::new(),
             caps: vec![named_ref("com.acme/http@1")],
             policies: Vec::new(),
             secrets: Vec::new(),
@@ -759,6 +796,188 @@ mod tests {
         assert!(matches!(
             err,
             ValidationError::CapabilityNotFound { cap } if cap == "missing_grant"
+        ));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_effect_binding_kind_not_declared() {
+        let mut manifest = base_manifest();
+        manifest.defaults = None;
+        manifest.effect_bindings.push(EffectBinding {
+            kind: crate::EffectKind::new("http.request"),
+            adapter_id: "http.default".into(),
+        });
+
+        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
+        let schemas = HashMap::from([
+            (
+                String::from("com.acme/Event@1"),
+                DefSchema {
+                    name: "com.acme/Event@1".into(),
+                    ty: record_type(),
+                },
+            ),
+            (
+                String::from("com.acme/State@1"),
+                DefSchema {
+                    name: "com.acme/State@1".into(),
+                    ty: text_type(),
+                },
+            ),
+        ]);
+
+        let err = validate_manifest(
+            &manifest,
+            &modules,
+            &schemas,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::EffectBindingKindNotDeclared { kind } if kind == "http.request"
+        ));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_duplicate_effect_binding_kind() {
+        let mut manifest = base_manifest();
+        manifest.defaults = None;
+        manifest.effect_bindings = vec![
+            EffectBinding {
+                kind: crate::EffectKind::new("http.request"),
+                adapter_id: "http.default".into(),
+            },
+            EffectBinding {
+                kind: crate::EffectKind::new("http.request"),
+                adapter_id: "http.alt".into(),
+            },
+        ];
+
+        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
+        let schemas = HashMap::from([
+            (
+                String::from("com.acme/Event@1"),
+                DefSchema {
+                    name: "com.acme/Event@1".into(),
+                    ty: record_type(),
+                },
+            ),
+            (
+                String::from("com.acme/State@1"),
+                DefSchema {
+                    name: "com.acme/State@1".into(),
+                    ty: text_type(),
+                },
+            ),
+            (
+                String::from("com.acme/HttpParams@1"),
+                DefSchema {
+                    name: "com.acme/HttpParams@1".into(),
+                    ty: record_type(),
+                },
+            ),
+            (
+                String::from("com.acme/HttpReceipt@1"),
+                DefSchema {
+                    name: "com.acme/HttpReceipt@1".into(),
+                    ty: record_type(),
+                },
+            ),
+        ]);
+        let effects = HashMap::from([(
+            String::from("com.acme/http.request@1"),
+            DefEffect {
+                name: "com.acme/http.request@1".into(),
+                kind: crate::EffectKind::new("http.request"),
+                cap_type: crate::CapType::http_out(),
+                params_schema: SchemaRef::new("com.acme/HttpParams@1").unwrap(),
+                receipt_schema: SchemaRef::new("com.acme/HttpReceipt@1").unwrap(),
+                origin_scope: crate::OriginScope::Both,
+            },
+        )]);
+
+        let err = validate_manifest(
+            &manifest,
+            &modules,
+            &schemas,
+            &effects,
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::EffectBindingDuplicateKind { kind } if kind == "http.request"
+        ));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_internal_effect_binding_kind() {
+        let mut manifest = base_manifest();
+        manifest.defaults = None;
+        manifest.effect_bindings.push(EffectBinding {
+            kind: crate::EffectKind::new("workspace.read_bytes"),
+            adapter_id: "workspace.default".into(),
+        });
+
+        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
+        let schemas = HashMap::from([
+            (
+                String::from("com.acme/Event@1"),
+                DefSchema {
+                    name: "com.acme/Event@1".into(),
+                    ty: record_type(),
+                },
+            ),
+            (
+                String::from("com.acme/State@1"),
+                DefSchema {
+                    name: "com.acme/State@1".into(),
+                    ty: text_type(),
+                },
+            ),
+            (
+                String::from("com.acme/WorkspaceParams@1"),
+                DefSchema {
+                    name: "com.acme/WorkspaceParams@1".into(),
+                    ty: record_type(),
+                },
+            ),
+            (
+                String::from("com.acme/WorkspaceReceipt@1"),
+                DefSchema {
+                    name: "com.acme/WorkspaceReceipt@1".into(),
+                    ty: record_type(),
+                },
+            ),
+        ]);
+        let effects = HashMap::from([(
+            String::from("com.acme/workspace.read_bytes@1"),
+            DefEffect {
+                name: "com.acme/workspace.read_bytes@1".into(),
+                kind: crate::EffectKind::new("workspace.read_bytes"),
+                cap_type: crate::CapType::workspace(),
+                params_schema: SchemaRef::new("com.acme/WorkspaceParams@1").unwrap(),
+                receipt_schema: SchemaRef::new("com.acme/WorkspaceReceipt@1").unwrap(),
+                origin_scope: crate::OriginScope::Both,
+            },
+        )]);
+
+        let err = validate_manifest(
+            &manifest,
+            &modules,
+            &schemas,
+            &effects,
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::EffectBindingInternalKind { kind } if kind == "workspace.read_bytes"
         ));
     }
 }

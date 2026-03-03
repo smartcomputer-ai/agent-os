@@ -506,7 +506,10 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let _ = resp.send(res);
             }
             ControlMsg::TraceSummary { resp } => {
-                let res = crate::trace::workflow_trace_summary(self.host.kernel());
+                let res = crate::trace::workflow_trace_summary_with_routes(
+                    self.host.kernel(),
+                    Some(self.host.effect_route_diagnostics()),
+                );
                 let _ = resp.send(res);
             }
             ControlMsg::PutBlob { data, resp } => {

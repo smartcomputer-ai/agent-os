@@ -1,21 +1,21 @@
 use aos_air_types::{
     DefModule, DefPolicy, DefSchema, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind,
-    OriginKind, PolicyDecision, PolicyMatch, PolicyRule, WorkflowAbi, TypeExpr, TypeRecord, TypeRef,
-    TypeVariant,
+    OriginKind, PolicyDecision, PolicyMatch, PolicyRule, TypeExpr, TypeRecord, TypeRef,
+    TypeVariant, WorkflowAbi,
 };
 use aos_effects::builtins::{BlobPutParams, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_kernel::Kernel;
+use aos_kernel::journal::JournalKind;
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
-use aos_kernel::journal::JournalKind;
-use aos_kernel::Kernel;
 use aos_store::{FsStore, Store};
 use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use std::sync::Arc;
 use tempfile::TempDir;
 use wat::parse_str;
 
-use helpers::fixtures::{self, TestWorld, START_SCHEMA};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 
 mod helpers;
 use helpers::{attach_default_policy, simple_state_manifest, timer_manifest};
@@ -77,7 +77,9 @@ fn workflow_timer_snapshot_resumes_on_receipt() {
     replay_world.tick_n(2).unwrap();
 
     assert_eq!(
-        replay_world.kernel.workflow_state("com.acme/TimerEmitter@1"),
+        replay_world
+            .kernel
+            .workflow_state("com.acme/TimerEmitter@1"),
         Some(vec![0x01])
     );
 }

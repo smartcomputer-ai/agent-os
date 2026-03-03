@@ -103,9 +103,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
-name = "aos-agent-sdk"
+name = "aos-agent"
 version = "0.1.0"
 dependencies = [
+ "aos-air-types",
  "aos-effects",
  "aos-wasm-abi",
  "aos-wasm-sdk",
@@ -114,6 +115,26 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "aos-agent-eval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aos-agent",
+ "aos-air-types",
+ "aos-cbor",
+ "aos-effects",
+ "aos-host",
+ "aos-kernel",
+ "aos-store",
+ "clap",
+ "serde",
+ "serde_cbor",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -225,11 +246,13 @@ dependencies = [
  "camino",
  "clap",
  "dotenvy",
+ "globset",
  "hex",
  "indexmap",
  "jsonschema",
  "log",
  "once_cell",
+ "regex",
  "reqwest 0.11.27",
  "serde",
  "serde_bytes",
@@ -299,7 +322,7 @@ name = "aos-smoke"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "aos-agent-sdk",
+ "aos-agent",
  "aos-air-exec",
  "aos-air-types",
  "aos-cbor",

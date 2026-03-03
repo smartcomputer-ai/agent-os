@@ -15,9 +15,11 @@ fn aggregator_manifest_loads_from_assets() {
     let loaded = load_from_assets(store, &root)
         .expect("load assets")
         .expect("manifest");
-    assert!(loaded
-        .manifest
-        .modules
-        .iter()
-        .any(|m| m.name == "demo/Aggregator@1"));
+    assert!(
+        loaded
+            .manifest
+            .modules
+            .iter()
+            .any(|m| m.name == "demo/Aggregator@1")
+    );
 }

@@ -21,6 +21,7 @@ const WASMTIME_VERSION: &str = "36.0.3";
 /// Deterministic runtime wrapper around Wasmtime.
 pub struct WorkflowRuntime {
     engine: Arc<Engine>,
+    linker: Linker<()>,
     module_cache: Mutex<HashMap<ModuleKey, Arc<Module>>>,
     disk_cache: Option<DiskCache>,
 }
@@ -40,7 +41,8 @@ impl WorkflowRuntime {
         cfg.consume_fuel(false);
         cfg.debug_info(false);
         cfg.cranelift_nan_canonicalization(true);
-        let engine = Engine::new(&cfg)?;
+        let engine = Arc::new(Engine::new(&cfg)?);
+        let linker = Linker::new(&engine);
         let disk_cache = if let Some(dir) = cache_dir {
             let fingerprint = engine_cache_fingerprint();
             let engine_dir = dir.join(&fingerprint);
@@ -54,7 +56,8 @@ impl WorkflowRuntime {
             None
         };
         Ok(Self {
-            engine: Arc::new(engine),
+            engine,
+            linker,
             module_cache: Mutex::new(HashMap::new()),
             disk_cache,
         })
@@ -73,8 +76,7 @@ impl WorkflowRuntime {
     /// Execute an already-compiled module with the given ABI envelope.
     pub fn run_compiled(&self, module: &Module, input: &WorkflowInput) -> Result<WorkflowOutput> {
         let mut store = Store::new(&self.engine, ());
-        let linker = Linker::new(&self.engine);
-        let instance = linker.instantiate(&mut store, module)?;
+        let instance = self.linker.instantiate(&mut store, module)?;
         let memory = instance
             .get_memory(&mut store, MEMORY_EXPORT)
             .context("wasm export 'memory' not found")?;
@@ -229,6 +231,7 @@ impl WorkflowRuntime {
 /// Deterministic runtime wrapper around Wasmtime for pure modules.
 pub struct PureRuntime {
     engine: Arc<Engine>,
+    linker: Linker<()>,
     module_cache: Mutex<HashMap<ModuleKey, Arc<Module>>>,
     disk_cache: Option<DiskCache>,
 }
@@ -248,7 +251,8 @@ impl PureRuntime {
         cfg.consume_fuel(false);
         cfg.debug_info(false);
         cfg.cranelift_nan_canonicalization(true);
-        let engine = Engine::new(&cfg)?;
+        let engine = Arc::new(Engine::new(&cfg)?);
+        let linker = Linker::new(&engine);
         let disk_cache = if let Some(dir) = cache_dir {
             let fingerprint = engine_cache_fingerprint();
             let engine_dir = dir.join(&fingerprint);
@@ -262,7 +266,8 @@ impl PureRuntime {
             None
         };
         Ok(Self {
-            engine: Arc::new(engine),
+            engine,
+            linker,
             module_cache: Mutex::new(HashMap::new()),
             disk_cache,
         })
@@ -281,8 +286,7 @@ impl PureRuntime {
     /// Execute an already-compiled module with the given ABI envelope.
     pub fn run_compiled(&self, module: &Module, input: &PureInput) -> Result<PureOutput> {
         let mut store = Store::new(&self.engine, ());
-        let linker = Linker::new(&self.engine);
-        let instance = linker.instantiate(&mut store, module)?;
+        let instance = self.linker.instantiate(&mut store, module)?;
         let memory = instance
             .get_memory(&mut store, MEMORY_EXPORT)
             .context("wasm export 'memory' not found")?;

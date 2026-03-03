@@ -1,0 +1,38 @@
+{
+  "id": "edit-file",
+  "description": "Patch an existing file in-place.",
+  "prompt": "Call apply_patch with a v4a patch that updates docs/status.txt from 'status: TODO' to 'status: DONE' using *** Begin Patch / *** End Patch format. Then answer DONE.",
+  "setup": {
+    "files": [
+      {
+        "path": "docs/status.txt",
+        "content": "status: TODO\n"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.apply_patch"
+    ],
+    "files": [
+      {
+        "path": "docs/status.txt",
+        "contains": "status: DONE"
+      }
+    ]
+  },
+  "eval": {
+    "runs": 3,
+    "min_pass_rate": 0.34,
+    "max_steps": 128
+  },
+  "run": {
+    "max_tokens": 1024,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.read_file",
+      "host.fs.apply_patch"
+    ],
+    "bootstrap_session": true
+  }
+}

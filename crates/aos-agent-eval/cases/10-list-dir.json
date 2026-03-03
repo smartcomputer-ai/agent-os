@@ -1,0 +1,39 @@
+{
+  "id": "list-dir",
+  "description": "List directory entries with host.fs.list_dir.",
+  "prompt": "Call list_dir with path tree. Then answer exactly LIST=OK.",
+  "setup": {
+    "files": [
+      {
+        "path": "tree/a.txt",
+        "content": "a\n"
+      },
+      {
+        "path": "tree/b/c.txt",
+        "content": "c\n"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.list_dir"
+    ],
+    "tool_output_contains": [
+      "a.txt",
+      "b/"
+    ]
+  },
+  "eval": {
+    "runs": 2,
+    "min_pass_rate": 0.5,
+    "max_steps": 96
+  },
+  "run": {
+    "max_tokens": 768,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.list_dir"
+    ],
+    "bootstrap_session": true
+  }
+}

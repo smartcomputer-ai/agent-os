@@ -326,7 +326,10 @@ mod tests {
         let decoded: KernelSnapshot = serde_cbor::from_slice(&bytes).expect("decode snapshot");
 
         assert_eq!(decoded.workflow_instances().len(), 1);
-        assert_eq!(decoded.workflow_instances()[0].instance_id, "com.acme/Workflow@1::");
+        assert_eq!(
+            decoded.workflow_instances()[0].instance_id,
+            "com.acme/Workflow@1::"
+        );
         assert_eq!(decoded.workflow_instances()[0].inflight_intents.len(), 1);
     }
 }

@@ -20,24 +20,28 @@ Grouping:
 | 09  | workspaces     | Workspace workflow + caps demo |
 | 10  | trace-failure-classification | Trace-get/diagnose failure conformance |
 | 11  | workflow-runtime-hardening | Single-scenario workflow runtime conformance + summaries |
+| 12  | performance | Non-keyed vs keyed event throughput |
 | 20  | agent-session  | SDK session lifecycle replay |
 | 21  | chat-live (opt-in) | Live provider tool orchestration smoke |
 | 22  | agent-live (opt-in) | SDK-driven live agent with iterative tools + follow-up |
+| 23  | agent-tools  | SDK built-in tool mapping e2e + replay |
 
 Run with:
 - `cargo run -p aos-smoke --`
 - `cargo run -p aos-smoke -- <slug>`
 - `cargo run -p aos-smoke -- all` (core fixtures `00`-`19`)
+- `cargo run -p aos-smoke -- performance --messages 1000 --cells 32`
 - `cargo run -p aos-smoke -- all-agent` (Agent SDK fixtures `20+`)
 - `cargo run -p aos-smoke -- chat-live` (opt-in live provider smoke; default `--provider openai`)
 - `cargo run -p aos-smoke -- chat-live --provider anthropic`
 - `cargo run -p aos-smoke -- chat-live --provider openai --model gpt-5-mini`
 - `cargo run -p aos-smoke -- agent-live` (opt-in live SDK agent smoke; default `--provider openai`)
 - `cargo run -p aos-smoke -- agent-live --provider anthropic`
+- `cargo run -p aos-smoke -- agent-tools` (scripted built-in host tools e2e smoke)
 
 Live smoke notes:
 - Uses `fixtures/21-chat-live` AIR with secret-injected API keys (`env:OPENAI_API_KEY`, `env:ANTHROPIC_API_KEY`).
 - Reads secrets from process env or `.env` files at repo root.
 - Runs a multi-tool agent flow (`echo_payload`, `sum_pair`) plus a follow-up user turn.
 - Ends with replay verification.
-- `fixtures/22-agent-live` uses `aos.agent/*` schemas + `aos-agent-sdk` workflow helpers and runs a dynamic tool-traversal flow (`search_step`) to completion, then follow-up + replay verification.
+- `fixtures/22-agent-live` uses `aos.agent/*` schemas + `aos-agent` workflow helpers and runs a dynamic tool-traversal flow (`search_step`) to completion, then follow-up + replay verification.

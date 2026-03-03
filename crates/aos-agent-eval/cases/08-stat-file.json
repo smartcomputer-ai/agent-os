@@ -1,0 +1,35 @@
+{
+  "id": "stat-file",
+  "description": "Inspect file metadata with host.fs.stat.",
+  "prompt": "Call stat with path notes/stats.txt. Then answer exactly STAT=OK only if exists is true and size_bytes is greater than zero.",
+  "setup": {
+    "files": [
+      {
+        "path": "notes/stats.txt",
+        "content": "12345\n"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.stat"
+    ],
+    "tool_output_contains": [
+      "\"exists\":true",
+      "size_bytes"
+    ]
+  },
+  "eval": {
+    "runs": 2,
+    "min_pass_rate": 0.5,
+    "max_steps": 96
+  },
+  "run": {
+    "max_tokens": 768,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.stat"
+    ],
+    "bootstrap_session": true
+  }
+}

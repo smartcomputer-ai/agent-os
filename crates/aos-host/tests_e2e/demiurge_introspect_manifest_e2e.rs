@@ -218,11 +218,11 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
     let tmp = tempfile::tempdir().context("tempdir")?;
     let store = Arc::new(FsStore::open(tmp.path()).context("open store")?);
 
-    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/demiurge");
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../worlds/demiurge");
     load_world_env(&asset_root).context("load demiurge .env")?;
     let asset_root = asset_root.as_path();
 
-    let sdk_air_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../aos-agent-sdk/air");
+    let sdk_air_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../aos-agent/air");
     let import_roots = vec![sdk_air_root];
     let mut loaded =
         manifest_loader::load_from_assets_with_imports(store.clone(), asset_root, &import_roots)
@@ -265,12 +265,6 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         .put_blob(&prompt_bytes)
         .context("store prompt blob")?
         .to_hex();
-    let tool_bytes = std::fs::read(asset_root.join("agent-ws/tools/catalogs/default.json"))
-        .context("read tool catalog file")?;
-    let tool_hash = store
-        .put_blob(&tool_bytes)
-        .context("store tool blob")?
-        .to_hex();
 
     let mut step_epoch = 1_u64;
 
@@ -289,15 +283,14 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
                     "workspace_binding": null,
                     "default_prompt_pack": null,
                     "default_prompt_refs": [prompt_hash],
-                    "default_tool_catalog": null,
-                    "default_tool_refs": [tool_hash]
+                    "default_tool_profile": "openai",
+                    "default_tool_enable": ["host.session.open"],
+                    "default_tool_disable": null,
+                    "default_tool_force": null
                 }
             }
         }),
     )?;
-    step_epoch += 1;
-
-    send_session_event(&mut host, step_epoch, json!({ "$tag": "RunStarted" }))?;
     step_epoch += 1;
     run_until_idle(&mut host, 8).await?;
 
@@ -310,12 +303,12 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         .get("prompt_refs")
         .and_then(Value::as_array)
         .context("missing prompt_refs")?;
-    let tool_refs = active_run_config
-        .get("tool_refs")
-        .and_then(Value::as_array)
-        .context("missing tool_refs")?;
+    let tool_profile = active_run_config
+        .get("tool_profile")
+        .and_then(Value::as_str)
+        .context("missing tool_profile")?;
     assert_eq!(prompt_refs.len(), 1);
-    assert_eq!(tool_refs.len(), 1);
+    assert_eq!(tool_profile, "openai");
     assert!(
         active_run_config
             .get("workspace_binding")
@@ -335,10 +328,16 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         &mut host,
         step_epoch,
         json!({
-            "$tag": "ToolBatchStarted",
+            "$tag": "ToolCallsObserved",
             "$value": {
-                "tool_batch_id": { "step_id": step_id, "batch_seq": 1 },
-                "expected_call_ids": [TOOL_CALL_ID]
+                "intent_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "params_hash": null,
+                "calls": [{
+                  "call_id": TOOL_CALL_ID,
+                  "tool_name": "host.session.open",
+                  "arguments_ref": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                  "provider_call_id": null
+                }]
             }
         }),
     )?;

@@ -183,6 +183,8 @@ fn write_manifest_file(manifest_path: &Path) -> Result<()> {
         schemas: Vec::new(),
         modules: Vec::new(),
         effects: Vec::new(),
+        effect_bindings: vec![],
+
         caps: Vec::new(),
         policies: Vec::new(),
         secrets: Vec::new(),

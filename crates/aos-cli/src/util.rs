@@ -360,6 +360,10 @@ const SYS_MODULES: &[SysModuleSpec] = &[
         name: "sys/CapEnforceWorkspace@1",
         bin: "cap_enforce_workspace",
     },
+    SysModuleSpec {
+        name: "sys/CapEnforceHost@1",
+        bin: "cap_enforce_host",
+    },
 ];
 
 fn resolve_sys_module(

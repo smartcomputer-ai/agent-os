@@ -861,6 +861,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             effects: Vec::new(),
+            effect_bindings: vec![],
+
             caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),
@@ -894,6 +896,8 @@ mod tests {
             }],
             modules: Vec::new(),
             effects: Vec::new(),
+            effect_bindings: vec![],
+
             caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),
@@ -933,6 +937,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             effects: Vec::new(),
+            effect_bindings: vec![],
+
             caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),
@@ -978,6 +984,8 @@ mod tests {
             }],
             modules: Vec::new(),
             effects: Vec::new(),
+            effect_bindings: vec![],
+
             caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),

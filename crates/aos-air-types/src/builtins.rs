@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use aos_cbor::Hash;
 use once_cell::sync::Lazy;
@@ -7,6 +7,8 @@ use serde_json;
 use crate::{DefCap, DefEffect, DefModule, DefSchema, HashRef};
 
 static BUILTIN_SCHEMAS_RAW: &str = include_str!("../../../spec/defs/builtin-schemas.air.json");
+static BUILTIN_SCHEMAS_HOST_RAW: &str =
+    include_str!("../../../spec/defs/builtin-schemas-host.air.json");
 static BUILTIN_EFFECTS_RAW: &str = include_str!("../../../spec/defs/builtin-effects.air.json");
 static BUILTIN_CAPS_RAW: &str = include_str!("../../../spec/defs/builtin-caps.air.json");
 static BUILTIN_MODULES_RAW: &str = include_str!("../../../spec/defs/builtin-modules.air.json");
@@ -42,7 +44,14 @@ pub struct BuiltinModule {
 static BUILTIN_SCHEMAS: Lazy<Vec<BuiltinSchema>> = Lazy::new(|| {
     let defs: Vec<DefSchema> = serde_json::from_str(BUILTIN_SCHEMAS_RAW)
         .expect("spec/defs/builtin-schemas.air.json must parse");
-    defs.into_iter()
+    let host_defs: Vec<DefSchema> = serde_json::from_str(BUILTIN_SCHEMAS_HOST_RAW)
+        .expect("spec/defs/builtin-schemas-host.air.json must parse");
+    let mut merged: BTreeMap<String, DefSchema> = BTreeMap::new();
+    for schema in defs.into_iter().chain(host_defs.into_iter()) {
+        merged.insert(schema.name.clone(), schema);
+    }
+    merged
+        .into_values()
         .map(|schema| {
             let hash = Hash::of_cbor(&schema).expect("canonical hash");
             let hash_ref = HashRef::new(hash.to_hex()).expect("valid hash");
@@ -197,6 +206,40 @@ mod tests {
         assert!(names.contains(&"sys/TimerSetParams@1"));
         assert!(names.contains(&"sys/TimerSetReceipt@1"));
         assert!(names.contains(&"sys/TimerFired@1"));
+        assert!(names.contains(&"sys/HostMount@1"));
+        assert!(names.contains(&"sys/HostLocalTarget@1"));
+        assert!(names.contains(&"sys/HostTarget@1"));
+        assert!(names.contains(&"sys/HostSessionOpenParams@1"));
+        assert!(names.contains(&"sys/HostSessionOpenReceipt@1"));
+        assert!(names.contains(&"sys/HostOutput@1"));
+        assert!(names.contains(&"sys/HostExecParams@1"));
+        assert!(names.contains(&"sys/HostExecReceipt@1"));
+        assert!(names.contains(&"sys/HostSessionSignalParams@1"));
+        assert!(names.contains(&"sys/HostSessionSignalReceipt@1"));
+        assert!(names.contains(&"sys/HostBlobRefInput@1"));
+        assert!(names.contains(&"sys/HostFileContentInput@1"));
+        assert!(names.contains(&"sys/HostFsReadFileParams@1"));
+        assert!(names.contains(&"sys/HostFsReadFileReceipt@1"));
+        assert!(names.contains(&"sys/HostFsWriteFileParams@1"));
+        assert!(names.contains(&"sys/HostFsWriteFileReceipt@1"));
+        assert!(names.contains(&"sys/HostFsEditFileParams@1"));
+        assert!(names.contains(&"sys/HostFsEditFileReceipt@1"));
+        assert!(names.contains(&"sys/HostPatchInput@1"));
+        assert!(names.contains(&"sys/HostPatchOpsSummary@1"));
+        assert!(names.contains(&"sys/HostFsApplyPatchParams@1"));
+        assert!(names.contains(&"sys/HostFsApplyPatchReceipt@1"));
+        assert!(names.contains(&"sys/HostTextOutput@1"));
+        assert!(names.contains(&"sys/HostFsGrepParams@1"));
+        assert!(names.contains(&"sys/HostFsGrepReceipt@1"));
+        assert!(names.contains(&"sys/HostFsGlobParams@1"));
+        assert!(names.contains(&"sys/HostFsGlobReceipt@1"));
+        assert!(names.contains(&"sys/HostFsStatParams@1"));
+        assert!(names.contains(&"sys/HostFsStatReceipt@1"));
+        assert!(names.contains(&"sys/HostFsExistsParams@1"));
+        assert!(names.contains(&"sys/HostFsExistsReceipt@1"));
+        assert!(names.contains(&"sys/HostFsListDirParams@1"));
+        assert!(names.contains(&"sys/HostFsListDirReceipt@1"));
+        assert!(names.contains(&"sys/HostCapParams@1"));
         assert!(names.contains(&"sys/BlobPutParams@1"));
         assert!(names.contains(&"sys/BlobEdge@1"));
         assert!(names.contains(&"sys/BlobPutReceipt@1"));
@@ -300,6 +343,7 @@ mod tests {
             "sys/blob@1",
             "sys/http.out@1",
             "sys/llm.basic@1",
+            "sys/host@1",
             "sys/secret@1",
             "sys/workspace@1",
             "sys/governance@1",
@@ -317,6 +361,7 @@ mod tests {
         for name in [
             "sys/CapEnforceHttpOut@1",
             "sys/CapEnforceLlmBasic@1",
+            "sys/CapEnforceHost@1",
             "sys/CapEnforceGovernance@1",
             "sys/CapEnforceWorkspace@1",
             "sys/Workspace@1",
