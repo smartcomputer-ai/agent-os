@@ -1,9 +1,9 @@
 #![cfg(feature = "e2e-tests")]
 
-use aos_air_types::{DefSchema, WorkflowAbi, TypeExpr, TypeRecord};
+use aos_air_types::{DefSchema, TypeExpr, TypeRecord, WorkflowAbi};
 use aos_kernel::error::KernelError;
 use aos_wasm_abi::{DomainEvent, WorkflowOutput};
-use helpers::fixtures::{self, TestWorld, START_SCHEMA};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 use indexmap::IndexMap;
 
 mod helpers;

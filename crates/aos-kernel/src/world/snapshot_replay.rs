@@ -194,10 +194,11 @@ impl<S: Store + 'static> Kernel<S> {
                 self.tick_until_idle()?;
             }
             JournalRecord::EffectIntent(record) => {
-                self.restore_effect_intent(record)?;
+                self.restore_effect_intent(self.hydrate_effect_intent_record(record)?)?;
             }
             JournalRecord::EffectReceipt(record) => {
                 self.sync_logical_from_record(record.logical_now_ns);
+                let record = self.hydrate_effect_receipt_record(record)?;
                 let stamp = IngressStamp {
                     now_ns: record.now_ns,
                     logical_now_ns: record.logical_now_ns,
@@ -273,6 +274,34 @@ impl<S: Store + 'static> Kernel<S> {
             _ => {}
         }
         Ok(())
+    }
+
+    fn hydrate_effect_intent_record(
+        &self,
+        mut record: EffectIntentRecord,
+    ) -> Result<EffectIntentRecord, KernelError> {
+        record.params_cbor = self.hydrate_externalized_cbor(
+            record.params_cbor,
+            record.params_ref.as_ref(),
+            record.params_size,
+            record.params_sha256.as_ref(),
+            "effect_intent.params",
+        )?;
+        Ok(record)
+    }
+
+    fn hydrate_effect_receipt_record(
+        &self,
+        mut record: EffectReceiptRecord,
+    ) -> Result<EffectReceiptRecord, KernelError> {
+        record.payload_cbor = self.hydrate_externalized_cbor(
+            record.payload_cbor,
+            record.payload_ref.as_ref(),
+            record.payload_size,
+            record.payload_sha256.as_ref(),
+            "effect_receipt.payload",
+        )?;
+        Ok(record)
     }
 
     fn load_snapshot(&mut self, record: &SnapshotRecord) -> Result<(), KernelError> {
@@ -627,7 +656,7 @@ mod tests {
         append_record, empty_manifest, event_record, kernel_with_store_and_journal,
         loaded_manifest_with_schema, minimal_kernel_non_keyed, write_manifest,
     };
-    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, WorkflowAbi, SchemaRef};
+    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
     use aos_effects::EffectStreamFrame;
     use aos_store::MemStore;
     use serde_json::json;
@@ -828,16 +857,7 @@ mod tests {
         let (loaded, manifest_hash) =
             loaded_manifest_with_schema(store.as_ref(), "com.acme/Event@1");
 
-        let snapshot = KernelSnapshot::new(
-            1,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            0,
-            None,
-        );
+        let snapshot = KernelSnapshot::new(1, vec![], vec![], vec![], vec![], vec![], 0, None);
         let snap_bytes = serde_cbor::to_vec(&snapshot).unwrap();
         let snap_hash = store.put_blob(&snap_bytes).unwrap();
 
@@ -1139,6 +1159,9 @@ mod tests {
             kind: "http.request".into(),
             cap_name: "cap/http@1".into(),
             params_cbor: vec![1],
+            params_ref: None,
+            params_size: None,
+            params_sha256: None,
             idempotency_key: [2u8; 32],
             origin: IntentOriginRecord::Workflow {
                 name: "example/Workflow@1".into(),
@@ -1157,6 +1180,9 @@ mod tests {
             adapter_id: "stub.http".into(),
             status: aos_effects::ReceiptStatus::Ok,
             payload_cbor: vec![],
+            payload_ref: None,
+            payload_size: None,
+            payload_sha256: None,
             cost_cents: None,
             signature: vec![],
             now_ns: 0,

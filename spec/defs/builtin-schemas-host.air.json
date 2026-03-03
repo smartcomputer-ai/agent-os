@@ -1,0 +1,1116 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "sys/HostMount@1",
+    "type": {
+      "record": {
+        "host_path": {
+          "text": {}
+        },
+        "guest_path": {
+          "text": {}
+        },
+        "mode": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostLocalTarget@1",
+    "type": {
+      "record": {
+        "mounts": {
+          "option": {
+            "list": {
+              "ref": "sys/HostMount@1"
+            }
+          }
+        },
+        "workdir": {
+          "option": {
+            "text": {}
+          }
+        },
+        "env": {
+          "option": {
+            "map": {
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "network_mode": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostTarget@1",
+    "type": {
+      "variant": {
+        "local": {
+          "ref": "sys/HostLocalTarget@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostSessionOpenParams@1",
+    "type": {
+      "record": {
+        "target": {
+          "ref": "sys/HostTarget@1"
+        },
+        "session_ttl_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "labels": {
+          "option": {
+            "map": {
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostSessionOpenReceipt@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "status": {
+          "text": {}
+        },
+        "started_at_ns": {
+          "nat": {}
+        },
+        "expires_at_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_message": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostOutput@1",
+    "type": {
+      "variant": {
+        "inline_text": {
+          "record": {
+            "text": {
+              "text": {}
+            }
+          }
+        },
+        "inline_bytes": {
+          "record": {
+            "bytes": {
+              "bytes": {}
+            }
+          }
+        },
+        "blob": {
+          "record": {
+            "blob_ref": {
+              "hash": {}
+            },
+            "size_bytes": {
+              "nat": {}
+            },
+            "preview_bytes": {
+              "option": {
+                "bytes": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostExecParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "argv": {
+          "list": {
+            "text": {}
+          }
+        },
+        "cwd": {
+          "option": {
+            "text": {}
+          }
+        },
+        "timeout_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "env_patch": {
+          "option": {
+            "map": {
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "stdin_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "output_mode": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostExecReceipt@1",
+    "type": {
+      "record": {
+        "exit_code": {
+          "int": {}
+        },
+        "status": {
+          "text": {}
+        },
+        "stdout": {
+          "option": {
+            "ref": "sys/HostOutput@1"
+          }
+        },
+        "stderr": {
+          "option": {
+            "ref": "sys/HostOutput@1"
+          }
+        },
+        "started_at_ns": {
+          "nat": {}
+        },
+        "ended_at_ns": {
+          "nat": {}
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_message": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostSessionSignalParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "signal": {
+          "text": {}
+        },
+        "grace_timeout_ns": {
+          "option": {
+            "nat": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostSessionSignalReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "exit_code": {
+          "option": {
+            "int": {}
+          }
+        },
+        "ended_at_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_message": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostBlobRefInput@1",
+    "type": {
+      "record": {
+        "blob_ref": {
+          "hash": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFileContentInput@1",
+    "type": {
+      "variant": {
+        "inline_text": {
+          "record": {
+            "text": {
+              "text": {}
+            }
+          }
+        },
+        "inline_bytes": {
+          "record": {
+            "bytes": {
+              "bytes": {}
+            }
+          }
+        },
+        "blob_ref": {
+          "ref": "sys/HostBlobRefInput@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsReadFileParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "path": {
+          "text": {}
+        },
+        "offset_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "encoding": {
+          "option": {
+            "text": {}
+          }
+        },
+        "output_mode": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsReadFileReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "content": {
+          "option": {
+            "ref": "sys/HostOutput@1"
+          }
+        },
+        "truncated": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "size_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsWriteFileParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "path": {
+          "text": {}
+        },
+        "content": {
+          "ref": "sys/HostFileContentInput@1"
+        },
+        "create_parents": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "mode": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsWriteFileReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "written_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "created": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "new_mtime_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsEditFileParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "path": {
+          "text": {}
+        },
+        "old_string": {
+          "text": {}
+        },
+        "new_string": {
+          "text": {}
+        },
+        "replace_all": {
+          "option": {
+            "bool": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsEditFileReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "replacements": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "applied": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "summary_text": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostPatchInput@1",
+    "type": {
+      "variant": {
+        "inline_text": {
+          "record": {
+            "text": {
+              "text": {}
+            }
+          }
+        },
+        "blob_ref": {
+          "ref": "sys/HostBlobRefInput@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostPatchOpsSummary@1",
+    "type": {
+      "record": {
+        "add": {
+          "nat": {}
+        },
+        "update": {
+          "nat": {}
+        },
+        "delete": {
+          "nat": {}
+        },
+        "move": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsApplyPatchParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "patch": {
+          "ref": "sys/HostPatchInput@1"
+        },
+        "patch_format": {
+          "option": {
+            "text": {}
+          }
+        },
+        "dry_run": {
+          "option": {
+            "bool": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsApplyPatchReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "files_changed": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "changed_paths": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "ops": {
+          "option": {
+            "ref": "sys/HostPatchOpsSummary@1"
+          }
+        },
+        "summary_text": {
+          "option": {
+            "text": {}
+          }
+        },
+        "errors": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostTextOutput@1",
+    "type": {
+      "variant": {
+        "inline_text": {
+          "record": {
+            "text": {
+              "text": {}
+            }
+          }
+        },
+        "blob": {
+          "record": {
+            "blob_ref": {
+              "hash": {}
+            },
+            "size_bytes": {
+              "nat": {}
+            },
+            "preview_bytes": {
+              "option": {
+                "bytes": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsGrepParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "pattern": {
+          "text": {}
+        },
+        "path": {
+          "option": {
+            "text": {}
+          }
+        },
+        "glob_filter": {
+          "option": {
+            "text": {}
+          }
+        },
+        "case_insensitive": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "max_results": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "output_mode": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsGrepReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "matches": {
+          "option": {
+            "ref": "sys/HostTextOutput@1"
+          }
+        },
+        "match_count": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "truncated": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "summary_text": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsGlobParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "pattern": {
+          "text": {}
+        },
+        "path": {
+          "option": {
+            "text": {}
+          }
+        },
+        "max_results": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "output_mode": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsGlobReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "paths": {
+          "option": {
+            "ref": "sys/HostTextOutput@1"
+          }
+        },
+        "count": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "truncated": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "summary_text": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsStatParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "path": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsStatReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "exists": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "is_dir": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "size_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "mtime_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsExistsParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "path": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsExistsReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "exists": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsListDirParams@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "text": {}
+        },
+        "path": {
+          "option": {
+            "text": {}
+          }
+        },
+        "max_results": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "output_mode": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostFsListDirReceipt@1",
+    "type": {
+      "record": {
+        "status": {
+          "text": {}
+        },
+        "entries": {
+          "option": {
+            "ref": "sys/HostTextOutput@1"
+          }
+        },
+        "count": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "truncated": {
+          "option": {
+            "bool": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "summary_text": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostCapParams@1",
+    "type": {
+      "record": {
+        "allowed_targets": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "network_modes": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "local_mount_roots": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "local_guest_path_prefixes": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "local_mount_modes": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "workdir_prefixes": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "env_allow": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "max_mounts": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_env_vars": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_session_ttl_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_exec_timeout_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_argv_len": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_arg_length": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "allowed_output_modes": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "allowed_signals": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "allowed_fs_ops": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "fs_roots": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "max_read_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_write_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_patch_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_inline_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_grep_results": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_glob_results": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_scan_files": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_scan_bytes": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "allowed_patch_formats": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "max_changed_files": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_edit_replacements": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "follow_symlinks": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  }
+]

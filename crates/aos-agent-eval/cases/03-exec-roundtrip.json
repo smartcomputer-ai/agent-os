@@ -1,0 +1,34 @@
+{
+  "id": "exec-roundtrip",
+  "description": "Run a shell command and return a hidden token.",
+  "prompt": "Call shell with argv exactly [\"cat\",\"notes/cmd_token.txt\"]. Then answer exactly EXEC=<value> using stdout.",
+  "setup": {
+    "files": [
+      {
+        "path": "notes/cmd_token.txt",
+        "content": "cmd-7349"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.exec"
+    ],
+    "tool_output_contains": [
+      "cmd-7349"
+    ]
+  },
+  "eval": {
+    "runs": 2,
+    "min_pass_rate": 0.5,
+    "max_steps": 96
+  },
+  "run": {
+    "max_tokens": 768,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.exec"
+    ],
+    "bootstrap_session": true
+  }
+}

@@ -536,6 +536,7 @@ impl CapType {
     pub const BLOB: &'static str = "blob";
     pub const TIMER: &'static str = "timer";
     pub const LLM_BASIC: &'static str = "llm.basic";
+    pub const HOST: &'static str = "host";
     pub const SECRET: &'static str = "secret";
     pub const QUERY: &'static str = "query";
     pub const WORKSPACE: &'static str = "workspace";
@@ -562,6 +563,10 @@ impl CapType {
 
     pub fn llm_basic() -> Self {
         Self::new(Self::LLM_BASIC)
+    }
+
+    pub fn host() -> Self {
+        Self::new(Self::HOST)
     }
 
     pub fn secret() -> Self {
@@ -653,6 +658,8 @@ pub struct Manifest {
     pub modules: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<NamedRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effect_bindings: Vec<EffectBinding>,
     pub caps: Vec<NamedRef>,
     pub policies: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -663,6 +670,12 @@ pub struct Manifest {
     pub module_bindings: IndexMap<Name, ModuleBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<Routing>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EffectBinding {
+    pub kind: EffectKind,
+    pub adapter_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -751,6 +764,18 @@ impl EffectKind {
     pub const BLOB_PUT: &'static str = "blob.put";
     pub const BLOB_GET: &'static str = "blob.get";
     pub const TIMER_SET: &'static str = "timer.set";
+    pub const HOST_SESSION_OPEN: &'static str = "host.session.open";
+    pub const HOST_EXEC: &'static str = "host.exec";
+    pub const HOST_SESSION_SIGNAL: &'static str = "host.session.signal";
+    pub const HOST_FS_READ_FILE: &'static str = "host.fs.read_file";
+    pub const HOST_FS_WRITE_FILE: &'static str = "host.fs.write_file";
+    pub const HOST_FS_EDIT_FILE: &'static str = "host.fs.edit_file";
+    pub const HOST_FS_APPLY_PATCH: &'static str = "host.fs.apply_patch";
+    pub const HOST_FS_GREP: &'static str = "host.fs.grep";
+    pub const HOST_FS_GLOB: &'static str = "host.fs.glob";
+    pub const HOST_FS_STAT: &'static str = "host.fs.stat";
+    pub const HOST_FS_EXISTS: &'static str = "host.fs.exists";
+    pub const HOST_FS_LIST_DIR: &'static str = "host.fs.list_dir";
     pub const LLM_GENERATE: &'static str = "llm.generate";
     pub const VAULT_PUT: &'static str = "vault.put";
     pub const VAULT_ROTATE: &'static str = "vault.rotate";
@@ -791,6 +816,54 @@ impl EffectKind {
 
     pub fn timer_set() -> Self {
         Self::new(Self::TIMER_SET)
+    }
+
+    pub fn host_session_open() -> Self {
+        Self::new(Self::HOST_SESSION_OPEN)
+    }
+
+    pub fn host_exec() -> Self {
+        Self::new(Self::HOST_EXEC)
+    }
+
+    pub fn host_session_signal() -> Self {
+        Self::new(Self::HOST_SESSION_SIGNAL)
+    }
+
+    pub fn host_fs_read_file() -> Self {
+        Self::new(Self::HOST_FS_READ_FILE)
+    }
+
+    pub fn host_fs_write_file() -> Self {
+        Self::new(Self::HOST_FS_WRITE_FILE)
+    }
+
+    pub fn host_fs_edit_file() -> Self {
+        Self::new(Self::HOST_FS_EDIT_FILE)
+    }
+
+    pub fn host_fs_apply_patch() -> Self {
+        Self::new(Self::HOST_FS_APPLY_PATCH)
+    }
+
+    pub fn host_fs_grep() -> Self {
+        Self::new(Self::HOST_FS_GREP)
+    }
+
+    pub fn host_fs_glob() -> Self {
+        Self::new(Self::HOST_FS_GLOB)
+    }
+
+    pub fn host_fs_stat() -> Self {
+        Self::new(Self::HOST_FS_STAT)
+    }
+
+    pub fn host_fs_exists() -> Self {
+        Self::new(Self::HOST_FS_EXISTS)
+    }
+
+    pub fn host_fs_list_dir() -> Self {
+        Self::new(Self::HOST_FS_LIST_DIR)
     }
 
     pub fn llm_generate() -> Self {

@@ -1,0 +1,52 @@
+{
+  "id": "fallback-log-report",
+  "description": "Resolve a fallback log path and write a derived report.",
+  "prompt": "Call list_dir with path jobs to find the task file, then read that file and follow it exactly: check preferred_log with exists; if it does not exist, read fallback_log with read_file. From the selected log content, extract the token from the line containing \"acquired\". Then write report_path with exact text RESULT=<token>\\n where <token> is the extracted token, with create_parents true. Do not write the report until exists and log read have both succeeded. Then answer exactly CHAIN=OK.",
+  "setup": {
+    "files": [
+      {
+        "path": "jobs/task-418.json",
+        "content": "{\n  \"preferred_log\": \"logs/primary.log\",\n  \"fallback_log\": \"logs/fallback.log\",\n  \"needle\": \"token-8831\",\n  \"report_path\": \"reports/final.txt\"\n}\n"
+      },
+      {
+        "path": "logs/fallback.log",
+        "content": "INFO boot\nINFO token-8831 acquired\nINFO done\n"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.list_dir",
+      "host.fs.read_file",
+      "host.fs.exists",
+      "host.fs.write_file"
+    ],
+    "tool_output_contains": [
+      "task-418.json",
+      "\"exists\":false",
+      "INFO token-8831 acquired",
+      "written_bytes"
+    ],
+    "files": [
+      {
+        "path": "reports/final.txt",
+        "equals": "RESULT=token-8831\n"
+      }
+    ]
+  },
+  "eval": {
+    "runs": 1,
+    "min_pass_rate": 1.0,
+    "max_steps": 128
+  },
+  "run": {
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.list_dir",
+      "host.fs.read_file",
+      "host.fs.exists",
+      "host.fs.write_file"
+    ],
+    "bootstrap_session": true
+  }
+}

@@ -7,7 +7,9 @@ impl<S: Store + 'static> Kernel<S> {
     const MAX_DOMAIN_EVENTS_PER_TICK: usize = 256;
     const MAX_WORKFLOW_OUTPUT_BYTES_PER_TICK: usize = 1_048_576;
 
-    pub(super) fn enforce_workflow_output_limits(output: &WorkflowOutput) -> Result<(), KernelError> {
+    pub(super) fn enforce_workflow_output_limits(
+        output: &WorkflowOutput,
+    ) -> Result<(), KernelError> {
         if output.effects.len() > Self::MAX_EFFECTS_PER_TICK {
             return Err(KernelError::WorkflowOutput(format!(
                 "workflow exceeded max effects per tick: {} > {}",
@@ -127,12 +129,15 @@ impl<S: Store + 'static> Kernel<S> {
                 .module_defs
                 .get(&binding.workflow)
                 .ok_or_else(|| KernelError::WorkflowNotFound(binding.workflow.clone()))?;
-            let workflow_schema = self.workflow_schemas.get(&binding.workflow).ok_or_else(|| {
-                KernelError::Manifest(format!(
-                    "schema for workflow '{}' not found while routing event",
-                    binding.workflow
-                ))
-            })?;
+            let workflow_schema =
+                self.workflow_schemas
+                    .get(&binding.workflow)
+                    .ok_or_else(|| {
+                        KernelError::Manifest(format!(
+                            "schema for workflow '{}' not found while routing event",
+                            binding.workflow
+                        ))
+                    })?;
             let keyed = module_def.key_schema.is_some();
 
             match (keyed, &binding.key_field) {
@@ -254,7 +259,10 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(normalized.bytes)
     }
 
-    pub(super) fn handle_workflow_event(&mut self, event: WorkflowEvent) -> Result<(), KernelError> {
+    pub(super) fn handle_workflow_event(
+        &mut self,
+        event: WorkflowEvent,
+    ) -> Result<(), KernelError> {
         let workflow_name = event.workflow.clone();
         let (keyed, wants_context) = {
             let module_def = self
@@ -295,7 +303,10 @@ impl<S: Store + 'static> Kernel<S> {
             index_root = Some(self.ensure_cell_index_root(&workflow_name)?);
         }
 
-        let state_entry = self.workflow_state.entry(workflow_name.clone()).or_default();
+        let state_entry = self
+            .workflow_state
+            .entry(workflow_name.clone())
+            .or_default();
         let key_bytes: &[u8] = key.as_deref().unwrap_or(MONO_KEY);
         let current_state = if let Some(entry) = state_entry.cell_cache.get(key_bytes) {
             Some(entry.state.clone())
@@ -398,7 +409,10 @@ impl<S: Store + 'static> Kernel<S> {
         let index_root = self.ensure_cell_index_root(&workflow_name)?;
         let mut new_index_root: Option<Hash> = None;
 
-        let entry = self.workflow_state.entry(workflow_name.clone()).or_default();
+        let entry = self
+            .workflow_state
+            .entry(workflow_name.clone())
+            .or_default();
 
         let key_bytes = if keyed {
             key.clone().expect("key required for keyed workflow")
@@ -445,7 +459,8 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
         if let Some(root) = new_index_root {
-            self.workflow_index_roots.insert(workflow_name.clone(), root);
+            self.workflow_index_roots
+                .insert(workflow_name.clone(), root);
         }
         self.record_workflow_state_transition(
             &workflow_name,
@@ -620,8 +635,8 @@ mod tests {
         minimal_kernel_with_router, minimal_kernel_with_router_non_keyed, schema_event_record,
     };
     use aos_air_types::{
-        CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, WorkflowAbi,
-        Routing, RoutingEvent, SchemaRef, TypePrimitive, TypePrimitiveHash, TypePrimitiveText,
+        CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, Routing,
+        RoutingEvent, SchemaRef, TypePrimitive, TypePrimitiveHash, TypePrimitiveText, WorkflowAbi,
         catalog::EffectCatalog,
     };
     use aos_cbor::Hash;
@@ -990,6 +1005,8 @@ mod tests {
                 hash: HashRef::new(hash(1)).unwrap(),
             }],
             effects: vec![],
+            effect_bindings: vec![],
+
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -1009,6 +1026,7 @@ mod tests {
             secrets: vec![],
             modules,
             effects: HashMap::new(),
+
             caps: HashMap::new(),
             policies: HashMap::new(),
             schemas,

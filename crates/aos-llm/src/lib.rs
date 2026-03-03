@@ -4,7 +4,6 @@
 //! is organized into the four-layer architecture described there.
 
 pub mod anthropic;
-pub mod catalog;
 pub mod client;
 pub mod errors;
 pub mod high_level;
@@ -16,8 +15,6 @@ pub mod utils;
 
 #[allow(unused_imports)]
 pub use anthropic::*;
-#[allow(unused_imports)]
-pub use catalog::*;
 #[allow(unused_imports)]
 pub use client::*;
 #[allow(unused_imports)]

@@ -1,0 +1,678 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionId@1",
+    "type": { "uuid": {} }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunId@1",
+    "type": {
+      "record": {
+        "session_id": { "ref": "aos.agent/SessionId@1" },
+        "run_seq": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolBatchId@1",
+    "type": {
+      "record": {
+        "run_id": { "ref": "aos.agent/RunId@1" },
+        "batch_seq": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallStatus@1",
+    "type": {
+      "variant": {
+        "Queued": { "unit": {} },
+        "Pending": { "unit": {} },
+        "Succeeded": { "unit": {} },
+        "Failed": { "record": { "code": { "text": {} }, "detail": { "text": {} } } },
+        "Ignored": { "unit": {} },
+        "Cancelled": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolMapper@1",
+    "type": {
+      "variant": {
+        "HostSessionOpen": { "unit": {} },
+        "HostExec": { "unit": {} },
+        "HostSessionSignal": { "unit": {} },
+        "HostFsReadFile": { "unit": {} },
+        "HostFsWriteFile": { "unit": {} },
+        "HostFsEditFile": { "unit": {} },
+        "HostFsApplyPatch": { "unit": {} },
+        "HostFsGrep": { "unit": {} },
+        "HostFsGlob": { "unit": {} },
+        "HostFsStat": { "unit": {} },
+        "HostFsExists": { "unit": {} },
+        "HostFsListDir": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolExecutor@1",
+    "type": {
+      "variant": {
+        "Effect": {
+          "record": {
+            "effect_kind": { "text": {} },
+            "cap_slot": { "option": { "text": {} } }
+          }
+        },
+        "HostLoop": {
+          "record": {
+            "bridge": { "text": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolAvailabilityRule@1",
+    "type": {
+      "variant": {
+        "Always": { "unit": {} },
+        "HostSessionReady": { "unit": {} },
+        "HostSessionNotReady": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolParallelismHint@1",
+    "type": {
+      "record": {
+        "parallel_safe": { "bool": {} },
+        "resource_key": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolSpec@1",
+    "type": {
+      "record": {
+        "tool_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "tool_ref": { "hash": {} },
+        "description": { "text": {} },
+        "args_schema_json": { "text": {} },
+        "mapper": { "ref": "aos.agent/ToolMapper@1" },
+        "executor": { "ref": "aos.agent/ToolExecutor@1" },
+        "availability_rules": { "list": { "ref": "aos.agent/ToolAvailabilityRule@1" } },
+        "parallelism_hint": { "ref": "aos.agent/ToolParallelismHint@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostSessionStatus@1",
+    "type": {
+      "variant": {
+        "Ready": { "unit": {} },
+        "Closed": { "unit": {} },
+        "Expired": { "unit": {} },
+        "Error": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolRuntimeContext@1",
+    "type": {
+      "record": {
+        "host_session_id": { "option": { "text": {} } },
+        "host_session_status": { "option": { "ref": "aos.agent/HostSessionStatus@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/EffectiveTool@1",
+    "type": {
+      "record": {
+        "tool_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "tool_ref": { "hash": {} },
+        "description": { "text": {} },
+        "args_schema_json": { "text": {} },
+        "mapper": { "ref": "aos.agent/ToolMapper@1" },
+        "executor": { "ref": "aos.agent/ToolExecutor@1" },
+        "parallel_safe": { "bool": {} },
+        "resource_key": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/EffectiveToolSet@1",
+    "type": {
+      "record": {
+        "profile_id": { "text": {} },
+        "profile_requires_host_session": { "bool": {} },
+        "ordered_tools": { "list": { "ref": "aos.agent/EffectiveTool@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallObserved@1",
+    "type": {
+      "record": {
+        "call_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "arguments_json": { "text": {} },
+        "arguments_ref": { "option": { "hash": {} } },
+        "provider_call_id": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallLlmResult@1",
+    "type": {
+      "record": {
+        "call_id": { "text": {} },
+        "tool_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "is_error": { "bool": {} },
+        "output_json": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PlannedToolCall@1",
+    "type": {
+      "record": {
+        "call_id": { "text": {} },
+        "tool_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "arguments_json": { "text": {} },
+        "arguments_ref": { "option": { "hash": {} } },
+        "provider_call_id": { "option": { "text": {} } },
+        "mapper": { "ref": "aos.agent/ToolMapper@1" },
+        "executor": { "ref": "aos.agent/ToolExecutor@1" },
+        "parallel_safe": { "bool": {} },
+        "resource_key": { "option": { "text": {} } },
+        "accepted": { "bool": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolExecutionPlan@1",
+    "type": {
+      "record": {
+        "groups": { "list": { "list": { "text": {} } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolBatchPlan@1",
+    "type": {
+      "record": {
+        "observed_calls": { "list": { "ref": "aos.agent/ToolCallObserved@1" } },
+        "planned_calls": { "list": { "ref": "aos.agent/PlannedToolCall@1" } },
+        "execution_plan": { "ref": "aos.agent/ToolExecutionPlan@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ActiveToolBatch@1",
+    "type": {
+      "record": {
+        "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+        "intent_id": { "hash": {} },
+        "params_hash": { "option": { "hash": {} } },
+        "plan": { "ref": "aos.agent/ToolBatchPlan@1" },
+        "call_status": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "ref": "aos.agent/ToolCallStatus@1" }
+          }
+        },
+        "pending_by_params_hash": {
+          "map": {
+            "key": { "hash": {} },
+            "value": { "list": { "text": {} } }
+          }
+        },
+        "next_group_index": { "nat": {} },
+        "llm_results": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "ref": "aos.agent/ToolCallLlmResult@1" }
+          }
+        },
+        "results_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolOverrideScope@1",
+    "type": {
+      "variant": {
+        "Session": { "unit": {} },
+        "Run": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ReasoningEffort@1",
+    "type": {
+      "variant": {
+        "Low": { "unit": {} },
+        "Medium": { "unit": {} },
+        "High": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceBinding@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} },
+        "version": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceApplyMode@1",
+    "type": {
+      "variant": {
+        "NextRun": { "unit": {} },
+        "ImmediateIfIdle": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSnapshot@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} },
+        "version": { "option": { "nat": {} } },
+        "root_hash": { "option": { "hash": {} } },
+        "index_ref": { "option": { "hash": {} } },
+        "prompt_pack": { "option": { "text": {} } },
+        "prompt_pack_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSnapshotReady@1",
+    "type": {
+      "record": {
+        "snapshot": { "ref": "aos.agent/WorkspaceSnapshot@1" },
+        "prompt_pack_bytes": { "option": { "bytes": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionConfig@1",
+    "type": {
+      "record": {
+        "provider": { "text": {} },
+        "model": { "text": {} },
+        "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
+        "max_tokens": { "option": { "nat": {} } },
+        "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
+        "default_prompt_pack": { "option": { "text": {} } },
+        "default_prompt_refs": { "option": { "list": { "hash": {} } } },
+        "default_tool_profile": { "option": { "text": {} } },
+        "default_tool_enable": { "option": { "list": { "text": {} } } },
+        "default_tool_disable": { "option": { "list": { "text": {} } } },
+        "default_tool_force": { "option": { "list": { "text": {} } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunConfig@1",
+    "type": {
+      "record": {
+        "provider": { "text": {} },
+        "model": { "text": {} },
+        "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
+        "max_tokens": { "option": { "nat": {} } },
+        "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
+        "prompt_pack": { "option": { "text": {} } },
+        "prompt_refs": { "option": { "list": { "hash": {} } } },
+        "tool_profile": { "option": { "text": {} } },
+        "tool_enable": { "option": { "list": { "text": {} } } },
+        "tool_disable": { "option": { "list": { "text": {} } } },
+        "tool_force": { "option": { "list": { "text": {} } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionLifecycle@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Running": { "unit": {} },
+        "WaitingInput": { "unit": {} },
+        "Paused": { "unit": {} },
+        "Cancelling": { "unit": {} },
+        "Completed": { "unit": {} },
+        "Failed": { "unit": {} },
+        "Cancelled": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostCommand@1",
+    "type": {
+      "record": {
+        "command_id": { "text": {} },
+        "issued_at": { "time": {} },
+        "command": {
+          "variant": {
+            "Steer": { "record": { "text": { "text": {} } } },
+            "FollowUp": { "record": { "text": { "text": {} } } },
+            "Pause": { "unit": {} },
+            "Resume": { "unit": {} },
+            "Cancel": { "record": { "reason": { "option": { "text": {} } } } },
+            "Noop": { "unit": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionIngressKind@1",
+    "type": {
+      "variant": {
+        "RunRequested": {
+          "record": {
+            "input_ref": { "hash": {} },
+            "run_overrides": { "option": { "ref": "aos.agent/SessionConfig@1" } }
+          }
+        },
+        "HostCommandReceived": { "ref": "aos.agent/HostCommand@1" },
+        "WorkspaceSyncRequested": {
+          "record": {
+            "workspace_binding": { "ref": "aos.agent/WorkspaceBinding@1" },
+            "prompt_pack": { "option": { "text": {} } }
+          }
+        },
+        "WorkspaceSyncUnchanged": {
+          "record": {
+            "workspace": { "text": {} },
+            "version": { "option": { "nat": {} } }
+          }
+        },
+        "WorkspaceSnapshotReady": { "ref": "aos.agent/WorkspaceSnapshotReady@1" },
+        "WorkspaceSyncFailed": {
+          "record": {
+            "workspace": { "text": {} },
+            "stage": { "text": {} },
+            "detail": { "text": {} }
+          }
+        },
+        "WorkspaceApplyRequested": {
+          "record": {
+            "mode": { "ref": "aos.agent/WorkspaceApplyMode@1" }
+          }
+        },
+        "ToolRegistrySet": {
+          "record": {
+            "registry": {
+              "map": {
+                "key": { "text": {} },
+                "value": { "ref": "aos.agent/ToolSpec@1" }
+              }
+            },
+            "profiles": {
+              "option": {
+                "map": {
+                  "key": { "text": {} },
+                  "value": { "list": { "text": {} } }
+                }
+              }
+            },
+            "default_profile": { "option": { "text": {} } }
+          }
+        },
+        "ToolProfileSelected": {
+          "record": {
+            "profile_id": { "text": {} }
+          }
+        },
+        "ToolOverridesSet": {
+          "record": {
+            "scope": { "ref": "aos.agent/ToolOverrideScope@1" },
+            "enable": { "option": { "list": { "text": {} } } },
+            "disable": { "option": { "list": { "text": {} } } },
+            "force": { "option": { "list": { "text": {} } } }
+          }
+        },
+        "HostSessionUpdated": {
+          "record": {
+            "host_session_id": { "option": { "text": {} } },
+            "host_session_status": {
+              "option": { "ref": "aos.agent/HostSessionStatus@1" }
+            }
+          }
+        },
+        "RunCompleted": { "unit": {} },
+        "RunFailed": {
+          "record": { "code": { "text": {} }, "detail": { "text": {} } }
+        },
+        "RunCancelled": {
+          "record": { "reason": { "option": { "text": {} } } }
+        },
+        "Noop": { "ref": "aos.agent/SessionNoop@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionIngress@1",
+    "type": {
+      "record": {
+        "session_id": { "ref": "aos.agent/SessionId@1" },
+        "observed_at_ns": { "time": {} },
+        "ingress": { "ref": "aos.agent/SessionIngressKind@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingIntent@1",
+    "type": {
+      "record": {
+        "effect_kind": { "text": {} },
+        "params_hash": { "hash": {} },
+        "intent_id": { "option": { "hash": {} } },
+        "cap_slot": { "option": { "text": {} } },
+        "emitted_at_ns": { "time": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobGetKind@1",
+    "type": {
+      "variant": {
+        "LlmOutputEnvelope": { "unit": {} },
+        "LlmToolCalls": { "unit": {} },
+        "ToolCallArguments": {
+          "record": {
+            "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+            "call_id": { "text": {} }
+          }
+        },
+        "ToolResultBlob": {
+          "record": {
+            "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+            "call_id": { "text": {} },
+            "blob_ref": { "text": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobGet@1",
+    "type": {
+      "record": {
+        "kind": { "ref": "aos.agent/PendingBlobGetKind@1" },
+        "emitted_at_ns": { "time": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobPutKind@1",
+    "type": {
+      "variant": {
+        "ToolDefinition": {
+          "record": {
+            "tool_id": { "text": {} }
+          }
+        },
+        "FollowUpMessage": {
+          "record": {
+            "index": { "nat": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobPut@1",
+    "type": {
+      "record": {
+        "kind": { "ref": "aos.agent/PendingBlobPutKind@1" },
+        "emitted_at_ns": { "time": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingFollowUpTurn@1",
+    "type": {
+      "record": {
+        "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+        "base_message_refs": { "list": { "hash": {} } },
+        "expected_messages": { "nat": {} },
+        "blob_refs_by_index": {
+          "map": {
+            "key": { "nat": {} },
+            "value": { "hash": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionState@1",
+    "type": {
+      "record": {
+        "session_id": { "ref": "aos.agent/SessionId@1" },
+        "lifecycle": { "ref": "aos.agent/SessionLifecycle@1" },
+        "next_run_seq": { "nat": {} },
+        "next_tool_batch_seq": { "nat": {} },
+        "session_config": { "ref": "aos.agent/SessionConfig@1" },
+        "active_run_id": { "option": { "ref": "aos.agent/RunId@1" } },
+        "active_run_config": { "option": { "ref": "aos.agent/RunConfig@1" } },
+        "active_tool_batch": { "option": { "ref": "aos.agent/ActiveToolBatch@1" } },
+        "pending_intents": {
+          "map": {
+            "key": { "hash": {} },
+            "value": { "ref": "aos.agent/PendingIntent@1" }
+          }
+        },
+        "pending_blob_gets": {
+          "map": {
+            "key": { "hash": {} },
+            "value": { "list": { "ref": "aos.agent/PendingBlobGet@1" } }
+          }
+        },
+        "pending_blob_puts": {
+          "map": {
+            "key": { "hash": {} },
+            "value": { "list": { "ref": "aos.agent/PendingBlobPut@1" } }
+          }
+        },
+        "pending_follow_up_turn": {
+          "option": { "ref": "aos.agent/PendingFollowUpTurn@1" }
+        },
+        "queued_llm_message_refs": { "option": { "list": { "hash": {} } } },
+        "conversation_message_refs": { "list": { "hash": {} } },
+        "tool_refs_materialized": { "bool": {} },
+        "in_flight_effects": { "nat": {} },
+        "active_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },
+        "pending_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },
+        "pending_workspace_apply_mode": {
+          "option": { "ref": "aos.agent/WorkspaceApplyMode@1" }
+        },
+        "tool_registry": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "ref": "aos.agent/ToolSpec@1" }
+          }
+        },
+        "tool_profiles": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "list": { "text": {} } }
+          }
+        },
+        "tool_profile": { "text": {} },
+        "tool_runtime_context": { "ref": "aos.agent/ToolRuntimeContext@1" },
+        "effective_tools": { "ref": "aos.agent/EffectiveToolSet@1" },
+        "last_tool_plan_hash": { "option": { "hash": {} } },
+        "pending_steer": { "list": { "text": {} } },
+        "pending_follow_up": { "list": { "text": {} } },
+        "created_at": { "time": {} },
+        "updated_at": { "time": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionWorkflowEvent@1",
+    "type": {
+      "variant": {
+        "Ingress": { "ref": "aos.agent/SessionIngress@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" },
+        "ReceiptRejected": { "ref": "sys/EffectReceiptRejected@1" },
+        "StreamFrame": { "ref": "sys/EffectStreamFrame@1" },
+        "Noop": { "ref": "aos.agent/SessionNoop@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionNoop@1",
+    "type": { "unit": {} }
+  }
+]

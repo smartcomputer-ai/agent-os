@@ -1,6 +1,10 @@
 use assert_cmd::prelude::*;
+use once_cell::sync::Lazy;
 use predicates::prelude::*;
 use std::process::Command;
+use std::sync::Mutex;
+
+static CLI_SMOKE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 const CLI_SMOKE_TESTS: &[&str] = &[
     "counter",
@@ -12,8 +16,10 @@ const CLI_SMOKE_TESTS: &[&str] = &[
     "safe-upgrade",
     "llm-summarizer",
     "agent-session",
+    "agent-tools",
     "trace-failure-classification",
     "workflow-runtime-hardening",
+    "performance",
     "all-agent",
 ];
 
@@ -73,6 +79,12 @@ fn agent_session_cli_runs() {
 
 #[test]
 #[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn agent_tools_cli_runs() {
+    run_cli_smoke("agent-tools");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
 fn trace_failure_classification_cli_runs() {
     run_cli_smoke("trace-failure-classification");
 }
@@ -85,8 +97,14 @@ fn workflow_runtime_hardening_cli_runs() {
 
 #[test]
 #[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn performance_cli_runs() {
+    run_cli_smoke("performance");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
 fn all_agent_cli_runs_sdk_lane() {
-    run_cli_smoke("all-agent");
+    run_cli_example("all-agent", "(agent-session)");
 }
 
 fn run_cli_smoke(subcommand: &str) {
@@ -102,8 +120,18 @@ fn run_cli_smoke(subcommand: &str) {
 }
 
 fn run_cli_example(subcommand: &str, expected_snippet: &str) {
+    let _guard = CLI_SMOKE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace crates/")
+        .parent()
+        .expect("workspace root");
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("aos-smoke"));
-    cmd.arg(subcommand).env("RUST_LOG", "error");
+    cmd.current_dir(workspace_root)
+        .arg(subcommand)
+        .env("RUST_LOG", "error");
     cmd.assert()
         .success()
         .stdout(predicate::str::contains(expected_snippet));

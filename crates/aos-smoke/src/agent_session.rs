@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use anyhow::{Result, anyhow, ensure};
-use aos_agent_sdk::{
+use anyhow::{Result, ensure};
+use aos_agent::{
     HostCommand, HostCommandKind, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, ToolBatchId, ToolCallStatus,
+    SessionLifecycle, SessionState,
 };
 use aos_host::config::HostConfig;
 
@@ -11,8 +11,8 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
-const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
-const SDK_WASM_PACKAGE: &str = "aos-agent-sdk";
+const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
+const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
 const SESSION_ID: &str = "11111111-1111-1111-1111-111111111111";
 
@@ -40,7 +40,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     println!("→ Agent Session demo");
 
-    // Run #1: request -> tool batch settle -> cancel.
+    // Run #1: request -> cancel.
     host.send_event(&run_requested_event_with_config(1, "openai", "gpt-5.2"))?;
     let run1 = host.read_state::<SessionState>()?;
     ensure!(
@@ -51,44 +51,12 @@ pub fn run(example_root: &Path) -> Result<()> {
         "expected run1 lifecycle Running|WaitingInput, got {:?}",
         run1.lifecycle
     );
-    let batch1 = active_batch_id(&run1, 1)?;
+
     host.send_event(&session_event(
         2,
-        SessionIngressKind::ToolBatchStarted {
-            tool_batch_id: batch1.clone(),
-            intent_id: fake_hash('b'),
-            params_hash: None,
-            expected_call_ids: vec!["call_a".into(), "call_b".into()],
-        },
-    ))?;
-    host.send_event(&session_event(
-        3,
-        SessionIngressKind::ToolCallSettled {
-            tool_batch_id: batch1.clone(),
-            call_id: "call_a".into(),
-            status: ToolCallStatus::Succeeded,
-        },
-    ))?;
-    host.send_event(&session_event(
-        4,
-        SessionIngressKind::ToolCallSettled {
-            tool_batch_id: batch1.clone(),
-            call_id: "call_b".into(),
-            status: ToolCallStatus::Succeeded,
-        },
-    ))?;
-    host.send_event(&session_event(
-        5,
-        SessionIngressKind::ToolBatchSettled {
-            tool_batch_id: batch1,
-            results_ref: Some(fake_hash('c')),
-        },
-    ))?;
-    host.send_event(&session_event(
-        6,
         SessionIngressKind::HostCommandReceived(HostCommand {
             command_id: "cmd-cancel".into(),
-            issued_at: 6,
+            issued_at: 2,
             command: HostCommandKind::Cancel {
                 reason: Some("operator stop".into()),
             },
@@ -107,7 +75,11 @@ pub fn run(example_root: &Path) -> Result<()> {
     );
 
     // Run #2: request + explicit completion.
-    host.send_event(&run_requested_event_with_config(7, "anthropic", "claude-sonnet-4-5"))?;
+    host.send_event(&run_requested_event_with_config(
+        3,
+        "anthropic",
+        "claude-sonnet-4-5",
+    ))?;
     let run2 = host.read_state::<SessionState>()?;
     ensure!(
         matches!(
@@ -123,7 +95,7 @@ pub fn run(example_root: &Path) -> Result<()> {
             .is_some_and(|cfg| cfg.provider == "anthropic" && cfg.model == "claude-sonnet-4-5"),
         "unexpected run2 active_run_config"
     );
-    host.send_event(&session_event(8, SessionIngressKind::RunCompleted))?;
+    host.send_event(&session_event(4, SessionIngressKind::RunCompleted))?;
 
     let state = host.read_state::<SessionState>()?;
     ensure!(
@@ -141,8 +113,8 @@ pub fn run(example_root: &Path) -> Result<()> {
         state.next_run_seq
     );
     ensure!(
-        state.updated_at == 8,
-        "expected updated_at=8, got {}",
+        state.updated_at == 4,
+        "expected updated_at=4, got {}",
         state.updated_at
     );
 
@@ -221,8 +193,10 @@ fn run_requested_event_with_config(
                 workspace_binding: None,
                 default_prompt_pack: None,
                 default_prompt_refs: Some(vec![fake_hash('e')]),
-                default_tool_catalog: None,
-                default_tool_refs: Some(vec![fake_hash('f')]),
+                default_tool_profile: None,
+                default_tool_enable: Some(vec!["host.session.open".into()]),
+                default_tool_disable: None,
+                default_tool_force: None,
             }),
         },
     )
@@ -234,14 +208,6 @@ fn session_event(observed_at_ns: u64, ingress: SessionIngressKind) -> SessionIng
         observed_at_ns,
         ingress,
     }
-}
-
-fn active_batch_id(state: &SessionState, batch_seq: u64) -> Result<ToolBatchId> {
-    let run_id = state
-        .active_run_id
-        .clone()
-        .ok_or_else(|| anyhow!("missing active run id"))?;
-    Ok(ToolBatchId { run_id, batch_seq })
 }
 
 fn fake_hash(ch: char) -> String {

@@ -4,14 +4,16 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, ensure};
-use aos_agent_sdk::{
-    LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionState, ToolBatchId, ToolCallStatus,
-    WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
-    materialize_llm_generate_params_with_workspace,
+use aos_agent::{
+    LlmToolCallList, SessionConfig, SessionId, SessionIngress, SessionIngressKind, SessionState,
+    ToolAvailabilityRule, ToolExecutor, ToolParallelismHint, ToolSpec, WorkspaceApplyMode,
+    WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
 };
+use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope};
+use aos_effects::builtins::{
+    LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolChoice,
+};
 use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_host::adapters::llm::LlmAdapter;
 use aos_host::adapters::traits::AsyncEffectAdapter;
@@ -28,14 +30,15 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
-const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
-const SDK_WASM_PACKAGE: &str = "aos-agent-sdk";
+const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
+const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
 const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 const AGENT_WORKSPACE_NAME: &str = "agent-live";
 const AGENT_WORKSPACE_DIR: &str = "agent-ws";
 const DEFAULT_PROMPT_PACK: &str = "default";
-const DEFAULT_TOOL_CATALOG: &str = "default";
+const SEARCH_TOOL_NAME: &str = "search_step";
+const SEARCH_TOOL_PROFILE: &str = "search-live";
 
 const SESSION_ID: &str = "22222222-2222-2222-2222-222222222222";
 
@@ -88,6 +91,21 @@ enum SearchPhase {
     Done,
 }
 
+#[derive(Debug, Clone, Default)]
+struct StepContext {
+    correlation_id: Option<String>,
+    message_refs: Vec<String>,
+    temperature: Option<String>,
+    top_p: Option<String>,
+    tool_refs: Option<Vec<String>>,
+    tool_choice: Option<LlmToolChoice>,
+    stop_sequences: Option<Vec<String>>,
+    metadata: Option<indexmap::IndexMap<String, String>>,
+    provider_options_ref: Option<String>,
+    response_format_ref: Option<String>,
+    api_key: Option<String>,
+}
+
 pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()> {
     let provider = resolve_provider(provider, model_override)?;
     let fixture_root = crate::workspace_root().join(FIXTURE_ROOT);
@@ -117,12 +135,13 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let world = SearchWorld::new();
 
     println!(
-        "→ Agent Live smoke (sdk) (provider={} model={})",
+        "→ Agent Live smoke (provider={} model={})",
         provider.provider_id, provider.model
     );
 
     let mut event_clock = 0_u64;
-    let workspace_root_hash = seed_workspace_commit(&mut host, &fixture_root.join(AGENT_WORKSPACE_DIR))?;
+    let workspace_root_hash =
+        seed_workspace_commit(&mut host, &fixture_root.join(AGENT_WORKSPACE_DIR))?;
     let workspace_binding = WorkspaceBinding {
         workspace: AGENT_WORKSPACE_NAME.into(),
         version: None,
@@ -133,7 +152,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         SessionIngressKind::WorkspaceSyncRequested {
             workspace_binding: workspace_binding.clone(),
             prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
-            tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
         },
     )?;
     let snapshot_ready = build_workspace_snapshot_ready(
@@ -158,6 +176,11 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             mode: WorkspaceApplyMode::NextRun,
         },
     )?;
+    configure_search_tool_registry(
+        &mut host,
+        &mut event_clock,
+        &fixture_root.join(AGENT_WORKSPACE_DIR),
+    )?;
 
     send_session_event(
         &mut host,
@@ -172,8 +195,10 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 workspace_binding: Some(workspace_binding),
                 default_prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
                 default_prompt_refs: None,
-                default_tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
-                default_tool_refs: None,
+                default_tool_profile: Some(SEARCH_TOOL_PROFILE.into()),
+                default_tool_enable: None,
+                default_tool_disable: None,
+                default_tool_force: None,
             }),
         },
     )?;
@@ -218,12 +243,17 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         );
 
         let history_ref = store_history_blob(&host, &history)?;
-        let step_ctx = LlmStepContext {
+        let turn_tool_refs = if matches!(phase, SearchPhase::Looking) {
+            state.effective_tools.tool_refs()
+        } else {
+            None
+        };
+        let step_ctx = StepContext {
             correlation_id: Some(format!("live-run-turn-{llm_turn}")),
             message_refs: vec![history_ref],
             temperature: None,
             top_p: None,
-            tool_refs: None,
+            tool_refs: turn_tool_refs,
             tool_choice: Some(match phase {
                 SearchPhase::Looking => LlmToolChoice::Required,
                 SearchPhase::NeedPrimaryAnswer | SearchPhase::NeedFollowUp | SearchPhase::Done => {
@@ -259,26 +289,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 calls.len()
             );
 
-            let run_id = state
-                .active_run_id
-                .clone()
-                .ok_or_else(|| anyhow!("missing active_run_id"))?;
-            let batch_id = ToolBatchId {
-                run_id,
-                batch_seq: 1,
-            };
-
-            send_session_event(
-                &mut host,
-                &mut event_clock,
-                SessionIngressKind::ToolBatchStarted {
-                    tool_batch_id: batch_id.clone(),
-                    intent_id: fake_hash('b'),
-                    params_hash: None,
-                    expected_call_ids: calls.iter().map(|call| call.call_id.clone()).collect(),
-                },
-            )?;
-
             history.push(json!({
                 "role": "assistant",
                 "content": calls.iter().map(|call| {
@@ -286,15 +296,14 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                         "type": "tool_call",
                         "id": call.call_id,
                         "name": call.tool_name,
-                        "arguments": load_json_blob(host.store().as_ref(), &call.arguments_ref).unwrap_or_else(|_| json!({}))
+                        "arguments": tool_call_args_json(&host, call)
                     })
                 }).collect::<Vec<_>>()
             }));
 
-            let mut tool_results = Vec::new();
             let mut found_target = false;
             for (idx, call) in calls.iter().enumerate() {
-                let args = load_json_blob(host.store().as_ref(), &call.arguments_ref)?;
+                let args = tool_call_args_json(&host, call);
                 let output = execute_search_tool(&world, &call.tool_name, &args)?;
                 if output.get("found").and_then(Value::as_bool) == Some(true) {
                     found_target = true;
@@ -311,31 +320,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                     "call_id": call.call_id,
                     "output": output.clone()
                 }));
-                tool_results.push(json!({
-                    "call_id": call.call_id,
-                    "output": output
-                }));
-
-                send_session_event(
-                    &mut host,
-                    &mut event_clock,
-                    SessionIngressKind::ToolCallSettled {
-                        tool_batch_id: batch_id.clone(),
-                        call_id: call.call_id.clone(),
-                        status: ToolCallStatus::Succeeded,
-                    },
-                )?;
             }
-
-            let results_ref = store_json_blob(&host, &Value::Array(tool_results))?;
-            send_session_event(
-                &mut host,
-                &mut event_clock,
-                SessionIngressKind::ToolBatchSettled {
-                    tool_batch_id: batch_id,
-                    results_ref: Some(results_ref),
-                },
-            )?;
             if found_target && matches!(phase, SearchPhase::Looking) {
                 let nudge = "Tool output is now found=true. Stop calling tools and answer now in the format: TARGET=<value>; SECOND_CLUE=<text>; STEPS=<n>.";
                 println!("   turn {} user: {}", llm_turn + 1, preview(nudge));
@@ -405,7 +390,11 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         stats.tool_calls
     );
 
-    send_session_event(&mut host, &mut event_clock, SessionIngressKind::RunCompleted)?;
+    send_session_event(
+        &mut host,
+        &mut event_clock,
+        SessionIngressKind::RunCompleted,
+    )?;
 
     let final_state: SessionState = host.read_state()?;
     ensure!(
@@ -418,11 +407,21 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         .verify_replay()?;
 
     println!(
-        "   sdk agent live smoke: OK (tool_rounds={} tool_calls={})",
+        "   agent live smoke: OK (tool_rounds={} tool_calls={})",
         stats.tool_rounds, stats.tool_calls
     );
 
     Ok(())
+}
+
+fn tool_call_args_json(host: &ExampleHost, call: &aos_agent::ToolCallObserved) -> Value {
+    if let Some(arguments_ref) = call.arguments_ref.as_ref()
+        && let Ok(value) = load_json_blob(host.store().as_ref(), arguments_ref)
+    {
+        return value;
+    }
+
+    serde_json::from_str(&call.arguments_json).unwrap_or_else(|_| json!({}))
 }
 
 fn send_session_event(
@@ -439,21 +438,134 @@ fn send_session_event(
     host.send_event(&event)
 }
 
-fn to_core_llm_params(
-    run_config: &aos_agent_sdk::RunConfig,
-    active_workspace_snapshot: Option<&aos_agent_sdk::WorkspaceSnapshot>,
-    step_ctx: &LlmStepContext,
-) -> Result<LlmGenerateParams> {
-    let mapped = materialize_llm_generate_params_with_workspace(
-        run_config,
-        active_workspace_snapshot,
-        step_ctx.clone(),
+fn configure_search_tool_registry(
+    host: &mut ExampleHost,
+    clock: &mut u64,
+    workspace_dir: &Path,
+) -> Result<()> {
+    let tool_catalog_path = workspace_dir.join("tools/catalogs/default.json");
+    let tool_catalog_bytes = fs::read(&tool_catalog_path)
+        .with_context(|| format!("read tool catalog {}", tool_catalog_path.display()))?;
+    let tool_ref = host
+        .store()
+        .put_blob(&tool_catalog_bytes)
+        .context("store search tool catalog blob")?
+        .to_hex();
+
+    let mut registry = BTreeMap::new();
+    registry.insert(
+        SEARCH_TOOL_NAME.into(),
+        ToolSpec {
+            tool_id: SEARCH_TOOL_NAME.into(),
+            tool_name: SEARCH_TOOL_NAME.into(),
+            tool_ref,
+            description: "Traverse one hop in the search graph.".into(),
+            args_schema_json: "{\"type\":\"object\",\"properties\":{\"cursor\":{\"type\":\"string\"}},\"required\":[\"cursor\"]}".into(),
+            mapper: aos_agent::ToolMapper::HostExec,
+            executor: ToolExecutor::HostLoop {
+                bridge: SEARCH_TOOL_NAME.into(),
+            },
+            availability_rules: vec![ToolAvailabilityRule::Always],
+            parallelism_hint: ToolParallelismHint {
+                parallel_safe: true,
+                resource_key: None,
+            },
+        },
+    );
+
+    let mut profiles = BTreeMap::new();
+    profiles.insert(SEARCH_TOOL_PROFILE.into(), vec![SEARCH_TOOL_NAME.into()]);
+
+    send_session_event(
+        host,
+        clock,
+        SessionIngressKind::ToolRegistrySet {
+            registry,
+            profiles: Some(profiles),
+            default_profile: Some(SEARCH_TOOL_PROFILE.into()),
+        },
     )
-    .map_err(|err| anyhow!("map llm params via sdk helpers: {err}"))?;
-    let cbor = serde_cbor::to_vec(&mapped).context("encode mapped sys llm params")?;
-    let core: LlmGenerateParams =
-        serde_cbor::from_slice(&cbor).context("decode mapped params into core llm params")?;
-    Ok(core)
+}
+
+fn to_core_llm_params(
+    run_config: &aos_agent::RunConfig,
+    active_workspace_snapshot: Option<&aos_agent::WorkspaceSnapshot>,
+    step_ctx: &StepContext,
+) -> Result<LlmGenerateParams> {
+    let provider = run_config.provider.trim();
+    ensure!(!provider.is_empty(), "run provider missing");
+    let model = run_config.model.trim();
+    ensure!(!model.is_empty(), "run model missing");
+
+    let mut message_refs = if let Some(explicit) = &run_config.prompt_refs {
+        explicit.clone()
+    } else if let Some(prompt_pack_ref) =
+        active_workspace_snapshot.and_then(|snapshot| snapshot.prompt_pack_ref.clone())
+    {
+        vec![prompt_pack_ref]
+    } else {
+        Vec::new()
+    };
+    message_refs.extend(step_ctx.message_refs.clone());
+    ensure!(!message_refs.is_empty(), "message_refs must not be empty");
+
+    let message_refs = message_refs
+        .into_iter()
+        .map(|value| HashRef::new(value).map_err(|err| anyhow!("invalid message ref: {err}")))
+        .collect::<Result<Vec<_>>>()?;
+
+    let tool_refs = step_ctx
+        .tool_refs
+        .clone()
+        .map(|values| {
+            values
+                .into_iter()
+                .map(|value| HashRef::new(value).map_err(|err| anyhow!("invalid tool ref: {err}")))
+                .collect::<Result<Vec<_>>>()
+        })
+        .transpose()?;
+    let provider_options_ref = step_ctx
+        .provider_options_ref
+        .clone()
+        .map(|value| {
+            HashRef::new(value).map_err(|err| anyhow!("invalid provider_options_ref: {err}"))
+        })
+        .transpose()?;
+    let response_format_ref = step_ctx
+        .response_format_ref
+        .clone()
+        .map(|value| {
+            HashRef::new(value).map_err(|err| anyhow!("invalid response_format_ref: {err}"))
+        })
+        .transpose()?;
+
+    Ok(LlmGenerateParams {
+        correlation_id: step_ctx.correlation_id.clone(),
+        provider: provider.into(),
+        model: model.into(),
+        message_refs,
+        runtime: LlmRuntimeArgs {
+            temperature: step_ctx.temperature.clone(),
+            top_p: step_ctx.top_p.clone(),
+            max_tokens: run_config.max_tokens,
+            tool_refs,
+            tool_choice: step_ctx.tool_choice.clone(),
+            reasoning_effort: run_config.reasoning_effort.map(reasoning_effort_text),
+            stop_sequences: step_ctx.stop_sequences.clone(),
+            metadata: step_ctx.metadata.clone(),
+            provider_options_ref,
+            response_format_ref,
+        },
+        api_key: step_ctx.api_key.clone(),
+    })
+}
+
+fn reasoning_effort_text(value: aos_agent::ReasoningEffort) -> String {
+    match value {
+        aos_agent::ReasoningEffort::Low => "low".into(),
+        aos_agent::ReasoningEffort::Medium => "medium".into(),
+        aos_agent::ReasoningEffort::High => "high".into(),
+    }
 }
 
 fn execute_llm(
@@ -581,14 +693,11 @@ fn build_workspace_snapshot_ready(
 ) -> Result<WorkspaceSnapshotReady> {
     let index_path = workspace_dir.join("agent.workspace.json");
     let prompt_pack_path = workspace_dir.join("prompts/packs/default.json");
-    let tool_catalog_path = workspace_dir.join("tools/catalogs/default.json");
 
     let index_bytes = fs::read(&index_path)
         .with_context(|| format!("read workspace index {}", index_path.display()))?;
     let prompt_pack_bytes = fs::read(&prompt_pack_path)
         .with_context(|| format!("read prompt pack {}", prompt_pack_path.display()))?;
-    let tool_catalog_bytes = fs::read(&tool_catalog_path)
-        .with_context(|| format!("read tool catalog {}", tool_catalog_path.display()))?;
 
     let store = host.store();
     let index_ref = store
@@ -599,10 +708,6 @@ fn build_workspace_snapshot_ready(
         .put_blob(&prompt_pack_bytes)
         .context("store workspace prompt pack blob")?
         .to_hex();
-    let tool_catalog_ref = store
-        .put_blob(&tool_catalog_bytes)
-        .context("store workspace tool catalog blob")?
-        .to_hex();
 
     Ok(WorkspaceSnapshotReady {
         snapshot: WorkspaceSnapshot {
@@ -611,12 +716,9 @@ fn build_workspace_snapshot_ready(
             root_hash: Some(root_hash),
             index_ref: Some(index_ref),
             prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
-            tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
             prompt_pack_ref: Some(prompt_pack_ref),
-            tool_catalog_ref: Some(tool_catalog_ref),
         },
         prompt_pack_bytes: Some(prompt_pack_bytes),
-        tool_catalog_bytes: Some(tool_catalog_bytes),
     })
 }
 

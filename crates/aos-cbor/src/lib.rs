@@ -185,7 +185,7 @@ mod tests {
             ),
             (
                 "spec/schemas/manifest.schema.json",
-                "sha256:c7b252549814c3bbfc177708c469d63b2cf9fc50a02c797f406691971a867410",
+                "sha256:b32aa1252be091376effdb07779915ed265f47520b14b46dde515685ced27e09",
             ),
             (
                 "spec/schemas/defsecret.schema.json",
@@ -193,7 +193,11 @@ mod tests {
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:089150e04b04527623631f22554d1ba1104a676af783c99bcda434c8a94e5e15",
+                "sha256:661710cc545b9c59b6c218b28c9161a444dacc31f30ec5cff34581c8f13aaa04",
+            ),
+            (
+                "spec/defs/builtin-schemas-host.air.json",
+                "sha256:88304b60706233629a10637306b3dc1e8aa1594e137fac2651743d8e9821cb72",
             ),
         ];
 

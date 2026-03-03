@@ -33,8 +33,8 @@ This phase moves AOS from a toy chat app toward a reusable agent runtime stack:
 - Agent semantics live above core AOS, not inside the kernel.
 - Built-in `sys/*` contracts are core-owned (`spec/defs`, `aos-effects`, `aos-host`, `aos-sys`) and must not be defined in SDK AIR assets.
 - SDK schema/plan/module naming uses the `aos.agent/*` namespace.
-- Canonical SDK implementation lives in `crates/aos-agent-sdk` (shared Rust types/helpers, SDK WASM modules, reusable AIR assets).
+- Canonical SDK implementation lives in `crates/aos-agent` (shared Rust types/helpers, SDK WASM modules, reusable AIR assets).
 - `crates/aos-sys` remains reserved for built-in `sys/*` runtime primitives and enforcers.
-- End-to-end SDK scenarios run through `crates/aos-smoke` fixtures; do not create a separate e2e runner in `aos-agent-sdk`.
+- End-to-end SDK scenarios run through `crates/aos-smoke` fixtures; do not create a separate e2e runner in `aos-agent`.
 - Real-provider LLM smoke checks are opt-in and separate from deterministic replay-parity gates.
 - Session/run config is provider/model-first; no provider-profile registry is required in v0.10.

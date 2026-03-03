@@ -1,5 +1,6 @@
 mod agent_live;
 mod agent_session;
+mod agent_tools;
 mod aggregator;
 mod blob_echo;
 mod chain_comp;
@@ -9,6 +10,7 @@ mod example_host;
 mod fetch_notify;
 mod hello_timer;
 mod llm_summarizer;
+mod performance;
 mod retry_backoff;
 mod safe_upgrade;
 mod trace_failure_classification;
@@ -64,6 +66,19 @@ enum Commands {
     TraceFailureClassification,
     /// Run the workflow runtime-hardening conformance example
     WorkflowRuntimeHardening,
+    /// Run the keyed/non-keyed performance counting example
+    Performance {
+        #[arg(long, default_value_t = performance::DEFAULT_MESSAGES)]
+        messages: u64,
+        #[arg(long, default_value_t = performance::DEFAULT_CELLS)]
+        cells: u64,
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Use in-memory CAS+journal (profiling mode; replay checks skipped)"
+        )]
+        in_memory: bool,
+    },
     /// Run live chat smoke (real provider + tools + follow-up)
     ChatLive {
         #[arg(long, value_enum, default_value_t = chat_live::LiveProvider::Openai)]
@@ -82,6 +97,8 @@ enum Commands {
         #[arg(long, help = "Override provider model for this run")]
         model: Option<String>,
     },
+    /// Run SDK built-in tools e2e smoke (scripted llm + host tool mapping)
+    AgentTools,
     /// Run core fixtures (00-19) sequentially
     All,
     /// Run Agent SDK fixtures (20+) sequentially
@@ -215,6 +232,15 @@ const EXAMPLES: &[ExampleMeta] = &[
         runner: workflow_runtime_hardening::run,
     },
     ExampleMeta {
+        number: "12",
+        slug: "performance",
+        title: "Performance",
+        summary: "Non-keyed vs keyed event throughput",
+        group: ExampleGroup::Core,
+        dir: "crates/aos-smoke/fixtures/12-performance",
+        runner: performance::run,
+    },
+    ExampleMeta {
         number: "20",
         slug: "agent-session",
         title: "Agent Session",
@@ -222,6 +248,15 @@ const EXAMPLES: &[ExampleMeta] = &[
         group: ExampleGroup::Agent,
         dir: "crates/aos-smoke/fixtures/20-agent-session",
         runner: agent_session::run,
+    },
+    ExampleMeta {
+        number: "23",
+        slug: "agent-tools",
+        title: "Agent Tools",
+        summary: "SDK built-in tool mapping e2e + replay parity",
+        group: ExampleGroup::Agent,
+        dir: "crates/aos-smoke/fixtures/23-agent-tools",
+        runner: agent_tools::run,
     },
 ];
 
@@ -262,8 +297,14 @@ fn run_cli() -> Result<()> {
         Some(Commands::AgentSession) => run_single("agent-session"),
         Some(Commands::TraceFailureClassification) => run_single("trace-failure-classification"),
         Some(Commands::WorkflowRuntimeHardening) => run_single("workflow-runtime-hardening"),
+        Some(Commands::Performance {
+            messages,
+            cells,
+            in_memory,
+        }) => run_performance(messages, cells, in_memory),
         Some(Commands::ChatLive { provider, model }) => chat_live::run(provider, model),
         Some(Commands::AgentLive { provider, model }) => agent_live::run(provider, model),
+        Some(Commands::AgentTools) => run_single("agent-tools"),
         Some(Commands::All) => run_group(ExampleGroup::Core),
         Some(Commands::AllAgent) => run_group(ExampleGroup::Agent),
         None => {
@@ -315,6 +356,22 @@ fn run_group(group: ExampleGroup) -> Result<()> {
         run_single(ex.slug)?;
     }
     Ok(())
+}
+
+fn run_performance(messages: u64, cells: u64, in_memory: bool) -> Result<()> {
+    let ex = EXAMPLES
+        .iter()
+        .find(|ex| ex.slug == "performance")
+        .ok_or_else(|| anyhow!("unknown example 'performance'"))?;
+    let abs_dir = example_root(ex);
+    ensure_structure_exists(&abs_dir)?;
+    println!(
+        "Running example {number} — {title} ({slug})",
+        number = ex.number,
+        title = ex.title,
+        slug = ex.slug
+    );
+    performance::run_with_config(&abs_dir, messages, cells, in_memory)
 }
 
 fn ensure_structure_exists(path: &Path) -> Result<()> {

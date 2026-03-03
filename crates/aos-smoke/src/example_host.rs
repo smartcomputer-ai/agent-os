@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
@@ -30,6 +31,19 @@ pub struct HarnessConfig<'a> {
     pub workflow_name: &'a str,
     pub event_schema: &'a str,
     pub module_crate: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EventDispatchTiming {
+    pub encode: Duration,
+    pub submit: Duration,
+    pub drain: Duration,
+}
+
+impl EventDispatchTiming {
+    pub fn total(self) -> Duration {
+        self.encode + self.submit + self.drain
+    }
 }
 
 /// Host-backed example driver built on TestHost, keeping explicit control flow.
@@ -156,13 +170,40 @@ impl ExampleHost {
         self.send_event_as(&schema, event)
     }
 
+    pub fn send_event_timed<T: Serialize>(&mut self, event: &T) -> Result<EventDispatchTiming> {
+        let schema = self.event_schema.clone();
+        self.send_event_as_timed(&schema, event)
+    }
+
     pub fn send_event_as<T: Serialize>(&mut self, schema: &str, event: &T) -> Result<()> {
+        self.send_event_as_timed(schema, event).map(|_| ())
+    }
+
+    pub fn send_event_as_timed<T: Serialize>(
+        &mut self,
+        schema: &str,
+        event: &T,
+    ) -> Result<EventDispatchTiming> {
+        let encode_start = Instant::now();
         let cbor = serde_cbor::to_vec(event)?;
+        let encode = encode_start.elapsed();
+
+        let submit_start = Instant::now();
         self.host
             .send_event_cbor(schema, cbor)
             .context("send event")?;
+        let submit = submit_start.elapsed();
+
         // Mirror the previous harness behavior: advance workflow immediately.
-        self.host.run_to_idle().context("drain after event")
+        let drain_start = Instant::now();
+        self.host.run_to_idle().context("drain after event")?;
+        let drain = drain_start.elapsed();
+
+        Ok(EventDispatchTiming {
+            encode,
+            submit,
+            drain,
+        })
     }
 
     pub fn run_cycle_batch(&mut self) -> Result<CycleOutcome> {

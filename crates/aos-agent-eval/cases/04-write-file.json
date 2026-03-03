@@ -1,0 +1,35 @@
+{
+  "id": "write-file",
+  "description": "Write a new file with host.fs.write_file.",
+  "prompt": "Call write_file exactly once with this arguments object and no extra fields: {\"path\":\"notes/generated.txt\",\"text\":\"beta-5512\",\"create_parents\":true}. Do not include blob_ref or mode. Then answer exactly WROTE=beta-5512.",
+  "setup": {
+    "files": []
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.write_file"
+    ],
+    "tool_output_contains": [
+      "written_bytes"
+    ],
+    "files": [
+      {
+        "path": "notes/generated.txt",
+        "equals": "beta-5512"
+      }
+    ]
+  },
+  "eval": {
+    "runs": 2,
+    "min_pass_rate": 0.5,
+    "max_steps": 96
+  },
+  "run": {
+    "max_tokens": 768,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.write_file"
+    ],
+    "bootstrap_session": true
+  }
+}

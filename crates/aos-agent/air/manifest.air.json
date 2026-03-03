@@ -1,0 +1,80 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    { "name": "aos.agent/SessionId@1" },
+    { "name": "aos.agent/RunId@1" },
+    { "name": "aos.agent/ToolBatchId@1" },
+    { "name": "aos.agent/ToolCallStatus@1" },
+    { "name": "aos.agent/ToolExecutor@1" },
+    { "name": "aos.agent/ToolAvailabilityRule@1" },
+    { "name": "aos.agent/ToolParallelismHint@1" },
+    { "name": "aos.agent/ToolSpec@1" },
+    { "name": "aos.agent/HostSessionStatus@1" },
+    { "name": "aos.agent/ToolRuntimeContext@1" },
+    { "name": "aos.agent/EffectiveTool@1" },
+    { "name": "aos.agent/EffectiveToolSet@1" },
+    { "name": "aos.agent/ToolCallObserved@1" },
+    { "name": "aos.agent/PlannedToolCall@1" },
+    { "name": "aos.agent/ToolExecutionPlan@1" },
+    { "name": "aos.agent/ToolBatchPlan@1" },
+    { "name": "aos.agent/ActiveToolBatch@1" },
+    { "name": "aos.agent/ToolOverrideScope@1" },
+    { "name": "aos.agent/ReasoningEffort@1" },
+    { "name": "aos.agent/WorkspaceBinding@1" },
+    { "name": "aos.agent/WorkspaceApplyMode@1" },
+    { "name": "aos.agent/WorkspaceSnapshot@1" },
+    { "name": "aos.agent/WorkspaceSnapshotReady@1" },
+    { "name": "aos.agent/SessionConfig@1" },
+    { "name": "aos.agent/RunConfig@1" },
+    { "name": "aos.agent/SessionLifecycle@1" },
+    { "name": "aos.agent/HostCommand@1" },
+    { "name": "aos.agent/SessionIngressKind@1" },
+    { "name": "aos.agent/SessionIngress@1" },
+    { "name": "aos.agent/PendingIntent@1" },
+    { "name": "aos.agent/PendingBlobGetKind@1" },
+    { "name": "aos.agent/PendingBlobGet@1" },
+    { "name": "aos.agent/PendingBlobPutKind@1" },
+    { "name": "aos.agent/PendingBlobPut@1" },
+    { "name": "aos.agent/PendingFollowUpTurn@1" },
+    { "name": "aos.agent/SessionState@1" },
+    { "name": "aos.agent/SessionNoop@1" },
+    { "name": "aos.agent/SessionWorkflowEvent@1" },
+    { "name": "sys/EffectReceiptEnvelope@1" },
+    { "name": "sys/EffectReceiptRejected@1" },
+    { "name": "sys/EffectStreamFrame@1" }
+  ],
+  "modules": [
+    { "name": "aos.agent/SessionWorkflow@1" },
+    { "name": "aos.agent/SessionEventEcho@1" }
+  ],
+  "caps": [],
+  "policies": [],
+  "effects": [
+    { "name": "sys/blob.put@1" },
+    { "name": "sys/blob.get@1" },
+    { "name": "sys/llm.generate@1" },
+    { "name": "sys/host.session.open@1" },
+    { "name": "sys/host.exec@1" },
+    { "name": "sys/host.session.signal@1" },
+    { "name": "sys/host.fs.read_file@1" },
+    { "name": "sys/host.fs.write_file@1" },
+    { "name": "sys/host.fs.edit_file@1" },
+    { "name": "sys/host.fs.apply_patch@1" },
+    { "name": "sys/host.fs.grep@1" },
+    { "name": "sys/host.fs.glob@1" },
+    { "name": "sys/host.fs.stat@1" },
+    { "name": "sys/host.fs.exists@1" },
+    { "name": "sys/host.fs.list_dir@1" }
+  ],
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "aos.agent/SessionIngress@1",
+        "module": "aos.agent/SessionWorkflow@1",
+        "key_field": "session_id"
+      }
+    ],
+    "inboxes": []
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "aos-agent-eval"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+aos-agent = { path = "../aos-agent" }
+aos-air-types = { path = "../aos-air-types" }
+aos-cbor = { path = "../aos-cbor" }
+aos-effects = { path = "../aos-effects" }
+aos-host = { path = "../aos-host", features = ["e2e-tests"] }
+aos-kernel = { path = "../aos-kernel" }
+aos-store = { path = "../aos-store" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "time"] }
+
+[lints.rust]
+unused_imports = "allow"
+unused_variables = "allow"
+dead_code = "allow"

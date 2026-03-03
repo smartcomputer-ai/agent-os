@@ -6,7 +6,7 @@
 
 ## Goal
 
-Hard-reset `crates/aos-agent-sdk` to the post-plan workflow runtime model.
+Hard-reset `crates/aos-agent` to the post-plan workflow runtime model.
 
 Breaking changes are intentional:
 
@@ -44,9 +44,9 @@ Completed this pass:
    - `cargo run -p aos-smoke -- all` passes.
 8. SDK schema ownership restored for `20-agent-session` and `22-agent-live`:
    - removed fixture-local `air/schemas.air.json` duplication in both fixtures,
-   - runners now load `crates/aos-agent-sdk/air` as an AIR import root,
+   - runners now load `crates/aos-agent/air` as an AIR import root,
    - fixture manifests route directly to keyed SDK module `aos.agent/SessionWorkflow@1` with `key_field`,
-   - fixture runners compile/load `aos-agent-sdk` bin `session_workflow` as workflow wasm for both fixtures,
+   - fixture runners compile/load `aos-agent` bin `session_workflow` as workflow wasm for both fixtures,
    - `aos.agent/SessionNoop@1` published in SDK AIR schemas/manifest for validator-compatible `Noop` variants.
 
 ## Workflow Model Review (Spec-Constrained)
@@ -63,10 +63,10 @@ From `spec/03-air.md`, `spec/05-workflows.md`, and `roadmap/v0.11-workflows/*`, 
 
 ## Original SDK Gaps (Now Resolved)
 
-At proposal time, `aos-agent-sdk` and `20+` smoke fixtures encoded these plan-era assumptions:
+At proposal time, `aos-agent` and `20+` smoke fixtures encoded these plan-era assumptions:
 
-1. `crates/aos-agent-sdk/air/plans/*` still exports `defplan`-based workspace orchestration.
-2. `crates/aos-agent-sdk/air/manifest.air.json` and `crates/aos-smoke/fixtures/20-agent-session/air/manifest.air.json` use `routing.events` and plan-era manifest sections.
+1. `crates/aos-agent/air/plans/*` still exports `defplan`-based workspace orchestration.
+2. `crates/aos-agent/air/manifest.air.json` and `crates/aos-smoke/fixtures/20-agent-session/air/manifest.air.json` use `routing.events` and plan-era manifest sections.
 3. `21-chat-live` and `22-agent-live` still depend on `plans` + `triggers`.
 4. Module defs still use `module_kind: "reducer"` in fixture AIR instead of canonical `workflow`.
 5. SDK reducer model is host-driven (`RunStarted`, `StepBoundary`, epoch fences) instead of receipt-driven workflow progression.
@@ -105,20 +105,20 @@ Rewrite SDK reducer helpers to orchestrate via effects + continuations:
 
 Implementation target files:
 
-1. `crates/aos-agent-sdk/src/contracts/*`
-2. `crates/aos-agent-sdk/src/helpers/*`
-3. `crates/aos-agent-sdk/src/bin/session_workflow.rs`
+1. `crates/aos-agent/src/contracts/*`
+2. `crates/aos-agent/src/helpers/*`
+3. `crates/aos-agent/src/bin/session_workflow.rs`
 
 ## 3) AIR Asset Reset (SDK-Owned)
 
 Rewrite SDK AIR to active post-plan contract:
 
-1. Remove `crates/aos-agent-sdk/air/plans/` and plan references from README/docs.
-2. Update `crates/aos-agent-sdk/air/manifest.air.json`:
+1. Remove `crates/aos-agent/air/plans/` and plan references from README/docs.
+2. Update `crates/aos-agent/air/manifest.air.json`:
    - remove `plans`/`triggers`,
    - switch to `routing.subscriptions`,
    - include receipt envelope schemas used by reducer event union.
-3. Update `crates/aos-agent-sdk/air/module.air.json`:
+3. Update `crates/aos-agent/air/module.air.json`:
    - canonical `module_kind: "workflow"`,
    - explicit `effects_emitted` allowlist for emitted effects.
 4. Publish only workflow-native reusable assets; no plan wrapper exports.
@@ -173,15 +173,15 @@ This keeps SDK aligned with planless runtime while avoiding new hidden orchestra
 
 ## Deliverables
 
-1. Workflow-native `aos-agent-sdk` contracts/helpers (updated in place under `aos.agent/*@1`).
+1. Workflow-native `aos-agent` contracts/helpers (updated in place under `aos.agent/*@1`).
 2. SDK AIR assets with no active plan/triggers surface.
 3. `20/21/22` fixtures updated to workflow-native manifests/modules/events.
 4. Smoke runners updated for new ingress/continuation model.
-5. Updated SDK docs (`crates/aos-agent-sdk/air/README.md`) and roadmap references.
+5. Updated SDK docs (`crates/aos-agent/air/README.md`) and roadmap references.
 
 ## Acceptance Criteria
 
-1. No `defplan` or manifest `triggers` remain in `crates/aos-agent-sdk/air` or fixtures `20/21/22`.
+1. No `defplan` or manifest `triggers` remain in `crates/aos-agent/air` or fixtures `20/21/22`.
 2. All three fixtures use `routing.subscriptions` and canonical `module_kind: "workflow"`.
 3. Session workflow progression is receipt-driven; synthetic step-boundary control events are removed from ingress contract.
 4. `20-agent-session` deterministic conformance and replay parity pass.

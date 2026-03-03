@@ -6,6 +6,7 @@
 .aos/
 notes-world/
 .playwright-mcp/
+profile.json.gz
 
 # ===========================================================================
 # Rust.gitignore

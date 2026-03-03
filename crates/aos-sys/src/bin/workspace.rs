@@ -9,7 +9,7 @@ extern crate alloc;
 
 use alloc::string::String;
 use aos_sys::{WorkspaceCommit, WorkspaceHistory, WorkspaceVersion};
-use aos_wasm_sdk::{ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
+use aos_wasm_sdk::{ReduceError, Value, Workflow, WorkflowCtx, aos_workflow};
 use serde_cbor;
 
 // Required for WASM binary entry point
@@ -50,7 +50,8 @@ impl Workflow for Workspace {
             let decoded_key: String = if let Ok(decoded) = serde_cbor::from_slice(key) {
                 decoded
             } else {
-                String::from_utf8(key.to_vec()).map_err(|_| ReduceError::new("key decode failed"))?
+                String::from_utf8(key.to_vec())
+                    .map_err(|_| ReduceError::new("key decode failed"))?
             };
             if decoded_key != workspace {
                 return Err(ReduceError::new("key mismatch"));

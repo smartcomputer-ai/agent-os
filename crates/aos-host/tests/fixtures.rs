@@ -10,10 +10,10 @@ use std::sync::Arc;
 
 use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
-    catalog::EffectCatalog, CapGrant, CapType, DefCap, DefEffect, DefModule, DefSchema,
-    EmptyObject, HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name,
-    NamedRef, OriginScope, Routing, RoutingEvent, SchemaRef, TypeExpr, TypeOption, TypePrimitive,
-    TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord,
+    CapGrant, CapType, DefCap, DefEffect, DefModule, DefSchema, EmptyObject, HashRef, Manifest,
+    ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef, OriginScope, Routing,
+    RoutingEvent, SchemaRef, TypeExpr, TypeOption, TypePrimitive, TypePrimitiveText, TypeRecord,
+    ValueLiteral, ValueRecord, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
@@ -130,6 +130,7 @@ pub fn build_loaded_manifest(
                 hash: e.hash_ref.clone(),
             })
             .collect(),
+        effect_bindings: vec![],
         caps: vec![],
         policies: vec![],
         secrets: vec![],
@@ -747,7 +748,7 @@ pub fn effect_params_text(intent: &aos_effects::EffectIntent) -> String {
 // ---------------------------------------------------------------------------
 
 use aos_effects::EffectIntent;
-use aos_kernel::{error::KernelError, journal::mem::MemJournal, journal::Journal, Kernel};
+use aos_kernel::{Kernel, error::KernelError, journal::Journal, journal::mem::MemJournal};
 use serde::Serialize;
 
 /// Wrapper around `Kernel<MemStore>` plus the underlying store for low-level integration tests.

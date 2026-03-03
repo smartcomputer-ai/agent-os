@@ -1,0 +1,16 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/PerfCounter@1",
+    "module_kind": "workflow",
+    "key_schema": "demo/PerfCellKey@1",
+    "abi": {
+      "workflow": {
+        "state": "demo/PerfState@1",
+        "event": "demo/PerfEvent@1",
+        "effects_emitted": [],
+        "cap_slots": {}
+      }
+    }
+  }
+]

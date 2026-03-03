@@ -1,0 +1,44 @@
+{
+  "id": "glob-configs",
+  "description": "Match config files with host.fs.glob.",
+  "prompt": "Call glob with pattern configs/*.toml and path . Then answer exactly GLOB=OK.",
+  "setup": {
+    "files": [
+      {
+        "path": "configs/app.dev.toml",
+        "content": "name = \"dev\"\n"
+      },
+      {
+        "path": "configs/app.prod.toml",
+        "content": "name = \"prod\"\n"
+      },
+      {
+        "path": "notes/readme.txt",
+        "content": "not a config\n"
+      }
+    ]
+  },
+  "expect": {
+    "tool_called": [
+      "host.fs.glob"
+    ],
+    "tool_output_contains": [
+      "configs/app.dev.toml",
+      "configs/app.prod.toml",
+      "count"
+    ]
+  },
+  "eval": {
+    "runs": 2,
+    "min_pass_rate": 0.5,
+    "max_steps": 96
+  },
+  "run": {
+    "max_tokens": 768,
+    "tool_profile": "openai",
+    "allowed_tools": [
+      "host.fs.glob"
+    ],
+    "bootstrap_session": true
+  }
+}

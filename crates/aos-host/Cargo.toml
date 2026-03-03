@@ -21,6 +21,8 @@ aos-sys = { path = "../aos-sys" }
 aos-llm = { path = "../aos-llm", optional = true }
 
 walkdir = "2"
+globset = "0.4"
+regex = "1"
 log = "0.4"
 
 # Optional dependencies for e2e-tests feature
@@ -73,6 +75,14 @@ path = "tests_e2e/cap_enforcer_e2e.rs"
 [[test]]
 name = "workspace_e2e"
 path = "tests_e2e/workspace_e2e.rs"
+
+[[test]]
+name = "host_adapter_e2e"
+path = "tests_e2e/host_adapter_e2e.rs"
+
+[[test]]
+name = "host_fs_adapter_e2e"
+path = "tests_e2e/host_fs_adapter_e2e.rs"
 
 [[test]]
 name = "adapters_llm_live"

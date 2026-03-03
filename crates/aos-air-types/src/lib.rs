@@ -3,8 +3,8 @@
 pub mod builtins;
 pub mod catalog;
 mod model;
-pub mod schema_index;
 mod refs;
+pub mod schema_index;
 pub mod schemas;
 pub mod typecheck;
 pub mod validate;
