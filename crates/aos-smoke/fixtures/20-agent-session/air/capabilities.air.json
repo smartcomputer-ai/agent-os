@@ -10,5 +10,11 @@
       }
     },
     "enforcer": { "module": "sys/CapEnforceLlmBasic@1" }
+  },
+  {
+    "$kind": "defcap",
+    "name": "demo/session_host@1",
+    "cap_type": "host",
+    "schema": { "record": {} }
   }
 ]

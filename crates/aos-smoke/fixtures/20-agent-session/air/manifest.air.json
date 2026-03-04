@@ -47,7 +47,8 @@
     { "name": "sys/CapEnforceLlmBasic@1" }
   ],
   "caps": [
-    { "name": "demo/session_llm_basic@1" }
+    { "name": "demo/session_llm_basic@1" },
+    { "name": "demo/session_host@1" }
   ],
   "policies": [
     { "name": "demo/session-llm-policy@1" }
@@ -77,18 +78,27 @@
         "params": {
           "record": {}
         }
+      },
+      {
+        "name": "host",
+        "cap": "demo/session_host@1",
+        "params": {
+          "record": {}
+        }
       }
     ]
   },
   "effects": [
     { "name": "sys/blob.put@1" },
     { "name": "sys/blob.get@1" },
-    { "name": "sys/llm.generate@1" }
+    { "name": "sys/llm.generate@1" },
+    { "name": "sys/host.session.open@1" }
   ],
   "effect_bindings": [
     { "kind": "blob.put", "adapter_id": "blob.put" },
     { "kind": "blob.get", "adapter_id": "blob.get" },
-    { "kind": "llm.generate", "adapter_id": "llm.generate" }
+    { "kind": "llm.generate", "adapter_id": "llm.generate" },
+    { "kind": "host.session.open", "adapter_id": "host.session.open" }
   ],
   "routing": {
     "subscriptions": [
@@ -104,7 +114,8 @@
     "aos.agent/SessionWorkflow@1": {
       "slots": {
         "blob": "blob",
-        "llm": "llm"
+        "llm": "llm",
+        "host": "host"
       }
     }
   }
