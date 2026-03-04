@@ -1,4 +1,4 @@
-# 20-agent-session
+# 21-agent-session
 
 Session lifecycle smoke fixture for `aos-agent` conformance and replay parity:
 - AIR `aos.agent/*` schemas are imported from `crates/aos-agent/air`,

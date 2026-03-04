@@ -241,12 +241,12 @@ const EXAMPLES: &[ExampleMeta] = &[
         runner: performance::run,
     },
     ExampleMeta {
-        number: "20",
+        number: "21",
         slug: "agent-session",
         title: "Agent Session",
         summary: "SDK session run-start + replay parity",
         group: ExampleGroup::Agent,
-        dir: "crates/aos-smoke/fixtures/20-agent-session",
+        dir: "crates/aos-smoke/fixtures/21-agent-session",
         runner: agent_session::run,
     },
     ExampleMeta {
@@ -306,7 +306,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::AgentLive { provider, model }) => agent_live::run(provider, model),
         Some(Commands::AgentTools) => run_single("agent-tools"),
         Some(Commands::All) => run_group(ExampleGroup::Core),
-        Some(Commands::AllAgent) => run_group(ExampleGroup::Agent),
+        Some(Commands::AllAgent) => run_all_agent(),
         None => {
             list_examples();
             Ok(())
@@ -327,6 +327,30 @@ fn list_examples() {
 }
 
 fn list_examples_for_group(group: ExampleGroup) {
+    if matches!(group, ExampleGroup::Agent) {
+        println!(
+            "{:<3} {:<12} {:<16} {}",
+            "20", "chat-live", "Chat Live", "Live provider tool orchestration smoke (opt-in)"
+        );
+        if let Some(ex) = EXAMPLES.iter().find(|ex| ex.slug == "agent-session") {
+            println!(
+                "{:<3} {:<12} {:<16} {}",
+                ex.number, ex.slug, ex.title, ex.summary
+            );
+        }
+        println!(
+            "{:<3} {:<12} {:<16} {}",
+            "22", "agent-live", "Agent Live", "Live SDK agent smoke (opt-in)"
+        );
+        if let Some(ex) = EXAMPLES.iter().find(|ex| ex.slug == "agent-tools") {
+            println!(
+                "{:<3} {:<12} {:<16} {}",
+                ex.number, ex.slug, ex.title, ex.summary
+            );
+        }
+        return;
+    }
+
     for ex in EXAMPLES.iter().filter(|ex| ex.group == group) {
         println!(
             "{:<3} {:<12} {:<16} {}",
@@ -355,6 +379,16 @@ fn run_group(group: ExampleGroup) -> Result<()> {
     for ex in EXAMPLES.iter().filter(|ex| ex.group == group) {
         run_single(ex.slug)?;
     }
+    Ok(())
+}
+
+fn run_all_agent() -> Result<()> {
+    println!("Running example 20 — Chat Live (chat-live)");
+    chat_live::run(chat_live::LiveProvider::Openai, None)?;
+    run_single("agent-session")?;
+    println!("Running example 22 — Agent Live (agent-live)");
+    agent_live::run(agent_live::LiveProvider::Openai, None)?;
+    run_single("agent-tools")?;
     Ok(())
 }
 

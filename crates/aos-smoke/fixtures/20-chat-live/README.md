@@ -1,4 +1,4 @@
-# 21-chat-live
+# 20-chat-live
 
 Opt-in live chat smoke fixture:
 - secret-injected `llm.generate` via `defsecret` aliases for OpenAI/Anthropic,
