@@ -30,9 +30,31 @@ const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
-const AGENT_ASSETS_DIR: &str = "assets";
 const SEARCH_TOOL_NAME: &str = "search_step";
 const SEARCH_TOOL_PROFILE: &str = "search-live";
+const SEARCH_TOOL_ARGS_SCHEMA_JSON: &str = "{\"type\":\"object\",\"properties\":{\"cursor\":{\"type\":\"string\"}},\"required\":[\"cursor\"]}";
+const DEFAULT_PROMPT_PACK_JSON: &str = r#"[
+  {
+    "role": "system",
+    "content": "You are a deterministic search agent. Use tool outputs as ground truth, avoid guessing, and return concise structured answers."
+  }
+]"#;
+const DEFAULT_TOOL_CATALOG_JSON: &str = r#"{
+  "tools": [
+    {
+      "name": "search_step",
+      "description": "Traverse one hop in the search graph using the current cursor.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cursor": { "type": "string" }
+        },
+        "required": ["cursor"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}"#;
 
 const SESSION_ID: &str = "22222222-2222-2222-2222-222222222222";
 
@@ -134,12 +156,8 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     );
 
     let mut event_clock = 0_u64;
-    let default_prompt_ref = store_default_prompt_ref(&host, &fixture_root.join(AGENT_ASSETS_DIR))?;
-    configure_search_tool_registry(
-        &mut host,
-        &mut event_clock,
-        &fixture_root.join(AGENT_ASSETS_DIR),
-    )?;
+    let default_prompt_ref = store_default_prompt_ref(&host)?;
+    configure_search_tool_registry(&mut host, &mut event_clock)?;
 
     send_session_event(
         &mut host,
@@ -385,17 +403,11 @@ fn send_session_event(
     host.send_event(&event)
 }
 
-fn configure_search_tool_registry(
-    host: &mut ExampleHost,
-    clock: &mut u64,
-    assets_dir: &Path,
-) -> Result<()> {
-    let tool_catalog_path = assets_dir.join("tools/catalogs/default.json");
-    let tool_catalog_bytes = fs::read(&tool_catalog_path)
-        .with_context(|| format!("read tool catalog {}", tool_catalog_path.display()))?;
+fn configure_search_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()> {
+    let tool_catalog_bytes = DEFAULT_TOOL_CATALOG_JSON.as_bytes();
     let tool_ref = host
         .store()
-        .put_blob(&tool_catalog_bytes)
+        .put_blob(tool_catalog_bytes)
         .context("store search tool catalog blob")?
         .to_hex();
 
@@ -407,7 +419,7 @@ fn configure_search_tool_registry(
             tool_name: SEARCH_TOOL_NAME.into(),
             tool_ref,
             description: "Traverse one hop in the search graph.".into(),
-            args_schema_json: "{\"type\":\"object\",\"properties\":{\"cursor\":{\"type\":\"string\"}},\"required\":[\"cursor\"]}".into(),
+            args_schema_json: SEARCH_TOOL_ARGS_SCHEMA_JSON.into(),
             mapper: aos_agent::ToolMapper::HostExec,
             executor: ToolExecutor::HostLoop {
                 bridge: SEARCH_TOOL_NAME.into(),
@@ -609,13 +621,11 @@ fn store_history_blob(host: &ExampleHost, history: &[Value]) -> Result<String> {
     Ok(hash.to_hex())
 }
 
-fn store_default_prompt_ref(host: &ExampleHost, assets_dir: &Path) -> Result<String> {
-    let prompt_pack_path = assets_dir.join("prompts/packs/default.json");
-    let prompt_pack_bytes = fs::read(&prompt_pack_path)
-        .with_context(|| format!("read prompt pack {}", prompt_pack_path.display()))?;
+fn store_default_prompt_ref(host: &ExampleHost) -> Result<String> {
+    let prompt_pack_bytes = DEFAULT_PROMPT_PACK_JSON.as_bytes();
     let hash = host
         .store()
-        .put_blob(&prompt_pack_bytes)
+        .put_blob(prompt_pack_bytes)
         .context("store prompt pack blob")?;
     Ok(hash.to_hex())
 }

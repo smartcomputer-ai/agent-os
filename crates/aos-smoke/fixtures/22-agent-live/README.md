@@ -4,7 +4,7 @@ Live SDK agent smoke fixture:
 - workflow runtime wasm is compiled from `aos-agent` bin `session_workflow`,
 - AIR `aos.agent/*` schemas are imported from `crates/aos-agent/air`,
 - routing binds directly to keyed SDK module `aos.agent/SessionWorkflow@1`,
-- fixture assets live under `assets/` (prompt pack + tool catalog),
+- fixture prompt/tool assets are embedded in the runner (no external asset dir),
 - runner drives `SessionIngress` lifecycle and tool-batch observe/settle ingress events,
 - runner uploads the default prompt pack blob and passes it as `default_prompt_refs`,
 - live LLM issues tool calls over multiple steps,
