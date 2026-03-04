@@ -31,11 +31,6 @@
       "dir": "workflow",
       "ignore": ["target/", ".git/", ".aos/"],
       "ref": "workflow"
-    },
-    {
-      "dir": "agent-ws",
-      "ignore": [".git/", ".aos/"],
-      "ref": "demiurge"
     }
   ]
 }

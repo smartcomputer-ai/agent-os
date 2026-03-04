@@ -31,8 +31,8 @@ const SDK_WASM_BIN: &str = "session_workflow";
 const SESSION_ID: &str = "33333333-3333-3333-3333-333333333333";
 const TOOL_PROFILE: &str = "smoke-host";
 const SCRIPTED_SESSION_ID: &str = "hs_tools_opened";
+const SEEDED_SESSION_ID: &str = "hs_seed";
 
-const CALL_OPEN: &str = "call-open";
 const CALL_WRITE: &str = "call-write";
 const CALL_EXISTS: &str = "call-exists";
 const CALL_READ: &str = "call-read";
@@ -45,6 +45,12 @@ const TOOL_FS_EXISTS: &str = "host.fs.exists";
 const TOOL_FS_READ: &str = "host.fs.read_file";
 const TOOL_FS_LIST: &str = "host.fs.list_dir";
 const TOOL_EXEC: &str = "host.exec";
+
+const LLM_TOOL_FS_WRITE: &str = "write_file";
+const LLM_TOOL_FS_EXISTS: &str = "exists";
+const LLM_TOOL_FS_READ: &str = "read_file";
+const LLM_TOOL_FS_LIST: &str = "list_dir";
+const LLM_TOOL_EXEC: &str = "shell";
 
 const TEST_FILE_PATH: &str = "notes/hello.txt";
 const TEST_FILE_TEXT: &str = "hello from agent-tools";
@@ -76,7 +82,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         &mut host,
         &mut clock,
         SessionIngressKind::HostSessionUpdated {
-            host_session_id: Some("hs_seed".into()),
+            host_session_id: Some(SEEDED_SESSION_ID.into()),
             host_session_status: Some(HostSessionStatus::Ready),
         },
     )?;
@@ -108,7 +114,10 @@ pub fn run(example_root: &Path) -> Result<()> {
         },
     )?;
 
-    let mut script = AgentToolsScript::default();
+    let mut script = AgentToolsScript {
+        opened_session_id: Some(SEEDED_SESSION_ID.into()),
+        ..AgentToolsScript::default()
+    };
     drive_scripted_effects(&mut host, &mut script)?;
 
     let state_after_tools: SessionState = host.read_state()?;
@@ -122,14 +131,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         .as_ref()
         .ok_or_else(|| anyhow!("expected active tool batch"))?;
     ensure!(batch.is_settled(), "expected tool batch settled");
-    for call_id in [
-        CALL_OPEN,
-        CALL_WRITE,
-        CALL_EXISTS,
-        CALL_READ,
-        CALL_LIST,
-        CALL_EXEC,
-    ] {
+    for call_id in [CALL_WRITE, CALL_EXISTS, CALL_READ, CALL_LIST, CALL_EXEC] {
         ensure!(
             matches!(
                 batch.call_status.get(call_id),
@@ -139,7 +141,6 @@ pub fn run(example_root: &Path) -> Result<()> {
         );
     }
     let expected_groups = vec![
-        vec![CALL_OPEN.to_string()],
         vec![
             CALL_WRITE.to_string(),
             CALL_EXISTS.to_string(),
@@ -154,7 +155,6 @@ pub fn run(example_root: &Path) -> Result<()> {
         batch.plan.execution_plan.groups
     );
     let expected_kinds = BTreeSet::from([
-        TOOL_SESSION_OPEN.to_string(),
         TOOL_FS_WRITE.to_string(),
         TOOL_FS_EXISTS.to_string(),
         TOOL_FS_READ.to_string(),
@@ -586,12 +586,6 @@ fn build_second_llm_output_ref(store: &FsStore) -> Result<HashRef> {
 }
 
 fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
-    let open_args = store_json_blob(
-        store,
-        &json!({
-            "target": { "local": { "network_mode": "off" } }
-        }),
-    )?;
     let write_args = store_json_blob(
         store,
         &json!({
@@ -629,38 +623,32 @@ fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
 
     Ok(vec![
         LlmToolCall {
-            call_id: CALL_OPEN.into(),
-            tool_name: TOOL_SESSION_OPEN.into(),
-            arguments_ref: open_args,
-            provider_call_id: Some("provider-call-open".into()),
-        },
-        LlmToolCall {
             call_id: CALL_WRITE.into(),
-            tool_name: TOOL_FS_WRITE.into(),
+            tool_name: LLM_TOOL_FS_WRITE.into(),
             arguments_ref: write_args,
             provider_call_id: Some("provider-call-write".into()),
         },
         LlmToolCall {
             call_id: CALL_EXISTS.into(),
-            tool_name: TOOL_FS_EXISTS.into(),
+            tool_name: LLM_TOOL_FS_EXISTS.into(),
             arguments_ref: exists_args,
             provider_call_id: Some("provider-call-exists".into()),
         },
         LlmToolCall {
             call_id: CALL_READ.into(),
-            tool_name: TOOL_FS_READ.into(),
+            tool_name: LLM_TOOL_FS_READ.into(),
             arguments_ref: read_args,
             provider_call_id: Some("provider-call-read".into()),
         },
         LlmToolCall {
             call_id: CALL_LIST.into(),
-            tool_name: TOOL_FS_LIST.into(),
+            tool_name: LLM_TOOL_FS_LIST.into(),
             arguments_ref: list_args,
             provider_call_id: Some("provider-call-list".into()),
         },
         LlmToolCall {
             call_id: CALL_EXEC.into(),
-            tool_name: TOOL_EXEC.into(),
+            tool_name: LLM_TOOL_EXEC.into(),
             arguments_ref: exec_args,
             provider_call_id: Some("provider-call-exec".into()),
         },
