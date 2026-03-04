@@ -35,6 +35,24 @@ impl<S: Store> LlmAdapter<S> {
         self.config.providers.get(name)
     }
 
+    fn env_api_key_var(provider: &ProviderConfig) -> &'static str {
+        match provider.api_kind {
+            LlmApiKind::Responses | LlmApiKind::ChatCompletions => "OPENAI_API_KEY",
+            LlmApiKind::AnthropicMessages => "ANTHROPIC_API_KEY",
+        }
+    }
+
+    fn resolve_api_key(&self, provider: &ProviderConfig, params_api_key: Option<String>) -> Option<String> {
+        params_api_key
+            .filter(|key| !key.is_empty())
+            .or_else(|| {
+                let var_name = Self::env_api_key_var(provider);
+                std::env::var(var_name)
+                    .ok()
+                    .filter(|value| !value.is_empty())
+            })
+    }
+
     fn failure_receipt(
         &self,
         intent: &EffectIntent,
@@ -243,14 +261,15 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        let api_key = match params.api_key.clone() {
-            Some(key) if !key.is_empty() => key,
+        let api_key = match self.resolve_api_key(provider, params.api_key.clone()) {
+            Some(key) => key,
             _ => {
+                let var_name = Self::env_api_key_var(provider);
                 return Ok(self.failure_receipt(
                     intent,
                     &provider_id,
                     ReceiptStatus::Error,
-                    "api_key missing",
+                    format!("api_key missing (set params.api_key or env:{var_name})"),
                 ));
             }
         };

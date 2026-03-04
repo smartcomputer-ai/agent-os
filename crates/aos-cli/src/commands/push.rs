@@ -1,6 +1,6 @@
 //! `aos push` command.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -13,13 +13,15 @@ use aos_host::manifest_loader;
 use aos_host::world_io::{WorldBundle, build_patch_document, manifest_node_hash};
 use aos_kernel::ManifestLoader;
 use aos_kernel::patch_doc::compile_patch_document;
+use aos_kernel::secret::{MapSecretResolver, SharedSecretResolver};
 use aos_store::{FsStore, Store};
 
 use crate::opts::WorldOpts;
 use crate::opts::resolve_dirs;
 use crate::output::print_success;
 use crate::util::{
-    compile_workflow, latest_manifest_hash_from_journal, resolve_placeholder_modules,
+    compile_workflow, latest_manifest_hash_from_journal, load_world_env,
+    host_config_from_opts, make_kernel_config, resolve_placeholder_modules,
 };
 
 use super::create_host;
@@ -53,6 +55,7 @@ pub struct PushArgs {
 
 pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
+    load_world_env(&dirs.world)?;
     let (map_path, config) = load_sync_config(&dirs.world, args.map.as_deref())?;
     let map_root = map_path.parent().unwrap_or(&dirs.world);
     let store = FsStore::open(&dirs.store_root).context("open store")?;
@@ -127,7 +130,18 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
         }
 
         let compiled = compile_patch_document(store.as_ref(), doc).context("compile patch doc")?;
-        let mut host = create_host(store.clone(), base_loaded, &dirs, opts)?;
+        let mut kernel_config = make_kernel_config(&dirs.store_root)?;
+        if let Some(resolver) = secret_resolver_from_bundle(&bundle)? {
+            kernel_config.secret_resolver = Some(resolver);
+        }
+        let host_config = host_config_from_opts(opts.http_timeout_ms, opts.http_max_body_bytes);
+        let mut host = aos_host::host::WorldHost::from_loaded_manifest(
+            store.clone(),
+            base_loaded,
+            &dirs.store_root,
+            host_config,
+            kernel_config,
+        )?;
         let manifest_hash = host
             .kernel_mut()
             .apply_patch_direct(compiled)
@@ -291,4 +305,48 @@ fn refresh_module_refs(loaded: &mut aos_kernel::LoadedManifest, store: &FsStore)
         }
     }
     Ok(())
+}
+
+fn secret_resolver_from_bundle(bundle: &WorldBundle) -> Result<Option<SharedSecretResolver>> {
+    let referenced: BTreeSet<&str> = bundle
+        .manifest
+        .secrets
+        .iter()
+        .filter_map(|entry| match entry {
+            aos_air_types::SecretEntry::Ref(named) => Some(named.name.as_str()),
+            aos_air_types::SecretEntry::Decl(_) => None,
+        })
+        .collect();
+
+    if referenced.is_empty() {
+        return Ok(None);
+    }
+
+    let defs_by_name: HashMap<&str, &aos_air_types::DefSecret> = bundle
+        .secrets
+        .iter()
+        .map(|secret| (secret.name.as_str(), secret))
+        .collect();
+
+    let mut values: HashMap<String, Vec<u8>> = HashMap::new();
+    for name in referenced {
+        let secret = defs_by_name.get(name).ok_or_else(|| {
+            anyhow!("manifest references secret '{name}' but no matching defsecret was loaded")
+        })?;
+        let binding = secret.binding_id.as_str();
+        let var_name = binding.strip_prefix("env:").ok_or_else(|| {
+            anyhow!(
+                "unsupported secret binding '{binding}' for '{name}' (expected env:VAR_NAME)"
+            )
+        })?;
+        if var_name.is_empty() {
+            anyhow::bail!("invalid empty env binding for secret '{name}'");
+        }
+        let value = std::env::var(var_name).map_err(|_| {
+            anyhow!("missing env var '{var_name}' required by secret '{name}' ({binding})")
+        })?;
+        values.insert(binding.to_string(), value.into_bytes());
+    }
+
+    Ok(Some(Arc::new(MapSecretResolver::new(values))))
 }

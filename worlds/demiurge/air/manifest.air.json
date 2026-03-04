@@ -64,6 +64,10 @@
   "policies": [
     { "name": "demiurge/task_policy@1" }
   ],
+  "secrets": [
+    { "name": "llm/openai_api@1" },
+    { "name": "llm/anthropic_api@1" }
+  ],
   "defaults": {
     "policy": "demiurge/task_policy@1",
     "cap_grants": [
@@ -80,7 +84,7 @@
                 { "text": "claude-sonnet-4-5" }
               ]
             },
-            "max_tokens": { "nat": 4096 }
+            "max_tokens": { "nat": 100000 }
           }
         }
       },

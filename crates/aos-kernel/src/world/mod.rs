@@ -1402,7 +1402,9 @@ fn ensure_secret_resolver(
     allow_placeholder: bool,
 ) -> Result<Option<SharedSecretResolver>, KernelError> {
     if !has_secrets {
-        return Ok(None);
+        // Preserve explicitly configured resolvers so a later governance apply
+        // can introduce secrets without requiring a kernel restart.
+        return Ok(provided);
     }
     if let Some(resolver) = provided {
         return Ok(Some(resolver));
@@ -1436,4 +1438,18 @@ fn refresh_workflow_status(state: &mut WorkflowInstanceState) {
         return;
     }
     state.status = WorkflowRuntimeStatus::Running;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_secret_resolver_keeps_provided_when_manifest_has_no_secrets() {
+        let provided: SharedSecretResolver =
+            Arc::new(crate::secret::MapSecretResolver::new(HashMap::new()));
+        let selected =
+            ensure_secret_resolver(false, Some(provided), false).expect("resolver selection");
+        assert!(selected.is_some());
+    }
 }
