@@ -99,8 +99,6 @@ pub fn run(example_root: &Path) -> Result<()> {
                 model: "gpt-5.2".into(),
                 reasoning_effort: None,
                 max_tokens: Some(512),
-                workspace_binding: None,
-                default_prompt_pack: None,
                 default_prompt_refs: None,
                 default_tool_profile: Some(TOOL_PROFILE.into()),
                 default_tool_enable: None,

@@ -190,8 +190,6 @@ fn run_requested_event_with_config(
                 model: model.into(),
                 reasoning_effort: None,
                 max_tokens: Some(512),
-                workspace_binding: None,
-                default_prompt_pack: None,
                 default_prompt_refs: Some(vec![fake_hash('e')]),
                 default_tool_profile: None,
                 default_tool_enable: Some(vec!["host.session.open".into()]),

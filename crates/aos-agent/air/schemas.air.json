@@ -285,50 +285,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/WorkspaceBinding@1",
-    "type": {
-      "record": {
-        "workspace": { "text": {} },
-        "version": { "option": { "nat": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/WorkspaceApplyMode@1",
-    "type": {
-      "variant": {
-        "NextRun": { "unit": {} },
-        "ImmediateIfIdle": { "unit": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/WorkspaceSnapshot@1",
-    "type": {
-      "record": {
-        "workspace": { "text": {} },
-        "version": { "option": { "nat": {} } },
-        "root_hash": { "option": { "hash": {} } },
-        "index_ref": { "option": { "hash": {} } },
-        "prompt_pack": { "option": { "text": {} } },
-        "prompt_pack_ref": { "option": { "hash": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/WorkspaceSnapshotReady@1",
-    "type": {
-      "record": {
-        "snapshot": { "ref": "aos.agent/WorkspaceSnapshot@1" },
-        "prompt_pack_bytes": { "option": { "bytes": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "aos.agent/SessionConfig@1",
     "type": {
       "record": {
@@ -336,8 +292,6 @@
         "model": { "text": {} },
         "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
         "max_tokens": { "option": { "nat": {} } },
-        "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
-        "default_prompt_pack": { "option": { "text": {} } },
         "default_prompt_refs": { "option": { "list": { "hash": {} } } },
         "default_tool_profile": { "option": { "text": {} } },
         "default_tool_enable": { "option": { "list": { "text": {} } } },
@@ -355,8 +309,6 @@
         "model": { "text": {} },
         "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
         "max_tokens": { "option": { "nat": {} } },
-        "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
-        "prompt_pack": { "option": { "text": {} } },
         "prompt_refs": { "option": { "list": { "hash": {} } } },
         "tool_profile": { "option": { "text": {} } },
         "tool_enable": { "option": { "list": { "text": {} } } },
@@ -413,31 +365,6 @@
           }
         },
         "HostCommandReceived": { "ref": "aos.agent/HostCommand@1" },
-        "WorkspaceSyncRequested": {
-          "record": {
-            "workspace_binding": { "ref": "aos.agent/WorkspaceBinding@1" },
-            "prompt_pack": { "option": { "text": {} } }
-          }
-        },
-        "WorkspaceSyncUnchanged": {
-          "record": {
-            "workspace": { "text": {} },
-            "version": { "option": { "nat": {} } }
-          }
-        },
-        "WorkspaceSnapshotReady": { "ref": "aos.agent/WorkspaceSnapshotReady@1" },
-        "WorkspaceSyncFailed": {
-          "record": {
-            "workspace": { "text": {} },
-            "stage": { "text": {} },
-            "detail": { "text": {} }
-          }
-        },
-        "WorkspaceApplyRequested": {
-          "record": {
-            "mode": { "ref": "aos.agent/WorkspaceApplyMode@1" }
-          }
-        },
         "ToolRegistrySet": {
           "record": {
             "registry": {
@@ -629,11 +556,6 @@
         "conversation_message_refs": { "list": { "hash": {} } },
         "tool_refs_materialized": { "bool": {} },
         "in_flight_effects": { "nat": {} },
-        "active_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },
-        "pending_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },
-        "pending_workspace_apply_mode": {
-          "option": { "ref": "aos.agent/WorkspaceApplyMode@1" }
-        },
         "tool_registry": {
           "map": {
             "key": { "text": {} },

@@ -80,11 +80,8 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         SessionReduceError::UnknownModel => ReduceError::new("run config model unknown"),
         SessionReduceError::RunAlreadyActive => ReduceError::new("run already active"),
         SessionReduceError::RunNotActive => ReduceError::new("run not active"),
-        SessionReduceError::InvalidWorkspacePromptPackJson => {
-            ReduceError::new("workspace prompt pack JSON invalid")
-        }
-        SessionReduceError::MissingWorkspacePromptPackBytes => {
-            ReduceError::new("workspace prompt pack bytes missing for validation")
+        SessionReduceError::EmptyMessageRefs => {
+            ReduceError::new("llm message_refs must not be empty")
         }
         SessionReduceError::TooManyPendingIntents => ReduceError::new("too many pending intents"),
         SessionReduceError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),

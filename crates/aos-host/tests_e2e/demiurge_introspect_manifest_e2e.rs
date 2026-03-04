@@ -280,8 +280,6 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
                     "model": "gpt-mock",
                     "reasoning_effort": null,
                     "max_tokens": 256,
-                    "workspace_binding": null,
-                    "default_prompt_pack": null,
                     "default_prompt_refs": [prompt_hash],
                     "default_tool_profile": "openai",
                     "default_tool_enable": ["host.session.open"],
@@ -309,12 +307,6 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         .context("missing tool_profile")?;
     assert_eq!(prompt_refs.len(), 1);
     assert_eq!(tool_profile, "openai");
-    assert!(
-        active_run_config
-            .get("workspace_binding")
-            .unwrap_or(&Value::Null)
-            .is_null()
-    );
 
     let step_id = state
         .get("active_step_id")

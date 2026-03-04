@@ -7,8 +7,8 @@ use crate::contracts::{
     PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, PendingFollowUpTurn, PendingIntent,
     PlannedToolCall, RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle, SessionState,
     SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallObserved, ToolCallStatus,
-    ToolExecutionPlan, ToolExecutor, ToolOverrideScope, ToolSpec, WorkspaceApplyMode,
-    WorkspaceBinding, WorkspaceSnapshot, default_tool_profile_for_provider,
+    ToolExecutionPlan, ToolExecutor, ToolOverrideScope, ToolSpec,
+    default_tool_profile_for_provider,
 };
 use crate::tools::{
     ToolEffectKind, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
@@ -27,7 +27,7 @@ use sha2::{Digest, Sha256};
 
 use super::llm::{
     LlmMappingError, LlmStepContext, LlmToolChoice, SysLlmGenerateParams,
-    materialize_llm_generate_params_with_workspace,
+    materialize_llm_generate_params_with_prompt_refs,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,8 +78,7 @@ pub enum SessionReduceError {
     UnknownModel,
     RunAlreadyActive,
     RunNotActive,
-    InvalidWorkspacePromptPackJson,
-    MissingWorkspacePromptPackBytes,
+    EmptyMessageRefs,
     TooManyPendingIntents,
     ToolProfileUnknown,
     UnknownToolOverride,
@@ -98,10 +97,7 @@ impl SessionReduceError {
             Self::UnknownModel => "run config model unknown",
             Self::RunAlreadyActive => "run already active",
             Self::RunNotActive => "run not active",
-            Self::InvalidWorkspacePromptPackJson => "workspace prompt pack JSON invalid",
-            Self::MissingWorkspacePromptPackBytes => {
-                "workspace prompt pack bytes missing for validation"
-            }
+            Self::EmptyMessageRefs => "llm message_refs must not be empty",
             Self::TooManyPendingIntents => "too many pending intents",
             Self::ToolProfileUnknown => "tool profile unknown",
             Self::UnknownToolOverride => "unknown tool override",
@@ -176,22 +172,6 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                 }
                 SessionIngressKind::HostCommandReceived(command) => {
                     on_host_command(state, command)?
-                }
-                SessionIngressKind::WorkspaceSyncRequested {
-                    workspace_binding,
-                    prompt_pack,
-                } => on_workspace_sync_requested(state, workspace_binding, prompt_pack.as_ref()),
-                SessionIngressKind::WorkspaceSyncUnchanged { workspace, version } => {
-                    on_workspace_sync_unchanged(state, workspace, *version)
-                }
-                SessionIngressKind::WorkspaceSnapshotReady(ready) => on_workspace_snapshot_ready(
-                    state,
-                    &ready.snapshot,
-                    ready.prompt_pack_bytes.as_deref(),
-                )?,
-                SessionIngressKind::WorkspaceSyncFailed { .. } => {}
-                SessionIngressKind::WorkspaceApplyRequested { mode } => {
-                    on_workspace_apply_requested(state, *mode)
                 }
                 SessionIngressKind::ToolRegistrySet {
                     registry,
@@ -335,9 +315,6 @@ fn on_run_requested(
 
     let requested = select_run_config(&state.session_config, run_overrides);
     validate_run_config(&requested)?;
-    if state.pending_workspace_apply_mode == Some(WorkspaceApplyMode::NextRun) {
-        apply_pending_workspace_snapshot(state);
-    }
 
     transition_lifecycle(state, SessionLifecycle::Running)
         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
@@ -361,7 +338,7 @@ fn map_llm_mapping_error(err: LlmMappingError) -> SessionReduceError {
     match err {
         LlmMappingError::MissingProvider => SessionReduceError::MissingProvider,
         LlmMappingError::MissingModel => SessionReduceError::MissingModel,
-        LlmMappingError::EmptyMessageRefs => SessionReduceError::InvalidWorkspacePromptPackJson,
+        LlmMappingError::EmptyMessageRefs => SessionReduceError::EmptyMessageRefs,
     }
 }
 
@@ -399,104 +376,6 @@ fn on_host_command(
     }
 
     Ok(())
-}
-
-fn on_workspace_sync_requested(
-    state: &mut SessionState,
-    workspace_binding: &WorkspaceBinding,
-    prompt_pack: Option<&String>,
-) {
-    state.session_config.workspace_binding = Some(workspace_binding.clone());
-    state.session_config.default_prompt_pack = prompt_pack.cloned();
-}
-
-fn on_workspace_sync_unchanged(state: &mut SessionState, workspace: &str, version: Option<u64>) {
-    if let Some(active) = state.active_workspace_snapshot.as_mut() {
-        if active.workspace == workspace {
-            active.version = version;
-        }
-    }
-    if let Some(pending) = state.pending_workspace_snapshot.as_mut() {
-        if pending.workspace == workspace {
-            pending.version = version;
-        }
-    }
-}
-
-fn on_workspace_snapshot_ready(
-    state: &mut SessionState,
-    snapshot: &WorkspaceSnapshot,
-    prompt_pack_bytes: Option<&[u8]>,
-) -> Result<(), SessionReduceError> {
-    validate_workspace_snapshot_json(snapshot, prompt_pack_bytes)?;
-    state.pending_workspace_snapshot = Some(snapshot.clone());
-    if state.pending_workspace_apply_mode == Some(WorkspaceApplyMode::ImmediateIfIdle)
-        && state.active_run_id.is_none()
-    {
-        apply_pending_workspace_snapshot(state);
-    }
-    Ok(())
-}
-
-fn validate_workspace_snapshot_json(
-    snapshot: &WorkspaceSnapshot,
-    prompt_pack_bytes: Option<&[u8]>,
-) -> Result<(), SessionReduceError> {
-    if snapshot.prompt_pack_ref.is_some() {
-        let bytes = prompt_pack_bytes.ok_or(SessionReduceError::MissingWorkspacePromptPackBytes)?;
-        validate_prompt_pack_json(bytes)?;
-    }
-    Ok(())
-}
-
-fn validate_prompt_pack_json(bytes: &[u8]) -> Result<(), SessionReduceError> {
-    let value: serde_json::Value = serde_json::from_slice(bytes)
-        .map_err(|_| SessionReduceError::InvalidWorkspacePromptPackJson)?;
-
-    fn looks_like_message(value: &serde_json::Value) -> bool {
-        match value {
-            serde_json::Value::Array(items) => items.iter().all(looks_like_message),
-            serde_json::Value::Object(obj) => {
-                obj.contains_key("role")
-                    || obj.contains_key("content")
-                    || obj.contains_key("type")
-                    || obj.contains_key("tool_calls")
-                    || obj.contains_key("output")
-                    || obj.contains_key("tool_call_id")
-                    || obj.contains_key("call_id")
-            }
-            _ => false,
-        }
-    }
-
-    if looks_like_message(&value) {
-        Ok(())
-    } else {
-        Err(SessionReduceError::InvalidWorkspacePromptPackJson)
-    }
-}
-
-fn on_workspace_apply_requested(state: &mut SessionState, mode: WorkspaceApplyMode) {
-    match mode {
-        WorkspaceApplyMode::ImmediateIfIdle => {
-            state.pending_workspace_apply_mode = Some(WorkspaceApplyMode::ImmediateIfIdle);
-            if state.active_run_id.is_none() {
-                apply_pending_workspace_snapshot(state);
-            }
-        }
-        WorkspaceApplyMode::NextRun => {
-            state.pending_workspace_apply_mode = Some(WorkspaceApplyMode::NextRun);
-        }
-    }
-}
-
-fn apply_pending_workspace_snapshot(state: &mut SessionState) -> bool {
-    let Some(snapshot) = state.pending_workspace_snapshot.take() else {
-        return false;
-    };
-    state.active_workspace_snapshot = Some(snapshot);
-    state.pending_workspace_apply_mode = None;
-    true
 }
 
 fn validate_tool_registry_payload(
@@ -1106,13 +985,8 @@ fn inject_blob_inline_text_into_output_json(
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(output_json) else {
         return None;
     };
-    let changed = inject_blob_inline_text_into_value(
-        &mut value,
-        blob_ref,
-        inline_text,
-        truncated,
-        error,
-    );
+    let changed =
+        inject_blob_inline_text_into_value(&mut value, blob_ref, inline_text, truncated, error);
     if !changed {
         return None;
     }
@@ -1129,9 +1003,7 @@ fn inject_blob_inline_text_into_value(
     let mut changed = false;
     match value {
         serde_json::Value::Object(map) => {
-            if let Some(blob_obj) = map
-                .get("blob")
-                .and_then(serde_json::Value::as_object)
+            if let Some(blob_obj) = map.get("blob").and_then(serde_json::Value::as_object)
                 && blob_obj
                     .get("blob_ref")
                     .and_then(serde_json::Value::as_str)
@@ -1142,7 +1014,10 @@ fn inject_blob_inline_text_into_value(
                     serde_json::json!({ "text": inline_text }),
                 );
                 if truncated {
-                    map.insert("inline_text_truncated".into(), serde_json::Value::Bool(true));
+                    map.insert(
+                        "inline_text_truncated".into(),
+                        serde_json::Value::Bool(true),
+                    );
                 }
                 if let Some(error_text) = error {
                     map.insert(
@@ -1707,14 +1582,18 @@ fn handle_pending_blob_get_receipt(
                 result.output_json = updated_output;
             }
 
-            let pending =
-                has_pending_tool_result_blob_get(state, &tool_batch_id, call_id.as_str());
+            let pending = has_pending_tool_result_blob_get(state, &tool_batch_id, call_id.as_str());
             if !pending
                 && let Some(batch) = state.active_tool_batch.as_mut()
                 && batch.tool_batch_id == tool_batch_id
-                && matches!(batch.call_status.get(&call_id), Some(ToolCallStatus::Pending))
+                && matches!(
+                    batch.call_status.get(&call_id),
+                    Some(ToolCallStatus::Pending)
+                )
             {
-                batch.call_status.insert(call_id.clone(), ToolCallStatus::Succeeded);
+                batch
+                    .call_status
+                    .insert(call_id.clone(), ToolCallStatus::Succeeded);
             }
 
             dispatch_next_ready_tool_group(state, out)?;
@@ -1866,12 +1745,8 @@ fn dispatch_queued_llm_turn(
         api_key: None,
     };
 
-    let params = materialize_llm_generate_params_with_workspace(
-        &run_config,
-        state.active_workspace_snapshot.as_ref(),
-        step_ctx,
-    )
-    .map_err(map_llm_mapping_error)?;
+    let params = materialize_llm_generate_params_with_prompt_refs(&run_config, step_ctx)
+        .map_err(map_llm_mapping_error)?;
     let params_hash = hash_llm_params(&params);
     state.pending_intents.insert(
         params_hash.clone(),
@@ -2176,8 +2051,6 @@ fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfi
         model: source.model.clone(),
         reasoning_effort: source.reasoning_effort,
         max_tokens: source.max_tokens,
-        workspace_binding: source.workspace_binding.clone(),
-        prompt_pack: source.default_prompt_pack.clone(),
         prompt_refs: source.default_prompt_refs.clone(),
         tool_profile: source.default_tool_profile.clone(),
         tool_enable: source.default_tool_enable.clone(),
@@ -2336,8 +2209,6 @@ mod tests {
                     model: "gpt-5.2".into(),
                     reasoning_effort: None,
                     max_tokens: Some(512),
-                    workspace_binding: None,
-                    default_prompt_pack: None,
                     default_prompt_refs: None,
                     default_tool_profile: None,
                     default_tool_enable: None,

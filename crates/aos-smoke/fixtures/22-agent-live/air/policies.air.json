@@ -1,7 +1,7 @@
 [
   {
     "$kind": "defpolicy",
-    "name": "demo/agent-live-workspace-policy@1",
+    "name": "demo/agent-live-policy@1",
     "rules": [
       {
         "when": {

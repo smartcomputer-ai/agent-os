@@ -1,6 +1,5 @@
 use super::{
     HostCommand, HostSessionStatus, SessionConfig, SessionId, ToolOverrideScope, ToolSpec,
-    WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -47,17 +46,6 @@ mod serde_bytes_vec {
     {
         ByteBuf::deserialize(deserializer).map(ByteBuf::into_vec)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct WorkspaceSnapshotReady {
-    pub snapshot: WorkspaceSnapshot,
-    #[serde(
-        default,
-        with = "serde_bytes_opt",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub prompt_pack_bytes: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -112,23 +100,6 @@ pub enum SessionIngressKind {
         run_overrides: Option<SessionConfig>,
     },
     HostCommandReceived(HostCommand),
-    WorkspaceSyncRequested {
-        workspace_binding: WorkspaceBinding,
-        prompt_pack: Option<String>,
-    },
-    WorkspaceSyncUnchanged {
-        workspace: String,
-        version: Option<u64>,
-    },
-    WorkspaceSnapshotReady(WorkspaceSnapshotReady),
-    WorkspaceSyncFailed {
-        workspace: String,
-        stage: String,
-        detail: String,
-    },
-    WorkspaceApplyRequested {
-        mode: WorkspaceApplyMode,
-    },
     ToolRegistrySet {
         registry: BTreeMap<String, ToolSpec>,
         profiles: Option<BTreeMap<String, Vec<String>>>,

@@ -1,5 +1,4 @@
-use super::workspace::materialize_workspace_step_inputs;
-use crate::contracts::{ReasoningEffort, RunConfig, WorkspaceSnapshot};
+use crate::contracts::{ReasoningEffort, RunConfig};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -120,43 +119,24 @@ pub fn materialize_llm_generate_params(
     })
 }
 
-/// Apply active workspace prompt refs to a step context.
-pub fn apply_workspace_snapshot_to_step_context(
-    active_snapshot: Option<&WorkspaceSnapshot>,
-    mut step: LlmStepContext,
-) -> LlmStepContext {
-    let derived = materialize_workspace_step_inputs(
-        active_snapshot,
-        core::mem::take(&mut step.message_refs),
-        None,
-    );
-    step.message_refs = derived.message_refs;
-    step
-}
-
-/// Apply prompt refs from run config or workspace snapshot.
-pub fn apply_prompt_sources_to_step_context(
+/// Apply prompt refs from run config to a step context.
+pub fn apply_prompt_refs_to_step_context(
     run_config: &RunConfig,
-    active_snapshot: Option<&WorkspaceSnapshot>,
     mut step: LlmStepContext,
 ) -> LlmStepContext {
-    let derived = materialize_workspace_step_inputs(
-        active_snapshot,
-        core::mem::take(&mut step.message_refs),
-        run_config.prompt_refs.clone(),
-    );
-    step.message_refs = derived.message_refs;
+    let mut message_refs = run_config.prompt_refs.clone().unwrap_or_default();
+    message_refs.extend(core::mem::take(&mut step.message_refs));
+    step.message_refs = message_refs;
     step
 }
 
-/// Convenience wrapper that applies workspace prompt refs and then maps to
+/// Convenience wrapper that applies prompt refs and then maps to
 /// `sys/llm.generate` params.
-pub fn materialize_llm_generate_params_with_workspace(
+pub fn materialize_llm_generate_params_with_prompt_refs(
     run_config: &RunConfig,
-    active_snapshot: Option<&WorkspaceSnapshot>,
     step: LlmStepContext,
 ) -> Result<SysLlmGenerateParams, LlmMappingError> {
-    let step = apply_prompt_sources_to_step_context(run_config, active_snapshot, step);
+    let step = apply_prompt_refs_to_step_context(run_config, step);
     materialize_llm_generate_params(run_config, &step)
 }
 
@@ -171,7 +151,7 @@ fn reasoning_effort_text(value: ReasoningEffort) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::{ReasoningEffort, RunConfig, WorkspaceSnapshot};
+    use crate::contracts::{ReasoningEffort, RunConfig};
     use alloc::collections::BTreeMap;
     use alloc::vec;
 
@@ -183,25 +163,12 @@ mod tests {
         value
     }
 
-    fn workspace_snapshot() -> WorkspaceSnapshot {
-        WorkspaceSnapshot {
-            workspace: "agent".into(),
-            version: Some(3),
-            root_hash: Some(hash('f')),
-            index_ref: Some(hash('g')),
-            prompt_pack: Some("default".into()),
-            prompt_pack_ref: Some(hash('p')),
-        }
-    }
-
     fn run_config() -> RunConfig {
         RunConfig {
             provider: "openai".into(),
             model: "gpt-5.2".into(),
             reasoning_effort: Some(ReasoningEffort::Medium),
             max_tokens: Some(512),
-            workspace_binding: None,
-            prompt_pack: None,
             prompt_refs: None,
             tool_profile: None,
             tool_enable: None,
@@ -265,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_workspace_prompt_refs_to_step_context() {
+    fn applies_run_prompt_refs_to_step_context() {
         let run = run_config();
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
@@ -273,29 +240,31 @@ mod tests {
         };
 
         let mapped =
-            materialize_llm_generate_params_with_workspace(&run, Some(&workspace_snapshot()), step)
-                .expect("map with workspace snapshot");
-        assert_eq!(mapped.message_refs, vec![hash('p'), hash('a')]);
+            materialize_llm_generate_params_with_prompt_refs(&run, step).expect("map params");
+        assert_eq!(mapped.message_refs, vec![hash('a')]);
         assert_eq!(mapped.runtime.tool_refs, None);
     }
 
     #[test]
-    fn explicit_tool_refs_are_preserved() {
+    fn explicit_tool_refs_are_preserved_when_prompt_refs_applied() {
+        let run = RunConfig {
+            prompt_refs: Some(vec![hash('r')]),
+            ..run_config()
+        };
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
             tool_refs: Some(vec![hash('z')]),
             ..LlmStepContext::default()
         };
 
-        let applied = apply_workspace_snapshot_to_step_context(Some(&workspace_snapshot()), step);
+        let applied = apply_prompt_refs_to_step_context(&run, step);
         assert_eq!(applied.tool_refs, Some(vec![hash('z')]));
-        assert_eq!(applied.message_refs, vec![hash('p'), hash('a')]);
+        assert_eq!(applied.message_refs, vec![hash('r'), hash('a')]);
     }
 
     #[test]
-    fn run_prompt_refs_override_workspace_prompt_pack() {
+    fn run_prompt_refs_prepend_to_history() {
         let run = RunConfig {
-            prompt_pack: Some("default".into()),
             prompt_refs: Some(vec![hash('r')]),
             ..run_config()
         };
@@ -304,9 +273,8 @@ mod tests {
             ..LlmStepContext::default()
         };
 
-        let mapped =
-            materialize_llm_generate_params_with_workspace(&run, Some(&workspace_snapshot()), step)
-                .expect("map with direct prompt refs");
+        let mapped = materialize_llm_generate_params_with_prompt_refs(&run, step)
+            .expect("map with direct prompt refs");
         assert_eq!(mapped.message_refs, vec![hash('r'), hash('a')]);
     }
 

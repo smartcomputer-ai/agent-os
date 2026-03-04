@@ -389,8 +389,6 @@ fn run_attempt(
                 model: provider.model.clone(),
                 reasoning_effort: None,
                 max_tokens: case.run.max_tokens,
-                workspace_binding: None,
-                default_prompt_pack: None,
                 default_prompt_refs: None,
                 default_tool_profile: Some(default_profile_id),
                 default_tool_enable: case.run.tool_enable.clone(),
@@ -782,7 +780,10 @@ fn execute_live_llm_intent(
     Ok(receipt)
 }
 
-fn collect_conversation_observations(store: &FsStore, state: &SessionState) -> ConversationObservations {
+fn collect_conversation_observations(
+    store: &FsStore,
+    state: &SessionState,
+) -> ConversationObservations {
     let mut assistant_fragments = Vec::new();
     let mut tools = BTreeSet::new();
     let mut tool_outputs = Vec::new();
@@ -850,11 +851,7 @@ fn walk_message_value(
                     };
                     tools.insert(name.to_string());
                     if let Some(arguments) = call_obj.get("arguments") {
-                        tool_arguments.push(format!(
-                            "{} {}",
-                            name,
-                            value_compact_text(arguments)
-                        ));
+                        tool_arguments.push(format!("{} {}", name, value_compact_text(arguments)));
                     }
                 }
             }

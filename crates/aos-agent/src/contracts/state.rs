@@ -1,7 +1,7 @@
 use super::{
     ActiveToolBatch, EffectiveToolSet, RunConfig, RunId, SessionConfig, SessionId,
-    SessionLifecycle, ToolBatchId, ToolRuntimeContext, ToolSpec, WorkspaceApplyMode,
-    WorkspaceSnapshot, default_tool_profiles, default_tool_registry,
+    SessionLifecycle, ToolBatchId, ToolRuntimeContext, ToolSpec, default_tool_profiles,
+    default_tool_registry,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -87,9 +87,6 @@ pub struct SessionState {
     pub conversation_message_refs: Vec<String>,
     pub tool_refs_materialized: bool,
     pub in_flight_effects: u64,
-    pub active_workspace_snapshot: Option<WorkspaceSnapshot>,
-    pub pending_workspace_snapshot: Option<WorkspaceSnapshot>,
-    pub pending_workspace_apply_mode: Option<WorkspaceApplyMode>,
     pub tool_registry: BTreeMap<String, ToolSpec>,
     pub tool_profiles: BTreeMap<String, Vec<String>>,
     pub tool_profile: String,
@@ -121,9 +118,6 @@ impl Default for SessionState {
             conversation_message_refs: Vec::new(),
             tool_refs_materialized: false,
             in_flight_effects: 0,
-            active_workspace_snapshot: None,
-            pending_workspace_snapshot: None,
-            pending_workspace_apply_mode: None,
             tool_registry: default_tool_registry(),
             tool_profiles: default_tool_profiles(),
             tool_profile: "openai".into(),
