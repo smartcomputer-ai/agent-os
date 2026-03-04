@@ -8,15 +8,12 @@
       "state": "demiurge/State@1",
       "event": "demiurge/WorkflowEvent@1",
       "effects_emitted": [
-        "llm.generate",
-        "introspect.manifest",
-        "workspace.resolve",
-        "workspace.read_bytes"
+        "blob.put",
+        "host.session.open"
       ],
       "cap_slots": {
-        "llm": "llm.basic",
-        "query": "query",
-        "workspace": "workspace"
+        "blob": "blob",
+        "host": "host"
       }
     }
   }

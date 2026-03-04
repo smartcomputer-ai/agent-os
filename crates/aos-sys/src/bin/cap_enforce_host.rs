@@ -63,9 +63,9 @@ struct HostCapParams {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HostTarget {
-    local: Option<HostLocalTarget>,
+#[serde(tag = "$tag", content = "$value", rename_all = "snake_case")]
+enum HostTarget {
+    Local(HostLocalTarget),
 }
 
 #[derive(Deserialize)]
@@ -319,8 +319,8 @@ fn validate_open(
         ));
     }
 
-    let Some(local) = params.target.local else {
-        return Ok(deny("target_invalid", "missing target.local"));
+    let local = match params.target {
+        HostTarget::Local(local) => local,
     };
 
     if !allowlist_contains(&cap.network_modes, &local.network_mode, |v| {

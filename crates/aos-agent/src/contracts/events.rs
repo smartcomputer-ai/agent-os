@@ -1,5 +1,6 @@
 use super::{
-    HostCommand, HostSessionStatus, SessionConfig, SessionId, ToolOverrideScope, ToolSpec,
+    HostCommand, HostSessionStatus, RunId, SessionConfig, SessionId, SessionLifecycle,
+    ToolOverrideScope, ToolSpec,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -135,6 +136,16 @@ pub struct SessionIngress {
     pub session_id: SessionId,
     pub observed_at_ns: u64,
     pub ingress: SessionIngressKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SessionLifecycleChanged {
+    pub session_id: SessionId,
+    pub observed_at_ns: u64,
+    pub from: SessionLifecycle,
+    pub to: SessionLifecycle,
+    pub run_id: Option<RunId>,
+    pub in_flight_effects: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

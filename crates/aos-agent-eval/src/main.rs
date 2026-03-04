@@ -24,17 +24,22 @@ use aos_host::config::{HostConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig}
 use aos_store::{FsStore, Store};
 use casefile::{EvalCase, FileExpectation, load_cases};
 use clap::{Parser, Subcommand, ValueEnum};
-use eval_host::{EvalHost, EvalHostConfig};
+use eval_host::{EvalHost, EvalHostConfig, EvalModuleBuild, EvalModulePatch};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
+const DIRECT_EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
+const DEMIURGE_EVENT_SCHEMA: &str = "demiurge/TaskSubmitted@1";
 const EVAL_ASSETS_ROOT: &str = "crates/aos-agent-eval/fixtures/eval-world/air";
+const DEMIURGE_ASSETS_ROOT: &str = "worlds/demiurge/air";
 const CASES_ROOT: &str = "crates/aos-agent-eval/cases";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
+const DEMIURGE_WORKFLOW_MODULE: &str = "demiurge/Demiurge@1";
+const DEMIURGE_WORKFLOW_MANIFEST: &str = "worlds/demiurge/workflow/Cargo.toml";
+const DEMIURGE_WORKFLOW_ARTIFACT_STEM: &str = "demiurge_workflow";
 
 const OPENAI_KEY_ENV: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL_ENV: &str = "OPENAI_BASE_URL";
@@ -65,6 +70,9 @@ struct Cli {
 
     #[arg(long, global = true, help = "Override number of runs per case")]
     runs: Option<u32>,
+
+    #[arg(long, global = true, value_enum, default_value_t = EntryMode::Direct)]
+    entry: EntryMode,
 }
 
 #[derive(Subcommand, Debug)]
@@ -81,6 +89,35 @@ enum Commands {
 enum ProviderChoice {
     Openai,
     Anthropic,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum EntryMode {
+    Direct,
+    Demiurge,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct TaskConfigInput {
+    provider: Option<String>,
+    model: Option<String>,
+    reasoning_effort: Option<aos_agent::ReasoningEffort>,
+    max_tokens: Option<u64>,
+    tool_profile: Option<String>,
+    allowed_tools: Option<Vec<String>>,
+    tool_enable: Option<Vec<String>>,
+    tool_disable: Option<Vec<String>>,
+    tool_force: Option<Vec<String>>,
+    session_ttl_ns: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct TaskSubmittedInput {
+    task_id: SessionId,
+    observed_at_ns: u64,
+    workdir: String,
+    task: String,
+    config: Option<TaskConfigInput>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,32 +167,67 @@ struct EvalInvocation {
     host: EvalHost,
     clock: u64,
     next_session_counter: u64,
+    entry_mode: EntryMode,
 }
 
 impl EvalInvocation {
-    fn new() -> Result<Self> {
+    fn new(entry_mode: EntryMode) -> Result<Self> {
         let world_temp = TempDir::new().context("create eval world tempdir")?;
         let world_root = world_temp.path().to_path_buf();
         let workspaces_root = world_root.join("workspaces");
         fs::create_dir_all(&workspaces_root)
             .with_context(|| format!("create workspaces root {}", workspaces_root.display()))?;
 
-        let assets_root = workspace_root().join(EVAL_ASSETS_ROOT);
+        let assets_root = if entry_mode == EntryMode::Demiurge {
+            workspace_root().join(DEMIURGE_ASSETS_ROOT)
+        } else {
+            workspace_root().join(EVAL_ASSETS_ROOT)
+        };
         let sdk_air_root = workspace_root().join(SDK_AIR_ROOT);
         let import_roots = vec![sdk_air_root];
+        let demiurge_manifest = workspace_root().join(DEMIURGE_WORKFLOW_MANIFEST);
+        let module_patches = if entry_mode == EntryMode::Demiurge {
+            vec![
+                EvalModulePatch {
+                    module_name: DEMIURGE_WORKFLOW_MODULE,
+                    build: EvalModuleBuild::CargoManifestLib {
+                        manifest_path: demiurge_manifest.as_path(),
+                        artifact_stem: DEMIURGE_WORKFLOW_ARTIFACT_STEM,
+                    },
+                },
+                EvalModulePatch {
+                    module_name: WORKFLOW_NAME,
+                    build: EvalModuleBuild::CargoBin {
+                        package: SDK_WASM_PACKAGE,
+                        bin: SDK_WASM_BIN,
+                    },
+                },
+            ]
+        } else {
+            vec![EvalModulePatch {
+                module_name: WORKFLOW_NAME,
+                build: EvalModuleBuild::CargoBin {
+                    package: SDK_WASM_PACKAGE,
+                    bin: SDK_WASM_BIN,
+                },
+            }]
+        };
         let host = EvalHost::prepare(EvalHostConfig {
             world_root: &world_root,
             assets_root: &assets_root,
             import_roots: &import_roots,
             workspace_root: workspace_root().as_path(),
             workflow_name: WORKFLOW_NAME,
-            event_schema: EVENT_SCHEMA,
+            event_schema: if entry_mode == EntryMode::Demiurge {
+                DEMIURGE_EVENT_SCHEMA
+            } else {
+                DIRECT_EVENT_SCHEMA
+            },
             host_config: HostConfig {
                 llm: None,
                 ..HostConfig::default()
             },
-            module_package: SDK_WASM_PACKAGE,
-            module_bin: SDK_WASM_BIN,
+            module_patches: &module_patches,
         })?;
 
         Ok(Self {
@@ -164,6 +236,7 @@ impl EvalInvocation {
             host,
             clock: 0,
             next_session_counter: 0,
+            entry_mode,
         })
     }
 
@@ -217,7 +290,7 @@ fn run_cli() -> Result<()> {
                 .into_iter()
                 .find(|c| c.id == id)
                 .ok_or_else(|| anyhow!("unknown case '{id}'"))?;
-            let mut invocation = EvalInvocation::new()?;
+            let mut invocation = EvalInvocation::new(cli.entry)?;
             let summary = run_case(&mut invocation, &case, &provider, cli.runs)?;
             print_case_summary(&summary);
             let pass_rate = summary.passed_runs as f64 / summary.total_runs as f64;
@@ -235,7 +308,7 @@ fn run_cli() -> Result<()> {
     }
 
     let provider = resolve_provider(cli.provider, cli.model.clone())?;
-    let mut invocation = EvalInvocation::new()?;
+    let mut invocation = EvalInvocation::new(cli.entry)?;
 
     let mut failures = Vec::new();
     let mut summaries = Vec::new();
@@ -349,54 +422,66 @@ fn run_attempt(
         .clone()
         .unwrap_or_else(|| default_tool_profile_for_provider(&provider.provider_id));
 
-    install_tool_registry(
-        &mut invocation.host,
-        &mut invocation.clock,
-        &session_id,
-        &default_profile_id,
-        case.run.allowed_tools.as_deref(),
-    )?;
+    if invocation.entry_mode == EntryMode::Demiurge {
+        send_demiurge_task_submitted(
+            &mut invocation.host,
+            &mut invocation.clock,
+            &session_id,
+            &workdir,
+            case,
+            provider,
+            default_profile_id.as_str(),
+        )?;
+    } else {
+        install_tool_registry(
+            &mut invocation.host,
+            &mut invocation.clock,
+            &session_id,
+            &default_profile_id,
+            case.run.allowed_tools.as_deref(),
+        )?;
 
-    if case.run.bootstrap_session.unwrap_or(true) {
-        let host_session_id = bootstrap_host_session(&invocation.host, &workdir)?;
+        if case.run.bootstrap_session.unwrap_or(true) {
+            let host_session_id = bootstrap_host_session(&invocation.host, &workdir)?;
+            send_session_event(
+                &mut invocation.host,
+                &mut invocation.clock,
+                &session_id,
+                SessionIngressKind::HostSessionUpdated {
+                    host_session_id: Some(host_session_id),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            )?;
+        }
+
+        let input_ref = store_json_blob(
+            invocation.host.store().as_ref(),
+            &json!({
+                "role": "user",
+                "content": case.prompt,
+            }),
+        )?;
+
         send_session_event(
             &mut invocation.host,
             &mut invocation.clock,
             &session_id,
-            SessionIngressKind::HostSessionUpdated {
-                host_session_id: Some(host_session_id),
-                host_session_status: Some(HostSessionStatus::Ready),
+            SessionIngressKind::RunRequested {
+                input_ref: input_ref.as_str().to_string(),
+                run_overrides: Some(SessionConfig {
+                    provider: provider.provider_id.clone(),
+                    model: provider.model.clone(),
+                    reasoning_effort: None,
+                    max_tokens: case.run.max_tokens,
+                    default_prompt_refs: None,
+                    default_tool_profile: Some(default_profile_id),
+                    default_tool_enable: case.run.tool_enable.clone(),
+                    default_tool_disable: case.run.tool_disable.clone(),
+                    default_tool_force: case.run.tool_force.clone(),
+                }),
             },
         )?;
     }
-
-    let input_ref = store_json_blob(
-        invocation.host.store().as_ref(),
-        &json!({
-            "role": "user",
-            "content": case.prompt,
-        }),
-    )?;
-
-    send_session_event(
-        &mut invocation.host,
-        &mut invocation.clock,
-        &session_id,
-        SessionIngressKind::RunRequested {
-            input_ref: input_ref.as_str().to_string(),
-            run_overrides: Some(SessionConfig {
-                provider: provider.provider_id.clone(),
-                model: provider.model.clone(),
-                reasoning_effort: None,
-                max_tokens: case.run.max_tokens,
-                default_prompt_refs: None,
-                default_tool_profile: Some(default_profile_id),
-                default_tool_enable: case.run.tool_enable.clone(),
-                default_tool_disable: case.run.tool_disable.clone(),
-                default_tool_force: case.run.tool_force.clone(),
-            }),
-        },
-    )?;
 
     let llm_adapter = make_adapter(invocation.host.store(), provider);
     let max_steps = case.eval.max_steps.unwrap_or(96).max(1);
@@ -566,6 +651,38 @@ fn send_session_event(
     })
 }
 
+fn send_demiurge_task_submitted(
+    host: &mut EvalHost,
+    clock: &mut u64,
+    session_id: &SessionId,
+    workdir: &Path,
+    case: &EvalCase,
+    provider: &ProviderRuntime,
+    default_profile: &str,
+) -> Result<()> {
+    *clock = clock.saturating_add(1);
+    let config = TaskConfigInput {
+        provider: Some(provider.provider_id.clone()),
+        model: Some(provider.model.clone()),
+        reasoning_effort: None,
+        max_tokens: case.run.max_tokens,
+        tool_profile: Some(default_profile.to_string()),
+        allowed_tools: case.run.allowed_tools.clone(),
+        tool_enable: case.run.tool_enable.clone(),
+        tool_disable: case.run.tool_disable.clone(),
+        tool_force: case.run.tool_force.clone(),
+        session_ttl_ns: None,
+    };
+
+    host.send_event(&TaskSubmittedInput {
+        task_id: session_id.clone(),
+        observed_at_ns: *clock,
+        workdir: workdir.to_string_lossy().to_string(),
+        task: case.prompt.clone(),
+        config: Some(config),
+    })
+}
+
 fn install_tool_registry(
     host: &mut EvalHost,
     clock: &mut u64,
@@ -626,14 +743,12 @@ fn resolve_tool_ids(state: &SessionState, llm_tool_names: &BTreeSet<String>) -> 
 
 fn bootstrap_host_session(host: &EvalHost, workdir: &Path) -> Result<String> {
     let params = HostSessionOpenParams {
-        target: HostTarget {
-            local: Some(HostLocalTarget {
-                mounts: None,
-                workdir: Some(workdir.to_string_lossy().to_string()),
-                env: None,
-                network_mode: "none".into(),
-            }),
-        },
+        target: HostTarget::local(HostLocalTarget {
+            mounts: None,
+            workdir: Some(workdir.to_string_lossy().to_string()),
+            env: None,
+            network_mode: "none".into(),
+        }),
         session_ttl_ns: None,
         labels: None,
     };

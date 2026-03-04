@@ -27,11 +27,13 @@ Prompt-level eval harness for `aos.agent/SessionWorkflow@1` with live tool execu
 - `--provider openai|anthropic` (default: `openai`)
 - `--model <name>`
 - `--runs <n>` override per-case runs
+- `--entry direct|demiurge` (default: `direct`)
 
 Examples:
 
 - `cargo run -p aos-agent-eval -- all --provider openai --model gpt-5.3-codex --runs 3`
 - `cargo run -p aos-agent-eval -- case edit-file --provider openai`
+- `cargo run -p aos-agent-eval -- case edit-file --entry demiurge`
 
 ## Case files
 

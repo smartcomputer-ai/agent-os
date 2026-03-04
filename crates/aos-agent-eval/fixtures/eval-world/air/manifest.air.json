@@ -29,6 +29,7 @@
     { "name": "aos.agent/HostCommand@1" },
     { "name": "aos.agent/SessionIngressKind@1" },
     { "name": "aos.agent/SessionIngress@1" },
+    { "name": "aos.agent/SessionLifecycleChanged@1" },
     { "name": "aos.agent/PendingBlobPutKind@1" },
     { "name": "aos.agent/PendingBlobPut@1" },
     { "name": "aos.agent/PendingBlobGetKind@1" },

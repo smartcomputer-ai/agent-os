@@ -429,6 +429,20 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/SessionLifecycleChanged@1",
+    "type": {
+      "record": {
+        "session_id": { "ref": "aos.agent/SessionId@1" },
+        "observed_at_ns": { "time": {} },
+        "from": { "ref": "aos.agent/SessionLifecycle@1" },
+        "to": { "ref": "aos.agent/SessionLifecycle@1" },
+        "run_id": { "option": { "ref": "aos.agent/RunId@1" } },
+        "in_flight_effects": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/PendingIntent@1",
     "type": {
       "record": {

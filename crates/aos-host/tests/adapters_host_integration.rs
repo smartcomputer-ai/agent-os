@@ -30,14 +30,12 @@ async fn process_open_exec_signal_roundtrip() {
     let (open_adapter, exec_adapter, signal_adapter) = make_host_adapters(store);
 
     let open_params = HostSessionOpenParams {
-        target: HostTarget {
-            local: Some(HostLocalTarget {
-                mounts: None,
-                workdir: None,
-                env: None,
-                network_mode: "none".into(),
-            }),
-        },
+        target: HostTarget::local(HostLocalTarget {
+            mounts: None,
+            workdir: None,
+            env: None,
+            network_mode: "none".into(),
+        }),
         session_ttl_ns: None,
         labels: None,
     };
@@ -120,14 +118,12 @@ async fn process_exec_auto_large_output_uses_blob() {
     let (open_adapter, exec_adapter, _) = make_host_adapters(store.clone());
 
     let open_params = HostSessionOpenParams {
-        target: HostTarget {
-            local: Some(HostLocalTarget {
-                mounts: None,
-                workdir: None,
-                env: None,
-                network_mode: "none".into(),
-            }),
-        },
+        target: HostTarget::local(HostLocalTarget {
+            mounts: None,
+            workdir: None,
+            env: None,
+            network_mode: "none".into(),
+        }),
         session_ttl_ns: None,
         labels: None,
     };

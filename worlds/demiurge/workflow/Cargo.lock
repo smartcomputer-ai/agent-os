@@ -117,9 +117,11 @@ name = "demiurge-workflow"
 version = "0.1.0"
 dependencies = [
  "aos-agent",
+ "aos-effects",
  "aos-wasm-sdk",
  "serde",
  "serde_cbor",
+ "serde_json",
 ]
 
 [[package]]

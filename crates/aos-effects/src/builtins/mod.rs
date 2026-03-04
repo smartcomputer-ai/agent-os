@@ -103,9 +103,21 @@ pub struct HostLocalTarget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct HostTarget {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local: Option<HostLocalTarget>,
+#[serde(tag = "$tag", content = "$value", rename_all = "snake_case")]
+pub enum HostTarget {
+    Local(HostLocalTarget),
+}
+
+impl HostTarget {
+    pub fn local(local: HostLocalTarget) -> Self {
+        Self::Local(local)
+    }
+
+    pub fn as_local(&self) -> &HostLocalTarget {
+        match self {
+            Self::Local(local) => local,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

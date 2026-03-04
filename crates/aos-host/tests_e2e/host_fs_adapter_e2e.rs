@@ -31,14 +31,12 @@ fn shell_available() -> bool {
 
 async fn open_session(set: &HostAdapterSet<MemStore>, workdir: &Path, seed: u8) -> String {
     let params = HostSessionOpenParams {
-        target: HostTarget {
-            local: Some(HostLocalTarget {
-                mounts: None,
-                workdir: Some(workdir.to_string_lossy().to_string()),
-                env: None,
-                network_mode: "none".into(),
-            }),
-        },
+        target: HostTarget::local(HostLocalTarget {
+            mounts: None,
+            workdir: Some(workdir.to_string_lossy().to_string()),
+            env: None,
+            network_mode: "none".into(),
+        }),
         session_ttl_ns: None,
         labels: None,
     };
