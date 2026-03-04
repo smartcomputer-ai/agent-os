@@ -21,7 +21,7 @@ use alloc::vec::Vec;
 use aos_air_types::HashRef;
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, LlmGenerateReceipt,
-    LlmOutputEnvelope, LlmToolCallList,
+    LlmOutputEnvelope, LlmToolCallList, TextOrSecretRef,
 };
 use sha2::{Digest, Sha256};
 
@@ -1742,7 +1742,7 @@ fn dispatch_queued_llm_turn(
         metadata: None,
         provider_options_ref: None,
         response_format_ref: None,
-        api_key: None,
+        api_key: provider_secret_ref(run_config.provider.as_str()),
     };
 
     let params = materialize_llm_generate_params_with_prompt_refs(&run_config, step_ctx)
@@ -1764,6 +1764,17 @@ fn dispatch_queued_llm_turn(
         params_hash,
     });
     Ok(())
+}
+
+fn provider_secret_ref(provider: &str) -> Option<TextOrSecretRef> {
+    let normalized = provider.trim().to_ascii_lowercase();
+    if normalized.contains("anthropic") {
+        return Some(TextOrSecretRef::secret("llm/anthropic_api", 1));
+    }
+    if normalized.contains("openai") {
+        return Some(TextOrSecretRef::secret("llm/openai_api", 1));
+    }
+    None
 }
 
 fn should_auto_open_host_session(state: &SessionState) -> bool {

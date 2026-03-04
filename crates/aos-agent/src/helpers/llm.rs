@@ -2,6 +2,7 @@ use crate::contracts::{ReasoningEffort, RunConfig};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use aos_effects::builtins::TextOrSecretRef;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -28,7 +29,7 @@ pub struct LlmStepContext {
     pub metadata: Option<BTreeMap<String, String>>,
     pub provider_options_ref: Option<String>,
     pub response_format_ref: Option<String>,
-    pub api_key: Option<String>,
+    pub api_key: Option<TextOrSecretRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -52,7 +53,7 @@ pub struct SysLlmGenerateParams {
     pub model: String,
     pub message_refs: Vec<String>,
     pub runtime: SysLlmRuntimeArgs,
-    pub api_key: Option<String>,
+    pub api_key: Option<TextOrSecretRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,7 +198,7 @@ mod tests {
             metadata: Some(metadata),
             provider_options_ref: Some(hash('c')),
             response_format_ref: Some(hash('d')),
-            api_key: Some("secret-ref".into()),
+            api_key: Some(TextOrSecretRef::literal("secret-ref")),
         };
 
         let mapped = materialize_llm_generate_params(&run, &step).expect("map params");
@@ -213,6 +214,10 @@ mod tests {
         assert_eq!(decoded.model, "gpt-5.2");
         assert_eq!(decoded.runtime.max_tokens, Some(512));
         assert_eq!(decoded.runtime.reasoning_effort.as_deref(), Some("medium"));
+        assert_eq!(
+            decoded.api_key,
+            Some(aos_effects::builtins::TextOrSecretRef::literal("secret-ref"))
+        );
         assert_eq!(
             decoded
                 .runtime

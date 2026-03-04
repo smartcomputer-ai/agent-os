@@ -13,7 +13,7 @@ use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_effects::builtins::{
     HeaderMap, HttpRequestParams, HttpRequestReceipt, LlmGenerateParams, LlmRuntimeArgs,
-    RequestTimings,
+    RequestTimings, TextOrSecretRef,
 };
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
@@ -266,26 +266,39 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         }
         let prompt_text = prompt_parts.join("\n");
 
-        if let Some(api_key) = &ctx.params.api_key {
-            let fingerprint = hash_key(api_key);
-            debug!(
-                "llm.mock using api_key (len={} bytes) fingerprint={}",
-                api_key.len(),
-                fingerprint
-            );
-            if let Some(expected) = &self.expected_api_key {
-                if expected != api_key {
-                    return Err(anyhow!(
-                        "llm.mock api_key mismatch: expected {}, got {}",
-                        hash_key(expected),
-                        fingerprint
-                    ));
+        match ctx.params.api_key.as_ref() {
+            Some(TextOrSecretRef::Literal(api_key)) => {
+                let fingerprint = hash_key(api_key);
+                debug!(
+                    "llm.mock using api_key (len={} bytes) fingerprint={}",
+                    api_key.len(),
+                    fingerprint
+                );
+                if let Some(expected) = &self.expected_api_key {
+                    if expected != api_key {
+                        return Err(anyhow!(
+                            "llm.mock api_key mismatch: expected {}, got {}",
+                            hash_key(expected),
+                            fingerprint
+                        ));
+                    }
                 }
             }
-        } else {
-            debug!("llm.mock no api_key provided (likely placeholder)");
-            if self.expected_api_key.is_some() {
-                return Err(anyhow!("llm.mock missing api_key but expected one"));
+            Some(TextOrSecretRef::Secret(secret)) => {
+                debug!(
+                    "llm.mock unresolved secret ref api_key {}@{}",
+                    secret.alias,
+                    secret.version
+                );
+                if self.expected_api_key.is_some() {
+                    return Err(anyhow!("llm.mock received unresolved api_key secret ref"));
+                }
+            }
+            None => {
+                debug!("llm.mock no api_key provided (likely placeholder)");
+                if self.expected_api_key.is_some() {
+                    return Err(anyhow!("llm.mock missing api_key but expected one"));
+                }
             }
         }
 
@@ -454,28 +467,32 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
     })
 }
 
-fn decode_api_key(value: Option<&serde_cbor::Value>) -> Result<Option<String>> {
+fn decode_api_key(value: Option<&serde_cbor::Value>) -> Result<Option<TextOrSecretRef>> {
     match value {
         None => Ok(None),
         Some(serde_cbor::Value::Null) => Ok(None),
-        Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
+        Some(serde_cbor::Value::Text(t)) => Ok(Some(TextOrSecretRef::literal(t.clone()))),
         Some(serde_cbor::Value::Map(m))
             if m.get(&serde_cbor::Value::Text("$tag".into()))
                 == Some(&serde_cbor::Value::Text("secret".into())) =>
         {
-            Ok(Some("demo-llm-api-key".into()))
+            let secret = decode_secret_ref(
+                m.get(&serde_cbor::Value::Text("$value".into()))
+                    .ok_or_else(|| anyhow!("secret variant missing $value"))?,
+            )?;
+            Ok(Some(TextOrSecretRef::Secret(secret)))
         }
         Some(serde_cbor::Value::Map(m))
             if m.get(&serde_cbor::Value::Text("$tag".into()))
                 == Some(&serde_cbor::Value::Text("literal".into())) =>
         {
             match m.get(&serde_cbor::Value::Text("$value".into())) {
-                Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
-                Some(serde_cbor::Value::Bytes(b)) => Ok(Some(
+                Some(serde_cbor::Value::Text(t)) => Ok(Some(TextOrSecretRef::literal(t.clone()))),
+                Some(serde_cbor::Value::Bytes(b)) => Ok(Some(TextOrSecretRef::literal(
                     std::str::from_utf8(b)
                         .map_err(|e| anyhow!("api_key bytes not utf8: {e}"))?
                         .to_string(),
-                )),
+                ))),
                 _ => Ok(None),
             }
         }
@@ -483,14 +500,17 @@ fn decode_api_key(value: Option<&serde_cbor::Value>) -> Result<Option<String>> {
             if let Some((serde_cbor::Value::Text(tag), val)) = m.iter().next() {
                 if tag == "literal" {
                     return match val {
-                        serde_cbor::Value::Text(t) => Ok(Some(t.clone())),
-                        serde_cbor::Value::Bytes(b) => Ok(Some(
+                        serde_cbor::Value::Text(t) => Ok(Some(TextOrSecretRef::literal(t.clone()))),
+                        serde_cbor::Value::Bytes(b) => Ok(Some(TextOrSecretRef::literal(
                             std::str::from_utf8(b)
                                 .map_err(|e| anyhow!("api_key bytes not utf8: {e}"))?
                                 .to_string(),
-                        )),
+                        ))),
                         _ => Ok(None),
                     };
+                }
+                if tag == "secret" {
+                    return Ok(Some(TextOrSecretRef::Secret(decode_secret_ref(val)?)));
                 }
             }
             Ok(None)
@@ -500,6 +520,23 @@ fn decode_api_key(value: Option<&serde_cbor::Value>) -> Result<Option<String>> {
             other
         )),
     }
+}
+
+fn decode_secret_ref(value: &serde_cbor::Value) -> Result<aos_air_types::SecretRef> {
+    let serde_cbor::Value::Map(map) = value else {
+        return Err(anyhow!("secret payload must be a map"));
+    };
+    let alias = match map.get(&serde_cbor::Value::Text("alias".into())) {
+        Some(serde_cbor::Value::Text(alias)) => alias.clone(),
+        Some(other) => return Err(anyhow!("secret alias must be text, got {:?}", other)),
+        None => return Err(anyhow!("secret payload missing alias")),
+    };
+    let version = match map.get(&serde_cbor::Value::Text("version".into())) {
+        Some(serde_cbor::Value::Integer(version)) if *version >= 0 => *version as u64,
+        Some(other) => return Err(anyhow!("secret version must be nat, got {:?}", other)),
+        None => return Err(anyhow!("secret payload missing version")),
+    };
+    Ok(aos_air_types::SecretRef { alias, version })
 }
 
 fn hash_key(key: &str) -> String {

@@ -35,22 +35,22 @@ impl<S: Store> LlmAdapter<S> {
         self.config.providers.get(name)
     }
 
-    fn env_api_key_var(provider: &ProviderConfig) -> &'static str {
-        match provider.api_kind {
-            LlmApiKind::Responses | LlmApiKind::ChatCompletions => "OPENAI_API_KEY",
-            LlmApiKind::AnthropicMessages => "ANTHROPIC_API_KEY",
+    fn resolve_api_key(params: &LlmGenerateParams) -> Result<String, String> {
+        let Some(api_key) = params.api_key.as_ref() else {
+            return Err("api_key missing (use secret ref in params and kernel secret injection)".into());
+        };
+        match api_key {
+            aos_effects::builtins::TextOrSecretRef::Literal(value) if !value.is_empty() => {
+                Ok(value.clone())
+            }
+            aos_effects::builtins::TextOrSecretRef::Literal(_) => {
+                Err("api_key literal was empty".into())
+            }
+            aos_effects::builtins::TextOrSecretRef::Secret(secret) => Err(format!(
+                "api_key secret ref unresolved: {}@{}",
+                secret.alias, secret.version
+            )),
         }
-    }
-
-    fn resolve_api_key(&self, provider: &ProviderConfig, params_api_key: Option<String>) -> Option<String> {
-        params_api_key
-            .filter(|key| !key.is_empty())
-            .or_else(|| {
-                let var_name = Self::env_api_key_var(provider);
-                std::env::var(var_name)
-                    .ok()
-                    .filter(|value| !value.is_empty())
-            })
     }
 
     fn failure_receipt(
@@ -261,15 +261,14 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        let api_key = match self.resolve_api_key(provider, params.api_key.clone()) {
-            Some(key) => key,
-            _ => {
-                let var_name = Self::env_api_key_var(provider);
+        let api_key = match Self::resolve_api_key(&params) {
+            Ok(key) => key,
+            Err(message) => {
                 return Ok(self.failure_receipt(
                     intent,
                     &provider_id,
                     ReceiptStatus::Error,
-                    format!("api_key missing (set params.api_key or env:{var_name})"),
+                    message,
                 ));
             }
         };
