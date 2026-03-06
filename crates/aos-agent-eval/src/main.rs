@@ -853,7 +853,7 @@ fn execute_live_llm_intent(
 ) -> Result<EffectReceipt> {
     let mut params: LlmGenerateParams =
         serde_cbor::from_slice(&intent.params_cbor).context("decode llm.generate params")?;
-    params.api_key = Some(api_key.to_string());
+    params.api_key = Some(api_key.to_string().into());
 
     let patched_intent = EffectIntent::from_raw_params(
         EffectKind::llm_generate(),

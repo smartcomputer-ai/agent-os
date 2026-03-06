@@ -1,10 +1,10 @@
+use alloc::collections::BTreeMap;
 use alloc::string::String;
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::HashRef;
 
-pub type HeaderMap = IndexMap<String, String>;
+pub type HeaderMap = BTreeMap<String, String>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HttpRequestParams {

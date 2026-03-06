@@ -410,7 +410,9 @@ impl AgentToolsScript {
                 }),
                 truncated: Some(false),
                 size_bytes: Some(TEST_FILE_TEXT.len() as u64),
+                mtime_ns: None,
                 error_code: None,
+                error_message: None,
             },
             "adapter.host.fake",
         )

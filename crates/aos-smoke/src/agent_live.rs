@@ -230,7 +230,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             metadata: None,
             provider_options_ref: None,
             response_format_ref: None,
-            api_key: Some(provider.api_key.clone()),
+            api_key: Some(provider.api_key.clone().into()),
         };
         let params = to_core_llm_params(
             state
@@ -502,11 +502,14 @@ fn to_core_llm_params(
             tool_choice: step_ctx.tool_choice.clone(),
             reasoning_effort: run_config.reasoning_effort.map(reasoning_effort_text),
             stop_sequences: step_ctx.stop_sequences.clone(),
-            metadata: step_ctx.metadata.clone(),
+            metadata: step_ctx
+                .metadata
+                .clone()
+                .map(|metadata| metadata.into_iter().collect::<BTreeMap<_, _>>()),
             provider_options_ref,
             response_format_ref,
         },
-        api_key: step_ctx.api_key.clone(),
+        api_key: step_ctx.api_key.clone().map(Into::into),
     })
 }
 

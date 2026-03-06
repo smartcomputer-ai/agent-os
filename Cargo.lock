@@ -214,7 +214,6 @@ dependencies = [
 name = "aos-effect-types"
 version = "0.1.0"
 dependencies = [
- "indexmap",
  "serde",
  "serde_bytes",
  "serde_cbor",
