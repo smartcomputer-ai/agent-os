@@ -253,7 +253,6 @@ pub struct PendingEffect {
     pub intent_id: Option<String>,
     pub cap_slot: Option<String>,
     pub emitted_at_ns: u64,
-    #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub last_stream_seq: u64,
 }
 
@@ -325,10 +324,6 @@ impl PendingEffect {
             EffectContinuationRef::Stream(_) => None,
         }
     }
-}
-
-fn is_zero_u64(value: &u64) -> bool {
-    *value == 0
 }
 
 /// Workflow-local storage for in-flight effect handles.

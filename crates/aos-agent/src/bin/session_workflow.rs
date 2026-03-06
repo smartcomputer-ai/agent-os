@@ -39,9 +39,14 @@ impl Workflow for SessionWorkflow {
             match effect {
                 SessionEffectCommand::LlmGenerate {
                     params, cap_slot, ..
-                } => ctx
-                    .effects()
-                    .emit_raw("llm.generate", &params, cap_slot.as_deref()),
+                } => {
+                    if let Some(cap_slot) = cap_slot.as_deref() {
+                        let mut effects = ctx.effects();
+                        effects.sys().llm_generate(&params, cap_slot);
+                    } else {
+                        ctx.effects().emit_raw("llm.generate", &params, None);
+                    }
+                }
                 SessionEffectCommand::ToolEffect {
                     kind,
                     params_json,
@@ -145,7 +150,8 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         SessionReduceError::EmptyMessageRefs => {
             ReduceError::new("llm message_refs must not be empty")
         }
-        SessionReduceError::TooManyPendingIntents => ReduceError::new("too many pending intents"),
+        SessionReduceError::TooManyPendingEffects => ReduceError::new("too many pending effects"),
+        SessionReduceError::InvalidHashRef => ReduceError::new("invalid hash ref"),
         SessionReduceError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
         SessionReduceError::UnknownToolOverride => ReduceError::new("unknown tool override"),
         SessionReduceError::InvalidToolRegistry => ReduceError::new("invalid tool registry"),

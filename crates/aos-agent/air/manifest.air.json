@@ -28,7 +28,7 @@
     { "name": "aos.agent/SessionIngressKind@1" },
     { "name": "aos.agent/SessionIngress@1" },
     { "name": "aos.agent/SessionLifecycleChanged@1" },
-    { "name": "aos.agent/PendingIntent@1" },
+    { "name": "sys/PendingEffect@1" },
     { "name": "aos.agent/PendingBlobGetKind@1" },
     { "name": "aos.agent/PendingBlobGet@1" },
     { "name": "aos.agent/PendingBlobPutKind@1" },

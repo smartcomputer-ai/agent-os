@@ -355,6 +355,20 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/PendingEffect@1",
+    "type": {
+      "record": {
+        "effect_kind": { "text": {} },
+        "params_hash": { "hash": {} },
+        "intent_id": { "option": { "hash": {} } },
+        "cap_slot": { "option": { "text": {} } },
+        "emitted_at_ns": { "time": {} },
+        "last_stream_seq": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/EffectReceiptEnvelope@1",
     "type": {
       "record": {

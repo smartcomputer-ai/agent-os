@@ -443,19 +443,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/PendingIntent@1",
-    "type": {
-      "record": {
-        "effect_kind": { "text": {} },
-        "params_hash": { "hash": {} },
-        "intent_id": { "option": { "hash": {} } },
-        "cap_slot": { "option": { "text": {} } },
-        "emitted_at_ns": { "time": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "aos.agent/PendingBlobGetKind@1",
     "type": {
       "variant": {
@@ -545,10 +532,10 @@
         "active_run_id": { "option": { "ref": "aos.agent/RunId@1" } },
         "active_run_config": { "option": { "ref": "aos.agent/RunConfig@1" } },
         "active_tool_batch": { "option": { "ref": "aos.agent/ActiveToolBatch@1" } },
-        "pending_intents": {
+        "pending_effects": {
           "map": {
             "key": { "hash": {} },
-            "value": { "ref": "aos.agent/PendingIntent@1" }
+            "value": { "ref": "sys/PendingEffect@1" }
           }
         },
         "pending_blob_gets": {

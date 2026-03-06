@@ -6,10 +6,8 @@ use super::{
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use aos_wasm_sdk::{PendingEffect, PendingEffects};
+use aos_wasm_sdk::PendingEffects;
 use serde::{Deserialize, Serialize};
-
-pub type PendingIntent = PendingEffect;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(tag = "$tag", content = "$value")]
@@ -73,7 +71,6 @@ pub struct SessionState {
     pub active_run_id: Option<RunId>,
     pub active_run_config: Option<RunConfig>,
     pub active_tool_batch: Option<ActiveToolBatch>,
-    #[serde(rename = "pending_intents", alias = "pending_effects")]
     pub pending_effects: PendingEffects,
     pub pending_blob_gets: BTreeMap<String, Vec<PendingBlobGet>>,
     pub pending_blob_puts: BTreeMap<String, Vec<PendingBlobPut>>,

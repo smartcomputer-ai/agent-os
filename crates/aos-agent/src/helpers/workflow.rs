@@ -4,8 +4,8 @@ use super::{
 };
 use crate::contracts::{
     ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommandKind, PendingBlobGet,
-    PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, PendingFollowUpTurn, PendingIntent,
-    PlannedToolCall, RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle, SessionState,
+    PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, PendingFollowUpTurn, PlannedToolCall,
+    RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle, SessionState,
     SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallObserved, ToolCallStatus,
     ToolExecutionPlan, ToolExecutor, ToolOverrideScope, ToolSpec,
     default_tool_profile_for_provider,
@@ -20,20 +20,19 @@ use alloc::vec;
 use alloc::vec::Vec;
 use aos_air_types::HashRef;
 use aos_effects::builtins::{
-    BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, LlmGenerateReceipt,
-    LlmOutputEnvelope, LlmToolCallList, TextOrSecretRef,
+    BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, LlmGenerateParams,
+    LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCallList, LlmToolChoice, TextOrSecretRef,
 };
-use aos_wasm_sdk::{EffectReceiptEnvelope, EffectReceiptRejected};
+use aos_wasm_sdk::{EffectReceiptEnvelope, EffectReceiptRejected, PendingEffect};
 
 use super::llm::{
-    LlmMappingError, LlmStepContext, LlmToolChoice, SysLlmGenerateParams,
-    materialize_llm_generate_params_with_prompt_refs,
+    LlmMappingError, LlmStepContext, materialize_llm_generate_params_with_prompt_refs,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEffectCommand {
     LlmGenerate {
-        params: SysLlmGenerateParams,
+        params: LlmGenerateParams,
         cap_slot: Option<String>,
         params_hash: String,
     },
@@ -62,7 +61,7 @@ pub struct SessionReduceOutput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SessionRuntimeLimits {
-    pub max_pending_intents: Option<u64>,
+    pub max_pending_effects: Option<u64>,
 }
 
 const TOOL_RESULT_BLOB_MAX_BYTES: usize = 8 * 1024;
@@ -79,7 +78,8 @@ pub enum SessionReduceError {
     RunAlreadyActive,
     RunNotActive,
     EmptyMessageRefs,
-    TooManyPendingIntents,
+    TooManyPendingEffects,
+    InvalidHashRef,
     ToolProfileUnknown,
     UnknownToolOverride,
     InvalidToolRegistry,
@@ -98,7 +98,8 @@ impl SessionReduceError {
             Self::RunAlreadyActive => "run already active",
             Self::RunNotActive => "run not active",
             Self::EmptyMessageRefs => "llm message_refs must not be empty",
-            Self::TooManyPendingIntents => "too many pending intents",
+            Self::TooManyPendingEffects => "too many pending effects",
+            Self::InvalidHashRef => "invalid hash ref",
             Self::ToolProfileUnknown => "tool profile unknown",
             Self::UnknownToolOverride => "unknown tool override",
             Self::InvalidToolRegistry => "invalid tool registry",
@@ -341,6 +342,7 @@ fn map_llm_mapping_error(err: LlmMappingError) -> SessionReduceError {
         LlmMappingError::MissingProvider => SessionReduceError::MissingProvider,
         LlmMappingError::MissingModel => SessionReduceError::MissingModel,
         LlmMappingError::EmptyMessageRefs => SessionReduceError::EmptyMessageRefs,
+        LlmMappingError::InvalidHashRef => SessionReduceError::InvalidHashRef,
     }
 }
 
@@ -1304,7 +1306,7 @@ fn enqueue_blob_get(
             emitted_at_ns: state.updated_at,
         });
     if !already_pending {
-        state.pending_effects.insert(PendingIntent::new(
+        state.pending_effects.insert(PendingEffect::new(
             "blob.get",
             params_hash.clone(),
             Some("blob".into()),
@@ -1341,7 +1343,7 @@ fn enqueue_blob_put(
             emitted_at_ns: state.updated_at,
         });
     if !already_pending {
-        state.pending_effects.insert(PendingIntent::new(
+        state.pending_effects.insert(PendingEffect::new(
             "blob.put",
             params_hash.clone(),
             Some("blob".into()),
@@ -1714,8 +1716,8 @@ fn dispatch_queued_llm_turn(
 
     let params = materialize_llm_generate_params_with_prompt_refs(&run_config, step_ctx)
         .map_err(map_llm_mapping_error)?;
-    let params_hash = hash_llm_params(&params);
-    state.pending_effects.insert(PendingIntent::new(
+    let params_hash = hash_cbor(&params);
+    state.pending_effects.insert(PendingEffect::new(
         "llm.generate",
         params_hash.clone(),
         Some("llm".into()),
@@ -1768,7 +1770,7 @@ fn emit_auto_host_session_open(
     )
     .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
     let params_hash = hash_cbor(&params);
-    state.pending_effects.insert(PendingIntent::new(
+    state.pending_effects.insert(PendingEffect::new(
         "host.session.open",
         params_hash.clone(),
         Some("host".into()),
@@ -2056,9 +2058,9 @@ fn enforce_runtime_limits(
     state: &SessionState,
     limits: SessionRuntimeLimits,
 ) -> Result<(), SessionReduceError> {
-    if let Some(max) = limits.max_pending_intents {
+    if let Some(max) = limits.max_pending_effects {
         if state.pending_effects.len() as u64 > max {
-            return Err(SessionReduceError::TooManyPendingIntents);
+            return Err(SessionReduceError::TooManyPendingEffects);
         }
     }
     Ok(())
@@ -2077,10 +2079,6 @@ fn stamp_timestamps(state: &mut SessionState, event: &SessionWorkflowEvent) {
         state.created_at = ts;
     }
     state.updated_at = ts;
-}
-
-fn hash_llm_params(params: &SysLlmGenerateParams) -> String {
-    hash_cbor(params)
 }
 
 fn hash_tool_plan(plan: &ToolBatchPlan) -> String {
