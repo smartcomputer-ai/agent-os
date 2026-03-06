@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/aos-effect-types",
   "crates/aos-air-types",
   "crates/aos-air-exec",
   "crates/aos-cbor",

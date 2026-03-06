@@ -1,0 +1,11 @@
+[package]
+name = "aos-effect-types"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+indexmap = { version = "2", default-features = false, features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+serde_cbor = "0.11"

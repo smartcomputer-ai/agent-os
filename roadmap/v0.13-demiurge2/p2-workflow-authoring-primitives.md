@@ -49,6 +49,7 @@ The first implemented pass lives in:
 
 1. `crates/aos-wasm-sdk/src/workflow_effects.rs`
 2. `crates/aos-wasm-sdk/src/workflows.rs`
+3. `crates/aos-effect-types/src/*.rs`
 
 This pass intentionally does **not** add Tokio-style `await` semantics.
 Instead it adds a future-shaped but explicit continuation toolkit that works
@@ -74,6 +75,9 @@ Implemented surface:
    - `hash_bytes`
 5. added a workflow emit helper:
    - `Effects::emit_tracked(...)`
+6. extracted builtin sys effect payload types into `aos-effect-types`:
+   - shared once between `aos-effects` and `aos-wasm-sdk`
+   - organized by effect family (`host`, `workspace`, `gov`, etc.)
 
 These primitives cover both one-shot receipts and streaming lifecycles from
 `roadmap/v0.11-workflows/p7-streaming-effect-lifecycles-optional.md`.
@@ -180,6 +184,7 @@ Candidate additions:
 2. effect emission helpers with durable handle registration,
 3. timer/retry scheduling helpers,
 4. lifecycle annotation/event helper patterns.
+5. typed builtin sys effect payloads re-exported from `aos-effect-types`
 
 Suggested file target:
 
@@ -216,11 +221,12 @@ change.
 Priority order:
 
 1. generic continuation envelopes + durable pending handles
-2. `emit_lifecycle`
-3. `request_llm`
-4. `run_tool_batch`
-5. `retry_with_backoff`
-6. `spawn_or_handoff_session`
+2. shared builtin sys effect payload types
+3. `emit_lifecycle`
+4. `request_llm`
+5. `run_tool_batch`
+6. `retry_with_backoff`
+7. `spawn_or_handoff_session`
 
 ### Phase 2: Refactor `SessionWorkflow`
 

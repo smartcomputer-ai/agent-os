@@ -692,7 +692,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                     content: None,
                     truncated: None,
                     size_bytes: None,
+                    mtime_ns: None,
                     error_code: Some(err.code.into()),
+                    error_message: None,
                 };
                 let receipt_status = if status == "error" {
                     ReceiptStatus::Error
@@ -716,7 +718,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                     content: None,
                     truncated: None,
                     size_bytes: None,
+                    mtime_ns: None,
                     error_code: None,
+                    error_message: None,
                 };
                 return build_receipt(
                     intent,
@@ -734,7 +738,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                 content: None,
                 truncated: None,
                 size_bytes: None,
+                mtime_ns: None,
                 error_code: None,
+                error_message: None,
             };
             return build_receipt(
                 intent,
@@ -767,7 +773,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                         content: None,
                         truncated: None,
                         size_bytes: Some(size_bytes),
+                        mtime_ns: None,
                         error_code: Some("inline_required_too_large".into()),
+                        error_message: None,
                     };
                     return build_receipt(
                         intent,
@@ -789,7 +797,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                         content: None,
                         truncated: None,
                         size_bytes: Some(size_bytes),
+                        mtime_ns: None,
                         error_code: Some("invalid_utf8".into()),
+                        error_message: None,
                     };
                     return build_receipt(
                         intent,
@@ -814,7 +824,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                         content: None,
                         truncated: None,
                         size_bytes: Some(size_bytes),
+                        mtime_ns: None,
                         error_code: Some("inline_required_too_large".into()),
+                        error_message: None,
                     };
                     return build_receipt(
                         intent,
@@ -840,7 +852,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
             content,
             truncated: Some(truncated),
             size_bytes: Some(size_bytes),
+            mtime_ns: None,
             error_code: None,
+            error_message: None,
         };
         build_receipt(
             intent,
@@ -1928,7 +1942,9 @@ fn fs_read_error(
         content: None,
         truncated: None,
         size_bytes: None,
+        mtime_ns: None,
         error_code: Some(code.into()),
+        error_message: None,
     };
     let mut receipt = build_receipt(
         intent,

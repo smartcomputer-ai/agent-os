@@ -9,6 +9,7 @@ default = []
 std = []
 
 [dependencies]
+aos-effect-types = { path = "../aos-effect-types" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"

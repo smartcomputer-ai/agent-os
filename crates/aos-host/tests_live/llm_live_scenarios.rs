@@ -25,7 +25,7 @@ pub(crate) async fn run_plain_completion(case: &ProviderRuntime) {
         model: case.model.clone(),
         message_refs: vec![message_ref],
         runtime: default_runtime(),
-        api_key: Some(case.api_key.clone()),
+        api_key: Some(case.api_key.clone().into()),
     };
 
     let receipt = adapter
@@ -65,7 +65,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
         model: case.model.clone(),
         message_refs: vec![turn1_ref],
         runtime: default_runtime(),
-        api_key: Some(case.api_key.clone()),
+        api_key: Some(case.api_key.clone().into()),
     };
     let turn1_receipt = adapter
         .execute(&build_intent(&turn1_params))
@@ -89,7 +89,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
             model: case.model.clone(),
             message_refs: vec![retry_ref],
             runtime: default_runtime(),
-            api_key: Some(case.api_key.clone()),
+            api_key: Some(case.api_key.clone().into()),
         };
         let retry_receipt = adapter
             .execute(&build_intent(&retry_params))
@@ -123,7 +123,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
         model: case.model.clone(),
         message_refs: vec![turn2_ref],
         runtime: default_runtime(),
-        api_key: Some(case.api_key.clone()),
+        api_key: Some(case.api_key.clone().into()),
     };
     let turn2_receipt = adapter
         .execute(&build_intent(&turn2_params))
@@ -151,7 +151,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
             model: case.model.clone(),
             message_refs: vec![retry_ref],
             runtime: default_runtime(),
-            api_key: Some(case.api_key.clone()),
+            api_key: Some(case.api_key.clone().into()),
         };
         let retry_receipt = adapter
             .execute(&build_intent(&retry_params))
@@ -182,7 +182,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
         model: case.model.clone(),
         message_refs: vec![turn3_ref],
         runtime: default_runtime(),
-        api_key: Some(case.api_key.clone()),
+        api_key: Some(case.api_key.clone().into()),
     };
     let turn3_receipt = adapter
         .execute(&build_intent(&turn3_params))
@@ -205,7 +205,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
             model: case.model.clone(),
             message_refs: vec![retry_ref],
             runtime: default_runtime(),
-            api_key: Some(case.api_key.clone()),
+            api_key: Some(case.api_key.clone().into()),
         };
         let retry_receipt = adapter
             .execute(&build_intent(&retry_params))
@@ -278,7 +278,7 @@ pub(crate) async fn run_runtime_refs_smoke(case: &ProviderRuntime) {
         model: case.model.clone(),
         message_refs: vec![message_ref],
         runtime,
-        api_key: Some(case.api_key.clone()),
+        api_key: Some(case.api_key.clone().into()),
     };
 
     let mut receipt = adapter

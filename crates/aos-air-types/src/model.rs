@@ -1,4 +1,4 @@
-use crate::{HashRef, SchemaRef};
+use crate::{HashRef, SchemaRef, SecretRef};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -116,13 +116,6 @@ pub struct ValueVariant {
     pub tag: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Box<ValueLiteral>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(deny_unknown_fields)]
-pub struct SecretRef {
-    pub alias: SecretAlias,
-    pub version: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
