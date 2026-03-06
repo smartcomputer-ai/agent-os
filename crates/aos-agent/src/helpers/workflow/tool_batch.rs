@@ -41,13 +41,11 @@ pub(super) fn fail_tool_call(
     );
 }
 
-pub(super) fn on_tool_calls_observed(
+pub(super) fn run_tool_batch(
     state: &mut SessionState,
-    intent_id: &str,
-    params_hash: Option<&String>,
-    calls: &[ToolCallObserved],
+    request: RunToolBatch<'_>,
     out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+) -> Result<StartedToolBatch, SessionReduceError> {
     if state
         .active_tool_batch
         .as_ref()
@@ -62,14 +60,18 @@ pub(super) fn on_tool_calls_observed(
         .ok_or(SessionReduceError::RunNotActive)?;
     let tool_batch_id = allocate_tool_batch_id(state, &run_id);
 
-    let (plan, call_status) = plan_tool_batch(state, calls);
+    let (plan, call_status) = plan_tool_batch(state, request.calls);
     state.last_tool_plan_hash = Some(hash_tool_plan(&plan));
     let execution = build_tool_execution(plan.execution_plan.groups.clone(), &call_status);
+    let started = StartedToolBatch {
+        tool_batch_id: tool_batch_id.clone(),
+        plan: plan.clone(),
+    };
 
     state.active_tool_batch = Some(ActiveToolBatch {
         tool_batch_id,
-        intent_id: intent_id.into(),
-        params_hash: params_hash.cloned(),
+        intent_id: request.intent_id.into(),
+        params_hash: request.params_hash.cloned(),
         plan,
         call_status,
         pending_effects: PendingEffectSet::new(),
@@ -78,8 +80,8 @@ pub(super) fn on_tool_calls_observed(
         results_ref: None,
     });
 
-    dispatch_next_ready_tool_group(state, out)?;
-    Ok(())
+    advance_tool_batch(state, out)?;
+    Ok(started)
 }
 
 fn plan_tool_batch(
@@ -170,22 +172,19 @@ fn flush_group(
     }
 }
 
-pub(super) fn dispatch_next_ready_tool_group(
+pub(super) fn advance_tool_batch(
     state: &mut SessionState,
     out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+) -> Result<Option<CompletedToolBatch>, SessionReduceError> {
     loop {
         let Some(mut batch) = state.active_tool_batch.take() else {
-            return Ok(());
+            return Ok(None);
         };
         batch.execution.advance_completed();
         if batch.execution.is_complete() {
-            if batch.is_settled() && batch.results_ref.is_none() {
-                start_follow_up_for_settled_batch(state, &mut batch, out)?;
-            }
             state.active_tool_batch = Some(batch);
             recompute_in_flight_effects(state);
-            return Ok(());
+            return Ok(take_completed_tool_batch(state));
         }
 
         let group = batch
@@ -347,7 +346,7 @@ pub(super) fn dispatch_next_ready_tool_group(
         state.active_tool_batch = Some(batch);
         recompute_in_flight_effects(state);
         if emitted_for_group > 0 {
-            return Ok(());
+            return Ok(None);
         }
     }
 }
@@ -367,21 +366,21 @@ fn insert_fallback_pending_tool_effect(
     pending
 }
 
-pub(super) fn settle_tool_call_from_receipt(
+pub(super) fn settle_tool_batch_receipt(
     state: &mut SessionState,
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
-) -> Result<bool, SessionReduceError> {
+) -> Result<ToolBatchReceiptMatch, SessionReduceError> {
     let (call_id, planned, tool_batch_id) = {
         let Some(batch) = state.active_tool_batch.as_mut() else {
-            return Ok(false);
+            return Ok(ToolBatchReceiptMatch::Unmatched);
         };
         let Some(matched) = batch
             .pending_effects
             .settle(envelope.into())
             .map_err(pending_effect_lookup_err_to_session_err)?
         else {
-            return Ok(false);
+            return Ok(ToolBatchReceiptMatch::Unmatched);
         };
         let call_id = matched.key;
         let Some(planned) = batch
@@ -391,7 +390,7 @@ pub(super) fn settle_tool_call_from_receipt(
             .find(|call| call.call_id == call_id)
             .cloned()
         else {
-            return Ok(false);
+            return Ok(ToolBatchReceiptMatch::Unmatched);
         };
         (call_id, planned, batch.tool_batch_id.clone())
     };
@@ -467,8 +466,8 @@ pub(super) fn settle_tool_call_from_receipt(
         refresh_effective_tools(state, active.as_ref())?;
     }
 
-    dispatch_next_ready_tool_group(state, out)?;
-    Ok(true)
+    let completion = advance_tool_batch(state, out)?;
+    Ok(ToolBatchReceiptMatch::Matched { completion })
 }
 
 pub(super) fn collect_blob_refs_from_output_json(output_json: &str) -> Vec<String> {
@@ -504,19 +503,19 @@ fn collect_blob_refs_from_value(value: &serde_json::Value, refs: &mut BTreeSet<S
     }
 }
 
-fn start_follow_up_for_settled_batch(
-    state: &mut SessionState,
-    batch: &mut ActiveToolBatch,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+pub(super) fn take_completed_tool_batch(state: &mut SessionState) -> Option<CompletedToolBatch> {
+    let batch = state.active_tool_batch.as_mut()?;
+    batch.execution.advance_completed();
+    if !batch.execution.is_complete() || !batch.is_settled() || batch.results_ref.is_some() {
+        return None;
+    }
+
     let mut ordered_results = Vec::new();
     for observed in &batch.plan.observed_calls {
         if let Some(result) = batch.llm_results.get(&observed.call_id) {
             ordered_results.push(result.clone());
         }
     }
-    batch.results_ref = Some(hash_cbor(&ordered_results));
-
     let accepted_calls = batch
         .plan
         .planned_calls
@@ -524,59 +523,12 @@ fn start_follow_up_for_settled_batch(
         .filter(|planned| planned.accepted)
         .cloned()
         .collect::<Vec<_>>();
-
-    let mut messages = Vec::new();
-    if !accepted_calls.is_empty() {
-        let tool_calls = accepted_calls
-            .iter()
-            .map(|call| {
-                let parsed_args = serde_json::from_str::<serde_json::Value>(&call.arguments_json)
-                    .unwrap_or_else(|_| serde_json::json!({}));
-                serde_json::json!({
-                    "id": call.call_id,
-                    "name": call.tool_name,
-                    "arguments": parsed_args,
-                })
-            })
-            .collect::<Vec<_>>();
-        messages.push(serde_json::json!({
-            "role": "assistant",
-            "tool_calls": tool_calls,
-        }));
-    }
-
-    for result in ordered_results {
-        let output = serde_json::from_str::<serde_json::Value>(&result.output_json)
-            .unwrap_or_else(|_| serde_json::Value::String(result.output_json.clone()));
-        messages.push(serde_json::json!({
-            "type": "function_call_output",
-            "call_id": result.call_id,
-            "output": output,
-            "is_error": result.is_error,
-        }));
-    }
-
-    if messages.is_empty() {
-        transition_to_waiting_input_if_running(state)?;
-        return Ok(());
-    }
-
-    let mut expected_messages = 0_u64;
-    for (idx, message) in messages.into_iter().enumerate() {
-        let bytes = serde_json::to_vec(&message).unwrap_or_else(|_| b"{}".to_vec());
-        super::blob_effects::enqueue_blob_put(
-            state,
-            bytes,
-            PendingBlobPutKind::FollowUpMessage { index: idx as u64 },
-            out,
-        );
-        expected_messages = expected_messages.saturating_add(1);
-    }
-    state.pending_follow_up_turn = Some(PendingFollowUpTurn {
+    let results_ref = hash_cbor(&ordered_results);
+    batch.results_ref = Some(results_ref.clone());
+    Some(CompletedToolBatch {
         tool_batch_id: batch.tool_batch_id.clone(),
-        base_message_refs: state.conversation_message_refs.clone(),
-        expected_messages,
-        blob_refs_by_index: BTreeMap::new(),
-    });
-    Ok(())
+        accepted_calls,
+        ordered_results,
+        results_ref,
+    })
 }

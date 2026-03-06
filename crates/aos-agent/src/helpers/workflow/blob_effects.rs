@@ -243,11 +243,13 @@ fn on_llm_tool_calls_blob(
             provider_call_id: call.provider_call_id,
         })
         .collect::<Vec<_>>();
-    super::tool_batch::on_tool_calls_observed(
+    super::run_tool_batch(
         state,
-        envelope.intent_id.as_str(),
-        None,
-        &observed,
+        RunToolBatch {
+            intent_id: envelope.intent_id.as_str(),
+            params_hash: None,
+            calls: &observed,
+        },
         out,
     )?;
     Ok(true)
@@ -271,7 +273,7 @@ fn on_tool_call_arguments_blob(
                 "failed to decode blob.get receipt payload",
             );
         }
-        super::tool_batch::dispatch_next_ready_tool_group(state, out)?;
+        super::continue_tool_batch(state, out)?;
         return Ok(true);
     };
 
@@ -290,7 +292,7 @@ fn on_tool_call_arguments_blob(
                     "tool arguments blob must contain JSON",
                 );
             }
-            super::tool_batch::dispatch_next_ready_tool_group(state, out)?;
+            super::continue_tool_batch(state, out)?;
             return Ok(true);
         }
     };
@@ -309,7 +311,7 @@ fn on_tool_call_arguments_blob(
         super::tool_batch::set_tool_call_status(batch, &call_id, ToolCallStatus::Queued);
         let _ = batch.execution.rewind_to_group_containing(&call_id);
     }
-    super::tool_batch::dispatch_next_ready_tool_group(state, out)?;
+    super::continue_tool_batch(state, out)?;
     Ok(true)
 }
 
@@ -358,7 +360,7 @@ fn on_tool_result_blob(
         super::tool_batch::set_tool_call_status(batch, &call_id, ToolCallStatus::Succeeded);
     }
 
-    super::tool_batch::dispatch_next_ready_tool_group(state, out)?;
+    super::continue_tool_batch(state, out)?;
     Ok(true)
 }
 
@@ -401,7 +403,7 @@ pub(super) fn handle_pending_blob_get_receipt(
                             "blob.get for tool arguments failed",
                         );
                     }
-                    super::tool_batch::dispatch_next_ready_tool_group(state, out)?;
+                    super::continue_tool_batch(state, out)?;
                     continue;
                 }
                 on_tool_call_arguments_blob(

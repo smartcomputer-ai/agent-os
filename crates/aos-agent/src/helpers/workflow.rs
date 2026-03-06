@@ -7,8 +7,8 @@ use crate::contracts::{
     ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommandKind, PendingBlobGet,
     PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, PendingFollowUpTurn, PlannedToolCall,
     RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle, SessionState,
-    SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallObserved, ToolCallStatus,
-    ToolExecutionPlan, ToolExecutor, ToolOverrideScope, ToolSpec,
+    SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchId, ToolBatchPlan, ToolCallLlmResult,
+    ToolCallObserved, ToolCallStatus, ToolExecutionPlan, ToolExecutor, ToolOverrideScope, ToolSpec,
     default_tool_profile_for_provider,
 };
 use crate::tools::{
@@ -36,11 +36,45 @@ use self::blob_effects::{
     enqueue_blob_get, enqueue_blob_put, handle_pending_blob_get_receipt,
     handle_pending_blob_put_receipt, has_pending_tool_definition_puts,
 };
-use self::tool_batch::settle_tool_call_from_receipt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SessionRuntimeLimits {
     pub max_pending_effects: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunToolBatch<'a> {
+    pub intent_id: &'a str,
+    pub params_hash: Option<&'a String>,
+    pub calls: &'a [ToolCallObserved],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartedToolBatch {
+    pub tool_batch_id: ToolBatchId,
+    pub plan: ToolBatchPlan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedToolBatch {
+    pub tool_batch_id: ToolBatchId,
+    pub accepted_calls: Vec<PlannedToolCall>,
+    pub ordered_results: Vec<ToolCallLlmResult>,
+    pub results_ref: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunToolBatchResult {
+    pub started: StartedToolBatch,
+    pub completion: Option<CompletedToolBatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolBatchReceiptMatch {
+    Unmatched,
+    Matched {
+        completion: Option<CompletedToolBatch>,
+    },
 }
 
 const TOOL_RESULT_BLOB_MAX_BYTES: usize = 8 * 1024;
@@ -98,6 +132,41 @@ impl core::error::Error for SessionReduceError {}
 
 fn pending_effect_lookup_err_to_session_err(_err: PendingEffectLookupError) -> SessionReduceError {
     SessionReduceError::AmbiguousPendingToolEffect
+}
+
+pub fn run_tool_batch(
+    state: &mut SessionState,
+    request: RunToolBatch<'_>,
+    out: &mut SessionReduceOutput,
+) -> Result<RunToolBatchResult, SessionReduceError> {
+    let started = tool_batch::run_tool_batch(state, request, out)?;
+    let completed = tool_batch::take_completed_tool_batch(state);
+    let completion = handle_completed_tool_batch(state, completed, out)?;
+    Ok(RunToolBatchResult {
+        started,
+        completion,
+    })
+}
+
+pub fn continue_tool_batch(
+    state: &mut SessionState,
+    out: &mut SessionReduceOutput,
+) -> Result<Option<CompletedToolBatch>, SessionReduceError> {
+    let completion = tool_batch::advance_tool_batch(state, out)?;
+    handle_completed_tool_batch(state, completion, out)
+}
+
+pub fn settle_tool_batch_receipt(
+    state: &mut SessionState,
+    envelope: &EffectReceiptEnvelope,
+    out: &mut SessionReduceOutput,
+) -> Result<ToolBatchReceiptMatch, SessionReduceError> {
+    match tool_batch::settle_tool_batch_receipt(state, envelope, out)? {
+        ToolBatchReceiptMatch::Unmatched => Ok(ToolBatchReceiptMatch::Unmatched),
+        ToolBatchReceiptMatch::Matched { completion } => Ok(ToolBatchReceiptMatch::Matched {
+            completion: handle_completed_tool_batch(state, completion, out)?,
+        }),
+    }
 }
 
 fn transition_to_waiting_input_if_running(
@@ -577,9 +646,12 @@ fn on_receipt_envelope(
         return Ok(());
     }
 
-    if settle_tool_call_from_receipt(state, envelope, out)? {
-        recompute_in_flight_effects(state);
-        return Ok(());
+    match settle_tool_batch_receipt(state, envelope, out)? {
+        ToolBatchReceiptMatch::Unmatched => {}
+        ToolBatchReceiptMatch::Matched { .. } => {
+            recompute_in_flight_effects(state);
+            return Ok(());
+        }
     }
 
     recompute_in_flight_effects(state);
@@ -611,8 +683,9 @@ fn on_receipt_rejected(
         return Ok(());
     }
 
-    if !settle_tool_call_from_receipt(state, &envelope, out)? {
-        fail_run(state)?;
+    match settle_tool_batch_receipt(state, &envelope, out)? {
+        ToolBatchReceiptMatch::Unmatched => fail_run(state)?,
+        ToolBatchReceiptMatch::Matched { .. } => {}
     }
     recompute_in_flight_effects(state);
     Ok(())
@@ -652,6 +725,76 @@ fn fail_run(state: &mut SessionState) -> Result<(), SessionReduceError> {
         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
     clear_active_run(state);
     Ok(())
+}
+
+fn handle_completed_tool_batch(
+    state: &mut SessionState,
+    completion: Option<CompletedToolBatch>,
+    out: &mut SessionReduceOutput,
+) -> Result<Option<CompletedToolBatch>, SessionReduceError> {
+    let Some(completion) = completion else {
+        return Ok(None);
+    };
+
+    let messages = build_tool_batch_follow_up_messages(&completion);
+    if messages.is_empty() {
+        transition_to_waiting_input_if_running(state)?;
+        return Ok(Some(completion));
+    }
+
+    let mut expected_messages = 0_u64;
+    for (idx, message) in messages.into_iter().enumerate() {
+        let bytes = serde_json::to_vec(&message).unwrap_or_else(|_| b"{}".to_vec());
+        enqueue_blob_put(
+            state,
+            bytes,
+            PendingBlobPutKind::FollowUpMessage { index: idx as u64 },
+            out,
+        );
+        expected_messages = expected_messages.saturating_add(1);
+    }
+    state.pending_follow_up_turn = Some(PendingFollowUpTurn {
+        tool_batch_id: completion.tool_batch_id.clone(),
+        base_message_refs: state.conversation_message_refs.clone(),
+        expected_messages,
+        blob_refs_by_index: BTreeMap::new(),
+    });
+    Ok(Some(completion))
+}
+
+fn build_tool_batch_follow_up_messages(completion: &CompletedToolBatch) -> Vec<serde_json::Value> {
+    let mut messages = Vec::new();
+    if !completion.accepted_calls.is_empty() {
+        let tool_calls = completion
+            .accepted_calls
+            .iter()
+            .map(|call| {
+                let parsed_args = serde_json::from_str::<serde_json::Value>(&call.arguments_json)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                serde_json::json!({
+                    "id": call.call_id,
+                    "name": call.tool_name,
+                    "arguments": parsed_args,
+                })
+            })
+            .collect::<Vec<_>>();
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "tool_calls": tool_calls,
+        }));
+    }
+
+    for result in &completion.ordered_results {
+        let output = serde_json::from_str::<serde_json::Value>(&result.output_json)
+            .unwrap_or_else(|_| serde_json::Value::String(result.output_json.clone()));
+        messages.push(serde_json::json!({
+            "type": "function_call_output",
+            "call_id": result.call_id,
+            "output": output,
+            "is_error": result.is_error,
+        }));
+    }
+    messages
 }
 
 fn queue_llm_turn(
@@ -1215,15 +1358,18 @@ mod tests {
 
         let mut out = SessionReduceOutput::default();
         let params_hash = fake_hash('h');
-        tool_batch::on_tool_calls_observed(
+        let started = run_tool_batch(
             &mut state,
-            fake_hash('i').as_str(),
-            Some(&params_hash),
-            &calls,
+            RunToolBatch {
+                intent_id: fake_hash('i').as_str(),
+                params_hash: Some(&params_hash),
+                calls: &calls,
+            },
             &mut out,
         )
         .expect("plan");
 
+        assert_eq!(started.started.plan.execution_plan.groups.len(), 2);
         let batch = state.active_tool_batch.as_ref().expect("active batch");
         assert_eq!(
             batch.plan.execution_plan.groups,
