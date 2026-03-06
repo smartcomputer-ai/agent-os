@@ -555,7 +555,9 @@ impl Serialize for TextOrSecretRef {
         S: serde::Serializer,
     {
         match self {
-            Self::Literal(value) => TaggedTextOrSecretRef::Literal(value.as_str()).serialize(serializer),
+            Self::Literal(value) => {
+                TaggedTextOrSecretRef::Literal(value.as_str()).serialize(serializer)
+            }
             Self::Secret(value) => TaggedTextOrSecretRef::Secret(value).serialize(serializer),
         }
     }
@@ -575,11 +577,14 @@ fn text_or_secret_from_value(value: serde_cbor::Value) -> Result<TextOrSecretRef
     match value {
         serde_cbor::Value::Text(text) => Ok(TextOrSecretRef::Literal(text)),
         serde_cbor::Value::Bytes(bytes) => {
-            let text = String::from_utf8(bytes).map_err(|e| format!("literal bytes not utf8: {e}"))?;
+            let text =
+                String::from_utf8(bytes).map_err(|e| format!("literal bytes not utf8: {e}"))?;
             Ok(TextOrSecretRef::Literal(text))
         }
         serde_cbor::Value::Map(map) => {
-            if let Some(serde_cbor::Value::Text(tag)) = map.get(&serde_cbor::Value::Text("$tag".into())) {
+            if let Some(serde_cbor::Value::Text(tag)) =
+                map.get(&serde_cbor::Value::Text("$tag".into()))
+            {
                 let payload = map
                     .get(&serde_cbor::Value::Text("$value".into()))
                     .ok_or_else(|| "missing '$value' in tagged variant".to_string())?;

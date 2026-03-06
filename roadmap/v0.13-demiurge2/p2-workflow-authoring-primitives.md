@@ -1,7 +1,7 @@
-# P5: Raise the Workflow Authoring Level
+# P2: Raise the Workflow Authoring Level
 
 **Priority**: P1  
-**Status**: Proposed  
+**Status**: In Progress  
 **Depends on**: `roadmap/v0.13-demiurge2/p1-demiurge2-task-orchestrator.md`, `roadmap/v0.13-demiurge2/p4-operator-ux-stuck-task-diagnosis.md`
 
 ## Goal
@@ -15,15 +15,15 @@ This slice adds a small higher-level primitive layer over:
 2. `crates/aos-agent/src/helpers/workflow.rs`
 
 The target is not a new orchestration DSL. The target is to remove repetitive,
-error-prone patterns from real workflows such as `SessionWorkflow` and
-`worlds/demiurge`.
+error-prone continuation plumbing from real workflows such as
+`SessionWorkflow` and `worlds/demiurge`.
 
 ## Problem Statement
 
 The current runtime model is correct but too manual at the authoring level:
 
 1. authors hand-roll pending-intent bookkeeping,
-2. each workflow manually maps effect receipts back into typestate,
+2. each workflow manually maps receipts and stream frames back into typestate,
 3. retries/backoff policies are re-expressed per workflow,
 4. lifecycle emission is easy to forget or implement inconsistently,
 5. bootstrap/handoff flows between workflows require explicit low-level intent
@@ -39,11 +39,46 @@ Do not build a fully declarative agent language.
 Instead:
 
 1. keep explicit workflow state,
-2. keep explicit events and receipts,
-3. add reusable typed helpers for the recurring effect/continuation patterns,
+2. keep explicit events, receipts, and stream frames,
+3. add reusable typed helpers for recurring effect/continuation patterns,
 4. prove the layer by refactoring `SessionWorkflow` and Demiurge.
 
-## Proposed Primitive Set
+## Implemented SDK Slice
+
+The first implemented pass lives in:
+
+1. `crates/aos-wasm-sdk/src/workflow_effects.rs`
+2. `crates/aos-wasm-sdk/src/workflows.rs`
+
+This pass intentionally does **not** add Tokio-style `await` semantics.
+Instead it adds a future-shaped but explicit continuation toolkit that works
+with deterministic event-sourced workflow execution.
+
+Implemented surface:
+
+1. moved generic continuation envelopes into `aos-wasm-sdk`:
+   - `EffectReceiptEnvelope`
+   - `EffectReceiptRejected`
+   - `EffectStreamFrameEnvelope`
+2. added generic continuation views:
+   - `EffectContinuation`
+   - `EffectContinuationRef`
+3. added durable workflow-side handles:
+   - `PendingEffect`
+   - `PendingEffects`
+   - `PendingEffectMatch`
+   - `ObservedEffect`
+4. added shared param hashing helpers:
+   - `encode_effect_params`
+   - `effect_params_hash`
+   - `hash_bytes`
+5. added a workflow emit helper:
+   - `Effects::emit_tracked(...)`
+
+These primitives cover both one-shot receipts and streaming lifecycles from
+`roadmap/v0.11-workflows/p7-streaming-effect-lifecycles-optional.md`.
+
+## Primitive Set
 
 ### 1) `request_llm`
 
@@ -76,19 +111,21 @@ Current source material:
 3. `on_tool_calls_observed` and related helpers in
    `crates/aos-agent/src/helpers/workflow.rs`
 
-### 3) `await_receipt`
+### 3) generic continuation matching
 
 Purpose:
 
-1. centralize receipt matching by intent id / params hash / effect kind,
-2. decode typed receipt payloads,
-3. route success / error / timeout / rejected cases through one helper,
-4. reduce per-workflow receipt-envelope boilerplate.
+1. centralize matching by intent id / params hash / effect kind,
+2. cover `receipt`, `receipt_rejected`, and `stream_frame` on one rail,
+3. decode typed receipt and stream payloads,
+4. reduce per-workflow continuation-envelope boilerplate.
 
-This primitive should cover both:
+Implemented as:
 
-1. a generic envelope matcher in `aos-wasm-sdk`, and
-2. typed convenience adapters in `aos-agent`.
+1. `EffectContinuationRef`
+2. `PendingEffect::observe`
+3. `PendingEffects::observe`
+4. `PendingEffects::settle`
 
 ### 4) `retry_with_backoff`
 
@@ -139,14 +176,14 @@ Keep this layer runtime-generic.
 
 Candidate additions:
 
-1. typed receipt matching helpers,
-2. effect emission helpers with cap-slot handling,
+1. typed continuation matching helpers,
+2. effect emission helpers with durable handle registration,
 3. timer/retry scheduling helpers,
 4. lifecycle annotation/event helper patterns.
 
 Suggested file target:
 
-1. `crates/aos-wasm-sdk/src/workflow_primitives.rs`
+1. `crates/aos-wasm-sdk/src/workflow_effects.rs`
 
 Keep `workflows.rs` small; re-export the new helpers from `lib.rs`.
 
@@ -178,9 +215,9 @@ change.
 
 Priority order:
 
-1. `emit_lifecycle`
-2. `request_llm`
-3. `await_receipt`
+1. generic continuation envelopes + durable pending handles
+2. `emit_lifecycle`
+3. `request_llm`
 4. `run_tool_batch`
 5. `retry_with_backoff`
 6. `spawn_or_handoff_session`
@@ -216,29 +253,45 @@ Expected outcomes:
 
 ## Candidate API Direction
 
-Illustrative only:
+Implemented SDK direction:
 
 ```rust
-let llm = agent::request_llm(ctx, &mut state, request)?;
-let outcome = workflow::await_receipt(event, llm.intent_id())?;
+let handle = ctx.effects().emit_tracked(
+    &mut state.pending_effects,
+    "llm.generate",
+    &params,
+    Some("llm"),
+);
 
-let retry = workflow::retry_with_backoff(&mut state.retry, outcome, RetryPolicy::default())?;
-if let Some(timer) = retry.timer_effect() {
-    timer.emit(ctx);
+if let Some(matched) = state.pending_effects.observe(event.continuation()?) {
+    match matched.observed {
+        workflow::ObservedEffect::Stream(frame) => {
+            let chunk: LlmStreamChunk = frame.decode_payload()?;
+            // update typestate, maybe emit follow-up effects
+        }
+        workflow::ObservedEffect::Settled(receipt) => {
+            let done: LlmGenerateReceipt = receipt.decode_receipt_payload()?;
+            let settled = state.pending_effects.settle(receipt.into());
+            // finish transition
+        }
+        workflow::ObservedEffect::Rejected(rejected) => {
+            let settled = state.pending_effects.settle(rejected.into());
+            // classify failure / retry / terminal path
+        }
+    }
 }
 ```
 
-For handoff:
+This keeps durable state explicit while removing the repetitive
+intent-id/params-hash/effect-kind matching logic from each workflow.
 
-```rust
-agent::spawn_or_handoff_session(
-    ctx,
-    session_id,
-    host_session,
-    input_ref,
-    run_config,
-)?;
-```
+Still planned above the SDK:
+
+1. `request_llm`
+2. `run_tool_batch`
+3. `retry_with_backoff`
+4. `emit_lifecycle`
+5. `spawn_or_handoff_session`
 
 The API must remain plain Rust over explicit state, not hidden runtime magic.
 

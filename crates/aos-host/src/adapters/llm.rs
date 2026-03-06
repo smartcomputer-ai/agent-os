@@ -37,7 +37,9 @@ impl<S: Store> LlmAdapter<S> {
 
     fn resolve_api_key(params: &LlmGenerateParams) -> Result<String, String> {
         let Some(api_key) = params.api_key.as_ref() else {
-            return Err("api_key missing (use secret ref in params and kernel secret injection)".into());
+            return Err(
+                "api_key missing (use secret ref in params and kernel secret injection)".into(),
+            );
         };
         match api_key {
             aos_effects::builtins::TextOrSecretRef::Literal(value) if !value.is_empty() => {

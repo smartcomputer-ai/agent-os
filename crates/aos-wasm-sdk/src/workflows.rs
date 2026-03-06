@@ -36,7 +36,7 @@ pub struct WorkflowCtx<S, A = Value> {
     context: Option<WorkflowContext>,
     workflow_name: &'static str,
     domain_events: Vec<PendingEvent>,
-    effects: Vec<PendingEffect>,
+    effects: Vec<EmittedEffect>,
 }
 
 impl<S, A> WorkflowCtx<S, A> {
@@ -153,7 +153,7 @@ impl<S, A> WorkflowCtx<S, A> {
         self.domain_events.push(event);
     }
 
-    fn emit_effect(&mut self, effect: PendingEffect) {
+    fn emit_effect(&mut self, effect: EmittedEffect) {
         self.effects.push(effect);
     }
 
@@ -286,12 +286,40 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
             Err(err) => self.ctx.trap(StepError::EffectPayload(err)),
         };
         let key = idempotency_key.map(|bytes| bytes.to_vec());
-        self.ctx.emit_effect(PendingEffect {
+        self.ctx.emit_effect(EmittedEffect {
             kind,
             params: payload,
             cap_slot: cap_slot.map(|s| s.to_string()),
             idempotency_key: key,
         });
+    }
+
+    /// Emit and register a durable handle for a workflow-origin effect intent.
+    pub fn emit_tracked(
+        &mut self,
+        pending: &mut crate::PendingEffects,
+        kind: &'static str,
+        params: &impl Serialize,
+        cap_slot: Option<&str>,
+    ) -> crate::PendingEffect {
+        let encoded = match crate::encode_effect_params(params) {
+            Ok(value) => value,
+            Err(err) => self.ctx.trap(StepError::EffectPayload(err)),
+        };
+        let pending_effect = crate::PendingEffect::new(
+            kind,
+            encoded.params_hash.clone(),
+            cap_slot.map(|slot| slot.to_string()),
+            self.ctx.now_ns().unwrap_or_default(),
+        );
+        pending.insert(pending_effect.clone());
+        self.ctx.emit_effect(EmittedEffect {
+            kind,
+            params: encoded.cbor,
+            cap_slot: cap_slot.map(|s| s.to_string()),
+            idempotency_key: None,
+        });
+        pending_effect
     }
 }
 
@@ -328,41 +356,6 @@ pub struct HashRef {
     pub digest: Vec<u8>,
 }
 
-/// Generic workflow receipt envelope delivered to workflows for external effects.
-///
-/// The `receipt_payload` field contains the canonical CBOR payload validated against
-/// the effect's declared `receipt_schema` in the kernel.
-#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct EffectReceiptEnvelope {
-    pub origin_module_id: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "serde_bytes_opt"
-    )]
-    pub origin_instance_key: Option<Vec<u8>>,
-    pub intent_id: String,
-    pub effect_kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub params_hash: Option<String>,
-    #[serde(with = "serde_bytes")]
-    pub receipt_payload: Vec<u8>,
-    pub status: String,
-    pub emitted_at_seq: u64,
-    pub adapter_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost_cents: Option<u64>,
-    #[serde(with = "serde_bytes")]
-    pub signature: Vec<u8>,
-}
-
-impl EffectReceiptEnvelope {
-    /// Decode the embedded receipt payload into a typed struct.
-    pub fn decode_receipt_payload<T: DeserializeOwned>(&self) -> Result<T, serde_cbor::Error> {
-        serde_cbor::from_slice(&self.receipt_payload)
-    }
-}
-
 const EFFECT_TIMER_SET: &str = "timer.set";
 const EFFECT_BLOB_PUT: &str = "blob.put";
 const EFFECT_BLOB_GET: &str = "blob.get";
@@ -383,14 +376,14 @@ impl PendingEvent {
     }
 }
 
-struct PendingEffect {
+struct EmittedEffect {
     kind: &'static str,
     params: Vec<u8>,
     cap_slot: Option<String>,
     idempotency_key: Option<Vec<u8>>,
 }
 
-impl PendingEffect {
+impl EmittedEffect {
     fn into_abi(self) -> AbiWorkflowEffect {
         let mut eff = AbiWorkflowEffect::new(self.kind, self.params);
         if let Some(slot) = self.cap_slot {
@@ -461,29 +454,6 @@ impl core::fmt::Display for StepError {
             StepError::EffectPayload(err) => write!(f, "effect payload encode failed: {err}"),
             StepError::Reduce(msg) => write!(f, "reduce error: {msg}"),
         }
-    }
-}
-
-mod serde_bytes_opt {
-    use alloc::vec::Vec;
-    use serde::{Deserialize, Deserializer, Serializer};
-    use serde_bytes::{ByteBuf, Bytes};
-
-    pub fn serialize<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match value {
-            Some(bytes) => serializer.serialize_some(Bytes::new(bytes)),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Option::<ByteBuf>::deserialize(deserializer).map(|opt| opt.map(|buf| buf.into_vec()))
     }
 }
 
@@ -627,6 +597,7 @@ macro_rules! aos_event_union {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{EffectReceiptEnvelope, PendingEffects};
     use alloc::collections::BTreeMap;
     use alloc::string::String;
     use aos_wasm_abi::{DomainEvent, WorkflowContext, WorkflowInput};
@@ -817,6 +788,64 @@ mod tests {
 
         let decoded: DummyReceipt = envelope.decode_receipt_payload().unwrap();
         assert_eq!(decoded, DummyReceipt { status: 200 });
+    }
+
+    #[test]
+    fn emit_tracked_registers_pending_handle() {
+        #[derive(Default)]
+        struct TrackedWorkflow;
+
+        #[derive(Default, Serialize, Deserialize)]
+        struct TrackedState {
+            pending: PendingEffects,
+        }
+
+        #[derive(Serialize, Deserialize)]
+        struct TrackedEvent;
+
+        #[derive(Serialize, Deserialize)]
+        struct TrackedParams {
+            prompt: String,
+        }
+
+        impl Workflow for TrackedWorkflow {
+            type State = TrackedState;
+            type Event = TrackedEvent;
+            type Ann = Value;
+
+            fn reduce(
+                &mut self,
+                _event: Self::Event,
+                ctx: &mut WorkflowCtx<Self::State>,
+            ) -> Result<(), ReduceError> {
+                let mut pending = core::mem::take(&mut ctx.state.pending);
+                let handle = ctx.effects().emit_tracked(
+                    &mut pending,
+                    "llm.generate",
+                    &TrackedParams {
+                        prompt: "hello".into(),
+                    },
+                    Some("llm"),
+                );
+                ctx.state.pending = pending;
+                assert_eq!(handle.effect_kind, "llm.generate");
+                Ok(())
+            }
+        }
+
+        let input = WorkflowInput {
+            version: aos_wasm_abi::ABI_VERSION,
+            state: None,
+            event: DomainEvent::new("schema", serde_cbor::to_vec(&TrackedEvent).unwrap()),
+            ctx: Some(context_bytes("com.acme/TrackedWorkflow@1")),
+        };
+        let bytes = input.encode().unwrap();
+        let output = step_bytes::<TrackedWorkflow>(&bytes).expect("step");
+        let decoded = WorkflowOutput::decode(&output).expect("decode");
+        assert_eq!(decoded.effects.len(), 1);
+        let state: TrackedState =
+            serde_cbor::from_slice(decoded.state.as_ref().expect("state")).expect("state decode");
+        assert_eq!(state.pending.len(), 1);
     }
 
     #[test]

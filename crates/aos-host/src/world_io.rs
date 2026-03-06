@@ -629,7 +629,10 @@ fn filter_sys_refs(refs: &[aos_air_types::NamedRef]) -> Vec<aos_air_types::Named
         .collect()
 }
 
-fn apply_placeholder_secret_ref(secrets: &mut Vec<aos_air_types::SecretEntry>, name: &str) -> Result<()> {
+fn apply_placeholder_secret_ref(
+    secrets: &mut Vec<aos_air_types::SecretEntry>,
+    name: &str,
+) -> Result<()> {
     let zero_hash = HashRef::new(format!("sha256:{}", "0".repeat(64)))?;
     if let Some(pos) = secrets
         .iter()
@@ -873,8 +876,8 @@ mod tests {
     use super::*;
     use aos_air_types::DefSecret;
     use aos_air_types::{
-        CURRENT_AIR_VERSION, DefSchema, EmptyObject, HashRef, NamedRef, SecretEntry,
-        TypeExpr, TypePrimitive, TypePrimitiveBool,
+        CURRENT_AIR_VERSION, DefSchema, EmptyObject, HashRef, NamedRef, SecretEntry, TypeExpr,
+        TypePrimitive, TypePrimitiveBool,
     };
     use aos_kernel::patch_doc::compile_patch_document;
     use aos_store::{MemStore, Store};

@@ -216,7 +216,9 @@ mod tests {
         assert_eq!(decoded.runtime.reasoning_effort.as_deref(), Some("medium"));
         assert_eq!(
             decoded.api_key,
-            Some(aos_effects::builtins::TextOrSecretRef::literal("secret-ref"))
+            Some(aos_effects::builtins::TextOrSecretRef::literal(
+                "secret-ref"
+            ))
         );
         assert_eq!(
             decoded

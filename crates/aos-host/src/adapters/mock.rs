@@ -287,8 +287,7 @@ impl<S: Store + 'static> MockLlmHarness<S> {
             Some(TextOrSecretRef::Secret(secret)) => {
                 debug!(
                     "llm.mock unresolved secret ref api_key {}@{}",
-                    secret.alias,
-                    secret.version
+                    secret.alias, secret.version
                 );
                 if self.expected_api_key.is_some() {
                     return Err(anyhow!("llm.mock received unresolved api_key secret ref"));

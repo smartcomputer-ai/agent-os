@@ -20,8 +20,8 @@ use crate::opts::WorldOpts;
 use crate::opts::resolve_dirs;
 use crate::output::print_success;
 use crate::util::{
-    compile_workflow, latest_manifest_hash_from_journal, load_world_env,
-    host_config_from_opts, make_kernel_config, resolve_placeholder_modules,
+    compile_workflow, host_config_from_opts, latest_manifest_hash_from_journal, load_world_env,
+    make_kernel_config, resolve_placeholder_modules,
 };
 
 use super::create_host;
@@ -335,9 +335,7 @@ fn secret_resolver_from_bundle(bundle: &WorldBundle) -> Result<Option<SharedSecr
         })?;
         let binding = secret.binding_id.as_str();
         let var_name = binding.strip_prefix("env:").ok_or_else(|| {
-            anyhow!(
-                "unsupported secret binding '{binding}' for '{name}' (expected env:VAR_NAME)"
-            )
+            anyhow!("unsupported secret binding '{binding}' for '{name}' (expected env:VAR_NAME)")
         })?;
         if var_name.is_empty() {
             anyhow::bail!("invalid empty env binding for secret '{name}'");
