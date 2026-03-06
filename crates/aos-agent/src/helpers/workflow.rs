@@ -20,8 +20,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use aos_air_types::HashRef;
 use aos_effects::builtins::{
-    BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, LlmGenerateParams,
-    LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCallList, LlmToolChoice, TextOrSecretRef,
+    BlobGetParams, BlobGetReceipt, BlobPutParams, LlmGenerateParams, LlmGenerateReceipt,
+    LlmOutputEnvelope, LlmToolCallList, LlmToolChoice, TextOrSecretRef,
 };
 use aos_wasm_sdk::{
     EffectReceiptEnvelope, EffectReceiptRejected, PendingBatch, PendingEffect,
@@ -1637,7 +1637,7 @@ mod tests {
         })
         .to_string();
 
-        let refs = collect_blob_refs_from_output_json(&output_json);
+        let refs = self::tool_batch::collect_blob_refs_from_output_json(&output_json);
         assert_eq!(refs.len(), 2);
         assert!(refs.iter().any(|value| value == &fake_hash('a')));
         assert!(refs.iter().any(|value| value == &fake_hash('b')));
@@ -1660,7 +1660,7 @@ mod tests {
         })
         .to_string();
 
-        let updated = inject_blob_inline_text_into_output_json(
+        let updated = self::blob_effects::inject_blob_inline_text_into_output_json(
             output_json.as_str(),
             blob_ref.as_str(),
             "alpha\nbeta",

@@ -1,36 +1,5 @@
 use super::*;
 
-fn enqueue_pending_blob_effect<P: Clone, T: serde::Serialize>(
-    pending_entries: &mut aos_wasm_sdk::SharedPendingEffects<P>,
-    effect_kind: &'static str,
-    params: &T,
-    cap_slot: Option<&str>,
-    emitted_at_ns: u64,
-    pending_entry: P,
-    make_effect: impl FnOnce(String) -> SessionEffectCommand,
-    out: &mut SessionReduceOutput,
-) -> String {
-    let cap_slot = cap_slot.map(ToString::to_string);
-    let begin = match pending_entries.begin(
-        effect_kind,
-        params,
-        cap_slot.clone(),
-        emitted_at_ns,
-        pending_entry.clone(),
-    ) {
-        Ok(begin) => begin,
-        Err(_) => {
-            let pending = PendingEffect::new(effect_kind, String::new(), cap_slot, emitted_at_ns);
-            pending_entries.attach(pending, pending_entry)
-        }
-    };
-    let params_hash = begin.pending.params_hash.clone();
-    if begin.should_emit {
-        out.effects.push(make_effect(params_hash.clone()));
-    }
-    params_hash
-}
-
 pub(super) fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
     state.pending_blob_puts.values().any(|shared| {
         shared
@@ -66,23 +35,35 @@ pub(super) fn enqueue_blob_get(
     out: &mut SessionReduceOutput,
 ) -> Result<String, SessionReduceError> {
     let params = BlobGetParams { blob_ref };
-    Ok(enqueue_pending_blob_effect(
-        &mut state.pending_blob_gets,
-        "blob.get",
-        &params,
-        Some("blob"),
-        state.updated_at,
-        PendingBlobGet {
-            kind,
-            emitted_at_ns: state.updated_at,
-        },
-        |params_hash| SessionEffectCommand::BlobGet {
-            params: params.clone(),
+    let pending_entry = PendingBlobGet {
+        kind,
+        emitted_at_ns: state.updated_at,
+    };
+    let begin =
+        match state
+            .pending_blob_gets
+            .begin(&params, state.updated_at, pending_entry.clone())
+        {
+            Ok(begin) => begin,
+            Err(_) => state.pending_blob_gets.attach(
+                PendingEffect::new(
+                    "blob.get",
+                    String::new(),
+                    Some(String::from("blob")),
+                    state.updated_at,
+                ),
+                pending_entry,
+            ),
+        };
+    let params_hash = begin.pending.params_hash.clone();
+    if begin.should_emit {
+        out.effects.push(SessionEffectCommand::BlobGet {
+            params,
             cap_slot: Some("blob".into()),
-            params_hash,
-        },
-        out,
-    ))
+            params_hash: params_hash.clone(),
+        });
+    }
+    Ok(params_hash)
 }
 
 pub(super) fn enqueue_blob_put(
@@ -96,23 +77,35 @@ pub(super) fn enqueue_blob_put(
         blob_ref: None,
         refs: None,
     };
-    enqueue_pending_blob_effect(
-        &mut state.pending_blob_puts,
-        "blob.put",
-        &params,
-        Some("blob"),
-        state.updated_at,
-        PendingBlobPut {
-            kind,
-            emitted_at_ns: state.updated_at,
-        },
-        |params_hash| SessionEffectCommand::BlobPut {
-            params: params.clone(),
+    let pending_entry = PendingBlobPut {
+        kind,
+        emitted_at_ns: state.updated_at,
+    };
+    let begin =
+        match state
+            .pending_blob_puts
+            .begin(&params, state.updated_at, pending_entry.clone())
+        {
+            Ok(begin) => begin,
+            Err(_) => state.pending_blob_puts.attach(
+                PendingEffect::new(
+                    "blob.put",
+                    String::new(),
+                    Some(String::from("blob")),
+                    state.updated_at,
+                ),
+                pending_entry,
+            ),
+        };
+    let params_hash = begin.pending.params_hash.clone();
+    if begin.should_emit {
+        out.effects.push(SessionEffectCommand::BlobPut {
+            params,
             cap_slot: Some("blob".into()),
-            params_hash,
-        },
-        out,
-    )
+            params_hash: params_hash.clone(),
+        });
+    }
+    params_hash
 }
 
 fn decode_blob_inline_text(bytes: &[u8]) -> (String, bool) {
@@ -125,7 +118,7 @@ fn decode_blob_inline_text(bytes: &[u8]) -> (String, bool) {
     (String::from_utf8_lossy(capped).to_string(), truncated)
 }
 
-fn inject_blob_inline_text_into_output_json(
+pub(super) fn inject_blob_inline_text_into_output_json(
     output_json: &str,
     blob_ref: &str,
     inline_text: &str,
@@ -375,29 +368,20 @@ pub(super) fn handle_pending_blob_get_receipt(
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
-    let Some(matched) = state.pending_blob_gets.settle(envelope.into()) else {
+    let Some(matched) = state.pending_blob_gets.settle(envelope) else {
         return Ok(false);
     };
-
-    let failed = envelope.status != "ok";
-    let receipt = if failed {
-        None
-    } else {
-        envelope.decode_receipt_payload::<BlobGetReceipt>().ok()
-    };
-
-    let shared_receipt = receipt;
     for pending in matched.waiters {
         match pending.kind {
             PendingBlobGetKind::LlmOutputEnvelope => {
-                let Some(receipt) = shared_receipt.clone() else {
+                let Some(receipt) = matched.receipt.clone().ok() else {
                     fail_run(state)?;
                     return Ok(true);
                 };
                 on_llm_output_blob(state, receipt, out)?;
             }
             PendingBlobGetKind::LlmToolCalls => {
-                let Some(receipt) = shared_receipt.clone() else {
+                let Some(receipt) = matched.receipt.clone().ok() else {
                     fail_run(state)?;
                     return Ok(true);
                 };
@@ -407,7 +391,7 @@ pub(super) fn handle_pending_blob_get_receipt(
                 tool_batch_id,
                 call_id,
             } => {
-                if failed {
+                if matched.receipt.is_failed() {
                     if let Some(batch) = state.active_tool_batch.as_mut()
                         && batch.tool_batch_id == tool_batch_id
                     {
@@ -425,7 +409,7 @@ pub(super) fn handle_pending_blob_get_receipt(
                     state,
                     tool_batch_id,
                     call_id,
-                    shared_receipt.clone(),
+                    matched.receipt.clone().ok(),
                     out,
                 )?;
             }
@@ -439,7 +423,7 @@ pub(super) fn handle_pending_blob_get_receipt(
                     tool_batch_id,
                     call_id,
                     blob_ref,
-                    shared_receipt.clone(),
+                    matched.receipt.clone().ok(),
                     out,
                 )?;
             }
@@ -453,22 +437,13 @@ pub(super) fn handle_pending_blob_put_receipt(
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
-    let Some(matched) = state.pending_blob_puts.settle(envelope.into()) else {
+    let Some(matched) = state.pending_blob_puts.settle(envelope) else {
         return Ok(false);
     };
-
-    let failed = envelope.status != "ok";
-    let receipt = if failed {
-        None
-    } else {
-        envelope.decode_receipt_payload::<BlobPutReceipt>().ok()
-    };
-
-    let shared_receipt = receipt;
     for pending in matched.waiters {
         match pending.kind {
             PendingBlobPutKind::ToolDefinition { tool_id } => {
-                let Some(receipt) = shared_receipt.clone() else {
+                let Some(receipt) = matched.receipt.clone().ok() else {
                     fail_run(state)?;
                     return Ok(true);
                 };
@@ -487,7 +462,7 @@ pub(super) fn handle_pending_blob_put_receipt(
                 }
             }
             PendingBlobPutKind::FollowUpMessage { index } => {
-                let Some(receipt) = shared_receipt.clone() else {
+                let Some(receipt) = matched.receipt.clone().ok() else {
                     fail_run(state)?;
                     return Ok(true);
                 };

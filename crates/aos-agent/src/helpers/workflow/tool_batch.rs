@@ -476,7 +476,7 @@ pub(super) fn settle_tool_call_from_receipt(
     Ok(true)
 }
 
-fn collect_blob_refs_from_output_json(output_json: &str) -> Vec<String> {
+pub(super) fn collect_blob_refs_from_output_json(output_json: &str) -> Vec<String> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output_json) else {
         return Vec::new();
     };
