@@ -28,7 +28,6 @@
     { "name": "aos.agent/SessionIngressKind@1" },
     { "name": "aos.agent/SessionIngress@1" },
     { "name": "aos.agent/SessionLifecycleChanged@1" },
-    { "name": "sys/PendingEffect@1" },
     { "name": "aos.agent/PendingBlobGetKind@1" },
     { "name": "aos.agent/PendingBlobGet@1" },
     { "name": "aos.agent/PendingBlobPutKind@1" },
@@ -36,10 +35,7 @@
     { "name": "aos.agent/PendingFollowUpTurn@1" },
     { "name": "aos.agent/SessionState@1" },
     { "name": "aos.agent/SessionNoop@1" },
-    { "name": "aos.agent/SessionWorkflowEvent@1" },
-    { "name": "sys/EffectReceiptEnvelope@1" },
-    { "name": "sys/EffectReceiptRejected@1" },
-    { "name": "sys/EffectStreamFrame@1" }
+    { "name": "aos.agent/SessionWorkflowEvent@1" }
   ],
   "modules": [
     { "name": "aos.agent/SessionWorkflow@1" },
