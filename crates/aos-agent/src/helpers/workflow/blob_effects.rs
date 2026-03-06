@@ -1,4 +1,5 @@
 use super::*;
+use alloc::string::ToString;
 
 pub(super) fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
     state.pending_blob_puts.values().any(|shared| {
@@ -59,8 +60,7 @@ pub(super) fn enqueue_blob_get(
     if begin.should_emit {
         out.effects.push(SessionEffectCommand::BlobGet {
             params,
-            cap_slot: Some("blob".into()),
-            params_hash: params_hash.clone(),
+            pending: begin.pending.clone(),
         });
     }
     Ok(params_hash)
@@ -101,8 +101,7 @@ pub(super) fn enqueue_blob_put(
     if begin.should_emit {
         out.effects.push(SessionEffectCommand::BlobPut {
             params,
-            cap_slot: Some("blob".into()),
-            params_hash: params_hash.clone(),
+            pending: begin.pending.clone(),
         });
     }
     params_hash

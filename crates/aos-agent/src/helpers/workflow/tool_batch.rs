@@ -1,4 +1,5 @@
 use super::*;
+use alloc::string::ToString;
 
 pub(super) fn build_tool_execution(
     groups: Vec<Vec<String>>,
@@ -265,11 +266,8 @@ pub(super) fn dispatch_next_ready_tool_group(
                 };
                 let already_pending = state.pending_blob_gets.contains(&blob_get_hash)
                     || out.effects.iter().any(|effect| {
-                        matches!(
-                            effect,
-                            SessionEffectCommand::BlobGet { params_hash, .. }
-                                if params_hash == &blob_get_hash
-                        )
+                        matches!(effect, SessionEffectCommand::BlobGet { .. })
+                            && effect.params_hash() == blob_get_hash
                     });
                 super::blob_effects::enqueue_blob_get(state, blob_get.blob_ref, pending_kind, out)?;
                 if !already_pending {
@@ -336,16 +334,13 @@ pub(super) fn dispatch_next_ready_tool_group(
                         state.updated_at,
                     )
                 });
-            let params_hash = pending.params_hash.clone();
             set_tool_call_status(&mut batch, &call_id, ToolCallStatus::Pending);
             emitted_for_group = emitted_for_group.saturating_add(1);
 
             out.effects.push(SessionEffectCommand::ToolEffect {
                 kind,
                 params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
-                cap_slot,
-                issuer_ref: Some(call_id.clone()),
-                params_hash,
+                pending,
             });
         }
 

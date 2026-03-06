@@ -1,6 +1,7 @@
 use super::{
-    allocate_run_id, allocate_tool_batch_id, can_apply_host_command, enqueue_host_text,
-    pop_follow_up_if_ready, transition_lifecycle,
+    LlmStepContext, RequestLlm, SessionEffectCommand, SessionReduceOutput, allocate_run_id,
+    allocate_tool_batch_id, can_apply_host_command, enqueue_host_text, pop_follow_up_if_ready,
+    request_llm, transition_lifecycle,
 };
 use crate::contracts::{
     ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommandKind, PendingBlobGet,
@@ -15,21 +16,17 @@ use crate::tools::{
 };
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use aos_air_types::HashRef;
 use aos_effects::builtins::{
-    BlobGetParams, BlobGetReceipt, BlobPutParams, LlmGenerateParams, LlmGenerateReceipt,
-    LlmOutputEnvelope, LlmToolCallList, LlmToolChoice, TextOrSecretRef,
+    BlobGetParams, BlobGetReceipt, BlobPutParams, LlmGenerateReceipt, LlmOutputEnvelope,
+    LlmToolCallList,
 };
 use aos_wasm_sdk::{
     EffectReceiptEnvelope, EffectReceiptRejected, PendingBatch, PendingEffect,
     PendingEffectLookupError, PendingEffectSet,
-};
-
-use super::llm::{
-    LlmMappingError, LlmStepContext, materialize_llm_generate_params_with_prompt_refs,
 };
 
 mod blob_effects;
@@ -40,37 +37,6 @@ use self::blob_effects::{
     handle_pending_blob_put_receipt, has_pending_tool_definition_puts,
 };
 use self::tool_batch::settle_tool_call_from_receipt;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SessionEffectCommand {
-    LlmGenerate {
-        params: LlmGenerateParams,
-        cap_slot: Option<String>,
-        params_hash: String,
-    },
-    ToolEffect {
-        kind: ToolEffectKind,
-        params_json: String,
-        cap_slot: Option<String>,
-        issuer_ref: Option<String>,
-        params_hash: String,
-    },
-    BlobPut {
-        params: BlobPutParams,
-        cap_slot: Option<String>,
-        params_hash: String,
-    },
-    BlobGet {
-        params: BlobGetParams,
-        cap_slot: Option<String>,
-        params_hash: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SessionReduceOutput {
-    pub effects: Vec<SessionEffectCommand>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SessionRuntimeLimits {
@@ -364,15 +330,6 @@ fn on_run_requested(
     refresh_effective_tools(state, Some(&requested))?;
     state.conversation_message_refs.push(input_ref.into());
     queue_llm_turn(state, state.conversation_message_refs.clone(), out)
-}
-
-fn map_llm_mapping_error(err: LlmMappingError) -> SessionReduceError {
-    match err {
-        LlmMappingError::MissingProvider => SessionReduceError::MissingProvider,
-        LlmMappingError::MissingModel => SessionReduceError::MissingModel,
-        LlmMappingError::EmptyMessageRefs => SessionReduceError::EmptyMessageRefs,
-        LlmMappingError::InvalidHashRef => SessionReduceError::InvalidHashRef,
-    }
 }
 
 fn on_host_command(
@@ -751,52 +708,36 @@ fn dispatch_queued_llm_turn(
     let Some(message_refs) = state.queued_llm_message_refs.take() else {
         return Ok(());
     };
-    let Some(run_config) = state.active_run_config.clone() else {
-        return Ok(());
-    };
     let run_seq = state
         .active_run_id
         .as_ref()
         .map(|id| id.run_seq)
         .unwrap_or(0);
 
-    let step_ctx = LlmStepContext {
-        correlation_id: Some(alloc::format!(
-            "run-{run_seq}-turn-{}",
-            state.next_tool_batch_seq + 1
-        )),
-        message_refs,
-        temperature: None,
-        top_p: None,
-        tool_refs: state.effective_tools.tool_refs(),
-        tool_choice: Some(LlmToolChoice::Auto),
-        stop_sequences: None,
-        metadata: None,
-        provider_options_ref: None,
-        response_format_ref: None,
-        api_key: provider_secret_ref(run_config.provider.as_str()),
-    };
-
-    let params = materialize_llm_generate_params_with_prompt_refs(&run_config, step_ctx)
-        .map_err(map_llm_mapping_error)?;
-    let params_hash = begin_pending_effect(state, "llm.generate", &params, Some("llm"));
-    out.effects.push(SessionEffectCommand::LlmGenerate {
-        params,
-        cap_slot: Some("llm".into()),
-        params_hash,
-    });
+    request_llm(
+        state,
+        out,
+        RequestLlm {
+            step: LlmStepContext {
+                correlation_id: Some(alloc::format!(
+                    "run-{run_seq}-turn-{}",
+                    state.next_tool_batch_seq + 1
+                )),
+                message_refs,
+                temperature: None,
+                top_p: None,
+                tool_refs: state.effective_tools.tool_refs(),
+                tool_choice: Some(aos_effects::builtins::LlmToolChoice::Auto),
+                stop_sequences: None,
+                metadata: None,
+                provider_options_ref: None,
+                response_format_ref: None,
+                api_key: None,
+            },
+            cap_slot: Some("llm".into()),
+        },
+    )?;
     Ok(())
-}
-
-fn provider_secret_ref(provider: &str) -> Option<TextOrSecretRef> {
-    let normalized = provider.trim().to_ascii_lowercase();
-    if normalized.contains("anthropic") {
-        return Some(TextOrSecretRef::secret("llm/anthropic_api", 1));
-    }
-    if normalized.contains("openai") {
-        return Some(TextOrSecretRef::secret("llm/openai_api", 1));
-    }
-    None
 }
 
 fn should_auto_open_host_session(state: &SessionState) -> bool {
@@ -826,13 +767,16 @@ fn emit_auto_host_session_open(
         &state.tool_runtime_context,
     )
     .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
-    let params_hash = begin_pending_effect(state, "host.session.open", &params, Some("host"));
     out.effects.push(SessionEffectCommand::ToolEffect {
         kind: ToolEffectKind::HostSessionOpen,
         params_json: serde_json::to_string(&params).unwrap_or_else(|_| "{}".into()),
-        cap_slot: Some("host".into()),
-        issuer_ref: None,
-        params_hash,
+        pending: super::begin_pending_effect(
+            state,
+            "host.session.open",
+            &params,
+            Some("host".into()),
+            None,
+        ),
     });
     Ok(())
 }
@@ -1060,28 +1004,6 @@ fn hash_tool_plan(plan: &ToolBatchPlan) -> String {
     hash_cbor(plan)
 }
 
-fn begin_pending_effect<T: serde::Serialize>(
-    state: &mut SessionState,
-    effect_kind: &'static str,
-    params: &T,
-    cap_slot: Option<&str>,
-) -> String {
-    let cap_slot = cap_slot.map(ToString::to_string);
-    match state
-        .pending_effects
-        .begin(effect_kind, params, cap_slot.clone(), state.updated_at)
-    {
-        Ok(pending) => pending.params_hash,
-        Err(_) => {
-            let pending =
-                PendingEffect::new(effect_kind, String::new(), cap_slot, state.updated_at);
-            let params_hash = pending.params_hash.clone();
-            state.pending_effects.insert(pending);
-            params_hash
-        }
-    }
-}
-
 fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
     aos_wasm_sdk::effect_params_hash(value).unwrap_or_default()
 }
@@ -1092,6 +1014,7 @@ mod tests {
     use crate::contracts::{
         HostSessionStatus, SessionId, SessionIngress, ToolCallObserved, ToolOverrideScope,
     };
+    use alloc::string::ToString;
     use aos_air_types::HashRef;
     use aos_effects::builtins::{
         BlobGetReceipt, BlobPutReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
@@ -1196,10 +1119,8 @@ mod tests {
         assert_eq!(out.effects.len(), 1);
         assert!(matches!(
             out.effects.first(),
-            Some(SessionEffectCommand::ToolEffect {
-                kind: ToolEffectKind::HostSessionOpen,
-                ..
-            })
+            Some(SessionEffectCommand::ToolEffect { pending, .. })
+                if pending.effect_kind == "host.session.open"
         ));
         assert_eq!(state.pending_effects.len(), 1);
         assert!(state.pending_blob_puts.is_empty());
@@ -1334,13 +1255,8 @@ mod tests {
         let blob_put_hashes = out
             .effects
             .iter()
-            .filter_map(|effect| {
-                if let SessionEffectCommand::BlobPut { params_hash, .. } = effect {
-                    Some(params_hash.clone())
-                } else {
-                    None
-                }
-            })
+            .filter(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. }))
+            .map(|effect| effect.params_hash().to_string())
             .collect::<Vec<_>>();
         assert!(!blob_put_hashes.is_empty(), "expected blob.put effects");
 
@@ -1392,13 +1308,8 @@ mod tests {
         let tool_def_put_hashes = out1
             .effects
             .iter()
-            .filter_map(|effect| {
-                if let SessionEffectCommand::BlobPut { params_hash, .. } = effect {
-                    Some(params_hash.clone())
-                } else {
-                    None
-                }
-            })
+            .filter(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. }))
+            .map(|effect| effect.params_hash().to_string())
             .collect::<Vec<_>>();
         assert!(
             !tool_def_put_hashes.is_empty(),
@@ -1425,13 +1336,8 @@ mod tests {
         let llm_params_hash = out2
             .effects
             .iter()
-            .find_map(|effect| {
-                if let SessionEffectCommand::LlmGenerate { params_hash, .. } = effect {
-                    Some(params_hash.clone())
-                } else {
-                    None
-                }
-            })
+            .find(|effect| matches!(effect, SessionEffectCommand::LlmGenerate { .. }))
+            .map(|effect| effect.params_hash().to_string())
             .expect("expected llm.generate");
 
         let out3 = apply_session_workflow_event(
@@ -1464,7 +1370,9 @@ mod tests {
         )
         .expect("llm receipt");
         let output_blob_get_hash = match out3.effects.first() {
-            Some(SessionEffectCommand::BlobGet { params_hash, .. }) => params_hash.clone(),
+            Some(effect) if matches!(effect, SessionEffectCommand::BlobGet { .. }) => {
+                effect.params_hash().to_string()
+            }
             _ => panic!("expected blob.get for llm output"),
         };
 
@@ -1490,7 +1398,9 @@ mod tests {
         )
         .expect("output blob.get receipt");
         let calls_blob_get_hash = match out4.effects.first() {
-            Some(SessionEffectCommand::BlobGet { params_hash, .. }) => params_hash.clone(),
+            Some(effect) if matches!(effect, SessionEffectCommand::BlobGet { .. }) => {
+                effect.params_hash().to_string()
+            }
             _ => panic!("expected blob.get for tool calls"),
         };
 
@@ -1517,7 +1427,9 @@ mod tests {
         )
         .expect("tool calls blob.get receipt");
         let args_blob_get_hash = match out5.effects.first() {
-            Some(SessionEffectCommand::BlobGet { params_hash, .. }) => params_hash.clone(),
+            Some(effect) if matches!(effect, SessionEffectCommand::BlobGet { .. }) => {
+                effect.params_hash().to_string()
+            }
             _ => panic!("expected blob.get for tool arguments"),
         };
 
@@ -1541,13 +1453,8 @@ mod tests {
             .effects
             .iter()
             .find_map(|effect| {
-                if let SessionEffectCommand::ToolEffect {
-                    params_hash,
-                    issuer_ref,
-                    ..
-                } = effect
-                {
-                    Some((params_hash.clone(), issuer_ref.clone()))
+                if let SessionEffectCommand::ToolEffect { pending, .. } = effect {
+                    Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
                 } else {
                     None
                 }
@@ -1579,13 +1486,8 @@ mod tests {
         let followup_hashes = out7
             .effects
             .iter()
-            .filter_map(|effect| {
-                if let SessionEffectCommand::BlobPut { params_hash, .. } = effect {
-                    Some(params_hash.clone())
-                } else {
-                    None
-                }
-            })
+            .filter(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. }))
+            .map(|effect| effect.params_hash().to_string())
             .collect::<Vec<_>>();
         assert!(!followup_hashes.is_empty());
 

@@ -1,7 +1,7 @@
 # P2: Raise the Workflow Authoring Level
 
 **Priority**: P1  
-**Status**: In Progress  
+**Status**: In Progress (SDK core done; agent-level primitives/refactors still pending)  
 **Depends on**: `roadmap/v0.13-demiurge2/p1-demiurge2-task-orchestrator.md`, `roadmap/v0.13-demiurge2/p4-operator-ux-stuck-task-diagnosis.md`
 
 ## Goal
@@ -84,7 +84,7 @@ These primitives cover both one-shot receipts and streaming lifecycles from
 
 ## Primitive Set
 
-### 1) `request_llm`
+### 1) `request_llm` (Partial)
 
 Purpose:
 
@@ -98,7 +98,12 @@ Current source material:
 1. `crates/aos-agent/src/helpers/llm.rs`
 2. `SessionEffectCommand::LlmGenerate`
 
-### 2) `run_tool_batch`
+Current status:
+
+1. canonical `llm.generate` param materialization is extracted,
+2. pending registration + emit flow still lives in `SessionWorkflow` helper glue.
+
+### 2) `run_tool_batch` (Partial)
 
 Purpose:
 
@@ -115,7 +120,14 @@ Current source material:
 3. `on_tool_calls_observed` and related helpers in
    `crates/aos-agent/src/helpers/workflow.rs`
 
-### 3) generic continuation matching
+Current status:
+
+1. tool-batch planning/dispatch/settlement logic is extracted into internal helper
+   modules,
+2. it is not yet exposed as a clean shared authoring primitive above the session
+   workflow.
+
+### 3) generic continuation matching (Done)
 
 Purpose:
 
@@ -131,7 +143,7 @@ Implemented as:
 3. `PendingEffects::observe`
 4. `PendingEffects::settle`
 
-### 4) `retry_with_backoff`
+### 4) `retry_with_backoff` (Not Started)
 
 Purpose:
 
@@ -143,7 +155,7 @@ Purpose:
 This should reuse existing failure ownership ideas rather than inventing a
 second retry system.
 
-### 5) `emit_lifecycle`
+### 5) `emit_lifecycle` (Not Done)
 
 Purpose:
 
@@ -158,7 +170,7 @@ Current proof point:
 
 The new primitive should move this out of ad hoc workflow-local glue.
 
-### 6) `spawn_or_handoff_session`
+### 6) `spawn_or_handoff_session` (Not Done)
 
 Purpose:
 
@@ -314,19 +326,32 @@ The API must remain plain Rust over explicit state, not hidden runtime magic.
 
 ## Implementation Plan
 
-### WP1: SDK primitive extraction
+### WP1: SDK primitive extraction (Mostly Done)
 
 1. add generic receipt/effect convenience helpers to `aos-wasm-sdk`,
 2. add tests for typed receipt matching and retry scheduling,
 3. keep public re-export surface small and stable.
 
-### WP2: Agent primitive extraction
+Current status:
+
+1. receipt/effect convenience helpers are implemented,
+2. typed matching tests exist,
+3. retry scheduling helper coverage is still pending with `retry_with_backoff`.
+
+### WP2: Agent primitive extraction (Partial)
 
 1. move LLM request building into a reusable helper,
 2. move lifecycle event emission into a reusable helper,
 3. move tool-batch emission/settlement into reusable helpers.
 
-### WP3: Refactor `SessionWorkflow`
+Current status:
+
+1. LLM param building is extracted,
+2. tool-batch logic is split into helper modules,
+3. lifecycle emission is still workflow-local,
+4. the surface is not yet consolidated into the intended primitive layer.
+
+### WP3: Refactor `SessionWorkflow` (Not Done)
 
 Targets:
 
@@ -338,7 +363,7 @@ Acceptance signal:
 1. reducer/event flow gets shorter,
 2. no behavior change in existing eval/smoke semantics.
 
-### WP4: Refactor Demiurge
+### WP4: Refactor Demiurge (Not Done)
 
 Targets:
 
