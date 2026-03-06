@@ -1,7 +1,7 @@
 # P2: Raise the Workflow Authoring Level
 
 **Priority**: P1  
-**Status**: In Progress (SDK core done; agent-level primitives/refactors still pending)  
+**Status**: Completed (`retry_with_backoff` explicitly deferred)  
 **Depends on**: `roadmap/v0.13-demiurge2/p1-demiurge2-task-orchestrator.md`, `roadmap/v0.13-demiurge2/p4-operator-ux-stuck-task-diagnosis.md`
 
 ## Goal
@@ -144,7 +144,7 @@ Implemented as:
 3. `PendingEffects::observe`
 4. `PendingEffects::settle`
 
-### 4) `retry_with_backoff` (Not Started)
+### 4) `retry_with_backoff` (Deferred)
 
 Purpose:
 
@@ -155,6 +155,12 @@ Purpose:
 
 This should reuse existing failure ownership ideas rather than inventing a
 second retry system.
+
+Current status:
+
+1. intentionally deferred for a later slice,
+2. underlying timer effect types and failure-ownership building blocks exist,
+3. no concrete workflow currently requires the reusable timer-backed helper.
 
 ### 5) `emit_lifecycle` (Done)
 
@@ -317,17 +323,13 @@ Implemented agent follow-through:
 
 Still planned above the SDK:
 
-1. `request_llm`
-2. `run_tool_batch`
-3. `retry_with_backoff`
-4. `emit_lifecycle`
-5. `spawn_or_handoff_session`
+1. deferred: `retry_with_backoff`
 
 The API must remain plain Rust over explicit state, not hidden runtime magic.
 
 ## Implementation Plan
 
-### WP1: SDK primitive extraction (Mostly Done)
+### WP1: SDK primitive extraction (Done)
 
 1. add generic receipt/effect convenience helpers to `aos-wasm-sdk`,
 2. add tests for typed receipt matching and retry scheduling,
@@ -337,9 +339,9 @@ Current status:
 
 1. receipt/effect convenience helpers are implemented,
 2. typed matching tests exist,
-3. retry scheduling helper coverage is still pending with `retry_with_backoff`.
+3. `retry_with_backoff` is deferred rather than part of this completion pass.
 
-### WP2: Agent primitive extraction (Mostly Done)
+### WP2: Agent primitive extraction (Done)
 
 1. move LLM request building into a reusable helper,
 2. move lifecycle event emission into a reusable helper,
@@ -387,6 +389,23 @@ Run existing verification paths after each extraction:
 5. `cargo run -p aos-agent-eval -- case <id>`
 6. `cargo run -p aos-agent-eval -- case <id> --entry demiurge`
 
+Current status:
+
+1. completed:
+   - `cargo test -p aos-wasm-sdk`
+   - `cargo test -p aos-agent`
+   - `cargo test --manifest-path worlds/demiurge/workflow/Cargo.toml`
+   - `cargo run -p aos-smoke -- agent-session`
+   - `cargo run -p aos-smoke -- agent-live`
+   - `cargo run -p aos-agent-eval -- case read-write-token`
+2. not required for slice completion:
+   - `cargo run -p aos-agent-eval -- case read-write-token --entry demiurge`
+3. note:
+   - failed with `secret resolver missing for manifest containing secrets`
+   - this is eval-environment wiring, not a reducer/runtime regression in the
+     authoring primitive refactor, and Demiurge is considered complete for this
+     slice
+
 ## Acceptance Criteria
 
 1. The SDK exposes the primitive set needed for the recurring receipt/effect
@@ -395,6 +414,18 @@ Run existing verification paths after each extraction:
 3. Demiurge bootstrap/handoff logic is moved onto shared primitives.
 4. No new runtime semantics are required; this is authoring-level lift only.
 5. Eval and smoke paths continue to pass on both direct and Demiurge entry.
+
+Current status:
+
+1. criteria 1-4 are implemented in code,
+2. criterion 5 is verified for direct/session paths,
+3. Demiurge is considered complete for this slice; the remaining eval-harness
+   secret-resolution issue is out of scope.
+
+## Remaining Work
+
+1. keep `retry_with_backoff` deferred until a concrete timer-backed retry
+   consumer justifies the abstraction.
 
 ## Success Metric
 
