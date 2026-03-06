@@ -169,9 +169,14 @@ Define canonical tuple-subspace layout (logical names; exact tuple encoding is i
 Universe global:
 
 - `u/<u>/cas/meta/<hash> -> { size, storage, object_key?, inline_bytes? }`
-- `u/<u>/effects/pending/<seq> -> EffectDispatchItem` (written in P2; consumed in P3)
-- `u/<u>/effects/inflight/<seq> -> EffectInFlightItem` (written in P2; consumed in P3)
-- `u/<u>/timers/due/<deliver_at_ns>/<intent_hash> -> TimerDueItem` (written in P2; consumed in P3)
+- `u/<u>/effects/pending/<shard>/<seq> -> EffectDispatchItem` (written in P2; consumed in P3)
+- `u/<u>/effects/inflight/<shard>/<seq> -> EffectInFlightItem` (written in P2; consumed in P3)
+- `u/<u>/effects/dedupe/<intent_hash> -> DispatchStatus` (written in P2; consumed in P3)
+- `u/<u>/effects/dedupe_gc/<gc_bucket>/<intent_hash> -> ()`
+- `u/<u>/timers/due/<shard>/<time_bucket>/<deliver_at_ns>/<intent_hash> -> TimerDueItem` (written in P2; consumed in P3)
+- `u/<u>/timers/inflight/<shard>/<intent_hash> -> TimerClaim` (written in P2; consumed in P3)
+- `u/<u>/timers/dedupe/<intent_hash> -> DeliveredStatus` (written in P2; consumed in P3)
+- `u/<u>/timers/dedupe_gc/<gc_bucket>/<intent_hash> -> ()`
 - `u/<u>/segments/<world>/<end_height> -> SegmentIndexRecord`
 
 Per world:
@@ -183,7 +188,7 @@ Per world:
 - `u/<u>/w/<w>/baseline/active -> SnapshotRecord`
 - `u/<u>/w/<w>/inbox/e/<seq> -> InboxItem`
 - `u/<u>/w/<w>/inbox/cursor -> Option<seq>`
-- `u/<u>/w/<w>/notify/counter -> u64`
+- `u/<u>/w/<w>/notify/counter -> u64` (atomic-add hint only)
 - `u/<u>/w/<w>/gc/pin/<hash> -> PinReason` (optional, if explicit pin-index is materialized)
 
 Rules:
@@ -192,13 +197,23 @@ Rules:
 - `snapshot/by_height` immutable once written.
 - `baseline/active` may advance, never regress.
 - `inbox/cursor` monotonic increasing only.
-- `notify/counter` best-effort latency signal only; not correctness-critical.
+- global effect and timer queues are sharded; there is no universe-wide total order across shards.
+- `shard` should be derived from a stable hash (normally `intent_hash`) with a fixed configured shard count.
+- timer queues are additionally bucketed by time to keep scans bounded.
+- `notify/counter` uses atomic add and is a best-effort latency signal only; not correctness-critical.
+- watches on `notify/counter` are optional wakeup hints only; correctness comes from scanning durable state.
+- queue and inbox values must stay small; large payloads are externalized to CAS and referenced from queue records.
+
+Initial rollout note:
+
+- The shard dimension is part of the keyspace from the start, but the first implementation may run with `shard_count = 1`.
+- This keeps the initial runtime simple while avoiding a later keyspace migration for global hot queues.
 
 ### 3) CAS implementation (object store + inline small objects)
 
 Storage policy:
 
-- `len(bytes) <= INLINE_THRESHOLD` (default 16 KiB): inline in FDB metadata value.
+- `len(bytes) <= INLINE_THRESHOLD` (default 4 KiB): inline in FDB metadata value.
 - `len(bytes) > INLINE_THRESHOLD`: body in object store, metadata in FDB.
 
 Object key convention:
@@ -225,6 +240,7 @@ Integrity invariants:
 - CAS metadata and body are immutable.
 - Body content must match key hash.
 - Duplicate puts are no-op idempotent.
+- Inline metadata values should remain comfortably within normal FDB value-size guidance; large bodies belong in object storage.
 
 ### 4) Journal append/scan semantics
 
@@ -240,6 +256,12 @@ Single writer assumption:
 3. Write `journal/e/head+1 .. head+n`.
 4. Write `journal/head = head+n`.
 5. Commit atomically.
+
+Batch sizing constraints:
+
+- Journal appends must be bounded by bytes as well as entry count.
+- Hosted runtime should target transactions well below FoundationDB's 1 MiB "red flag" affected-data threshold and never approach the hard 10 MB limit.
+- Retry loops must assume FoundationDB's five-second transaction lifetime.
 
 Conflict behavior:
 
@@ -260,6 +282,10 @@ Inbox item union:
 - `InboxIngress { inbox_name, payload_cbor, headers? }`
 - `TimerFiredIngress { timer_id, payload_cbor }`
 - `ControlIngress { cmd, payload_cbor }`
+
+Payload sizing rule:
+
+- Any large `*_cbor` field should be externalized to CAS above a queue payload threshold and represented by companion `{ *_ref, *_size, *_sha256 }` metadata instead of large inline values.
 
 Enqueue transaction:
 
@@ -361,6 +387,7 @@ Conformance cases:
 4. Cursor monotonicity and no duplication under simulated crash.
 5. Snapshot index monotonicity and baseline non-regression.
 6. Segment export + restore equivalence.
+7. Sharded effect/timer queue scans preserve correctness under concurrent producers.
 
 ### 9) Repository touch points
 
@@ -468,12 +495,14 @@ Guarantees:
 2. Metadata commit succeeds but read path sees missing object: hard error, no silent heal.
 3. Head conflict under concurrent appends returns typed conflict.
 4. Cursor regression attempt is rejected.
+5. Sharded pending/timer queues continue operating when one shard is hot or one shard reaper crashes.
 
 ### Scale tests (target envelope)
 
 1. 10k worlds, sparse activity: metadata reads/writes remain bounded.
 2. 1k active worlds with sustained inbox ingress: no per-world starvation.
 3. Segment export under sustained appends does not stall foreground writes.
+4. Global effect/timer dispatch throughput scales with shard count rather than a single hot range.
 
 ## Deliverables / DoD
 
