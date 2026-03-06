@@ -53,7 +53,7 @@ This milestone is the persistence substrate only. It does not include scheduling
 
 Add a concrete FDB-focused persistence implementation crate with deterministic semantics and a narrow operation surface for host/runtime integration:
 
-- Suggested crate: `crates/aos-db` (name can vary, FDB-first stance cannot).
+- Suggested crate: `crates/aos-fdb` (name can vary, FDB-first stance cannot).
 - Provide canonical types and operations for:
   - CAS
   - World journal
@@ -378,7 +378,7 @@ Restore with segments:
 
 Add a reusable protocol conformance test suite:
 
-- package: `crates/aos-db/tests/conformance.rs`
+- package: `crates/aos-fdb/tests/conformance.rs`
 - runs against:
   - FDB implementation (required in integration/nightly)
   - in-memory behavioral reference implementation used for CI/unit tests (not a portability target)
@@ -399,9 +399,9 @@ Conformance cases:
 
 Expected implementation touch points:
 
-- New: `crates/aos-db/` (FDB-first persistence implementation + protocol types + conformance harness)
-- Optional New: `crates/aos-db-objstore/` (object-store helper if split for operational concerns)
-- Update: `crates/aos-host/` to consume `aos-db` operations in hosted mode
+- New: `crates/aos-fdb/` (FDB-first persistence implementation + protocol types + conformance harness)
+- Optional New: `crates/aos-fdb-objstore/` (object-store helper if split for operational concerns, but I prefer it to be part of aos-fdb to avoid too many crates unless there is a very good reason for this.)
+- Update: `crates/aos-host/` to consume `aos-fdb` operations in hosted mode
 - Update: `crates/aos-host/` startup paths to open hosted worlds by persistence identity rather than assuming a filesystem world root is the runtime authority
 - Update: `crates/aos-kernel/` only via narrow boundary (no FDB/object-store coupling)
 - Update: docs/spec alignment in `spec/02-architecture.md` and infra notes
@@ -512,8 +512,8 @@ Guarantees:
 
 ## Deliverables / DoD
 
-1. `aos-db` protocol/types merged with conformance tests and in-memory behavioral reference backend.
-2. `aos-db` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
+1. `aos-fdb` protocol/types merged with conformance tests and in-memory behavioral reference backend.
+2. `aos-fdb` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
 3. Hosted-mode restore uses active baseline + segments + hot tail deterministically.
 4. Inbox drain protocol with cursor commit is implemented and crash-safe.
 5. Segment export compaction is available behind config flag and tested.
