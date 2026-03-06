@@ -14,6 +14,8 @@ Design stance for P2:
 - FoundationDB is the primary and only production metadata/ordering store target in this milestone.
 - We do not introduce a "portable multi-DB" abstraction layer.
 - We do keep a narrow operation boundary between host runtime and storage implementation so kernel/runtime logic is not coupled to raw FDB client APIs.
+- That boundary should remain suitable for a later first-party embedded backend for isolated local universes, but that backend is not implemented in P2.
+- P2 does not attempt live hosted/embedded communication or two-way sync; movement between modes is deferred to later export/import work.
 
 Core outcomes:
 
@@ -27,7 +29,7 @@ This milestone is the persistence substrate only. It does not include scheduling
 
 ## Dependency
 
-- Requires `v0.11-infra/p1-protocol-roots-and-baselines.md` merged.
+- Requires `v0.20-infra/p1-protocol-roots-and-baselines.md` merged.
 - P2 assumes:
   - `BlobEdge` and `blob.put@1` normalization are active.
   - Baseline promotion checks are active.
@@ -39,6 +41,8 @@ This milestone is the persistence substrate only. It does not include scheduling
 - Multi-worker scheduling/orchestrator decisions (P3).
 - Cross-world `fabric.send` adapter (P3).
 - Timer worker and global effect worker pools (P3).
+- Embedded-universe mode implementation (follow-on milestone).
+- Live communication or shared CAS between embedded and hosted universes.
 - Mark-and-sweep deletion execution and retention policy UI.
 - Multi-region replication strategy.
 - A backend-portable storage layer across unrelated databases.
@@ -57,18 +61,25 @@ Add a concrete FDB-focused persistence implementation crate with deterministic s
   - Snapshot index + active baseline
   - Segment index (for cold log materialization)
 
+Boundary design constraints:
+
+- This is a runtime/storage protocol boundary, not a promise of arbitrary backend portability.
+- Public protocol types should not expose raw FoundationDB client types directly, even if the FDB implementation uses them internally.
+- The boundary should be reusable later by a first-party embedded backend for isolated local universes.
+- World runtime integration should key off `(universe_id, world_id)`, not a filesystem world root.
+
 Suggested core types:
 
 - `UniverseId = Uuid`
 - `WorldId = Uuid`
 - `JournalHeight = u64`
-- `InboxSeq = [u8; 10]` (FDB versionstamp bytes; this is intentionally FDB-shaped)
+- `InboxSeq = opaque, serializable, totally ordered cursor token` (FDB may encode this as versionstamp bytes internally)
 - `SegmentId = { start: u64, end: u64 }`
 
 Suggested operation surface (illustrative):
 
 ```rust
-pub trait HostedPersistence {
+pub trait WorldPersistence {
     fn cas_put_verified(&self, universe: UniverseId, bytes: &[u8]) -> Result<Hash, PersistError>;
     fn cas_get(&self, universe: UniverseId, hash: Hash) -> Result<Vec<u8>, PersistError>;
     fn cas_has(&self, universe: UniverseId, hash: Hash) -> Result<bool, PersistError>;
@@ -148,6 +159,8 @@ FDB semantic leakage is accepted and explicit:
 - queue ordering is versionstamp-driven,
 - transaction chunking limits shape large batch behavior,
 - monotonic cursor/baseline constraints are enforced with compare-and-swap semantics.
+
+However, these remain implementation semantics of the FDB backend, not stable public protocol shapes for the runtime boundary.
 
 ### 2) FDB keyspace layout (authoritative metadata + ordering + queues)
 
@@ -338,6 +351,8 @@ Add a reusable protocol conformance test suite:
   - FDB implementation (required in integration/nightly)
   - in-memory behavioral reference implementation used for CI/unit tests (not a portability target)
 
+The harness should be structured so a later first-party embedded backend can be added without redefining the protocol.
+
 Conformance cases:
 
 1. CAS put/get/has idempotency and hash correctness.
@@ -354,6 +369,7 @@ Expected implementation touch points:
 - New: `crates/aos-db/` (FDB-first persistence implementation + protocol types + conformance harness)
 - Optional New: `crates/aos-db-objstore/` (object-store helper if split for operational concerns)
 - Update: `crates/aos-host/` to consume `aos-db` operations in hosted mode
+- Update: `crates/aos-host/` startup paths to open hosted worlds by persistence identity rather than assuming a filesystem world root is the runtime authority
 - Update: `crates/aos-kernel/` only via narrow boundary (no FDB/object-store coupling)
 - Update: docs/spec alignment in `spec/02-architecture.md` and infra notes
 
@@ -474,5 +490,7 @@ Guarantees:
 - Orchestrator assignment strategy and leases execution loop (P3).
 - Effect/timer worker scheduling and retries (P3).
 - Fabric adapter and cross-world semantics (P3).
+- Embedded-universe runtime implementation and hosted/embedded bridge semantics.
+- Export/import movement between embedded and hosted modes.
 - Automated mark-and-sweep deletion execution.
 - Quota/billing enforcement.

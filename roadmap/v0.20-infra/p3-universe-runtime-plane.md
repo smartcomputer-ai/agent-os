@@ -17,9 +17,13 @@ Ship the first complete hosted runtime plane on top of P2 persistence:
 
 This milestone turns hosted storage into a working distributed runtime.
 
+Constraint for later follow-on work:
+
+- The worker loop and world-lifecycle boundary established here should remain reusable by a later embedded-universe mode, even though P3 itself is hosted-only.
+
 ## Dependencies
 
-- Requires `v0.11-infra/p2-hosted-persistence-plane.md` merged.
+- Requires `v0.20-infra/p2-hosted-persistence-plane.md` merged.
 - Requires P1 semantics already active (`BlobEdge`, baseline rules, snapshot root completeness).
 
 ## Non-Goals (P3)
@@ -29,6 +33,9 @@ This milestone turns hosted storage into a working distributed runtime.
 - Full tenant quota/billing engine.
 - Rich workflow placement optimization (ML scheduling, cost-aware routing).
 - Public internet control-plane APIs and auth hardening.
+- Embedded-universe runtime implementation.
+- Live communication or shared CAS between embedded and hosted universes.
+- Export/import movement between embedded and hosted modes.
 
 ## Runtime Roles (In Scope)
 
@@ -106,6 +113,12 @@ Run loop budgets:
 - `max_tick_steps_per_cycle`
 - `max_effects_per_cycle`
 - `max_cycle_wall_ms` (operational guardrail only; deterministic outputs remain journal-defined)
+
+Runtime-shape constraints:
+
+- worker/runtime code should key off `(universe_id, world_id)` rather than a filesystem world root
+- phase-1 single-process multi-world hosting should be the same basic runtime shape later reused by embedded mode
+- hosted storage remains the only authoritative persistence plane in P3
 
 ### 3) Durable ingress normalization path
 
@@ -188,6 +201,11 @@ Semantics:
 Add plan-only effect kind:
 
 - `fabric.send`
+
+P3 scope note:
+
+- In this milestone, `fabric.send` only targets worlds that live inside the same hosted persistence plane.
+- Bridging to embedded universes is deferred.
 
 Proposed built-ins:
 
@@ -370,6 +388,11 @@ Guarantees:
 - Timer delivery: `intent_hash`.
 - Journal append: `expected_head` + single writer.
 
+Deferred boundary:
+
+- P3 does not define durable delivery across hosted/embedded authority boundaries.
+- Any future embedded/hosted bridge must be specified as an explicit relay/export surface, not assumed by these protocols.
+
 ## Testing and Validation
 
 ### Deterministic integration tests
@@ -414,6 +437,7 @@ Assertions:
 
 - Leases active but no contention.
 - Adapter and timer workers can be in-process sidecars.
+- This runtime shape should be preserved so embedded-universe mode can later reuse it with a different authoritative persistence backend.
 
 ### Phase 2: Multi-worker lease handoff
 
@@ -435,12 +459,13 @@ Assertions:
 
 1. Lease protocol with epoch fencing implemented and enforced on world mutations.
 2. Worker runtime loop can host multiple worlds and survive failover.
-3. Durable effect dispatch queue with adapter workers and receipt re-ingress is live.
-4. Durable timer worker path is live and migration-safe.
-5. `fabric.send` effect with idempotent destination enqueue is implemented.
-6. World fork/seed from snapshot is implemented with explicit default effect policy.
-7. Failure-injection test suite passes with replay parity guarantees.
-8. Internal ops APIs and observability metrics/logging are in place.
+3. Runtime startup/operation is keyed by persistence identity rather than filesystem world-root assumptions.
+4. Durable effect dispatch queue with adapter workers and receipt re-ingress is live.
+5. Durable timer worker path is live and migration-safe.
+6. `fabric.send` effect with idempotent destination enqueue is implemented for hosted-to-hosted delivery.
+7. World fork/seed from snapshot is implemented with explicit default effect policy.
+8. Failure-injection test suite passes with replay parity guarantees.
+9. Internal ops APIs and observability metrics/logging are in place.
 
 ## Explicitly Out of Scope
 
@@ -448,4 +473,4 @@ Assertions:
 - Multi-region consensus or geo-replication.
 - Billing/chargeback and tenant quota enforcement policies.
 - Complex policy DSL upgrades beyond current cap/policy primitives.
-
+- Embedded-universe implementation and hosted/embedded bridge semantics.
