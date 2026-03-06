@@ -255,15 +255,15 @@ mod tests {
         assert!(names.contains(&"sys/BlobGetParams@1"));
         assert!(names.contains(&"sys/BlobGetReceipt@1"));
         assert!(names.contains(&"sys/BlobGetResult@1"));
+        assert!(names.contains(&"sys/WorkflowContext@1"));
+        assert!(names.contains(&"sys/PureContext@1"));
+        assert!(names.contains(&"sys/PendingEffect@1"));
         assert!(names.contains(&"sys/EffectReceiptEnvelope@1"));
         assert!(names.contains(&"sys/EffectStreamFrame@1"));
         assert!(names.contains(&"sys/EffectReceiptRejected@1"));
         assert!(names.contains(&"sys/PendingEffectSetText@1"));
         assert!(names.contains(&"sys/PendingBatchGroupText@1"));
         assert!(names.contains(&"sys/PendingBatchText@1"));
-        // Plan composition
-        assert!(names.contains(&"sys/PlanHandle@1"));
-        assert!(names.contains(&"sys/PlanError@1"));
         // HTTP/LLM
         assert!(names.contains(&"sys/HttpRequestParams@1"));
         assert!(names.contains(&"sys/HttpRequestReceipt@1"));

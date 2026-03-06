@@ -671,7 +671,7 @@ mod tests {
             key_schema: None,
             abi: ModuleAbi {
                 workflow: Some(WorkflowAbi {
-                    state: SchemaRef::new("sys/PlanError@1").unwrap(),
+                    state: SchemaRef::new("sys/PendingEffect@1").unwrap(),
                     event: SchemaRef::new(crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA).unwrap(),
                     context: None,
                     annotations: None,

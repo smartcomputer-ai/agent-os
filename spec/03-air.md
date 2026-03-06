@@ -251,18 +251,18 @@ Use workflow modules (reducer ABI) for stateful logic; use pure modules for dete
 Modules may declare a `context` schema in their ABI. If omitted, the kernel does **not**
 send a context envelope to that module. Built-in contexts:
 
-- `sys/ReducerContext@1`: reducer call context (now/logical time, entropy, journal metadata, reducer/key).
+- `sys/WorkflowContext@1`: workflow call context (now/logical time, entropy, journal metadata, workflow/key).
 - `sys/PureContext@1`: pure module call context (logical time + journal/manifest metadata).
 
-`sys/ReducerContext@1` fields include `now_ns`, `logical_now_ns`, `journal_height`, `entropy` (64 bytes),
-`event_hash`, `manifest_hash`, `reducer`, `key`, and `cell_mode`. `sys/PureContext@1` includes
+`sys/WorkflowContext@1` fields include `now_ns`, `logical_now_ns`, `journal_height`, `entropy` (64 bytes),
+`event_hash`, `manifest_hash`, `workflow`, `key`, and `cell_mode`. `sys/PureContext@1` includes
 `logical_now_ns`, `journal_height`, `manifest_hash`, and `module`.
 
 See: spec/schemas/defmodule.schema.json
 
 ## 7) Effect Catalog (Built-in v1)
 
-`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so workflow modules, reducers, and adapters all hash the same shapes. Reusable workflow-SDK persistence schemas live under `spec/defs/builtin-schemas-sdk.air.json`. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions by deriving enums from the `defeffect` set.
+`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical effect parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so workflow modules, reducers, and adapters all hash the same shapes. Workflow SDK/runtime support schemas live under `spec/defs/builtin-schemas-sdk.air.json`. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions by deriving enums from the `defeffect` set.
 
 `origin_scope` on each `defeffect` gates who may emit it. The current schema uses compatibility labels: `"reducer"` means workflow-module reducer ABI emission, `"plan"` means non-reducer orchestration origins (system/governance/tooling), and `"both"` allows either. “Micro-effects” are those whose `origin_scope` allows reducers (currently `blob.put`, `blob.get`, `timer.set` in v1).
 
@@ -381,7 +381,7 @@ Workflow modules that emit effects receive normalized receipt events. AIR v1 res
 
 Workflow reducers should include `sys/EffectReceiptEnvelope@1` in ABI event variants as the primary receipt path. `sys/EffectReceiptRejected@1` is optional; if absent and a receipt is malformed, the kernel settles that receipt, marks the instance failed, and drops remaining pending receipts for that instance to avoid clogging execution. Legacy typed receipt events (`sys/TimerFired@1`, `sys/BlobPutResult@1`, `sys/BlobGetResult@1`) are compatibility fallbacks when reducer event schemas still expect those shapes.
 
-Canonical JSON definitions for these schemas (plus their parameter/receipt companions) live in `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so manifests can hash and reference them directly. Reusable SDK state schemas live separately in `spec/defs/builtin-schemas-sdk.air.json`.
+Canonical JSON definitions for built-in effect parameter/receipt schemas live in `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json`. Workflow continuation envelopes, runtime contexts, and reusable SDK state schemas live in `spec/defs/builtin-schemas-sdk.air.json`.
 
 ## 8) Effect Intents and Receipts
 
