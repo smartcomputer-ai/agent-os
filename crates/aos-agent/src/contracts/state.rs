@@ -6,16 +6,10 @@ use super::{
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use aos_wasm_sdk::{PendingEffect, PendingEffects};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct PendingIntent {
-    pub effect_kind: String,
-    pub params_hash: String,
-    pub intent_id: Option<String>,
-    pub cap_slot: Option<String>,
-    pub emitted_at_ns: u64,
-}
+pub type PendingIntent = PendingEffect;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(tag = "$tag", content = "$value")]
@@ -79,7 +73,8 @@ pub struct SessionState {
     pub active_run_id: Option<RunId>,
     pub active_run_config: Option<RunConfig>,
     pub active_tool_batch: Option<ActiveToolBatch>,
-    pub pending_intents: BTreeMap<String, PendingIntent>,
+    #[serde(rename = "pending_intents", alias = "pending_effects")]
+    pub pending_effects: PendingEffects,
     pub pending_blob_gets: BTreeMap<String, Vec<PendingBlobGet>>,
     pub pending_blob_puts: BTreeMap<String, Vec<PendingBlobPut>>,
     pub pending_follow_up_turn: Option<PendingFollowUpTurn>,
@@ -110,7 +105,7 @@ impl Default for SessionState {
             active_run_id: None,
             active_run_config: None,
             active_tool_batch: None,
-            pending_intents: BTreeMap::new(),
+            pending_effects: PendingEffects::new(),
             pending_blob_gets: BTreeMap::new(),
             pending_blob_puts: BTreeMap::new(),
             pending_follow_up_turn: None,

@@ -55,14 +55,24 @@ impl Workflow for SessionWorkflow {
                 }
                 SessionEffectCommand::BlobPut {
                     params, cap_slot, ..
-                } => ctx
-                    .effects()
-                    .emit_raw("blob.put", &params, cap_slot.as_deref()),
+                } => {
+                    if let Some(cap_slot) = cap_slot.as_deref() {
+                        let mut effects = ctx.effects();
+                        effects.sys().blob_put(&params, cap_slot);
+                    } else {
+                        ctx.effects().emit_raw("blob.put", &params, None);
+                    }
+                }
                 SessionEffectCommand::BlobGet {
                     params, cap_slot, ..
-                } => ctx
-                    .effects()
-                    .emit_raw("blob.get", &params, cap_slot.as_deref()),
+                } => {
+                    if let Some(cap_slot) = cap_slot.as_deref() {
+                        let mut effects = ctx.effects();
+                        effects.sys().blob_get(&params, cap_slot);
+                    } else {
+                        ctx.effects().emit_raw("blob.get", &params, None);
+                    }
+                }
             }
         }
         emit_lifecycle_event_if_changed(ctx, prev_lifecycle, prev_run_id);

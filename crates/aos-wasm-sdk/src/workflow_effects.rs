@@ -253,6 +253,7 @@ pub struct PendingEffect {
     pub intent_id: Option<String>,
     pub cap_slot: Option<String>,
     pub emitted_at_ns: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub last_stream_seq: u64,
 }
 
@@ -326,8 +327,13 @@ impl PendingEffect {
     }
 }
 
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+}
+
 /// Workflow-local storage for in-flight effect handles.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(transparent)]
 pub struct PendingEffects {
     by_params_hash: BTreeMap<String, PendingEffect>,
 }
@@ -343,6 +349,23 @@ impl PendingEffects {
 
     pub fn is_empty(&self) -> bool {
         self.by_params_hash.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &PendingEffect)> {
+        self.by_params_hash.iter()
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &PendingEffect> {
+        self.by_params_hash.values()
+    }
+
+    pub fn clear(&mut self) {
+        self.by_params_hash.clear();
+    }
+
+    pub fn contains_effect_kind(&self, effect_kind: &str) -> bool {
+        self.values()
+            .any(|pending| pending.effect_kind == effect_kind)
     }
 
     pub fn insert(&mut self, pending: PendingEffect) -> Option<PendingEffect> {

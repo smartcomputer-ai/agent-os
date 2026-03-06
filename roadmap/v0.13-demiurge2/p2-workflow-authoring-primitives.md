@@ -291,6 +291,17 @@ if let Some(matched) = state.pending_effects.observe(event.continuation()?) {
 This keeps durable state explicit while removing the repetitive
 intent-id/params-hash/effect-kind matching logic from each workflow.
 
+Implemented agent follow-through:
+
+1. `aos-agent::SessionState` now stores SDK `PendingEffects` rather than a
+   bespoke pending-intent map.
+2. `SessionWorkflowEvent` receipt/rejection handling now settles tracked effects
+   through the SDK continuation helpers before falling back to agent-specific
+   tool-batch logic.
+3. `session_workflow.rs` now emits blob sys effects through the SDK namespaced
+   effect surface instead of wiring every sys kind directly through
+   `workflows.rs`.
+
 Still planned above the SDK:
 
 1. `request_llm`

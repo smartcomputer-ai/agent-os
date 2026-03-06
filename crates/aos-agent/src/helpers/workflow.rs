@@ -23,7 +23,7 @@ use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, LlmGenerateReceipt,
     LlmOutputEnvelope, LlmToolCallList, TextOrSecretRef,
 };
-use sha2::{Digest, Sha256};
+use aos_wasm_sdk::{EffectReceiptEnvelope, EffectReceiptRejected};
 
 use super::llm::{
     LlmMappingError, LlmStepContext, LlmToolChoice, SysLlmGenerateParams,
@@ -226,7 +226,9 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
         SessionWorkflowEvent::ReceiptRejected(rejected) => {
             on_receipt_rejected(state, rejected, &mut out)?
         }
-        SessionWorkflowEvent::StreamFrame(_frame) => {}
+        SessionWorkflowEvent::StreamFrame(frame) => {
+            let _ = state.pending_effects.observe(frame.into());
+        }
         SessionWorkflowEvent::Noop => {}
     }
 
@@ -721,32 +723,20 @@ fn dispatch_next_ready_tool_group(
                 };
                 let blob_get = BlobGetParams { blob_ref };
                 let blob_get_hash = hash_cbor(&blob_get);
-                let already_pending = state.pending_blob_gets.contains_key(&blob_get_hash);
-                state
-                    .pending_blob_gets
-                    .entry(blob_get_hash.clone())
-                    .or_default()
-                    .push(PendingBlobGet {
-                        kind: PendingBlobGetKind::ToolCallArguments {
-                            tool_batch_id: batch.tool_batch_id.clone(),
-                            call_id: call_id.clone(),
-                        },
-                        emitted_at_ns: state.updated_at,
-                    });
-                if !already_pending
-                    && !out.effects.iter().any(|effect| {
+                let pending_kind = PendingBlobGetKind::ToolCallArguments {
+                    tool_batch_id: batch.tool_batch_id.clone(),
+                    call_id: call_id.clone(),
+                };
+                let already_pending = state.pending_blob_gets.contains_key(&blob_get_hash)
+                    || out.effects.iter().any(|effect| {
                         matches!(
                             effect,
                             SessionEffectCommand::BlobGet { params_hash, .. }
                                 if params_hash == &blob_get_hash
                         )
-                    })
-                {
-                    out.effects.push(SessionEffectCommand::BlobGet {
-                        params: blob_get,
-                        cap_slot: Some("blob".into()),
-                        params_hash: blob_get_hash,
                     });
+                enqueue_blob_get(state, blob_get.blob_ref, pending_kind, out)?;
+                if !already_pending {
                     emitted_for_group = emitted_for_group.saturating_add(1);
                 }
                 batch
@@ -1075,7 +1065,7 @@ fn has_pending_tool_result_blob_get(
 
 fn handle_standalone_host_session_open_receipt(
     state: &mut SessionState,
-    envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
+    envelope: &EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
     if envelope.effect_kind != "host.session.open" {
@@ -1106,85 +1096,44 @@ fn handle_standalone_host_session_open_receipt(
     Ok(true)
 }
 
-fn on_receipt_envelope(
+fn handle_llm_generate_receipt(
     state: &mut SessionState,
-    envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
+    envelope: &EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
-    if handle_pending_blob_get_receipt(state, envelope, out)? {
-        recompute_in_flight_effects(state);
-        return Ok(());
-    }
-    if handle_pending_blob_put_receipt(state, envelope, out)? {
-        recompute_in_flight_effects(state);
-        return Ok(());
-    }
-    if settle_tool_call_from_receipt(state, envelope, out)? {
-        recompute_in_flight_effects(state);
-        return Ok(());
-    }
-    if handle_standalone_host_session_open_receipt(state, envelope, out)? {
-        remove_pending_intent_for_receipt(
-            state,
-            envelope.params_hash.as_ref(),
-            envelope.intent_id.as_str(),
-        );
-        recompute_in_flight_effects(state);
+    if envelope.status != "ok" {
+        fail_run(state)?;
         return Ok(());
     }
 
-    remove_pending_intent_for_receipt(
+    let Ok(receipt) = serde_cbor::from_slice::<LlmGenerateReceipt>(&envelope.receipt_payload)
+    else {
+        fail_run(state)?;
+        return Ok(());
+    };
+
+    if enqueue_blob_get(
         state,
-        envelope.params_hash.as_ref(),
-        envelope.intent_id.as_str(),
-    );
-
-    if envelope.effect_kind == "llm.generate" {
-        if envelope.status != "ok" {
-            transition_lifecycle(state, SessionLifecycle::Failed)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
-            clear_active_run(state);
-            recompute_in_flight_effects(state);
-            return Ok(());
-        }
-
-        let parsed = serde_cbor::from_slice::<LlmGenerateReceipt>(&envelope.receipt_payload);
-        let Ok(receipt) = parsed else {
-            transition_lifecycle(state, SessionLifecycle::Failed)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
-            clear_active_run(state);
-            recompute_in_flight_effects(state);
-            return Ok(());
-        };
-        if let Err(_err) = enqueue_blob_get(
-            state,
-            receipt.output_ref,
-            PendingBlobGetKind::LlmOutputEnvelope,
-            out,
-        ) {
-            transition_lifecycle(state, SessionLifecycle::Failed)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
-            clear_active_run(state);
-            recompute_in_flight_effects(state);
-            return Ok(());
-        }
+        receipt.output_ref,
+        PendingBlobGetKind::LlmOutputEnvelope,
+        out,
+    )
+    .is_err()
+    {
+        fail_run(state)?;
     }
 
-    recompute_in_flight_effects(state);
     Ok(())
 }
 
-fn on_receipt_rejected(
-    state: &mut SessionState,
-    rejected: &crate::contracts::EffectReceiptRejected,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+fn rejected_as_error_envelope(rejected: &EffectReceiptRejected) -> EffectReceiptEnvelope {
     let payload = serde_json::json!({
         "status": "error",
         "error_code": rejected.error_code,
         "error_message": rejected.error_message,
     });
-    let envelope = aos_wasm_sdk::EffectReceiptEnvelope {
+
+    EffectReceiptEnvelope {
         origin_module_id: rejected.origin_module_id.clone(),
         origin_instance_key: rejected.origin_instance_key.clone(),
         intent_id: rejected.intent_id.clone(),
@@ -1196,29 +1145,68 @@ fn on_receipt_rejected(
         adapter_id: rejected.adapter_id.clone(),
         cost_cents: None,
         signature: Vec::new(),
-    };
-    if handle_pending_blob_get_receipt(state, &envelope, out)?
-        || handle_pending_blob_put_receipt(state, &envelope, out)?
-        || settle_tool_call_from_receipt(state, &envelope, out)?
-    {
-        remove_pending_intent_for_receipt(
-            state,
-            rejected.params_hash.as_ref(),
-            rejected.intent_id.as_str(),
-        );
+    }
+}
+
+fn on_receipt_envelope(
+    state: &mut SessionState,
+    envelope: &EffectReceiptEnvelope,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    if let Some(matched) = state.pending_effects.settle(envelope.into()) {
+        match matched.pending.effect_kind.as_str() {
+            "blob.get" => {
+                let _ = handle_pending_blob_get_receipt(state, envelope, out)?;
+            }
+            "blob.put" => {
+                let _ = handle_pending_blob_put_receipt(state, envelope, out)?;
+            }
+            "host.session.open" => {
+                let _ = handle_standalone_host_session_open_receipt(state, envelope, out)?;
+            }
+            "llm.generate" => handle_llm_generate_receipt(state, envelope, out)?,
+            _ => {}
+        }
         recompute_in_flight_effects(state);
         return Ok(());
     }
 
-    remove_pending_intent_for_receipt(
-        state,
-        rejected.params_hash.as_ref(),
-        rejected.intent_id.as_str(),
-    );
+    if settle_tool_call_from_receipt(state, envelope, out)? {
+        recompute_in_flight_effects(state);
+        return Ok(());
+    }
 
-    transition_lifecycle(state, SessionLifecycle::Failed)
-        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
-    clear_active_run(state);
+    recompute_in_flight_effects(state);
+    Ok(())
+}
+
+fn on_receipt_rejected(
+    state: &mut SessionState,
+    rejected: &EffectReceiptRejected,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    let envelope = rejected_as_error_envelope(rejected);
+    if let Some(matched) = state.pending_effects.settle(rejected.into()) {
+        match matched.pending.effect_kind.as_str() {
+            "blob.get" => {
+                let _ = handle_pending_blob_get_receipt(state, &envelope, out)?;
+            }
+            "blob.put" => {
+                let _ = handle_pending_blob_put_receipt(state, &envelope, out)?;
+            }
+            "host.session.open" => {
+                let _ = handle_standalone_host_session_open_receipt(state, &envelope, out)?;
+            }
+            "llm.generate" => fail_run(state)?,
+            _ => {}
+        }
+        recompute_in_flight_effects(state);
+        return Ok(());
+    }
+
+    if !settle_tool_call_from_receipt(state, &envelope, out)? {
+        fail_run(state)?;
+    }
     recompute_in_flight_effects(state);
     Ok(())
 }
@@ -1261,37 +1249,7 @@ fn pop_pending_blob_put(state: &mut SessionState, params_hash: &str) -> Option<P
     next
 }
 
-fn remove_pending_intent_for_receipt(
-    state: &mut SessionState,
-    params_hash: Option<&String>,
-    intent_id: &str,
-) {
-    if let Some(params_hash) = params_hash {
-        state.pending_intents.remove(params_hash);
-        return;
-    }
-
-    if let Some((key, _intent)) = state
-        .pending_intents
-        .iter()
-        .find(|(_, pending)| pending.intent_id.as_deref() == Some(intent_id))
-        .map(|(k, v)| (k.clone(), v.clone()))
-    {
-        state.pending_intents.remove(&key);
-    }
-}
-
 fn recompute_in_flight_effects(state: &mut SessionState) {
-    let pending_blob_gets = state
-        .pending_blob_gets
-        .values()
-        .map(|items| items.len())
-        .sum::<usize>();
-    let pending_blob_puts = state
-        .pending_blob_puts
-        .values()
-        .map(|items| items.len())
-        .sum::<usize>();
     let pending_tool_effect_receipts = state
         .active_tool_batch
         .as_ref()
@@ -1315,11 +1273,8 @@ fn recompute_in_flight_effects(state: &mut SessionState) {
         })
         .unwrap_or(0);
 
-    let total = state.pending_intents.len()
-        + pending_blob_gets
-        + pending_blob_puts
-        + pending_tool_effect_receipts
-        + pending_host_loop_calls;
+    let total =
+        state.pending_effects.len() + pending_tool_effect_receipts + pending_host_loop_calls;
     state.in_flight_effects = total as u64;
 }
 
@@ -1349,6 +1304,12 @@ fn enqueue_blob_get(
             emitted_at_ns: state.updated_at,
         });
     if !already_pending {
+        state.pending_effects.insert(PendingIntent::new(
+            "blob.get",
+            params_hash.clone(),
+            Some("blob".into()),
+            state.updated_at,
+        ));
         out.effects.push(SessionEffectCommand::BlobGet {
             params,
             cap_slot: Some("blob".into()),
@@ -1380,6 +1341,12 @@ fn enqueue_blob_put(
             emitted_at_ns: state.updated_at,
         });
     if !already_pending {
+        state.pending_effects.insert(PendingIntent::new(
+            "blob.put",
+            params_hash.clone(),
+            Some("blob".into()),
+            state.updated_at,
+        ));
         out.effects.push(SessionEffectCommand::BlobPut {
             params,
             cap_slot: Some("blob".into()),
@@ -1685,7 +1652,7 @@ fn dispatch_queued_llm_turn(
     if state.queued_llm_message_refs.is_none() {
         return Ok(());
     }
-    if !state.pending_intents.is_empty() || state.pending_follow_up_turn.is_some() {
+    if !state.pending_effects.is_empty() || state.pending_follow_up_turn.is_some() {
         return Ok(());
     }
 
@@ -1748,16 +1715,12 @@ fn dispatch_queued_llm_turn(
     let params = materialize_llm_generate_params_with_prompt_refs(&run_config, step_ctx)
         .map_err(map_llm_mapping_error)?;
     let params_hash = hash_llm_params(&params);
-    state.pending_intents.insert(
+    state.pending_effects.insert(PendingIntent::new(
+        "llm.generate",
         params_hash.clone(),
-        PendingIntent {
-            effect_kind: "llm.generate".into(),
-            params_hash: params_hash.clone(),
-            intent_id: None,
-            cap_slot: Some("llm".into()),
-            emitted_at_ns: state.updated_at,
-        },
-    );
+        Some("llm".into()),
+        state.updated_at,
+    ));
     out.effects.push(SessionEffectCommand::LlmGenerate {
         params,
         cap_slot: Some("llm".into()),
@@ -1790,9 +1753,8 @@ fn should_auto_open_host_session(state: &SessionState) -> bool {
         return false;
     }
     !state
-        .pending_intents
-        .values()
-        .any(|pending| pending.effect_kind == "host.session.open")
+        .pending_effects
+        .contains_effect_kind("host.session.open")
 }
 
 fn emit_auto_host_session_open(
@@ -1806,16 +1768,12 @@ fn emit_auto_host_session_open(
     )
     .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
     let params_hash = hash_cbor(&params);
-    state.pending_intents.insert(
+    state.pending_effects.insert(PendingIntent::new(
+        "host.session.open",
         params_hash.clone(),
-        PendingIntent {
-            effect_kind: "host.session.open".into(),
-            params_hash: params_hash.clone(),
-            intent_id: None,
-            cap_slot: Some("host".into()),
-            emitted_at_ns: state.updated_at,
-        },
-    );
+        Some("host".into()),
+        state.updated_at,
+    ));
     out.effects.push(SessionEffectCommand::ToolEffect {
         kind: ToolEffectKind::HostSessionOpen,
         params_json: serde_json::to_string(&params).unwrap_or_else(|_| "{}".into()),
@@ -2084,7 +2042,7 @@ fn clear_active_run(state: &mut SessionState) {
     state.active_run_id = None;
     state.active_run_config = None;
     state.active_tool_batch = None;
-    state.pending_intents.clear();
+    state.pending_effects.clear();
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
     state.pending_follow_up_turn = None;
@@ -2099,7 +2057,7 @@ fn enforce_runtime_limits(
     limits: SessionRuntimeLimits,
 ) -> Result<(), SessionReduceError> {
     if let Some(max) = limits.max_pending_intents {
-        if state.pending_intents.len() as u64 > max {
+        if state.pending_effects.len() as u64 > max {
             return Err(SessionReduceError::TooManyPendingIntents);
         }
     }
@@ -2130,23 +2088,7 @@ fn hash_tool_plan(plan: &ToolBatchPlan) -> String {
 }
 
 fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
-    let bytes = serde_cbor::to_vec(value).unwrap_or_default();
-    let digest = Sha256::digest(bytes);
-    let mut out = String::from("sha256:");
-    for byte in digest {
-        let hi = byte >> 4;
-        let lo = byte & 0x0f;
-        out.push(nibble_to_hex(hi));
-        out.push(nibble_to_hex(lo));
-    }
-    out
-}
-
-fn nibble_to_hex(n: u8) -> char {
-    match n {
-        0..=9 => (b'0' + n) as char,
-        _ => (b'a' + (n - 10)) as char,
-    }
+    aos_wasm_sdk::effect_params_hash(value).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -2245,7 +2187,7 @@ mod tests {
                 ..
             })
         ));
-        assert_eq!(state.pending_intents.len(), 1);
+        assert_eq!(state.pending_effects.len(), 1);
         assert!(state.pending_blob_puts.is_empty());
         assert!(state.queued_llm_message_refs.is_some());
         assert_eq!(state.in_flight_effects, 1);
@@ -2413,7 +2355,7 @@ mod tests {
                 .iter()
                 .any(|effect| matches!(effect, SessionEffectCommand::LlmGenerate { .. }))
         );
-        assert_eq!(state.pending_intents.len(), 1);
+        assert_eq!(state.pending_effects.len(), 1);
     }
 
     #[test]
