@@ -263,7 +263,7 @@ pub(super) fn dispatch_next_ready_tool_group(
                     tool_batch_id: batch.tool_batch_id.clone(),
                     call_id: call_id.clone(),
                 };
-                let already_pending = state.pending_blob_gets.contains_key(&blob_get_hash)
+                let already_pending = state.pending_blob_gets.contains(&blob_get_hash)
                     || out.effects.iter().any(|effect| {
                         matches!(
                             effect,

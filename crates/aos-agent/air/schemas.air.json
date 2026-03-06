@@ -232,36 +232,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/PendingToolEffectSet@1",
-    "type": {
-      "map": {
-        "key": { "text": {} },
-        "value": { "ref": "sys/PendingEffect@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/PendingToolBatchGroup@1",
-    "type": {
-      "record": {
-        "keys": { "list": { "text": {} } },
-        "terminal_keys": { "list": { "text": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/PendingToolExecution@1",
-    "type": {
-      "record": {
-        "groups": { "list": { "ref": "aos.agent/PendingToolBatchGroup@1" } },
-        "next_group_index": { "nat": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "aos.agent/ActiveToolBatch@1",
     "type": {
       "record": {
@@ -275,8 +245,8 @@
             "value": { "ref": "aos.agent/ToolCallStatus@1" }
           }
         },
-        "pending_effects": { "ref": "aos.agent/PendingToolEffectSet@1" },
-        "execution": { "ref": "aos.agent/PendingToolExecution@1" },
+        "pending_effects": { "ref": "sys/PendingEffectSetText@1" },
+        "execution": { "ref": "sys/PendingBatchText@1" },
         "llm_results": {
           "map": {
             "key": { "text": {} },
@@ -546,6 +516,26 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/SharedPendingBlobGet@1",
+    "type": {
+      "record": {
+        "pending": { "ref": "sys/PendingEffect@1" },
+        "waiters": { "list": { "ref": "aos.agent/PendingBlobGet@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SharedPendingBlobPut@1",
+    "type": {
+      "record": {
+        "pending": { "ref": "sys/PendingEffect@1" },
+        "waiters": { "list": { "ref": "aos.agent/PendingBlobPut@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/SessionState@1",
     "type": {
       "record": {
@@ -566,13 +556,13 @@
         "pending_blob_gets": {
           "map": {
             "key": { "hash": {} },
-            "value": { "list": { "ref": "aos.agent/PendingBlobGet@1" } }
+            "value": { "ref": "aos.agent/SharedPendingBlobGet@1" }
           }
         },
         "pending_blob_puts": {
           "map": {
             "key": { "hash": {} },
-            "value": { "list": { "ref": "aos.agent/PendingBlobPut@1" } }
+            "value": { "ref": "aos.agent/SharedPendingBlobPut@1" }
           }
         },
         "pending_follow_up_turn": {

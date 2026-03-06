@@ -601,14 +601,15 @@ fn on_receipt_envelope(
     envelope: &EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
+    if handle_pending_blob_get_receipt(state, envelope, out)?
+        || handle_pending_blob_put_receipt(state, envelope, out)?
+    {
+        recompute_in_flight_effects(state);
+        return Ok(());
+    }
+
     if let Some(matched) = state.pending_effects.settle(envelope.into()) {
         match matched.pending.effect_kind.as_str() {
-            "blob.get" => {
-                let _ = handle_pending_blob_get_receipt(state, envelope, out)?;
-            }
-            "blob.put" => {
-                let _ = handle_pending_blob_put_receipt(state, envelope, out)?;
-            }
             "host.session.open" => {
                 let _ = handle_standalone_host_session_open_receipt(state, envelope, out)?;
             }
@@ -634,14 +635,15 @@ fn on_receipt_rejected(
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
     let envelope = rejected_as_error_envelope(rejected);
+    if handle_pending_blob_get_receipt(state, &envelope, out)?
+        || handle_pending_blob_put_receipt(state, &envelope, out)?
+    {
+        recompute_in_flight_effects(state);
+        return Ok(());
+    }
+
     if let Some(matched) = state.pending_effects.settle(rejected.into()) {
         match matched.pending.effect_kind.as_str() {
-            "blob.get" => {
-                let _ = handle_pending_blob_get_receipt(state, &envelope, out)?;
-            }
-            "blob.put" => {
-                let _ = handle_pending_blob_put_receipt(state, &envelope, out)?;
-            }
             "host.session.open" => {
                 let _ = handle_standalone_host_session_open_receipt(state, &envelope, out)?;
             }
@@ -680,8 +682,11 @@ fn recompute_in_flight_effects(state: &mut SessionState) {
         })
         .unwrap_or(0);
 
-    let total =
-        state.pending_effects.len() + pending_tool_effect_receipts + pending_host_loop_calls;
+    let total = state.pending_effects.len()
+        + state.pending_blob_gets.len()
+        + state.pending_blob_puts.len()
+        + pending_tool_effect_receipts
+        + pending_host_loop_calls;
     state.in_flight_effects = total as u64;
 }
 
@@ -708,7 +713,11 @@ fn dispatch_queued_llm_turn(
     if state.queued_llm_message_refs.is_none() {
         return Ok(());
     }
-    if !state.pending_effects.is_empty() || state.pending_follow_up_turn.is_some() {
+    if !state.pending_effects.is_empty()
+        || !state.pending_blob_gets.is_empty()
+        || !state.pending_blob_puts.is_empty()
+        || state.pending_follow_up_turn.is_some()
+    {
         return Ok(());
     }
 
@@ -1022,7 +1031,10 @@ fn enforce_runtime_limits(
     limits: SessionRuntimeLimits,
 ) -> Result<(), SessionReduceError> {
     if let Some(max) = limits.max_pending_effects {
-        if state.pending_effects.len() as u64 > max {
+        let total_pending = state.pending_effects.len()
+            + state.pending_blob_gets.len()
+            + state.pending_blob_puts.len();
+        if total_pending as u64 > max {
             return Err(SessionReduceError::TooManyPendingEffects);
         }
     }
@@ -1046,19 +1058,6 @@ fn stamp_timestamps(state: &mut SessionState, event: &SessionWorkflowEvent) {
 
 fn hash_tool_plan(plan: &ToolBatchPlan) -> String {
     hash_cbor(plan)
-}
-
-fn pending_effect_from_params<T: serde::Serialize>(
-    state: &SessionState,
-    effect_kind: &'static str,
-    params: &T,
-    cap_slot: Option<&str>,
-) -> PendingEffect {
-    let cap_slot = cap_slot.map(ToString::to_string);
-    PendingEffect::from_params(effect_kind, params, cap_slot.clone(), state.updated_at)
-        .unwrap_or_else(|_| {
-            PendingEffect::new(effect_kind, String::new(), cap_slot, state.updated_at)
-        })
 }
 
 fn begin_pending_effect<T: serde::Serialize>(

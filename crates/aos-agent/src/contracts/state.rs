@@ -6,7 +6,7 @@ use super::{
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use aos_wasm_sdk::PendingEffects;
+use aos_wasm_sdk::{PendingEffects, SharedPendingEffects};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -72,8 +72,8 @@ pub struct SessionState {
     pub active_run_config: Option<RunConfig>,
     pub active_tool_batch: Option<ActiveToolBatch>,
     pub pending_effects: PendingEffects,
-    pub pending_blob_gets: BTreeMap<String, Vec<PendingBlobGet>>,
-    pub pending_blob_puts: BTreeMap<String, Vec<PendingBlobPut>>,
+    pub pending_blob_gets: SharedPendingEffects<PendingBlobGet>,
+    pub pending_blob_puts: SharedPendingEffects<PendingBlobPut>,
     pub pending_follow_up_turn: Option<PendingFollowUpTurn>,
     pub queued_llm_message_refs: Option<Vec<String>>,
     pub conversation_message_refs: Vec<String>,
@@ -103,8 +103,8 @@ impl Default for SessionState {
             active_run_config: None,
             active_tool_batch: None,
             pending_effects: PendingEffects::new(),
-            pending_blob_gets: BTreeMap::new(),
-            pending_blob_puts: BTreeMap::new(),
+            pending_blob_gets: SharedPendingEffects::new(),
+            pending_blob_puts: SharedPendingEffects::new(),
             pending_follow_up_turn: None,
             queued_llm_message_refs: None,
             conversation_message_refs: Vec::new(),

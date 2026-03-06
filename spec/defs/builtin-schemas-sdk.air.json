@@ -1,0 +1,32 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "sys/PendingEffectSetText@1",
+    "type": {
+      "map": {
+        "key": { "text": {} },
+        "value": { "ref": "sys/PendingEffect@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/PendingBatchGroupText@1",
+    "type": {
+      "record": {
+        "keys": { "list": { "text": {} } },
+        "terminal_keys": { "list": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/PendingBatchText@1",
+    "type": {
+      "record": {
+        "groups": { "list": { "ref": "sys/PendingBatchGroupText@1" } },
+        "next_group_index": { "nat": {} }
+      }
+    }
+  }
+]

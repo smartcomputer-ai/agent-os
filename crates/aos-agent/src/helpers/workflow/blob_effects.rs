@@ -1,29 +1,40 @@
 use super::*;
 
-fn enqueue_pending_blob_effect<P>(
-    pending_entries: &mut BTreeMap<String, Vec<P>>,
-    pending_effects: &mut aos_wasm_sdk::PendingEffects,
-    pending: PendingEffect,
+fn enqueue_pending_blob_effect<P: Clone, T: serde::Serialize>(
+    pending_entries: &mut aos_wasm_sdk::SharedPendingEffects<P>,
+    effect_kind: &'static str,
+    params: &T,
+    cap_slot: Option<&str>,
+    emitted_at_ns: u64,
     pending_entry: P,
     make_effect: impl FnOnce(String) -> SessionEffectCommand,
     out: &mut SessionReduceOutput,
 ) -> String {
-    let params_hash = pending.params_hash.clone();
-    let already_pending = pending_entries.contains_key(&params_hash);
-    pending_entries
-        .entry(params_hash.clone())
-        .or_default()
-        .push(pending_entry);
-    if !already_pending {
-        pending_effects.insert(pending);
+    let cap_slot = cap_slot.map(ToString::to_string);
+    let begin = match pending_entries.begin(
+        effect_kind,
+        params,
+        cap_slot.clone(),
+        emitted_at_ns,
+        pending_entry.clone(),
+    ) {
+        Ok(begin) => begin,
+        Err(_) => {
+            let pending = PendingEffect::new(effect_kind, String::new(), cap_slot, emitted_at_ns);
+            pending_entries.attach(pending, pending_entry)
+        }
+    };
+    let params_hash = begin.pending.params_hash.clone();
+    if begin.should_emit {
         out.effects.push(make_effect(params_hash.clone()));
     }
     params_hash
 }
 
 pub(super) fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
-    state.pending_blob_puts.values().any(|items| {
-        items
+    state.pending_blob_puts.values().any(|shared| {
+        shared
+            .waiters
             .iter()
             .any(|pending| matches!(pending.kind, PendingBlobPutKind::ToolDefinition { .. }))
     })
@@ -34,8 +45,8 @@ fn has_pending_tool_result_blob_get(
     tool_batch_id: &crate::contracts::ToolBatchId,
     call_id: &str,
 ) -> bool {
-    state.pending_blob_gets.values().any(|items| {
-        items.iter().any(|pending| {
+    state.pending_blob_gets.values().any(|shared| {
+        shared.waiters.iter().any(|pending| {
             matches!(
                 &pending.kind,
                 PendingBlobGetKind::ToolResultBlob {
@@ -55,17 +66,18 @@ pub(super) fn enqueue_blob_get(
     out: &mut SessionReduceOutput,
 ) -> Result<String, SessionReduceError> {
     let params = BlobGetParams { blob_ref };
-    let pending = pending_effect_from_params(state, "blob.get", &params, Some("blob"));
     Ok(enqueue_pending_blob_effect(
         &mut state.pending_blob_gets,
-        &mut state.pending_effects,
-        pending,
+        "blob.get",
+        &params,
+        Some("blob"),
+        state.updated_at,
         PendingBlobGet {
             kind,
             emitted_at_ns: state.updated_at,
         },
         |params_hash| SessionEffectCommand::BlobGet {
-            params,
+            params: params.clone(),
             cap_slot: Some("blob".into()),
             params_hash,
         },
@@ -84,60 +96,23 @@ pub(super) fn enqueue_blob_put(
         blob_ref: None,
         refs: None,
     };
-    let pending = pending_effect_from_params(state, "blob.put", &params, Some("blob"));
     enqueue_pending_blob_effect(
         &mut state.pending_blob_puts,
-        &mut state.pending_effects,
-        pending,
+        "blob.put",
+        &params,
+        Some("blob"),
+        state.updated_at,
         PendingBlobPut {
             kind,
             emitted_at_ns: state.updated_at,
         },
         |params_hash| SessionEffectCommand::BlobPut {
-            params,
+            params: params.clone(),
             cap_slot: Some("blob".into()),
             params_hash,
         },
         out,
     )
-}
-
-fn pop_pending_blob_get(state: &mut SessionState, params_hash: &str) -> Option<PendingBlobGet> {
-    let mut should_remove = false;
-    let next = if let Some(items) = state.pending_blob_gets.get_mut(params_hash) {
-        let value = if items.is_empty() {
-            None
-        } else {
-            Some(items.remove(0))
-        };
-        should_remove = items.is_empty();
-        value
-    } else {
-        None
-    };
-    if should_remove {
-        state.pending_blob_gets.remove(params_hash);
-    }
-    next
-}
-
-fn pop_pending_blob_put(state: &mut SessionState, params_hash: &str) -> Option<PendingBlobPut> {
-    let mut should_remove = false;
-    let next = if let Some(items) = state.pending_blob_puts.get_mut(params_hash) {
-        let value = if items.is_empty() {
-            None
-        } else {
-            Some(items.remove(0))
-        };
-        should_remove = items.is_empty();
-        value
-    } else {
-        None
-    };
-    if should_remove {
-        state.pending_blob_puts.remove(params_hash);
-    }
-    next
 }
 
 fn decode_blob_inline_text(bytes: &[u8]) -> (String, bool) {
@@ -400,10 +375,7 @@ pub(super) fn handle_pending_blob_get_receipt(
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
-    let Some(params_hash) = envelope.params_hash.as_ref() else {
-        return Ok(false);
-    };
-    let Some(pending) = pop_pending_blob_get(state, params_hash.as_str()) else {
+    let Some(matched) = state.pending_blob_gets.settle(envelope.into()) else {
         return Ok(false);
     };
 
@@ -414,47 +386,66 @@ pub(super) fn handle_pending_blob_get_receipt(
         envelope.decode_receipt_payload::<BlobGetReceipt>().ok()
     };
 
-    match pending.kind {
-        PendingBlobGetKind::LlmOutputEnvelope => {
-            let Some(receipt) = receipt else {
-                fail_run(state)?;
-                return Ok(true);
-            };
-            on_llm_output_blob(state, receipt, out)
-        }
-        PendingBlobGetKind::LlmToolCalls => {
-            let Some(receipt) = receipt else {
-                fail_run(state)?;
-                return Ok(true);
-            };
-            on_llm_tool_calls_blob(state, envelope, receipt, out)
-        }
-        PendingBlobGetKind::ToolCallArguments {
-            tool_batch_id,
-            call_id,
-        } => {
-            if failed {
-                if let Some(batch) = state.active_tool_batch.as_mut()
-                    && batch.tool_batch_id == tool_batch_id
-                {
-                    super::tool_batch::fail_tool_call(
-                        batch,
-                        &call_id,
-                        "tool_arguments_ref_failed",
-                        "blob.get for tool arguments failed",
-                    );
-                }
-                super::tool_batch::dispatch_next_ready_tool_group(state, out)?;
-                return Ok(true);
+    let shared_receipt = receipt;
+    for pending in matched.waiters {
+        match pending.kind {
+            PendingBlobGetKind::LlmOutputEnvelope => {
+                let Some(receipt) = shared_receipt.clone() else {
+                    fail_run(state)?;
+                    return Ok(true);
+                };
+                on_llm_output_blob(state, receipt, out)?;
             }
-            on_tool_call_arguments_blob(state, tool_batch_id, call_id, receipt, out)
+            PendingBlobGetKind::LlmToolCalls => {
+                let Some(receipt) = shared_receipt.clone() else {
+                    fail_run(state)?;
+                    return Ok(true);
+                };
+                on_llm_tool_calls_blob(state, envelope, receipt, out)?;
+            }
+            PendingBlobGetKind::ToolCallArguments {
+                tool_batch_id,
+                call_id,
+            } => {
+                if failed {
+                    if let Some(batch) = state.active_tool_batch.as_mut()
+                        && batch.tool_batch_id == tool_batch_id
+                    {
+                        super::tool_batch::fail_tool_call(
+                            batch,
+                            &call_id,
+                            "tool_arguments_ref_failed",
+                            "blob.get for tool arguments failed",
+                        );
+                    }
+                    super::tool_batch::dispatch_next_ready_tool_group(state, out)?;
+                    continue;
+                }
+                on_tool_call_arguments_blob(
+                    state,
+                    tool_batch_id,
+                    call_id,
+                    shared_receipt.clone(),
+                    out,
+                )?;
+            }
+            PendingBlobGetKind::ToolResultBlob {
+                tool_batch_id,
+                call_id,
+                blob_ref,
+            } => {
+                on_tool_result_blob(
+                    state,
+                    tool_batch_id,
+                    call_id,
+                    blob_ref,
+                    shared_receipt.clone(),
+                    out,
+                )?;
+            }
         }
-        PendingBlobGetKind::ToolResultBlob {
-            tool_batch_id,
-            call_id,
-            blob_ref,
-        } => on_tool_result_blob(state, tool_batch_id, call_id, blob_ref, receipt, out),
     }
+    Ok(true)
 }
 
 pub(super) fn handle_pending_blob_put_receipt(
@@ -462,10 +453,7 @@ pub(super) fn handle_pending_blob_put_receipt(
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
-    let Some(params_hash) = envelope.params_hash.as_ref() else {
-        return Ok(false);
-    };
-    let Some(pending) = pop_pending_blob_put(state, params_hash.as_str()) else {
+    let Some(matched) = state.pending_blob_puts.settle(envelope.into()) else {
         return Ok(false);
     };
 
@@ -476,50 +464,52 @@ pub(super) fn handle_pending_blob_put_receipt(
         envelope.decode_receipt_payload::<BlobPutReceipt>().ok()
     };
 
-    match pending.kind {
-        PendingBlobPutKind::ToolDefinition { tool_id } => {
-            let Some(receipt) = receipt else {
-                fail_run(state)?;
-                return Ok(true);
-            };
-            let blob_ref = receipt.blob_ref.as_str().to_string();
-            if let Some(spec) = state.tool_registry.get_mut(&tool_id) {
-                spec.tool_ref = blob_ref.clone();
-            }
-            for tool in &mut state.effective_tools.ordered_tools {
-                if tool.tool_id == tool_id {
-                    tool.tool_ref = blob_ref.clone();
+    let shared_receipt = receipt;
+    for pending in matched.waiters {
+        match pending.kind {
+            PendingBlobPutKind::ToolDefinition { tool_id } => {
+                let Some(receipt) = shared_receipt.clone() else {
+                    fail_run(state)?;
+                    return Ok(true);
+                };
+                let blob_ref = receipt.blob_ref.as_str().to_string();
+                if let Some(spec) = state.tool_registry.get_mut(&tool_id) {
+                    spec.tool_ref = blob_ref.clone();
                 }
-            }
-            if !has_pending_tool_definition_puts(state) {
-                state.tool_refs_materialized = true;
-                dispatch_queued_llm_turn(state, out)?;
-            }
-            Ok(true)
-        }
-        PendingBlobPutKind::FollowUpMessage { index } => {
-            let Some(receipt) = receipt else {
-                fail_run(state)?;
-                return Ok(true);
-            };
-            if let Some(turn) = state.pending_follow_up_turn.as_mut() {
-                turn.blob_refs_by_index
-                    .insert(index, receipt.blob_ref.as_str().to_string());
-                if turn.blob_refs_by_index.len() as u64 >= turn.expected_messages {
-                    let mut refs = Vec::new();
-                    for idx in 0..turn.expected_messages {
-                        if let Some(value) = turn.blob_refs_by_index.get(&idx) {
-                            refs.push(value.clone());
-                        }
+                for tool in &mut state.effective_tools.ordered_tools {
+                    if tool.tool_id == tool_id {
+                        tool.tool_ref = blob_ref.clone();
                     }
-                    let mut next_refs = turn.base_message_refs.clone();
-                    next_refs.extend(refs);
-                    state.conversation_message_refs = next_refs.clone();
-                    state.pending_follow_up_turn = None;
-                    queue_llm_turn(state, next_refs, out)?;
+                }
+                if !has_pending_tool_definition_puts(state) {
+                    state.tool_refs_materialized = true;
+                    dispatch_queued_llm_turn(state, out)?;
                 }
             }
-            Ok(true)
+            PendingBlobPutKind::FollowUpMessage { index } => {
+                let Some(receipt) = shared_receipt.clone() else {
+                    fail_run(state)?;
+                    return Ok(true);
+                };
+                if let Some(turn) = state.pending_follow_up_turn.as_mut() {
+                    turn.blob_refs_by_index
+                        .insert(index, receipt.blob_ref.as_str().to_string());
+                    if turn.blob_refs_by_index.len() as u64 >= turn.expected_messages {
+                        let mut refs = Vec::new();
+                        for idx in 0..turn.expected_messages {
+                            if let Some(value) = turn.blob_refs_by_index.get(&idx) {
+                                refs.push(value.clone());
+                            }
+                        }
+                        let mut next_refs = turn.base_message_refs.clone();
+                        next_refs.extend(refs);
+                        state.conversation_message_refs = next_refs.clone();
+                        state.pending_follow_up_turn = None;
+                        queue_llm_turn(state, next_refs, out)?;
+                    }
+                }
+            }
         }
     }
+    Ok(true)
 }
