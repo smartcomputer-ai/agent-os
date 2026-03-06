@@ -208,6 +208,12 @@ Semantics:
 - World migration does not affect timer durability.
 - There is no global total order across timer shards; only due-time ordering within a shard scan.
 
+Recurring schedule note:
+
+- `P3` only implements durable delivery for one-shot `timer.set` intents.
+- Recurring schedules are deferred until after the first hosted runtime pass, once leases, wakeups, migration, and one-shot durability are proven end to end.
+- When added later, the schedule engine should own recurring metadata and materialize one-shot timer instances onto the existing due queue, rather than replacing the timer runtime itself.
+
 ### 6) Fabric cross-world messaging (`fabric.send`)
 
 Add plan-only effect kind:

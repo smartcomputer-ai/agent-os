@@ -209,6 +209,12 @@ Initial rollout note:
 - The shard dimension is part of the keyspace from the start, but the first implementation may run with `shard_count = 1`.
 - This keeps the initial runtime simple while avoiding a later keyspace migration for global hot queues.
 
+Recurring schedule note:
+
+- `P2` only defines durable one-shot timer storage for `timer.set`.
+- First-class recurring schedules (`schedule.upsert`, `schedule.cancel`, cron/interval metadata, misfire policy) are intentionally deferred until after the first hosted infra pass.
+- Future recurring schedules should compile down to the same durable timer substrate by materializing the next one-shot due item into `u/<u>/timers/due/...`; `P2` should not require a timer keyspace redesign for that later step.
+
 ### 3) CAS implementation (object store + inline small objects)
 
 Storage policy:
