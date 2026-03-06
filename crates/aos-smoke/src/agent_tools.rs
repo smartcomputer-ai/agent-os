@@ -6,8 +6,14 @@ use aos_agent::{
     HostSessionStatus, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
     SessionLifecycle, SessionState, ToolCallStatus, default_tool_registry,
 };
-use aos_air_types::HashRef;
+use aos_air_types::{HashRef, Manifest};
 use aos_cbor::{Hash, to_canonical_cbor};
+use aos_effect_types::HashRef as EffectHashRef;
+use aos_effect_types::introspect::{
+    IntrospectCellInfo, IntrospectListCellsParams, IntrospectListCellsReceipt,
+    IntrospectManifestParams, IntrospectManifestReceipt, IntrospectWorkflowStateParams,
+    IntrospectWorkflowStateReceipt, ReadMeta,
+};
 use aos_effects::builtins::{
     BlobEdge, BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, HostExecReceipt,
     HostFsExistsReceipt, HostFsListDirReceipt, HostFsReadFileReceipt, HostFsWriteFileReceipt,
@@ -38,6 +44,9 @@ const CALL_EXISTS: &str = "call-exists";
 const CALL_READ: &str = "call-read";
 const CALL_LIST: &str = "call-list";
 const CALL_EXEC: &str = "call-exec";
+const CALL_INSPECT_WORLD: &str = "call-inspect-world";
+const CALL_INSPECT_WORKFLOW_STATE: &str = "call-inspect-workflow-state";
+const CALL_INSPECT_WORKFLOW_CELLS: &str = "call-inspect-workflow-cells";
 
 const TOOL_SESSION_OPEN: &str = "host.session.open";
 const TOOL_FS_WRITE: &str = "host.fs.write_file";
@@ -45,12 +54,17 @@ const TOOL_FS_EXISTS: &str = "host.fs.exists";
 const TOOL_FS_READ: &str = "host.fs.read_file";
 const TOOL_FS_LIST: &str = "host.fs.list_dir";
 const TOOL_EXEC: &str = "host.exec";
+const TOOL_INTROSPECT_MANIFEST: &str = "introspect.manifest";
+const TOOL_INTROSPECT_WORKFLOW_STATE: &str = "introspect.workflow_state";
+const TOOL_INTROSPECT_LIST_CELLS: &str = "introspect.list_cells";
 
 const LLM_TOOL_FS_WRITE: &str = "write_file";
 const LLM_TOOL_FS_EXISTS: &str = "exists";
 const LLM_TOOL_FS_READ: &str = "read_file";
 const LLM_TOOL_FS_LIST: &str = "list_dir";
 const LLM_TOOL_EXEC: &str = "shell";
+const LLM_TOOL_INSPECT_WORLD: &str = "inspect_world";
+const LLM_TOOL_INSPECT_WORKFLOW: &str = "inspect_workflow";
 
 const TEST_FILE_PATH: &str = "notes/hello.txt";
 const TEST_FILE_TEXT: &str = "hello from agent-tools";
@@ -131,7 +145,16 @@ pub fn run(example_root: &Path) -> Result<()> {
         .as_ref()
         .ok_or_else(|| anyhow!("expected active tool batch"))?;
     ensure!(batch.is_settled(), "expected tool batch settled");
-    for call_id in [CALL_WRITE, CALL_EXISTS, CALL_READ, CALL_LIST, CALL_EXEC] {
+    for call_id in [
+        CALL_WRITE,
+        CALL_EXISTS,
+        CALL_READ,
+        CALL_LIST,
+        CALL_INSPECT_WORLD,
+        CALL_INSPECT_WORKFLOW_STATE,
+        CALL_INSPECT_WORKFLOW_CELLS,
+        CALL_EXEC,
+    ] {
         ensure!(
             matches!(
                 batch.call_status.get(call_id),
@@ -146,6 +169,9 @@ pub fn run(example_root: &Path) -> Result<()> {
             CALL_EXISTS.to_string(),
             CALL_READ.to_string(),
             CALL_LIST.to_string(),
+            CALL_INSPECT_WORLD.to_string(),
+            CALL_INSPECT_WORKFLOW_STATE.to_string(),
+            CALL_INSPECT_WORKFLOW_CELLS.to_string(),
         ],
         vec![CALL_EXEC.to_string()],
     ];
@@ -160,6 +186,9 @@ pub fn run(example_root: &Path) -> Result<()> {
         TOOL_FS_READ.to_string(),
         TOOL_FS_LIST.to_string(),
         TOOL_EXEC.to_string(),
+        TOOL_INTROSPECT_MANIFEST.to_string(),
+        TOOL_INTROSPECT_WORKFLOW_STATE.to_string(),
+        TOOL_INTROSPECT_LIST_CELLS.to_string(),
     ]);
     ensure!(
         script.seen_tool_effect_kinds == expected_kinds,
@@ -215,6 +244,9 @@ impl AgentToolsScript {
             TOOL_FS_READ => self.handle_host_fs_read(intent),
             TOOL_FS_LIST => self.handle_host_fs_list(intent),
             TOOL_EXEC => self.handle_host_exec(intent),
+            TOOL_INTROSPECT_MANIFEST => self.handle_introspect_manifest(intent),
+            TOOL_INTROSPECT_WORKFLOW_STATE => self.handle_introspect_workflow_state(intent),
+            TOOL_INTROSPECT_LIST_CELLS => self.handle_introspect_list_cells(intent),
             other => bail!("unexpected effect kind in agent-tools smoke: {other}"),
         }
     }
@@ -489,6 +521,91 @@ impl AgentToolsScript {
         )
     }
 
+    fn handle_introspect_manifest(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: IntrospectManifestParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode introspect.manifest params")?;
+        ensure!(
+            params.consistency == "head",
+            "expected manifest consistency=head, got {}",
+            params.consistency
+        );
+
+        self.seen_tool_effect_kinds
+            .insert(TOOL_INTROSPECT_MANIFEST.into());
+        ok_receipt(
+            intent,
+            &IntrospectManifestReceipt {
+                manifest: serde_cbor::to_vec(&smoke_manifest())?,
+                meta: smoke_read_meta()?,
+            },
+            "adapter.introspect.fake",
+        )
+    }
+
+    fn handle_introspect_workflow_state(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: IntrospectWorkflowStateParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode introspect.workflow_state params")?;
+        ensure!(
+            params.workflow == WORKFLOW_NAME,
+            "expected workflow {}, got {}",
+            WORKFLOW_NAME,
+            params.workflow
+        );
+        ensure!(
+            params.consistency == "head",
+            "expected workflow_state consistency=head, got {}",
+            params.consistency
+        );
+        ensure!(
+            params.key.is_none(),
+            "expected state inspection without key, got {:?}",
+            params.key
+        );
+
+        self.seen_tool_effect_kinds
+            .insert(TOOL_INTROSPECT_WORKFLOW_STATE.into());
+        ok_receipt(
+            intent,
+            &IntrospectWorkflowStateReceipt {
+                state: Some(serde_cbor::to_vec(&json!({
+                    "lifecycle": "WaitingInput",
+                    "tool_profile": TOOL_PROFILE,
+                }))?),
+                meta: smoke_read_meta()?,
+            },
+            "adapter.introspect.fake",
+        )
+    }
+
+    fn handle_introspect_list_cells(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: IntrospectListCellsParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode introspect.list_cells params")?;
+        ensure!(
+            params.workflow == WORKFLOW_NAME,
+            "expected workflow {}, got {}",
+            WORKFLOW_NAME,
+            params.workflow
+        );
+
+        self.seen_tool_effect_kinds
+            .insert(TOOL_INTROSPECT_LIST_CELLS.into());
+        ok_receipt(
+            intent,
+            &IntrospectListCellsReceipt {
+                cells: vec![IntrospectCellInfo {
+                    key: Vec::new(),
+                    state_hash: EffectHashRef::new(
+                        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    )?,
+                    size: 128,
+                    last_active_ns: 99,
+                }],
+                meta: smoke_read_meta()?,
+            },
+            "adapter.introspect.fake",
+        )
+    }
+
     fn ensure_runtime_session(&self, actual: &str) -> Result<()> {
         let expected = self
             .opened_session_id
@@ -511,6 +628,8 @@ fn configure_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()
         TOOL_FS_READ.to_string(),
         TOOL_FS_LIST.to_string(),
         TOOL_EXEC.to_string(),
+        TOOL_INTROSPECT_MANIFEST.to_string(),
+        TOOL_INTROSPECT_WORKFLOW_STATE.to_string(),
     ];
     let allowed: BTreeSet<String> = ordered.iter().cloned().collect();
     registry.retain(|name, _| allowed.contains(name));
@@ -622,6 +741,21 @@ fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
             "cwd": "."
         }),
     )?;
+    let inspect_world_args = store_json_blob(store, &json!({}))?;
+    let inspect_workflow_state_args = store_json_blob(
+        store,
+        &json!({
+            "workflow": WORKFLOW_NAME,
+            "view": "state"
+        }),
+    )?;
+    let inspect_workflow_cells_args = store_json_blob(
+        store,
+        &json!({
+            "workflow": WORKFLOW_NAME,
+            "view": "cells"
+        }),
+    )?;
 
     Ok(vec![
         LlmToolCall {
@@ -647,6 +781,24 @@ fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
             tool_name: LLM_TOOL_FS_LIST.into(),
             arguments_ref: list_args,
             provider_call_id: Some("provider-call-list".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_INSPECT_WORLD.into(),
+            tool_name: LLM_TOOL_INSPECT_WORLD.into(),
+            arguments_ref: inspect_world_args,
+            provider_call_id: Some("provider-call-inspect-world".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_INSPECT_WORKFLOW_STATE.into(),
+            tool_name: LLM_TOOL_INSPECT_WORKFLOW.into(),
+            arguments_ref: inspect_workflow_state_args,
+            provider_call_id: Some("provider-call-inspect-workflow-state".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_INSPECT_WORKFLOW_CELLS.into(),
+            tool_name: LLM_TOOL_INSPECT_WORKFLOW.into(),
+            arguments_ref: inspect_workflow_cells_args,
+            provider_call_id: Some("provider-call-inspect-workflow-cells".into()),
         },
         LlmToolCall {
             call_id: CALL_EXEC.into(),
@@ -688,4 +840,30 @@ fn ok_receipt<T: Serialize>(
         cost_cents: Some(0),
         signature: vec![0; 64],
     })
+}
+
+fn smoke_read_meta() -> Result<ReadMeta> {
+    Ok(ReadMeta {
+        journal_height: 12,
+        snapshot_hash: None,
+        manifest_hash: EffectHashRef::new(
+            "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        )?,
+    })
+}
+
+fn smoke_manifest() -> Manifest {
+    Manifest {
+        air_version: "1".into(),
+        schemas: vec![],
+        modules: vec![],
+        effects: vec![],
+        effect_bindings: vec![],
+        caps: vec![],
+        policies: vec![],
+        secrets: vec![],
+        defaults: None,
+        module_bindings: Default::default(),
+        routing: None,
+    }
 }

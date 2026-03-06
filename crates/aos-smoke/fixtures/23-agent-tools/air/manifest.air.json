@@ -81,6 +81,13 @@
         "params": {
           "record": {}
         }
+      },
+      {
+        "name": "query",
+        "cap": "sys/query@1",
+        "params": {
+          "record": {}
+        }
       }
     ]
   },
@@ -93,7 +100,10 @@
     { "name": "sys/host.fs.exists@1" },
     { "name": "sys/host.fs.read_file@1" },
     { "name": "sys/host.fs.list_dir@1" },
-    { "name": "sys/host.exec@1" }
+    { "name": "sys/host.exec@1" },
+    { "name": "sys/introspect.manifest@1" },
+    { "name": "sys/introspect.workflow_state@1" },
+    { "name": "sys/introspect.list_cells@1" }
   ],
   "effect_bindings": [
     { "kind": "blob.put", "adapter_id": "blob.put" },
@@ -121,7 +131,8 @@
       "slots": {
         "blob": "blob",
         "llm": "llm",
-        "host": "host"
+        "host": "host",
+        "query": "query"
       }
     }
   }

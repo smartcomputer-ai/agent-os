@@ -335,6 +335,7 @@ dependencies = [
  "aos-air-exec",
  "aos-air-types",
  "aos-cbor",
+ "aos-effect-types",
  "aos-effects",
  "aos-host",
  "aos-kernel",
