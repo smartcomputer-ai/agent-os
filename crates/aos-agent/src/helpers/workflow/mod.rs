@@ -812,11 +812,11 @@ fn emit_auto_host_session_open(
     .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
     out.effects.push(SessionEffectCommand::ToolEffect {
         kind: ToolEffectKind::HostSessionOpen,
-        params_json: serde_json::to_string(&params).unwrap_or_else(|_| "{}".into()),
+        params_json: serde_json::to_string(&params.params_json).unwrap_or_else(|_| "{}".into()),
         pending: super::begin_pending_effect(
             state,
             "host.session.open",
-            &params,
+            &params.params_json,
             Some("host".into()),
             None,
         ),
@@ -1171,7 +1171,14 @@ mod tests {
         assert!(state.queued_llm_message_refs.is_some());
         assert_eq!(state.in_flight_effects, 1);
         assert_eq!(state.effective_tools.profile_id, "openai");
-        assert!(state.effective_tools.ordered_tools.is_empty());
+        let tools: Vec<&str> = state
+            .effective_tools
+            .ordered_tools
+            .iter()
+            .map(|tool| tool.tool_name.as_str())
+            .collect();
+        assert!(tools.contains(&"inspect_world"));
+        assert!(tools.contains(&"inspect_workflow"));
         assert!(state.effective_tools.profile_requires_host_session);
     }
 

@@ -1,4 +1,4 @@
-use super::types::{ToolMappedReceipt, ToolMappingError};
+use super::types::{ToolMappedArgs, ToolMappedReceipt, ToolMappingError, ToolRuntimeDelta};
 use crate::contracts::{HostSessionStatus, ToolCallStatus, ToolMapper, ToolRuntimeContext};
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -16,12 +16,14 @@ mod host_fs_stat;
 mod host_fs_write_file;
 mod host_session_open;
 mod host_session_signal;
+mod inspect_workflow;
+mod inspect_world;
 
 pub fn map_args(
     mapper: ToolMapper,
     arguments_json: &str,
     runtime: &ToolRuntimeContext,
-) -> Result<Value, ToolMappingError> {
+) -> Result<ToolMappedArgs, ToolMappingError> {
     match mapper {
         ToolMapper::HostSessionOpen => host_session_open::map_args(arguments_json),
         ToolMapper::HostExec => host_exec::map_args(arguments_json, runtime),
@@ -35,10 +37,29 @@ pub fn map_args(
         ToolMapper::HostFsStat => host_fs_stat::map_args(arguments_json, runtime),
         ToolMapper::HostFsExists => host_fs_exists::map_args(arguments_json, runtime),
         ToolMapper::HostFsListDir => host_fs_list_dir::map_args(arguments_json, runtime),
+        ToolMapper::InspectWorld => inspect_world::map_args(arguments_json),
+        ToolMapper::InspectWorkflow => inspect_workflow::map_args(arguments_json),
     }
 }
 
 pub fn map_receipt(
+    mapper: ToolMapper,
+    tool_name: &str,
+    status: &str,
+    payload: &[u8],
+) -> ToolMappedReceipt {
+    match mapper {
+        ToolMapper::InspectWorld => return inspect_world::map_receipt(tool_name, status, payload),
+        ToolMapper::InspectWorkflow => {
+            return inspect_workflow::map_receipt(tool_name, status, payload);
+        }
+        _ => {}
+    }
+
+    map_json_receipt(mapper, tool_name, status, payload)
+}
+
+fn map_json_receipt(
     mapper: ToolMapper,
     tool_name: &str,
     status: &str,
@@ -114,26 +135,17 @@ pub fn map_receipt(
         ToolCallStatus::Succeeded
     };
 
-    let llm_output = json!({
-        "tool": tool_name,
-        "ok": !is_error,
-        "status": payload_json
-            .get("status")
-            .and_then(Value::as_str)
-            .unwrap_or(status),
-        "result": payload_json,
-    });
-
-    ToolMappedReceipt {
-        status: status_value,
-        llm_output_json: serde_json::to_string(&llm_output)
-            .unwrap_or_else(|_| String::from("{\"ok\":false,\"error\":\"encode_failed\"}")),
+    build_receipt(
+        tool_name,
+        status,
+        payload_json,
         is_error,
-        runtime_delta: super::types::ToolRuntimeDelta {
+        status_value,
+        ToolRuntimeDelta {
             host_session_id: runtime_host_session_id,
             host_session_status: runtime_status_override,
         },
-    }
+    )
 }
 
 fn parse_host_session_status(value: &str) -> Option<HostSessionStatus> {
@@ -216,4 +228,51 @@ pub(super) fn session_id_from_args_or_runtime(
 
 pub(super) fn value_object(map: Map<String, Value>) -> Value {
     Value::Object(map)
+}
+
+pub(super) fn build_receipt(
+    tool_name: &str,
+    status: &str,
+    result: Value,
+    is_error: bool,
+    status_value: ToolCallStatus,
+    runtime_delta: ToolRuntimeDelta,
+) -> ToolMappedReceipt {
+    let llm_output = json!({
+        "tool": tool_name,
+        "ok": !is_error,
+        "status": status,
+        "result": result,
+    });
+
+    ToolMappedReceipt {
+        status: status_value,
+        llm_output_json: serde_json::to_string(&llm_output)
+            .unwrap_or_else(|_| String::from("{\"ok\":false,\"error\":\"encode_failed\"}")),
+        is_error,
+        runtime_delta,
+    }
+}
+
+pub(super) fn failed_receipt(
+    tool_name: &str,
+    status: &str,
+    code: &str,
+    detail: impl Into<String>,
+) -> ToolMappedReceipt {
+    let detail = detail.into();
+    build_receipt(
+        tool_name,
+        status,
+        json!({
+            "error_code": code,
+            "error_message": detail,
+        }),
+        true,
+        ToolCallStatus::Failed {
+            code: code.into(),
+            detail,
+        },
+        ToolRuntimeDelta::default(),
+    )
 }

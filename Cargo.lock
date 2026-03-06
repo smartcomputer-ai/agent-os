@@ -107,6 +107,7 @@ name = "aos-agent"
 version = "0.1.0"
 dependencies = [
  "aos-air-types",
+ "aos-effect-types",
  "aos-effects",
  "aos-wasm-abi",
  "aos-wasm-sdk",

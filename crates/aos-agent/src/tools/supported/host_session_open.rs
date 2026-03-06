@@ -1,9 +1,9 @@
 use super::{optional_object, optional_u64, parse_json_object, value_object};
-use crate::tools::types::ToolMappingError;
+use crate::tools::types::{ToolMappedArgs, ToolMappingError};
 use alloc::string::ToString;
 use serde_json::{Map, Value, json};
 
-pub fn map_args(arguments_json: &str) -> Result<Value, ToolMappingError> {
+pub fn map_args(arguments_json: &str) -> Result<ToolMappedArgs, ToolMappingError> {
     let args = parse_json_object(arguments_json)?;
 
     let target = if let Some(target) = optional_object(&args, "target") {
@@ -37,5 +37,5 @@ pub fn map_args(arguments_json: &str) -> Result<Value, ToolMappingError> {
     if let Some(labels) = labels {
         out.insert("labels".into(), labels);
     }
-    Ok(value_object(out))
+    Ok(ToolMappedArgs::params(value_object(out)))
 }

@@ -245,25 +245,13 @@ pub(super) fn advance_tool_batch(
                 ToolExecutor::Effect { .. } => {}
             }
 
-            let (effect_kind, cap_slot) = match &planned.executor {
+            let (executor_effect_kind, cap_slot) = match &planned.executor {
                 ToolExecutor::Effect {
                     effect_kind,
                     cap_slot,
                 } => (effect_kind.clone(), cap_slot.clone()),
                 ToolExecutor::HostLoop { .. } => unreachable!(),
             };
-            let kind =
-                if let Some(mapper) = crate::tools::mapper_for_effect_kind(effect_kind.as_str()) {
-                    crate::tools::effect_kind_for_mapper(mapper)
-                } else {
-                    fail_tool_call(
-                        &mut batch,
-                        &call_id,
-                        "executor_unsupported",
-                        format!("unsupported effect kind for wasm emit_raw: {effect_kind}"),
-                    );
-                    continue;
-                };
 
             let arguments_json = if !planned.arguments_json.trim().is_empty() {
                 planned.arguments_json.clone()
@@ -310,7 +298,7 @@ pub(super) fn advance_tool_batch(
                 continue;
             };
 
-            let params_json = match map_tool_arguments_to_effect_params(
+            let mapped_args = match map_tool_arguments_to_effect_params(
                 planned.mapper,
                 arguments_json.as_str(),
                 &runtime_ctx,
@@ -336,13 +324,31 @@ pub(super) fn advance_tool_batch(
                     continue;
                 }
             };
+            let kind = if let Some(kind) = mapped_args.effect_kind {
+                kind
+            } else if let Some(mapper) =
+                crate::tools::mapper_for_effect_kind(executor_effect_kind.as_str())
+            {
+                crate::tools::effect_kind_for_mapper(mapper)
+            } else {
+                fail_tool_call(
+                    &mut batch,
+                    &call_id,
+                    "executor_unsupported",
+                    format!(
+                        "unsupported effect kind for wasm emit_raw: {}",
+                        executor_effect_kind
+                    ),
+                );
+                continue;
+            };
 
             let pending = batch
                 .pending_effects
                 .begin_with_issuer_ref(
                     call_id.clone(),
                     kind.as_str(),
-                    &params_json,
+                    &mapped_args.params_json,
                     cap_slot.clone(),
                     state.updated_at,
                     Some(call_id.clone()),
@@ -361,7 +367,8 @@ pub(super) fn advance_tool_batch(
 
             out.effects.push(SessionEffectCommand::ToolEffect {
                 kind,
-                params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
+                params_json: serde_json::to_string(&mapped_args.params_json)
+                    .unwrap_or_else(|_| "{}".into()),
                 pending,
             });
         }

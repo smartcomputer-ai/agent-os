@@ -1,6 +1,7 @@
 use crate::contracts::{HostSessionStatus, ToolCallStatus, ToolMapper};
 use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(tag = "$tag", content = "$value")]
@@ -17,6 +18,9 @@ pub enum ToolEffectKind {
     HostFsStat,
     HostFsExists,
     HostFsListDir,
+    IntrospectManifest,
+    IntrospectWorkflowState,
+    IntrospectListCells,
 }
 
 impl ToolEffectKind {
@@ -34,6 +38,32 @@ impl ToolEffectKind {
             Self::HostFsStat => "host.fs.stat",
             Self::HostFsExists => "host.fs.exists",
             Self::HostFsListDir => "host.fs.list_dir",
+            Self::IntrospectManifest => "introspect.manifest",
+            Self::IntrospectWorkflowState => "introspect.workflow_state",
+            Self::IntrospectListCells => "introspect.list_cells",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolMappedArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_kind: Option<ToolEffectKind>,
+    pub params_json: Value,
+}
+
+impl ToolMappedArgs {
+    pub fn params(params_json: Value) -> Self {
+        Self {
+            effect_kind: None,
+            params_json,
+        }
+    }
+
+    pub fn with_effect_kind(effect_kind: ToolEffectKind, params_json: Value) -> Self {
+        Self {
+            effect_kind: Some(effect_kind),
+            params_json,
         }
     }
 }
@@ -124,5 +154,7 @@ pub fn mapper_effect_kind(mapper: ToolMapper) -> ToolEffectKind {
         ToolMapper::HostFsStat => ToolEffectKind::HostFsStat,
         ToolMapper::HostFsExists => ToolEffectKind::HostFsExists,
         ToolMapper::HostFsListDir => ToolEffectKind::HostFsListDir,
+        ToolMapper::InspectWorld => ToolEffectKind::IntrospectManifest,
+        ToolMapper::InspectWorkflow => ToolEffectKind::IntrospectWorkflowState,
     }
 }

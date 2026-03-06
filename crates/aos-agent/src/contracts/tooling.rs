@@ -39,6 +39,8 @@ pub enum ToolMapper {
     HostFsStat,
     HostFsExists,
     HostFsListDir,
+    InspectWorld,
+    InspectWorkflow,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

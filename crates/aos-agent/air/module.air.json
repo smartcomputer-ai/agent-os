@@ -23,12 +23,16 @@
           "host.fs.glob",
           "host.fs.stat",
           "host.fs.exists",
-          "host.fs.list_dir"
+          "host.fs.list_dir",
+          "introspect.manifest",
+          "introspect.workflow_state",
+          "introspect.list_cells"
         ],
         "cap_slots": {
           "blob": "blob",
           "llm": "llm.basic",
-          "host": "host"
+          "host": "host",
+          "query": "query"
         }
       }
     }

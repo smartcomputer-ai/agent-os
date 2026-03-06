@@ -54,7 +54,9 @@
         "HostFsGlob": { "unit": {} },
         "HostFsStat": { "unit": {} },
         "HostFsExists": { "unit": {} },
-        "HostFsListDir": { "unit": {} }
+        "HostFsListDir": { "unit": {} },
+        "InspectWorld": { "unit": {} },
+        "InspectWorkflow": { "unit": {} }
       }
     }
   },

@@ -58,7 +58,10 @@
     { "name": "sys/host.fs.glob@1" },
     { "name": "sys/host.fs.stat@1" },
     { "name": "sys/host.fs.exists@1" },
-    { "name": "sys/host.fs.list_dir@1" }
+    { "name": "sys/host.fs.list_dir@1" },
+    { "name": "sys/introspect.manifest@1" },
+    { "name": "sys/introspect.workflow_state@1" },
+    { "name": "sys/introspect.list_cells@1" }
   ],
   "routing": {
     "subscriptions": [
