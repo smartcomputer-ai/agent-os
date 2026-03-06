@@ -7,11 +7,14 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_agent::{
-    EffectReceiptRejected, HostSessionStatus, RunId, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, default_tool_profile_for_provider,
-    default_tool_profiles, default_tool_registry,
+    EffectReceiptRejected, RunId, SessionConfig, SessionId, SessionLifecycle,
+    SessionLifecycleChanged, default_tool_registry,
+    helpers::{
+        LocalSessionSpawnRequest, SessionHandoffRequest, SpawnOrHandoffSessionPlan,
+        SpawnOrHandoffSessionRequest, emit_session_ingresses, spawn_or_handoff_session,
+    },
 };
-use aos_effects::builtins::{HostLocalTarget, HostSessionOpenParams, HostTarget};
+use aos_effects::builtins::{BlobPutReceipt, HostSessionOpenReceipt};
 use aos_wasm_sdk::{
     BlobPutParams, EffectReceiptEnvelope, ReduceError, Value, Workflow, WorkflowCtx, aos_workflow,
 };
@@ -191,7 +194,8 @@ fn on_task_submitted(
     let bytes = serde_json::to_vec(&message_blob)
         .map_err(|_| ReduceError::new("failed to encode task message JSON"))?;
 
-    ctx.effects().blob_put(
+    let mut effects = ctx.effects();
+    effects.sys().blob_put(
         &BlobPutParams {
             bytes,
             blob_ref: None,
@@ -230,10 +234,10 @@ fn on_receipt(
                 );
             }
 
-            let payload: BlobPutReceiptPayload = serde_cbor::from_slice(&receipt.receipt_payload)
+            let payload: BlobPutReceipt = serde_cbor::from_slice(&receipt.receipt_payload)
                 .map_err(|_| ReduceError::new("blob.put receipt decode failed"))?;
 
-            ctx.state.input_ref = Some(payload.blob_ref);
+            ctx.state.input_ref = Some(payload.blob_ref.as_str().into());
             let workdir = ctx
                 .state
                 .workdir
@@ -241,15 +245,14 @@ fn on_receipt(
                 .ok_or_else(|| ReduceError::new("missing workdir for host.session.open"))?;
             let cfg = ctx.state.config.clone().unwrap_or_default();
 
-            let params = HostSessionOpenParams {
-                target: HostTarget::local(HostLocalTarget {
-                    mounts: None,
-                    workdir: Some(workdir),
-                    env: None,
-                    network_mode: "none".into(),
-                }),
-                session_ttl_ns: cfg.session_ttl_ns,
-                labels: None,
+            let params = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::SpawnLocal(
+                LocalSessionSpawnRequest {
+                    workdir,
+                    session_ttl_ns: cfg.session_ttl_ns,
+                },
+            )) {
+                SpawnOrHandoffSessionPlan::OpenHostSession(params) => params,
+                SpawnOrHandoffSessionPlan::Handoff(_) => unreachable!(),
             };
             ctx.effects()
                 .emit_raw(EFFECT_HOST_SESSION_OPEN, &params, Some("host"));
@@ -260,10 +263,12 @@ fn on_receipt(
             if receipt.effect_kind != EFFECT_HOST_SESSION_OPEN {
                 return Ok(());
             }
-            let payload: HostSessionOpenReceiptPayload = serde_cbor::from_slice(&receipt.receipt_payload)
-                .unwrap_or(HostSessionOpenReceiptPayload {
+            let payload: HostSessionOpenReceipt = serde_cbor::from_slice(&receipt.receipt_payload)
+                .unwrap_or(HostSessionOpenReceipt {
                     session_id: String::new(),
                     status: String::from("error"),
+                    started_at_ns: 0,
+                    expires_at_ns: None,
                     error_code: Some(String::from("receipt_decode_error")),
                     error_message: Some(String::from("host.session.open receipt decode failed")),
                 });
@@ -305,7 +310,7 @@ fn on_receipt(
             ctx.state.host_session_id = Some(payload.session_id.clone());
             ctx.state.pending_stage = None;
             ctx.state.status = TaskStatus::Running;
-            emit_bootstrap_ingress(ctx, payload.session_id.as_str())?;
+            emit_session_bootstrap(ctx, payload.session_id.as_str())?;
             Ok(())
         }
     }
@@ -345,11 +350,10 @@ fn on_receipt_rejected(
     )
 }
 
-fn emit_bootstrap_ingress(
+fn emit_session_bootstrap(
     ctx: &mut WorkflowCtx<DemiurgeState, Value>,
     host_session_id: &str,
 ) -> Result<(), ReduceError> {
-    let task_id = ctx.state.task_id.clone();
     let input_ref = ctx
         .state
         .input_ref
@@ -367,42 +371,6 @@ fn emit_bootstrap_ingress(
         .clone()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_MODEL.into());
-    let tool_profile = cfg
-        .tool_profile
-        .clone()
-        .unwrap_or_else(|| default_tool_profile_for_provider(provider.as_str()));
-
-    if let Some(allowed_tools) = cfg.allowed_tools.clone() {
-        let registry = default_tool_registry();
-        let mut profiles = default_tool_profiles();
-        profiles.insert(tool_profile.clone(), allowed_tools);
-        let observed_at_ns = next_observed_at_ns(&mut ctx.state);
-        emit_session_ingress(
-            ctx,
-            SessionIngress {
-                session_id: task_id.clone(),
-                observed_at_ns,
-                ingress: SessionIngressKind::ToolRegistrySet {
-                    registry,
-                    profiles: Some(profiles),
-                    default_profile: Some(tool_profile.clone()),
-                },
-            },
-        );
-    }
-
-    let host_session_observed_at_ns = next_observed_at_ns(&mut ctx.state);
-    emit_session_ingress(
-        ctx,
-        SessionIngress {
-            session_id: task_id.clone(),
-            observed_at_ns: host_session_observed_at_ns,
-            ingress: SessionIngressKind::HostSessionUpdated {
-                host_session_id: Some(host_session_id.into()),
-                host_session_status: Some(HostSessionStatus::Ready),
-            },
-        },
-    );
 
     let run_overrides = SessionConfig {
         provider,
@@ -410,32 +378,30 @@ fn emit_bootstrap_ingress(
         reasoning_effort: cfg.reasoning_effort,
         max_tokens: Some(cfg.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS)),
         default_prompt_refs: None,
-        default_tool_profile: Some(tool_profile),
+        default_tool_profile: cfg.tool_profile.clone(),
         default_tool_enable: cfg.tool_enable,
         default_tool_disable: cfg.tool_disable,
         default_tool_force: cfg.tool_force,
     };
 
-    let run_requested_observed_at_ns = next_observed_at_ns(&mut ctx.state);
-    emit_session_ingress(
-        ctx,
-        SessionIngress {
-            session_id: task_id,
-            observed_at_ns: run_requested_observed_at_ns,
-            ingress: SessionIngressKind::RunRequested {
-                input_ref,
-                run_overrides: Some(run_overrides),
-            },
+    let first_observed_at_ns = next_observed_at_ns(&mut ctx.state);
+    let plan = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::Handoff(
+        SessionHandoffRequest {
+            first_observed_at_ns,
+            session_id: ctx.state.task_id.clone(),
+            input_ref,
+            host_session_id: host_session_id.into(),
+            run_overrides,
+            allowed_tools: cfg.allowed_tools,
         },
-    );
+    )) {
+        SpawnOrHandoffSessionPlan::Handoff(plan) => plan,
+        SpawnOrHandoffSessionPlan::OpenHostSession(_) => unreachable!(),
+    };
+    emit_session_ingresses(ctx, &plan.ingresses);
+    ctx.state.next_observed_at_ns = plan.next_observed_at_ns;
 
     Ok(())
-}
-
-fn emit_session_ingress(ctx: &mut WorkflowCtx<DemiurgeState, Value>, ingress: SessionIngress) {
-    ctx.intent("aos.agent/SessionIngress@1")
-        .payload(&ingress)
-        .send();
 }
 
 fn on_session_lifecycle_changed(
@@ -581,21 +547,6 @@ fn event_observed_at_ns(event: &DemiurgeWorkflowEvent) -> u64 {
 struct UserMessageBlob {
     role: String,
     content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct BlobPutReceiptPayload {
-    blob_ref: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct HostSessionOpenReceiptPayload {
-    session_id: String,
-    status: String,
-    #[serde(default)]
-    error_code: Option<String>,
-    #[serde(default)]
-    error_message: Option<String>,
 }
 
 #[cfg(test)]

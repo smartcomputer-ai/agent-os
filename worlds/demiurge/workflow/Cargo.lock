@@ -22,6 +22,7 @@ name = "aos-air-types"
 version = "0.1.0"
 dependencies = [
  "aos-cbor",
+ "aos-effect-types",
  "indexmap",
  "once_cell",
  "petgraph",
@@ -43,14 +44,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aos-effect-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_bytes",
+ "serde_cbor",
+]
+
+[[package]]
 name = "aos-effects"
 version = "0.1.0"
 dependencies = [
  "aos-air-types",
  "aos-cbor",
- "hex",
- "indexmap",
- "once_cell",
+ "aos-effect-types",
  "serde",
  "serde_bytes",
  "serde_cbor",
@@ -72,10 +80,12 @@ dependencies = [
 name = "aos-wasm-sdk"
 version = "0.1.0"
 dependencies = [
+ "aos-effect-types",
  "aos-wasm-abi",
  "serde",
  "serde_bytes",
  "serde_cbor",
+ "sha2",
 ]
 
 [[package]]

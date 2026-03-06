@@ -84,7 +84,7 @@ These primitives cover both one-shot receipts and streaming lifecycles from
 
 ## Primitive Set
 
-### 1) `request_llm` (Partial)
+### 1) `request_llm` (Done)
 
 Purpose:
 
@@ -101,9 +101,10 @@ Current source material:
 Current status:
 
 1. canonical `llm.generate` param materialization is extracted,
-2. pending registration + emit flow still lives in `SessionWorkflow` helper glue.
+2. pending registration + effect command emission are extracted into a reusable
+   agent primitive.
 
-### 2) `run_tool_batch` (Partial)
+### 2) `run_tool_batch` (Done)
 
 Purpose:
 
@@ -122,10 +123,10 @@ Current source material:
 
 Current status:
 
-1. tool-batch planning/dispatch/settlement logic is extracted into internal helper
-   modules,
-2. it is not yet exposed as a clean shared authoring primitive above the session
-   workflow.
+1. tool-batch planning/dispatch/settlement logic is exposed through reusable
+   agent helpers,
+2. session-specific follow-up message construction remains separate from the
+   generic batch engine.
 
 ### 3) generic continuation matching (Done)
 
@@ -155,7 +156,7 @@ Purpose:
 This should reuse existing failure ownership ideas rather than inventing a
 second retry system.
 
-### 5) `emit_lifecycle` (Not Done)
+### 5) `emit_lifecycle` (Done)
 
 Purpose:
 
@@ -168,9 +169,9 @@ Current proof point:
 1. `crates/aos-agent/src/bin/session_workflow.rs` already emits
    `aos.agent/SessionLifecycleChanged@1` after reducer transitions.
 
-The new primitive should move this out of ad hoc workflow-local glue.
+The primitive now lives in agent helpers and is reused by `SessionWorkflow`.
 
-### 6) `spawn_or_handoff_session` (Not Done)
+### 6) `spawn_or_handoff_session` (Done)
 
 Purpose:
 
@@ -338,7 +339,7 @@ Current status:
 2. typed matching tests exist,
 3. retry scheduling helper coverage is still pending with `retry_with_backoff`.
 
-### WP2: Agent primitive extraction (Partial)
+### WP2: Agent primitive extraction (Mostly Done)
 
 1. move LLM request building into a reusable helper,
 2. move lifecycle event emission into a reusable helper,
@@ -346,12 +347,13 @@ Current status:
 
 Current status:
 
-1. LLM param building is extracted,
-2. tool-batch logic is split into helper modules,
-3. lifecycle emission is still workflow-local,
-4. the surface is not yet consolidated into the intended primitive layer.
+1. LLM request building is extracted,
+2. lifecycle emission is extracted,
+3. tool-batch orchestration is exposed through shared helper entrypoints,
+4. session bootstrap/handoff primitives are extracted for Demiurge-style
+   orchestrators.
 
-### WP3: Refactor `SessionWorkflow` (Not Done)
+### WP3: Refactor `SessionWorkflow` (Done)
 
 Targets:
 
@@ -363,7 +365,7 @@ Acceptance signal:
 1. reducer/event flow gets shorter,
 2. no behavior change in existing eval/smoke semantics.
 
-### WP4: Refactor Demiurge (Not Done)
+### WP4: Refactor Demiurge (Done)
 
 Targets:
 
