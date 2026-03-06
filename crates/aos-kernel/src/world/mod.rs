@@ -489,6 +489,7 @@ impl<S: Store + 'static> Kernel<S> {
             IntentOriginRecord::Workflow {
                 name,
                 instance_key,
+                issuer_ref,
                 emitted_at_seq,
             } => {
                 if self
@@ -505,6 +506,7 @@ impl<S: Store + 'static> Kernel<S> {
                             instance_key.clone(),
                             effect_kind.clone(),
                             params_cbor.clone(),
+                            issuer_ref.clone(),
                             record.intent_hash,
                             emitted_at_seq.unwrap_or_default(),
                             None,

@@ -245,10 +245,10 @@
             "value": { "ref": "aos.agent/ToolCallStatus@1" }
           }
         },
-        "pending_by_params_hash": {
+        "pending_by_issuer_ref": {
           "map": {
-            "key": { "hash": {} },
-            "value": { "list": { "text": {} } }
+            "key": { "text": {} },
+            "value": { "text": {} }
           }
         },
         "next_group_index": { "nat": {} },

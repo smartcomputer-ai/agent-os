@@ -210,6 +210,8 @@ pub struct WorkflowEffect {
     pub params_cbor: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap_slot: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer_ref: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -224,6 +226,7 @@ impl WorkflowEffect {
             kind: kind.into(),
             params_cbor,
             cap_slot: None,
+            issuer_ref: None,
             idempotency_key: None,
         }
     }
@@ -237,6 +240,7 @@ impl WorkflowEffect {
             kind: kind.into(),
             params_cbor,
             cap_slot: Some(slot.into()),
+            issuer_ref: None,
             idempotency_key: None,
         }
     }

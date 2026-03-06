@@ -833,6 +833,7 @@ mod tests {
                 None,
                 "http.request".into(),
                 vec![],
+                None,
                 [9u8; 32],
                 0,
                 None,
@@ -952,6 +953,7 @@ mod tests {
             None,
             "http.request".into(),
             vec![1, 2, 3],
+            None,
             intent_hash,
             5,
             None,
@@ -1166,6 +1168,7 @@ mod tests {
             origin: IntentOriginRecord::Workflow {
                 name: "example/Workflow@1".into(),
                 instance_key: None,
+                issuer_ref: None,
                 emitted_at_seq: Some(0),
             },
         };

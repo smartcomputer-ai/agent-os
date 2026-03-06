@@ -65,6 +65,8 @@ pub struct EffectReceiptEnvelope {
     pub effect_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer_ref: Option<String>,
     #[serde(with = "serde_bytes_vec")]
     pub receipt_payload: Vec<u8>,
     pub status: String,
@@ -97,6 +99,8 @@ pub struct EffectReceiptRejected {
     pub intent_id: String,
     pub effect_kind: String,
     pub params_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer_ref: Option<String>,
     pub adapter_id: String,
     pub status: String,
     pub error_code: String,
@@ -119,6 +123,8 @@ pub struct EffectStreamFrameEnvelope {
     pub intent_id: String,
     pub effect_kind: String,
     pub params_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer_ref: Option<String>,
     pub emitted_at_seq: u64,
     pub seq: u64,
     pub kind: String,
@@ -167,6 +173,14 @@ impl<'a> EffectContinuationRef<'a> {
             Self::Receipt(value) => value.params_hash.as_deref(),
             Self::Rejected(value) => value.params_hash.as_deref(),
             Self::Stream(value) => value.params_hash.as_deref(),
+        }
+    }
+
+    pub fn issuer_ref(self) -> Option<&'a str> {
+        match self {
+            Self::Receipt(value) => value.issuer_ref.as_deref(),
+            Self::Rejected(value) => value.issuer_ref.as_deref(),
+            Self::Stream(value) => value.issuer_ref.as_deref(),
         }
     }
 
@@ -251,6 +265,7 @@ pub struct PendingEffect {
     pub effect_kind: String,
     pub params_hash: String,
     pub intent_id: Option<String>,
+    pub issuer_ref: Option<String>,
     pub cap_slot: Option<String>,
     pub emitted_at_ns: u64,
     pub last_stream_seq: u64,
@@ -267,10 +282,21 @@ impl PendingEffect {
             effect_kind: effect_kind.into(),
             params_hash: params_hash.into(),
             intent_id: None,
+            issuer_ref: None,
             cap_slot,
             emitted_at_ns,
             last_stream_seq: 0,
         }
+    }
+
+    pub fn with_issuer_ref(mut self, issuer_ref: impl Into<String>) -> Self {
+        self.issuer_ref = Some(issuer_ref.into());
+        self
+    }
+
+    pub fn with_issuer_ref_opt(mut self, issuer_ref: Option<String>) -> Self {
+        self.issuer_ref = issuer_ref;
+        self
     }
 
     pub fn from_params<T: Serialize>(
@@ -279,12 +305,23 @@ impl PendingEffect {
         cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Result<Self, serde_cbor::Error> {
+        Self::from_params_with_issuer_ref(effect_kind, params, cap_slot, emitted_at_ns, None)
+    }
+
+    pub fn from_params_with_issuer_ref<T: Serialize>(
+        effect_kind: impl Into<String>,
+        params: &T,
+        cap_slot: Option<String>,
+        emitted_at_ns: u64,
+        issuer_ref: Option<String>,
+    ) -> Result<Self, serde_cbor::Error> {
         Ok(Self::new(
             effect_kind,
             effect_params_hash(params)?,
             cap_slot,
             emitted_at_ns,
-        ))
+        )
+        .with_issuer_ref_opt(issuer_ref))
     }
 
     pub fn matches(&self, continuation: EffectContinuationRef<'_>) -> bool {
@@ -294,6 +331,12 @@ impl PendingEffect {
 
         if let Some(intent_id) = self.intent_id.as_deref() {
             return intent_id == continuation.intent_id();
+        }
+
+        if let Some(issuer_ref) = self.issuer_ref.as_deref() {
+            return continuation
+                .issuer_ref()
+                .is_some_and(|value| value == issuer_ref);
         }
 
         continuation
@@ -375,7 +418,24 @@ impl PendingEffects {
         cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Result<PendingEffect, serde_cbor::Error> {
-        let pending = PendingEffect::from_params(effect_kind, params, cap_slot, emitted_at_ns)?;
+        self.begin_with_issuer_ref(effect_kind, params, cap_slot, emitted_at_ns, None)
+    }
+
+    pub fn begin_with_issuer_ref<T: Serialize>(
+        &mut self,
+        effect_kind: impl Into<String>,
+        params: &T,
+        cap_slot: Option<String>,
+        emitted_at_ns: u64,
+        issuer_ref: Option<String>,
+    ) -> Result<PendingEffect, serde_cbor::Error> {
+        let pending = PendingEffect::from_params_with_issuer_ref(
+            effect_kind,
+            params,
+            cap_slot,
+            emitted_at_ns,
+            issuer_ref,
+        )?;
         self.insert(pending.clone());
         Ok(pending)
     }
@@ -420,6 +480,15 @@ impl PendingEffects {
             .by_params_hash
             .iter()
             .find(|(_, pending)| pending.intent_id.as_deref() == Some(continuation.intent_id()))
+        {
+            return Some((*params_hash).clone());
+        }
+
+        if let Some(issuer_ref) = continuation.issuer_ref()
+            && let Some((params_hash, _)) = self
+                .by_params_hash
+                .iter()
+                .find(|(_, pending)| pending.issuer_ref.as_deref() == Some(issuer_ref))
         {
             return Some((*params_hash).clone());
         }
@@ -762,6 +831,7 @@ mod tests {
         let frame = EffectStreamFrameEnvelope {
             intent_id: fake_hash('a'),
             effect_kind: "llm.session.start".into(),
+            issuer_ref: Some("stream-1".into()),
             seq: 2,
             kind: "tool_call.requested".into(),
             payload: serde_cbor::to_vec(&DummyStream { chunk: 7 }).unwrap(),
@@ -783,6 +853,7 @@ mod tests {
             intent_id: fake_hash('i'),
             effect_kind: "llm.generate".into(),
             params_hash: Some(handle.params_hash.clone()),
+            issuer_ref: Some("run-1".into()),
             seq: 1,
             kind: "progress".into(),
             payload: serde_cbor::to_vec(&DummyStream { chunk: 1 }).unwrap(),
@@ -801,6 +872,7 @@ mod tests {
             intent_id: stream.intent_id.clone(),
             effect_kind: "llm.generate".into(),
             params_hash: Some(handle.params_hash.clone()),
+            issuer_ref: Some("run-1".into()),
             receipt_payload: serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap(),
             status: "ok".into(),
             ..EffectReceiptEnvelope::default()
@@ -826,6 +898,7 @@ mod tests {
         let rejected = EffectReceiptRejected {
             intent_id: fake_hash('i'),
             effect_kind: "host.session.open".into(),
+            issuer_ref: Some("open-1".into()),
             status: "error".into(),
             error_code: "receipt.invalid_payload".into(),
             error_message: "bad payload".into(),

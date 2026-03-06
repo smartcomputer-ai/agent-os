@@ -752,6 +752,7 @@ mod tests {
             None,
             "http.request".into(),
             vec![1, 2, 3],
+            None,
             intent_hash,
             emitted_at_seq,
             None,

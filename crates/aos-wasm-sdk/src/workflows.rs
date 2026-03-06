@@ -260,7 +260,7 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         params: &impl Serialize,
         cap_slot: Option<&str>,
     ) {
-        self.emit_raw_with_idempotency(kind, params, cap_slot, None);
+        self.emit_raw_with_refs(kind, params, cap_slot, None, None);
     }
 
     /// Emit a micro-effect with an explicit idempotency key (32 bytes).
@@ -270,6 +270,28 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         params: &impl Serialize,
         cap_slot: Option<&str>,
         idempotency_key: Option<&[u8]>,
+    ) {
+        self.emit_raw_with_refs(kind, params, cap_slot, idempotency_key, None);
+    }
+
+    /// Emit a micro-effect with an explicit issuer reference echoed in continuations.
+    pub fn emit_raw_with_issuer_ref(
+        &mut self,
+        kind: &'static str,
+        params: &impl Serialize,
+        cap_slot: Option<&str>,
+        issuer_ref: Option<&str>,
+    ) {
+        self.emit_raw_with_refs(kind, params, cap_slot, None, issuer_ref);
+    }
+
+    fn emit_raw_with_refs(
+        &mut self,
+        kind: &'static str,
+        params: &impl Serialize,
+        cap_slot: Option<&str>,
+        idempotency_key: Option<&[u8]>,
+        issuer_ref: Option<&str>,
     ) {
         let payload = match serde_cbor::to_vec(params) {
             Ok(bytes) => bytes,
@@ -281,6 +303,7 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
             params: payload,
             cap_slot: cap_slot.map(|s| s.to_string()),
             idempotency_key: key,
+            issuer_ref: issuer_ref.map(|value| value.to_string()),
         });
     }
 
@@ -292,6 +315,18 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         params: &impl Serialize,
         cap_slot: Option<&str>,
     ) -> crate::PendingEffect {
+        self.emit_tracked_with_issuer_ref(pending, kind, params, cap_slot, None)
+    }
+
+    /// Emit and register a durable handle with an issuer reference echoed in continuations.
+    pub fn emit_tracked_with_issuer_ref(
+        &mut self,
+        pending: &mut crate::PendingEffects,
+        kind: &'static str,
+        params: &impl Serialize,
+        cap_slot: Option<&str>,
+        issuer_ref: Option<&str>,
+    ) -> crate::PendingEffect {
         let encoded = match crate::encode_effect_params(params) {
             Ok(value) => value,
             Err(err) => self.ctx.trap(StepError::EffectPayload(err)),
@@ -301,13 +336,15 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
             encoded.params_hash.clone(),
             cap_slot.map(|slot| slot.to_string()),
             self.ctx.now_ns().unwrap_or_default(),
-        );
+        )
+        .with_issuer_ref_opt(issuer_ref.map(|value| value.to_string()));
         pending.insert(pending_effect.clone());
         self.ctx.emit_effect(EmittedEffect {
             kind,
             params: encoded.cbor,
             cap_slot: cap_slot.map(|s| s.to_string()),
             idempotency_key: None,
+            issuer_ref: issuer_ref.map(|value| value.to_string()),
         });
         pending_effect
     }
@@ -334,6 +371,7 @@ struct EmittedEffect {
     params: Vec<u8>,
     cap_slot: Option<String>,
     idempotency_key: Option<Vec<u8>>,
+    issuer_ref: Option<String>,
 }
 
 impl EmittedEffect {
@@ -341,6 +379,9 @@ impl EmittedEffect {
         let mut eff = AbiWorkflowEffect::new(self.kind, self.params);
         if let Some(slot) = self.cap_slot {
             eff.cap_slot = Some(slot);
+        }
+        if let Some(issuer_ref) = self.issuer_ref {
+            eff.issuer_ref = Some(issuer_ref);
         }
         if let Some(key) = self.idempotency_key {
             eff.idempotency_key = Some(key);
@@ -731,6 +772,7 @@ mod tests {
                 .into(),
             effect_kind: "http.request".into(),
             params_hash: None,
+            issuer_ref: None,
             receipt_payload: payload,
             status: "ok".into(),
             emitted_at_seq: 42,

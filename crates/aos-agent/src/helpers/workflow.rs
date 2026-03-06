@@ -40,6 +40,7 @@ pub enum SessionEffectCommand {
         kind: ToolEffectKind,
         params_json: String,
         cap_slot: Option<String>,
+        issuer_ref: Option<String>,
         params_hash: String,
     },
     BlobPut {
@@ -512,7 +513,7 @@ fn on_tool_calls_observed(
         params_hash: params_hash.cloned(),
         plan,
         call_status,
-        pending_by_params_hash: BTreeMap::new(),
+        pending_by_issuer_ref: BTreeMap::new(),
         next_group_index: 0,
         llm_results: BTreeMap::new(),
         results_ref: None,
@@ -790,10 +791,8 @@ fn dispatch_next_ready_tool_group(
 
             let params_hash = hash_cbor(&params_json);
             batch
-                .pending_by_params_hash
-                .entry(params_hash.clone())
-                .or_default()
-                .push(call_id.clone());
+                .pending_by_issuer_ref
+                .insert(call_id.clone(), call_id.clone());
             batch
                 .call_status
                 .insert(call_id.clone(), ToolCallStatus::Pending);
@@ -803,6 +802,7 @@ fn dispatch_next_ready_tool_group(
                 kind,
                 params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
                 cap_slot,
+                issuer_ref: Some(call_id.clone()),
                 params_hash,
             });
         }
@@ -820,23 +820,16 @@ fn settle_tool_call_from_receipt(
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
-    let Some(params_hash) = envelope.params_hash.as_ref() else {
+    let Some(issuer_ref) = envelope.issuer_ref.as_ref() else {
         return Ok(false);
     };
     let (call_id, planned, tool_batch_id) = {
         let Some(batch) = state.active_tool_batch.as_mut() else {
             return Ok(false);
         };
-        let Some(call_ids) = batch.pending_by_params_hash.get_mut(params_hash) else {
+        let Some(call_id) = batch.pending_by_issuer_ref.remove(issuer_ref) else {
             return Ok(false);
         };
-        if call_ids.is_empty() {
-            return Ok(false);
-        }
-        let call_id = call_ids.remove(0);
-        if call_ids.is_empty() {
-            batch.pending_by_params_hash.remove(params_hash);
-        }
         let Some(planned) = batch
             .plan
             .planned_calls
@@ -1140,6 +1133,7 @@ fn rejected_as_error_envelope(rejected: &EffectReceiptRejected) -> EffectReceipt
         intent_id: rejected.intent_id.clone(),
         effect_kind: rejected.effect_kind.clone(),
         params_hash: rejected.params_hash.clone(),
+        issuer_ref: rejected.issuer_ref.clone(),
         receipt_payload: serde_cbor::to_vec(&payload).unwrap_or_default(),
         status: rejected.status.clone(),
         emitted_at_seq: rejected.emitted_at_seq,
@@ -1254,13 +1248,7 @@ fn recompute_in_flight_effects(state: &mut SessionState) {
     let pending_tool_effect_receipts = state
         .active_tool_batch
         .as_ref()
-        .map(|batch| {
-            batch
-                .pending_by_params_hash
-                .values()
-                .map(|items| items.len())
-                .sum::<usize>()
-        })
+        .map(|batch| batch.pending_by_issuer_ref.len())
         .unwrap_or(0);
     let pending_host_loop_calls = state
         .active_tool_batch
@@ -1759,6 +1747,7 @@ fn emit_auto_host_session_open(
         kind: ToolEffectKind::HostSessionOpen,
         params_json: serde_json::to_string(&params).unwrap_or_else(|_| "{}".into()),
         cap_slot: Some("host".into()),
+        issuer_ref: None,
         params_hash,
     });
     Ok(())
@@ -2149,12 +2138,31 @@ mod tests {
         status: &str,
         payload: &T,
     ) -> SessionWorkflowEvent {
+        receipt_event_with_issuer_ref(
+            emitted_at_seq,
+            effect_kind,
+            params_hash,
+            None,
+            status,
+            payload,
+        )
+    }
+
+    fn receipt_event_with_issuer_ref<T: serde::Serialize>(
+        emitted_at_seq: u64,
+        effect_kind: &str,
+        params_hash: Option<String>,
+        issuer_ref: Option<String>,
+        status: &str,
+        payload: &T,
+    ) -> SessionWorkflowEvent {
         SessionWorkflowEvent::Receipt(aos_wasm_sdk::EffectReceiptEnvelope {
             origin_module_id: "aos.agent/SessionWorkflow@1".into(),
             origin_instance_key: None,
             intent_id: fake_hash('i'),
             effect_kind: effect_kind.into(),
             params_hash,
+            issuer_ref,
             receipt_payload: serde_cbor::to_vec(payload).expect("encode payload"),
             status: status.into(),
             emitted_at_seq,
@@ -2535,12 +2543,17 @@ mod tests {
             ),
         )
         .expect("tool args blob.get receipt");
-        let tool_effect_hash = out6
+        let (tool_effect_hash, tool_effect_issuer_ref) = out6
             .effects
             .iter()
             .find_map(|effect| {
-                if let SessionEffectCommand::ToolEffect { params_hash, .. } = effect {
-                    Some(params_hash.clone())
+                if let SessionEffectCommand::ToolEffect {
+                    params_hash,
+                    issuer_ref,
+                    ..
+                } = effect
+                {
+                    Some((params_hash.clone(), issuer_ref.clone()))
                 } else {
                     None
                 }
@@ -2549,10 +2562,11 @@ mod tests {
 
         let out7 = apply_session_workflow_event(
             &mut state,
-            &receipt_event(
+            &receipt_event_with_issuer_ref(
                 7,
                 "host.exec",
                 Some(tool_effect_hash),
+                tool_effect_issuer_ref,
                 "ok",
                 &serde_json::json!({
                     "status": "ok",

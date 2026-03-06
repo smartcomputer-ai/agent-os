@@ -51,12 +51,17 @@ impl Workflow for SessionWorkflow {
                     kind,
                     params_json,
                     cap_slot,
+                    issuer_ref,
                     ..
                 } => {
                     let params: serde_json::Value =
                         serde_json::from_str(&params_json).unwrap_or(serde_json::Value::Null);
-                    ctx.effects()
-                        .emit_raw(kind.as_str(), &params, cap_slot.as_deref());
+                    ctx.effects().emit_raw_with_issuer_ref(
+                        kind.as_str(),
+                        &params,
+                        cap_slot.as_deref(),
+                        issuer_ref.as_deref(),
+                    );
                 }
                 SessionEffectCommand::BlobPut {
                     params, cap_slot, ..
