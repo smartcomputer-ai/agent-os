@@ -1108,8 +1108,7 @@ fn handle_llm_generate_receipt(
         return Ok(());
     }
 
-    let Ok(receipt) = serde_cbor::from_slice::<LlmGenerateReceipt>(&envelope.receipt_payload)
-    else {
+    let Some(receipt): Option<LlmGenerateReceipt> = envelope.decode_receipt_payload().ok() else {
         fail_run(state)?;
         return Ok(());
     };
@@ -1295,7 +1294,8 @@ fn enqueue_blob_get(
     out: &mut SessionReduceOutput,
 ) -> Result<String, SessionReduceError> {
     let params = BlobGetParams { blob_ref };
-    let params_hash = hash_cbor(&params);
+    let pending = pending_effect_from_params(state, "blob.get", &params, Some("blob"));
+    let params_hash = pending.params_hash.clone();
     let already_pending = state.pending_blob_gets.contains_key(&params_hash);
     state
         .pending_blob_gets
@@ -1306,12 +1306,7 @@ fn enqueue_blob_get(
             emitted_at_ns: state.updated_at,
         });
     if !already_pending {
-        state.pending_effects.insert(PendingEffect::new(
-            "blob.get",
-            params_hash.clone(),
-            Some("blob".into()),
-            state.updated_at,
-        ));
+        state.pending_effects.insert(pending);
         out.effects.push(SessionEffectCommand::BlobGet {
             params,
             cap_slot: Some("blob".into()),
@@ -1332,7 +1327,8 @@ fn enqueue_blob_put(
         blob_ref: None,
         refs: None,
     };
-    let params_hash = hash_cbor(&params);
+    let pending = pending_effect_from_params(state, "blob.put", &params, Some("blob"));
+    let params_hash = pending.params_hash.clone();
     let already_pending = state.pending_blob_puts.contains_key(&params_hash);
     state
         .pending_blob_puts
@@ -1343,12 +1339,7 @@ fn enqueue_blob_put(
             emitted_at_ns: state.updated_at,
         });
     if !already_pending {
-        state.pending_effects.insert(PendingEffect::new(
-            "blob.put",
-            params_hash.clone(),
-            Some("blob".into()),
-            state.updated_at,
-        ));
+        state.pending_effects.insert(pending);
         out.effects.push(SessionEffectCommand::BlobPut {
             params,
             cap_slot: Some("blob".into()),
@@ -1381,7 +1372,7 @@ fn handle_pending_blob_get_receipt(
     let receipt = if failed {
         None
     } else {
-        serde_cbor::from_slice::<BlobGetReceipt>(&envelope.receipt_payload).ok()
+        envelope.decode_receipt_payload::<BlobGetReceipt>().ok()
     };
 
     match pending.kind {
@@ -1587,7 +1578,7 @@ fn handle_pending_blob_put_receipt(
     let receipt = if failed {
         None
     } else {
-        serde_cbor::from_slice::<BlobPutReceipt>(&envelope.receipt_payload).ok()
+        envelope.decode_receipt_payload::<BlobPutReceipt>().ok()
     };
 
     match pending.kind {
@@ -1716,13 +1707,7 @@ fn dispatch_queued_llm_turn(
 
     let params = materialize_llm_generate_params_with_prompt_refs(&run_config, step_ctx)
         .map_err(map_llm_mapping_error)?;
-    let params_hash = hash_cbor(&params);
-    state.pending_effects.insert(PendingEffect::new(
-        "llm.generate",
-        params_hash.clone(),
-        Some("llm".into()),
-        state.updated_at,
-    ));
+    let params_hash = begin_pending_effect(state, "llm.generate", &params, Some("llm"));
     out.effects.push(SessionEffectCommand::LlmGenerate {
         params,
         cap_slot: Some("llm".into()),
@@ -1769,13 +1754,7 @@ fn emit_auto_host_session_open(
         &state.tool_runtime_context,
     )
     .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
-    let params_hash = hash_cbor(&params);
-    state.pending_effects.insert(PendingEffect::new(
-        "host.session.open",
-        params_hash.clone(),
-        Some("host".into()),
-        state.updated_at,
-    ));
+    let params_hash = begin_pending_effect(state, "host.session.open", &params, Some("host"));
     out.effects.push(SessionEffectCommand::ToolEffect {
         kind: ToolEffectKind::HostSessionOpen,
         params_json: serde_json::to_string(&params).unwrap_or_else(|_| "{}".into()),
@@ -2083,6 +2062,41 @@ fn stamp_timestamps(state: &mut SessionState, event: &SessionWorkflowEvent) {
 
 fn hash_tool_plan(plan: &ToolBatchPlan) -> String {
     hash_cbor(plan)
+}
+
+fn pending_effect_from_params<T: serde::Serialize>(
+    state: &SessionState,
+    effect_kind: &'static str,
+    params: &T,
+    cap_slot: Option<&str>,
+) -> PendingEffect {
+    let cap_slot = cap_slot.map(ToString::to_string);
+    PendingEffect::from_params(effect_kind, params, cap_slot.clone(), state.updated_at)
+        .unwrap_or_else(|_| {
+            PendingEffect::new(effect_kind, String::new(), cap_slot, state.updated_at)
+        })
+}
+
+fn begin_pending_effect<T: serde::Serialize>(
+    state: &mut SessionState,
+    effect_kind: &'static str,
+    params: &T,
+    cap_slot: Option<&str>,
+) -> String {
+    let cap_slot = cap_slot.map(ToString::to_string);
+    match state
+        .pending_effects
+        .begin(effect_kind, params, cap_slot.clone(), state.updated_at)
+    {
+        Ok(pending) => pending.params_hash,
+        Err(_) => {
+            let pending =
+                PendingEffect::new(effect_kind, String::new(), cap_slot, state.updated_at);
+            let params_hash = pending.params_hash.clone();
+            state.pending_effects.insert(pending);
+            params_hash
+        }
+    }
 }
 
 fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
