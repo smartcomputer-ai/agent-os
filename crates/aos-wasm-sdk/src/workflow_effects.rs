@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use serde::de::DeserializeOwned;
@@ -499,6 +499,367 @@ impl PendingEffects {
                 .filter(|pending| pending.effect_kind == continuation.effect_kind())
                 .map(|_| params_hash.to_string())
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingEffectLookupError {
+    AmbiguousIssuerRef {
+        issuer_ref: String,
+        matches: usize,
+    },
+    AmbiguousParamsHash {
+        effect_kind: String,
+        params_hash: String,
+        matches: usize,
+    },
+}
+
+impl core::fmt::Display for PendingEffectLookupError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::AmbiguousIssuerRef {
+                issuer_ref,
+                matches,
+            } => write!(
+                f,
+                "multiple pending effects match issuer_ref {issuer_ref}: {matches}"
+            ),
+            Self::AmbiguousParamsHash {
+                effect_kind,
+                params_hash,
+                matches,
+            } => write!(
+                f,
+                "multiple pending effects match {effect_kind} with params_hash {params_hash}: {matches}"
+            ),
+        }
+    }
+}
+
+impl core::error::Error for PendingEffectLookupError {}
+
+/// Workflow-local storage for in-flight effect handles keyed by workflow state.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+#[serde(bound(serialize = "K: Serialize", deserialize = "K: Ord + Deserialize<'de>"))]
+pub struct PendingEffectSet<K> {
+    by_key: BTreeMap<K, PendingEffect>,
+}
+
+impl<K> Default for PendingEffectSet<K> {
+    fn default() -> Self {
+        Self {
+            by_key: BTreeMap::new(),
+        }
+    }
+}
+
+impl<K> PendingEffectSet<K>
+where
+    K: Ord + Clone,
+{
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_key.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_key.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &PendingEffect)> {
+        self.by_key.iter()
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &PendingEffect> {
+        self.by_key.values()
+    }
+
+    pub fn clear(&mut self) {
+        self.by_key.clear();
+    }
+
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.by_key.contains_key(key)
+    }
+
+    pub fn insert(&mut self, key: K, pending: PendingEffect) -> Option<PendingEffect> {
+        self.by_key.insert(key, pending)
+    }
+
+    pub fn begin<T: Serialize>(
+        &mut self,
+        key: K,
+        effect_kind: impl Into<String>,
+        params: &T,
+        cap_slot: Option<String>,
+        emitted_at_ns: u64,
+    ) -> Result<PendingEffect, serde_cbor::Error> {
+        self.begin_with_issuer_ref(key, effect_kind, params, cap_slot, emitted_at_ns, None)
+    }
+
+    pub fn begin_with_issuer_ref<T: Serialize>(
+        &mut self,
+        key: K,
+        effect_kind: impl Into<String>,
+        params: &T,
+        cap_slot: Option<String>,
+        emitted_at_ns: u64,
+        issuer_ref: Option<String>,
+    ) -> Result<PendingEffect, serde_cbor::Error> {
+        let pending = PendingEffect::from_params_with_issuer_ref(
+            effect_kind,
+            params,
+            cap_slot,
+            emitted_at_ns,
+            issuer_ref,
+        )?;
+        self.insert(key, pending.clone());
+        Ok(pending)
+    }
+
+    pub fn get(&self, key: &K) -> Option<&PendingEffect> {
+        self.by_key.get(key)
+    }
+
+    pub fn remove(&mut self, key: &K) -> Option<PendingEffect> {
+        self.by_key.remove(key)
+    }
+
+    pub fn observe<'a>(
+        &mut self,
+        continuation: EffectContinuationRef<'a>,
+    ) -> Result<Option<PendingEffectSetMatch<'a, K>>, PendingEffectLookupError> {
+        let Some(key) = self.lookup_key(continuation)? else {
+            return Ok(None);
+        };
+        let pending = self.by_key.get_mut(&key).expect("matched pending effect");
+        let observed = pending.observe(continuation).expect("matched continuation");
+        Ok(Some(PendingEffectSetMatch {
+            key,
+            pending: pending.clone(),
+            observed,
+        }))
+    }
+
+    pub fn settle<'a>(
+        &mut self,
+        continuation: EffectContinuationRef<'a>,
+    ) -> Result<Option<PendingEffectSetMatch<'a, K>>, PendingEffectLookupError> {
+        if !continuation.is_terminal() {
+            return Ok(None);
+        }
+
+        let Some(key) = self.lookup_key(continuation)? else {
+            return Ok(None);
+        };
+        let mut pending = self.by_key.remove(&key).expect("matched pending effect");
+        let observed = pending.observe(continuation).expect("matched continuation");
+        Ok(Some(PendingEffectSetMatch {
+            key,
+            pending,
+            observed,
+        }))
+    }
+
+    fn lookup_key(
+        &self,
+        continuation: EffectContinuationRef<'_>,
+    ) -> Result<Option<K>, PendingEffectLookupError> {
+        if let Some((key, _)) = self
+            .by_key
+            .iter()
+            .find(|(_, pending)| pending.intent_id.as_deref() == Some(continuation.intent_id()))
+        {
+            return Ok(Some(key.clone()));
+        }
+
+        if let Some(issuer_ref) = continuation.issuer_ref() {
+            let matches = self
+                .by_key
+                .iter()
+                .filter(|(_, pending)| pending.issuer_ref.as_deref() == Some(issuer_ref))
+                .map(|(key, _)| key.clone())
+                .collect::<Vec<_>>();
+            return match matches.len() {
+                0 => Ok(None),
+                1 => Ok(matches.into_iter().next()),
+                count => Err(PendingEffectLookupError::AmbiguousIssuerRef {
+                    issuer_ref: issuer_ref.to_string(),
+                    matches: count,
+                }),
+            };
+        }
+
+        let Some(params_hash) = continuation.params_hash() else {
+            return Ok(None);
+        };
+        let matches = self
+            .by_key
+            .iter()
+            .filter(|(_, pending)| {
+                pending.effect_kind == continuation.effect_kind()
+                    && pending.params_hash == params_hash
+            })
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(matches.into_iter().next()),
+            count => Err(PendingEffectLookupError::AmbiguousParamsHash {
+                effect_kind: continuation.effect_kind().to_string(),
+                params_hash: params_hash.to_string(),
+                matches: count,
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingEffectSetMatch<'a, K> {
+    pub key: K,
+    pub pending: PendingEffect,
+    pub observed: ObservedEffect<'a>,
+}
+
+/// Durable completion state for one `await_all` group of keyed effects.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(bound(serialize = "K: Serialize", deserialize = "K: Ord + Deserialize<'de>"))]
+pub struct PendingBatchGroup<K> {
+    pub keys: Vec<K>,
+    pub terminal_keys: BTreeSet<K>,
+}
+
+impl<K> Default for PendingBatchGroup<K> {
+    fn default() -> Self {
+        Self {
+            keys: Vec::new(),
+            terminal_keys: BTreeSet::new(),
+        }
+    }
+}
+
+impl<K> PendingBatchGroup<K>
+where
+    K: Ord + Clone,
+{
+    pub fn new(keys: Vec<K>) -> Self {
+        Self {
+            keys,
+            terminal_keys: BTreeSet::new(),
+        }
+    }
+
+    pub fn contains(&self, key: &K) -> bool {
+        self.keys.iter().any(|candidate| candidate == key)
+    }
+
+    pub fn mark_terminal(&mut self, key: &K) -> bool {
+        if !self.contains(key) {
+            return false;
+        }
+        self.terminal_keys.insert(key.clone())
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.keys.iter().all(|key| self.terminal_keys.contains(key))
+    }
+}
+
+/// Durable sequential batch state built from `await_all` groups of keyed effects.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(bound(serialize = "K: Serialize", deserialize = "K: Ord + Deserialize<'de>"))]
+pub struct PendingBatch<K> {
+    pub groups: Vec<PendingBatchGroup<K>>,
+    pub next_group_index: u64,
+}
+
+impl<K> Default for PendingBatch<K> {
+    fn default() -> Self {
+        Self {
+            groups: Vec::new(),
+            next_group_index: 0,
+        }
+    }
+}
+
+impl<K> PendingBatch<K>
+where
+    K: Ord + Clone,
+{
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_groups(groups: Vec<Vec<K>>) -> Self {
+        Self {
+            groups: groups.into_iter().map(PendingBatchGroup::new).collect(),
+            next_group_index: 0,
+        }
+    }
+
+    pub fn current_group_index(&self) -> Option<usize> {
+        let idx = self.next_group_index as usize;
+        (idx < self.groups.len()).then_some(idx)
+    }
+
+    pub fn current_group(&self) -> Option<&PendingBatchGroup<K>> {
+        self.current_group_index()
+            .and_then(|idx| self.groups.get(idx))
+    }
+
+    pub fn current_group_keys(&self) -> Option<&[K]> {
+        self.current_group().map(|group| group.keys.as_slice())
+    }
+
+    pub fn advance(&mut self) -> bool {
+        if self.current_group_index().is_none() {
+            return false;
+        }
+        self.next_group_index = self.next_group_index.saturating_add(1);
+        true
+    }
+
+    pub fn advance_completed(&mut self) -> usize {
+        let mut advanced = 0usize;
+        while self
+            .current_group()
+            .is_some_and(PendingBatchGroup::is_complete)
+        {
+            self.next_group_index = self.next_group_index.saturating_add(1);
+            advanced = advanced.saturating_add(1);
+        }
+        advanced
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.current_group_index().is_none()
+    }
+
+    pub fn group_index_of(&self, key: &K) -> Option<usize> {
+        self.groups.iter().position(|group| group.contains(key))
+    }
+
+    pub fn rewind_to_group_containing(&mut self, key: &K) -> bool {
+        let Some(idx) = self.group_index_of(key) else {
+            return false;
+        };
+        if idx >= self.next_group_index as usize {
+            return false;
+        }
+        self.next_group_index = idx as u64;
+        true
+    }
+
+    pub fn mark_terminal(&mut self, key: &K) -> bool {
+        self.groups
+            .iter_mut()
+            .find(|group| group.contains(key))
+            .is_some_and(|group| group.mark_terminal(key))
     }
 }
 

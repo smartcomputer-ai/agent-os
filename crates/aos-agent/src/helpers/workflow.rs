@@ -23,7 +23,10 @@ use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, LlmGenerateParams,
     LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCallList, LlmToolChoice, TextOrSecretRef,
 };
-use aos_wasm_sdk::{EffectReceiptEnvelope, EffectReceiptRejected, PendingEffect};
+use aos_wasm_sdk::{
+    EffectReceiptEnvelope, EffectReceiptRejected, PendingBatch, PendingEffect,
+    PendingEffectLookupError, PendingEffectSet,
+};
 
 use super::llm::{
     LlmMappingError, LlmStepContext, materialize_llm_generate_params_with_prompt_refs,
@@ -84,6 +87,7 @@ pub enum SessionReduceError {
     ToolProfileUnknown,
     UnknownToolOverride,
     InvalidToolRegistry,
+    AmbiguousPendingToolEffect,
 }
 
 impl SessionReduceError {
@@ -104,6 +108,7 @@ impl SessionReduceError {
             Self::ToolProfileUnknown => "tool profile unknown",
             Self::UnknownToolOverride => "unknown tool override",
             Self::InvalidToolRegistry => "invalid tool registry",
+            Self::AmbiguousPendingToolEffect => "ambiguous pending tool effect",
         }
     }
 }
@@ -115,6 +120,56 @@ impl core::fmt::Display for SessionReduceError {
 }
 
 impl core::error::Error for SessionReduceError {}
+
+fn pending_effect_lookup_err_to_session_err(_err: PendingEffectLookupError) -> SessionReduceError {
+    SessionReduceError::AmbiguousPendingToolEffect
+}
+
+fn build_tool_execution(
+    groups: Vec<Vec<String>>,
+    call_status: &BTreeMap<String, ToolCallStatus>,
+) -> PendingBatch<String> {
+    let mut execution = PendingBatch::from_groups(groups);
+    for (call_id, status) in call_status {
+        if status.is_terminal() {
+            let _ = execution.mark_terminal(call_id);
+        }
+    }
+    execution
+}
+
+fn set_tool_call_status(batch: &mut ActiveToolBatch, call_id: &String, status: ToolCallStatus) {
+    if status.is_terminal() {
+        let _ = batch.execution.mark_terminal(call_id);
+    }
+    batch.call_status.insert(call_id.clone(), status);
+}
+
+fn fail_tool_call(
+    batch: &mut ActiveToolBatch,
+    call_id: &String,
+    code: &str,
+    detail: impl Into<String>,
+) {
+    set_tool_call_status(
+        batch,
+        call_id,
+        ToolCallStatus::Failed {
+            code: code.into(),
+            detail: detail.into(),
+        },
+    );
+}
+
+fn transition_to_waiting_input_if_running(
+    state: &mut SessionState,
+) -> Result<(), SessionReduceError> {
+    if matches!(state.lifecycle, SessionLifecycle::Running) {
+        transition_lifecycle(state, SessionLifecycle::WaitingInput)
+            .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+    }
+    Ok(())
+}
 
 pub fn apply_session_workflow_event(
     state: &mut SessionState,
@@ -506,6 +561,7 @@ fn on_tool_calls_observed(
 
     let (plan, call_status) = plan_tool_batch(state, calls);
     state.last_tool_plan_hash = Some(hash_tool_plan(&plan));
+    let execution = build_tool_execution(plan.execution_plan.groups.clone(), &call_status);
 
     state.active_tool_batch = Some(ActiveToolBatch {
         tool_batch_id,
@@ -513,8 +569,8 @@ fn on_tool_calls_observed(
         params_hash: params_hash.cloned(),
         plan,
         call_status,
-        pending_by_issuer_ref: BTreeMap::new(),
-        next_group_index: 0,
+        pending_effects: PendingEffectSet::new(),
+        execution,
         llm_results: BTreeMap::new(),
         results_ref: None,
     });
@@ -619,8 +675,8 @@ fn dispatch_next_ready_tool_group(
         let Some(mut batch) = state.active_tool_batch.take() else {
             return Ok(());
         };
-        let idx = batch.next_group_index as usize;
-        if idx >= batch.plan.execution_plan.groups.len() {
+        batch.execution.advance_completed();
+        if batch.execution.is_complete() {
             if batch.is_settled() && batch.results_ref.is_none() {
                 start_follow_up_for_settled_batch(state, &mut batch, out)?;
             }
@@ -629,29 +685,12 @@ fn dispatch_next_ready_tool_group(
             return Ok(());
         }
 
-        let previous_groups_settled =
-            batch
-                .plan
-                .execution_plan
-                .groups
-                .iter()
-                .take(idx)
-                .all(|group| {
-                    group.iter().all(|call_id| {
-                        batch
-                            .call_status
-                            .get(call_id)
-                            .is_some_and(ToolCallStatus::is_terminal)
-                    })
-                });
-        if !previous_groups_settled {
-            state.active_tool_batch = Some(batch);
-            recompute_in_flight_effects(state);
-            return Ok(());
-        }
-
-        let group = batch.plan.execution_plan.groups[idx].clone();
-        batch.next_group_index = batch.next_group_index.saturating_add(1);
+        let group = batch
+            .execution
+            .current_group_keys()
+            .map(|group| group.to_vec())
+            .unwrap_or_default();
+        let _ = batch.execution.advance();
 
         let runtime_ctx = state.tool_runtime_context.clone();
         let mut emitted_for_group = 0usize;
@@ -675,9 +714,7 @@ fn dispatch_next_ready_tool_group(
 
             match &planned.executor {
                 ToolExecutor::HostLoop { .. } => {
-                    batch
-                        .call_status
-                        .insert(call_id.clone(), ToolCallStatus::Pending);
+                    set_tool_call_status(&mut batch, &call_id, ToolCallStatus::Pending);
                     continue;
                 }
                 ToolExecutor::Effect { .. } => {}
@@ -690,20 +727,18 @@ fn dispatch_next_ready_tool_group(
                 } => (effect_kind.clone(), cap_slot.clone()),
                 ToolExecutor::HostLoop { .. } => unreachable!(),
             };
-            let kind = if let Some(mapper) =
-                crate::tools::mapper_for_effect_kind(effect_kind.as_str())
-            {
-                crate::tools::effect_kind_for_mapper(mapper)
-            } else {
-                batch.call_status.insert(
-                    call_id.clone(),
-                    ToolCallStatus::Failed {
-                        code: "executor_unsupported".into(),
-                        detail: format!("unsupported effect kind for wasm emit_raw: {effect_kind}"),
-                    },
-                );
-                continue;
-            };
+            let kind =
+                if let Some(mapper) = crate::tools::mapper_for_effect_kind(effect_kind.as_str()) {
+                    crate::tools::effect_kind_for_mapper(mapper)
+                } else {
+                    fail_tool_call(
+                        &mut batch,
+                        &call_id,
+                        "executor_unsupported",
+                        format!("unsupported effect kind for wasm emit_raw: {effect_kind}"),
+                    );
+                    continue;
+                };
 
             let arguments_json = if !planned.arguments_json.trim().is_empty() {
                 planned.arguments_json.clone()
@@ -711,15 +746,11 @@ fn dispatch_next_ready_tool_group(
                 let blob_ref = match HashRef::new(arguments_ref) {
                     Ok(value) => value,
                     Err(err) => {
-                        batch.call_status.insert(
-                            call_id.clone(),
-                            ToolCallStatus::Failed {
-                                code: "tool_invalid_args_ref".into(),
-                                detail: format!(
-                                    "invalid arguments_ref for {}: {err}",
-                                    planned.tool_name
-                                ),
-                            },
+                        fail_tool_call(
+                            &mut batch,
+                            &call_id,
+                            "tool_invalid_args_ref",
+                            format!("invalid arguments_ref for {}: {err}", planned.tool_name),
                         );
                         continue;
                     }
@@ -742,20 +773,17 @@ fn dispatch_next_ready_tool_group(
                 if !already_pending {
                     emitted_for_group = emitted_for_group.saturating_add(1);
                 }
-                batch
-                    .call_status
-                    .insert(call_id.clone(), ToolCallStatus::Pending);
+                set_tool_call_status(&mut batch, &call_id, ToolCallStatus::Pending);
                 continue;
             } else {
-                batch.call_status.insert(
-                    call_id.clone(),
-                    ToolCallStatus::Failed {
-                        code: "tool_invalid_args".into(),
-                        detail: format!(
-                            "tool {} missing arguments_json and arguments_ref",
-                            planned.tool_name
-                        ),
-                    },
+                fail_tool_call(
+                    &mut batch,
+                    &call_id,
+                    "tool_invalid_args",
+                    format!(
+                        "tool {} missing arguments_json and arguments_ref",
+                        planned.tool_name
+                    ),
                 );
                 continue;
             };
@@ -767,9 +795,7 @@ fn dispatch_next_ready_tool_group(
             ) {
                 Ok(params) => params,
                 Err(err) => {
-                    batch
-                        .call_status
-                        .insert(call_id.clone(), err.to_failed_status());
+                    set_tool_call_status(&mut batch, &call_id, err.to_failed_status());
                     batch.llm_results.insert(
                         call_id.clone(),
                         crate::contracts::ToolCallLlmResult {
@@ -789,13 +815,27 @@ fn dispatch_next_ready_tool_group(
                 }
             };
 
-            let params_hash = hash_cbor(&params_json);
-            batch
-                .pending_by_issuer_ref
-                .insert(call_id.clone(), call_id.clone());
-            batch
-                .call_status
-                .insert(call_id.clone(), ToolCallStatus::Pending);
+            let pending = batch
+                .pending_effects
+                .begin_with_issuer_ref(
+                    call_id.clone(),
+                    kind.as_str(),
+                    &params_json,
+                    cap_slot.clone(),
+                    state.updated_at,
+                    Some(call_id.clone()),
+                )
+                .unwrap_or_else(|_| {
+                    insert_fallback_pending_tool_effect(
+                        &mut batch,
+                        &call_id,
+                        kind,
+                        cap_slot.clone(),
+                        state.updated_at,
+                    )
+                });
+            let params_hash = pending.params_hash.clone();
+            set_tool_call_status(&mut batch, &call_id, ToolCallStatus::Pending);
             emitted_for_group = emitted_for_group.saturating_add(1);
 
             out.effects.push(SessionEffectCommand::ToolEffect {
@@ -815,21 +855,38 @@ fn dispatch_next_ready_tool_group(
     }
 }
 
+fn insert_fallback_pending_tool_effect(
+    batch: &mut ActiveToolBatch,
+    call_id: &String,
+    kind: ToolEffectKind,
+    cap_slot: Option<String>,
+    emitted_at_ns: u64,
+) -> PendingEffect {
+    let pending = PendingEffect::new(kind.as_str(), String::new(), cap_slot, emitted_at_ns)
+        .with_issuer_ref(call_id.clone());
+    batch
+        .pending_effects
+        .insert(call_id.clone(), pending.clone());
+    pending
+}
+
 fn settle_tool_call_from_receipt(
     state: &mut SessionState,
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
-    let Some(issuer_ref) = envelope.issuer_ref.as_ref() else {
-        return Ok(false);
-    };
     let (call_id, planned, tool_batch_id) = {
         let Some(batch) = state.active_tool_batch.as_mut() else {
             return Ok(false);
         };
-        let Some(call_id) = batch.pending_by_issuer_ref.remove(issuer_ref) else {
+        let Some(matched) = batch
+            .pending_effects
+            .settle(envelope.into())
+            .map_err(pending_effect_lookup_err_to_session_err)?
+        else {
             return Ok(false);
         };
+        let call_id = matched.key;
         let Some(planned) = batch
             .plan
             .planned_calls
@@ -879,7 +936,7 @@ fn settle_tool_call_from_receipt(
         } else {
             mapped.status.clone()
         };
-        batch.call_status.insert(call_id.clone(), initial_status);
+        set_tool_call_status(batch, &call_id, initial_status);
     }
 
     for blob_ref in &queued_blob_refs {
@@ -1248,7 +1305,7 @@ fn recompute_in_flight_effects(state: &mut SessionState) {
     let pending_tool_effect_receipts = state
         .active_tool_batch
         .as_ref()
-        .map(|batch| batch.pending_by_issuer_ref.len())
+        .map(|batch| batch.pending_effects.len())
         .unwrap_or(0);
     let pending_host_loop_calls = state
         .active_tool_batch
@@ -1256,8 +1313,11 @@ fn recompute_in_flight_effects(state: &mut SessionState) {
         .map(|batch| {
             batch
                 .call_status
-                .values()
-                .filter(|status| matches!(status, ToolCallStatus::Pending))
+                .iter()
+                .filter(|(call_id, status)| {
+                    matches!(status, ToolCallStatus::Pending)
+                        && !batch.pending_effects.contains_key(*call_id)
+                })
                 .count()
         })
         .unwrap_or(0);
@@ -1378,9 +1438,8 @@ fn handle_pending_blob_get_receipt(
             };
             if let Some(tool_calls_ref) = output.tool_calls_ref {
                 enqueue_blob_get(state, tool_calls_ref, PendingBlobGetKind::LlmToolCalls, out)?;
-            } else if matches!(state.lifecycle, SessionLifecycle::Running) {
-                transition_lifecycle(state, SessionLifecycle::WaitingInput)
-                    .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+            } else {
+                transition_to_waiting_input_if_running(state)?;
             }
             Ok(true)
         }
@@ -1397,10 +1456,7 @@ fn handle_pending_blob_get_receipt(
                 }
             };
             if calls.is_empty() {
-                if matches!(state.lifecycle, SessionLifecycle::Running) {
-                    transition_lifecycle(state, SessionLifecycle::WaitingInput)
-                        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
-                }
+                transition_to_waiting_input_if_running(state)?;
                 return Ok(true);
             }
             let observed = calls
@@ -1424,8 +1480,9 @@ fn handle_pending_blob_get_receipt(
                 if let Some(batch) = state.active_tool_batch.as_mut()
                     && batch.tool_batch_id == tool_batch_id
                 {
-                    batch.call_status.insert(
-                        call_id.clone(),
+                    set_tool_call_status(
+                        batch,
+                        &call_id,
                         ToolCallStatus::Failed {
                             code: "tool_arguments_ref_failed".into(),
                             detail: "blob.get for tool arguments failed".into(),
@@ -1440,8 +1497,9 @@ fn handle_pending_blob_get_receipt(
                 if let Some(batch) = state.active_tool_batch.as_mut()
                     && batch.tool_batch_id == tool_batch_id
                 {
-                    batch.call_status.insert(
-                        call_id.clone(),
+                    set_tool_call_status(
+                        batch,
+                        &call_id,
                         ToolCallStatus::Failed {
                             code: "tool_arguments_ref_decode_failed".into(),
                             detail: "failed to decode blob.get receipt payload".into(),
@@ -1460,8 +1518,9 @@ fn handle_pending_blob_get_receipt(
                     if let Some(batch) = state.active_tool_batch.as_mut()
                         && batch.tool_batch_id == tool_batch_id
                     {
-                        batch.call_status.insert(
-                            call_id.clone(),
+                        set_tool_call_status(
+                            batch,
+                            &call_id,
                             ToolCallStatus::Failed {
                                 code: "tool_arguments_not_json".into(),
                                 detail: "tool arguments blob must contain JSON".into(),
@@ -1484,18 +1543,8 @@ fn handle_pending_blob_get_receipt(
                 {
                     planned.arguments_json = args_json;
                 }
-                batch
-                    .call_status
-                    .insert(call_id.clone(), ToolCallStatus::Queued);
-                if let Some(group_idx) = batch
-                    .plan
-                    .execution_plan
-                    .groups
-                    .iter()
-                    .position(|group| group.iter().any(|id| id == &call_id))
-                {
-                    batch.next_group_index = group_idx as u64;
-                }
+                set_tool_call_status(batch, &call_id, ToolCallStatus::Queued);
+                let _ = batch.execution.rewind_to_group_containing(&call_id);
             }
             dispatch_next_ready_tool_group(state, out)?;
             Ok(true)
@@ -1539,9 +1588,7 @@ fn handle_pending_blob_get_receipt(
                     Some(ToolCallStatus::Pending)
                 )
             {
-                batch
-                    .call_status
-                    .insert(call_id.clone(), ToolCallStatus::Succeeded);
+                set_tool_call_status(batch, &call_id, ToolCallStatus::Succeeded);
             }
 
             dispatch_next_ready_tool_group(state, out)?;
@@ -1806,10 +1853,7 @@ fn start_follow_up_for_settled_batch(
     }
 
     if messages.is_empty() {
-        if matches!(state.lifecycle, SessionLifecycle::Running) {
-            transition_lifecycle(state, SessionLifecycle::WaitingInput)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
-        }
+        transition_to_waiting_input_if_running(state)?;
         return Ok(());
     }
 

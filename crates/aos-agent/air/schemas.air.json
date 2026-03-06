@@ -232,6 +232,36 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/PendingToolEffectSet@1",
+    "type": {
+      "map": {
+        "key": { "text": {} },
+        "value": { "ref": "sys/PendingEffect@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingToolBatchGroup@1",
+    "type": {
+      "record": {
+        "keys": { "list": { "text": {} } },
+        "terminal_keys": { "list": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingToolExecution@1",
+    "type": {
+      "record": {
+        "groups": { "list": { "ref": "aos.agent/PendingToolBatchGroup@1" } },
+        "next_group_index": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/ActiveToolBatch@1",
     "type": {
       "record": {
@@ -245,13 +275,8 @@
             "value": { "ref": "aos.agent/ToolCallStatus@1" }
           }
         },
-        "pending_by_issuer_ref": {
-          "map": {
-            "key": { "text": {} },
-            "value": { "text": {} }
-          }
-        },
-        "next_group_index": { "nat": {} },
+        "pending_effects": { "ref": "aos.agent/PendingToolEffectSet@1" },
+        "execution": { "ref": "aos.agent/PendingToolExecution@1" },
         "llm_results": {
           "map": {
             "key": { "text": {} },

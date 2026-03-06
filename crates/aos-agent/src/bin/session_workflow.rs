@@ -160,6 +160,9 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         SessionReduceError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
         SessionReduceError::UnknownToolOverride => ReduceError::new("unknown tool override"),
         SessionReduceError::InvalidToolRegistry => ReduceError::new("invalid tool registry"),
+        SessionReduceError::AmbiguousPendingToolEffect => {
+            ReduceError::new("ambiguous pending tool effect")
+        }
     }
 }
 
