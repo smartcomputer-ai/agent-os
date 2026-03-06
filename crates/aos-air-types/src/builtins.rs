@@ -316,6 +316,8 @@ mod tests {
         assert!(names.contains(&"sys/WorkspaceReadBytesReceipt@1"));
         assert!(names.contains(&"sys/WorkspaceWriteBytesParams@1"));
         assert!(names.contains(&"sys/WorkspaceWriteBytesReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceWriteRefParams@1"));
+        assert!(names.contains(&"sys/WorkspaceWriteRefReceipt@1"));
         assert!(names.contains(&"sys/WorkspaceRemoveParams@1"));
         assert!(names.contains(&"sys/WorkspaceRemoveReceipt@1"));
         assert!(names.contains(&"sys/WorkspaceDiffParams@1"));

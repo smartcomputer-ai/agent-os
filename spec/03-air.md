@@ -340,6 +340,10 @@ Example secret ref in `llm.generate` params:
 - params: `{ root_hash:hash, path:text, bytes:bytes, mode?:nat }`
 - receipt: `{ new_root_hash:hash, blob_hash:hash }`
 
+**workspace.write_ref** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+- params: `{ root_hash:hash, path:text, blob_hash:hash, mode?:nat }`
+- receipt: `{ new_root_hash:hash, blob_hash:hash }`
+
 **workspace.remove** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
 - params: `{ root_hash:hash, path:text }`
 - receipt: `{ new_root_hash:hash }`

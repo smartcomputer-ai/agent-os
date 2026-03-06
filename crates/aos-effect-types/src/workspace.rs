@@ -107,6 +107,21 @@ pub struct WorkspaceWriteBytesReceipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceWriteRefParams {
+    pub root_hash: HashRef,
+    pub path: String,
+    pub blob_hash: HashRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceWriteRefReceipt {
+    pub new_root_hash: HashRef,
+    pub blob_hash: HashRef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceRemoveParams {
     pub root_hash: HashRef,
     pub path: String,

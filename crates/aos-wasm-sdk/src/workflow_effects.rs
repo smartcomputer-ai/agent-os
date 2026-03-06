@@ -1115,6 +1115,12 @@ define_sys_effect_helpers!(
         WorkspaceWriteBytesParams
     ),
     (
+        workspace_write_ref,
+        workspace_write_ref_tracked,
+        "workspace.write_ref",
+        WorkspaceWriteRefParams
+    ),
+    (
         workspace_remove,
         workspace_remove_tracked,
         "workspace.remove",
