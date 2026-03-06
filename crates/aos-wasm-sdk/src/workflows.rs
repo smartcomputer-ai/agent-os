@@ -248,19 +248,9 @@ pub struct Effects<'ctx, S, A> {
 }
 
 impl<'ctx, S, A> Effects<'ctx, S, A> {
-    /// Emit a timer.set micro-effect.
-    pub fn timer_set(&mut self, params: &TimerSetParams, cap_slot: &str) {
-        self.emit_raw(EFFECT_TIMER_SET, params, Some(cap_slot));
-    }
-
-    /// Emit a blob.put micro-effect.
-    pub fn blob_put(&mut self, params: &BlobPutParams, cap_slot: &str) {
-        self.emit_raw(EFFECT_BLOB_PUT, params, Some(cap_slot));
-    }
-
-    /// Emit a blob.get micro-effect.
-    pub fn blob_get(&mut self, params: &BlobGetParams, cap_slot: &str) {
-        self.emit_raw(EFFECT_BLOB_GET, params, Some(cap_slot));
+    /// Enter the namespaced sys-effect authoring surface.
+    pub fn sys(&mut self) -> crate::SysEffects<'_, 'ctx, S, A> {
+        crate::SysEffects::new(self)
     }
 
     /// Escape hatch for future micro-effects.
@@ -322,43 +312,6 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         pending_effect
     }
 }
-
-/// Timer.set parameters (canonical schema subset).
-#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct TimerSetParams {
-    pub deliver_at_ns: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key: Option<String>,
-}
-
-/// Blob.put parameters.
-#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct BlobPutParams {
-    #[serde(with = "serde_bytes")]
-    pub bytes: Vec<u8>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blob_ref: Option<HashRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refs: Option<Vec<HashRef>>,
-}
-
-/// Blob.get parameters.
-#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct BlobGetParams {
-    pub blob_ref: HashRef,
-}
-
-/// Content-addressed blob reference.
-#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct HashRef {
-    pub algorithm: String,
-    #[serde(with = "serde_bytes")]
-    pub digest: Vec<u8>,
-}
-
-const EFFECT_TIMER_SET: &str = "timer.set";
-const EFFECT_BLOB_PUT: &str = "blob.put";
-const EFFECT_BLOB_GET: &str = "blob.get";
 
 struct PendingEvent {
     schema: &'static str,
@@ -597,7 +550,7 @@ macro_rules! aos_event_union {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EffectReceiptEnvelope, PendingEffects};
+    use crate::{EffectReceiptEnvelope, PendingEffects, TimerSetParams};
     use alloc::collections::BTreeMap;
     use alloc::string::String;
     use aos_wasm_abi::{DomainEvent, WorkflowContext, WorkflowInput};
@@ -698,8 +651,8 @@ mod tests {
                     deliver_at_ns: 42,
                     key: None,
                 };
-                ctx.effects().timer_set(&params, "clock");
-                ctx.effects().timer_set(&params, "clock");
+                ctx.effects().sys().timer_set(&params, "clock");
+                ctx.effects().sys().timer_set(&params, "clock");
                 Ok(())
             }
         }
