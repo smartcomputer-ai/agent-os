@@ -1,5 +1,24 @@
-use super::*;
+use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
+use aos_air_types::HashRef;
+use aos_effects::builtins::{
+    BlobGetParams, BlobGetReceipt, BlobPutParams, LlmOutputEnvelope, LlmToolCallList,
+};
+use aos_wasm_sdk::PendingEffect;
+
+use crate::contracts::{
+    PendingBlobGet, PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, SessionState,
+    ToolCallObserved, ToolCallStatus,
+};
+use crate::helpers::{SessionEffectCommand, SessionReduceOutput};
+
+use super::tool_batch::{fail_tool_call, set_tool_call_status};
+use super::{
+    RunToolBatch, SessionReduceError, TOOL_RESULT_BLOB_MAX_BYTES, continue_tool_batch,
+    dispatch_queued_llm_turn, fail_run, queue_llm_turn, run_tool_batch,
+    transition_to_waiting_input_if_running,
+};
 
 pub(super) fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
     state.pending_blob_puts.values().any(|shared| {
@@ -243,7 +262,7 @@ fn on_llm_tool_calls_blob(
             provider_call_id: call.provider_call_id,
         })
         .collect::<Vec<_>>();
-    super::run_tool_batch(
+    run_tool_batch(
         state,
         RunToolBatch {
             intent_id: envelope.intent_id.as_str(),
@@ -266,14 +285,14 @@ fn on_tool_call_arguments_blob(
         if let Some(batch) = state.active_tool_batch.as_mut()
             && batch.tool_batch_id == tool_batch_id
         {
-            super::tool_batch::fail_tool_call(
+            fail_tool_call(
                 batch,
                 &call_id,
                 "tool_arguments_ref_decode_failed",
                 "failed to decode blob.get receipt payload",
             );
         }
-        super::continue_tool_batch(state, out)?;
+        continue_tool_batch(state, out)?;
         return Ok(true);
     };
 
@@ -285,14 +304,14 @@ fn on_tool_call_arguments_blob(
             if let Some(batch) = state.active_tool_batch.as_mut()
                 && batch.tool_batch_id == tool_batch_id
             {
-                super::tool_batch::fail_tool_call(
+                fail_tool_call(
                     batch,
                     &call_id,
                     "tool_arguments_not_json",
                     "tool arguments blob must contain JSON",
                 );
             }
-            super::continue_tool_batch(state, out)?;
+            continue_tool_batch(state, out)?;
             return Ok(true);
         }
     };
@@ -308,10 +327,10 @@ fn on_tool_call_arguments_blob(
         {
             planned.arguments_json = args_json;
         }
-        super::tool_batch::set_tool_call_status(batch, &call_id, ToolCallStatus::Queued);
+        set_tool_call_status(batch, &call_id, ToolCallStatus::Queued);
         let _ = batch.execution.rewind_to_group_containing(&call_id);
     }
-    super::continue_tool_batch(state, out)?;
+    continue_tool_batch(state, out)?;
     Ok(true)
 }
 
@@ -357,10 +376,10 @@ fn on_tool_result_blob(
             Some(ToolCallStatus::Pending)
         )
     {
-        super::tool_batch::set_tool_call_status(batch, &call_id, ToolCallStatus::Succeeded);
+        set_tool_call_status(batch, &call_id, ToolCallStatus::Succeeded);
     }
 
-    super::continue_tool_batch(state, out)?;
+    continue_tool_batch(state, out)?;
     Ok(true)
 }
 
@@ -396,14 +415,14 @@ pub(super) fn handle_pending_blob_get_receipt(
                     if let Some(batch) = state.active_tool_batch.as_mut()
                         && batch.tool_batch_id == tool_batch_id
                     {
-                        super::tool_batch::fail_tool_call(
+                        fail_tool_call(
                             batch,
                             &call_id,
                             "tool_arguments_ref_failed",
                             "blob.get for tool arguments failed",
                         );
                     }
-                    super::continue_tool_batch(state, out)?;
+                    continue_tool_batch(state, out)?;
                     continue;
                 }
                 on_tool_call_arguments_blob(

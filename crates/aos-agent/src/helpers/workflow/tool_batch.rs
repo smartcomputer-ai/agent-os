@@ -1,5 +1,28 @@
-use super::*;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec;
+use alloc::vec::Vec;
+use aos_air_types::HashRef;
+use aos_effects::builtins::BlobGetParams;
+use aos_wasm_sdk::{PendingBatch, PendingEffect, PendingEffectSet};
+
+use crate::contracts::{
+    ActiveToolBatch, PendingBlobGetKind, PlannedToolCall, SessionState, ToolBatchPlan,
+    ToolCallObserved, ToolCallStatus, ToolExecutionPlan, ToolExecutor,
+};
+use crate::helpers::{SessionEffectCommand, SessionReduceOutput, allocate_tool_batch_id};
+use crate::tools::{
+    ToolEffectKind, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
+};
+
+use super::blob_effects::enqueue_blob_get;
+use super::{
+    CompletedToolBatch, RunToolBatch, SessionReduceError, StartedToolBatch, ToolBatchReceiptMatch,
+    hash_cbor, hash_tool_plan, pending_effect_lookup_err_to_session_err,
+    recompute_in_flight_effects, refresh_effective_tools,
+};
 
 pub(super) fn build_tool_execution(
     groups: Vec<Vec<String>>,
@@ -268,7 +291,7 @@ pub(super) fn advance_tool_batch(
                         matches!(effect, SessionEffectCommand::BlobGet { .. })
                             && effect.params_hash() == blob_get_hash
                     });
-                super::blob_effects::enqueue_blob_get(state, blob_get.blob_ref, pending_kind, out)?;
+                enqueue_blob_get(state, blob_get.blob_ref, pending_kind, out)?;
                 if !already_pending {
                     emitted_for_group = emitted_for_group.saturating_add(1);
                 }
@@ -440,7 +463,7 @@ pub(super) fn settle_tool_batch_receipt(
             Ok(value) => value,
             Err(_) => continue,
         };
-        super::blob_effects::enqueue_blob_get(
+        enqueue_blob_get(
             state,
             hash_ref,
             PendingBlobGetKind::ToolResultBlob {

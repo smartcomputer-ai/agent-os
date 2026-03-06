@@ -1,138 +1,38 @@
 use super::{
     LlmStepContext, RequestLlm, SessionEffectCommand, SessionReduceOutput, allocate_run_id,
-    allocate_tool_batch_id, can_apply_host_command, enqueue_host_text, pop_follow_up_if_ready,
-    request_llm, transition_lifecycle,
+    can_apply_host_command, enqueue_host_text, pop_follow_up_if_ready, request_llm,
+    transition_lifecycle,
 };
 use crate::contracts::{
-    ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommandKind, PendingBlobGet,
-    PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, PendingFollowUpTurn, PlannedToolCall,
-    RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle, SessionState,
-    SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchId, ToolBatchPlan, ToolCallLlmResult,
-    ToolCallObserved, ToolCallStatus, ToolExecutionPlan, ToolExecutor, ToolOverrideScope, ToolSpec,
-    default_tool_profile_for_provider,
+    EffectiveTool, EffectiveToolSet, HostCommandKind, PendingBlobGetKind, PendingBlobPutKind,
+    PendingFollowUpTurn, RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle,
+    SessionState, SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallStatus,
+    ToolOverrideScope, ToolSpec, default_tool_profile_for_provider,
 };
 use crate::tools::{
     ToolEffectKind, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
 };
 use alloc::collections::{BTreeMap, BTreeSet};
-use alloc::format;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
-use aos_air_types::HashRef;
-use aos_effects::builtins::{
-    BlobGetParams, BlobGetReceipt, BlobPutParams, LlmGenerateReceipt, LlmOutputEnvelope,
-    LlmToolCallList,
-};
-use aos_wasm_sdk::{
-    EffectReceiptEnvelope, EffectReceiptRejected, PendingBatch, PendingEffect,
-    PendingEffectLookupError, PendingEffectSet,
-};
+use aos_effects::builtins::LlmGenerateReceipt;
+use aos_wasm_sdk::{EffectReceiptEnvelope, EffectReceiptRejected};
 
 mod blob_effects;
 mod tool_batch;
+mod types;
 
 use self::blob_effects::{
     enqueue_blob_get, enqueue_blob_put, handle_pending_blob_get_receipt,
     handle_pending_blob_put_receipt, has_pending_tool_definition_puts,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SessionRuntimeLimits {
-    pub max_pending_effects: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunToolBatch<'a> {
-    pub intent_id: &'a str,
-    pub params_hash: Option<&'a String>,
-    pub calls: &'a [ToolCallObserved],
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StartedToolBatch {
-    pub tool_batch_id: ToolBatchId,
-    pub plan: ToolBatchPlan,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompletedToolBatch {
-    pub tool_batch_id: ToolBatchId,
-    pub accepted_calls: Vec<PlannedToolCall>,
-    pub ordered_results: Vec<ToolCallLlmResult>,
-    pub results_ref: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunToolBatchResult {
-    pub started: StartedToolBatch,
-    pub completion: Option<CompletedToolBatch>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolBatchReceiptMatch {
-    Unmatched,
-    Matched {
-        completion: Option<CompletedToolBatch>,
-    },
-}
+use self::types::pending_effect_lookup_err_to_session_err;
+pub use self::types::{
+    CompletedToolBatch, RunToolBatch, RunToolBatchResult, SessionReduceError, SessionRuntimeLimits,
+    StartedToolBatch, ToolBatchReceiptMatch,
+};
 
 const TOOL_RESULT_BLOB_MAX_BYTES: usize = 8 * 1024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionReduceError {
-    InvalidLifecycleTransition,
-    HostCommandRejected,
-    ToolBatchAlreadyActive,
-    MissingProvider,
-    MissingModel,
-    UnknownProvider,
-    UnknownModel,
-    RunAlreadyActive,
-    RunNotActive,
-    EmptyMessageRefs,
-    TooManyPendingEffects,
-    InvalidHashRef,
-    ToolProfileUnknown,
-    UnknownToolOverride,
-    InvalidToolRegistry,
-    AmbiguousPendingToolEffect,
-}
-
-impl SessionReduceError {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::InvalidLifecycleTransition => "invalid lifecycle transition",
-            Self::HostCommandRejected => "host command rejected",
-            Self::ToolBatchAlreadyActive => "tool batch already active",
-            Self::MissingProvider => "run config provider missing",
-            Self::MissingModel => "run config model missing",
-            Self::UnknownProvider => "run config provider unknown",
-            Self::UnknownModel => "run config model unknown",
-            Self::RunAlreadyActive => "run already active",
-            Self::RunNotActive => "run not active",
-            Self::EmptyMessageRefs => "llm message_refs must not be empty",
-            Self::TooManyPendingEffects => "too many pending effects",
-            Self::InvalidHashRef => "invalid hash ref",
-            Self::ToolProfileUnknown => "tool profile unknown",
-            Self::UnknownToolOverride => "unknown tool override",
-            Self::InvalidToolRegistry => "invalid tool registry",
-            Self::AmbiguousPendingToolEffect => "ambiguous pending tool effect",
-        }
-    }
-}
-
-impl core::fmt::Display for SessionReduceError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl core::error::Error for SessionReduceError {}
-
-fn pending_effect_lookup_err_to_session_err(_err: PendingEffectLookupError) -> SessionReduceError {
-    SessionReduceError::AmbiguousPendingToolEffect
-}
 
 pub fn run_tool_batch(
     state: &mut SessionState,
@@ -1158,6 +1058,7 @@ mod tests {
         HostSessionStatus, SessionId, SessionIngress, ToolCallObserved, ToolOverrideScope,
     };
     use alloc::string::ToString;
+    use alloc::vec;
     use aos_air_types::HashRef;
     use aos_effects::builtins::{
         BlobGetReceipt, BlobPutReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
