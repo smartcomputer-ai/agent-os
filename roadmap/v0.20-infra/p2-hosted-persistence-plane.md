@@ -7,9 +7,9 @@
 
 Implementation status as of 2026-03-07:
 
-- Complete in `crates/aos-fdb`: scope `1)` FDB-first storage boundary, `2)` canonical keyspace layout, `3)` CAS, `4)` journal append/scan semantics, `5)` inbox queue semantics, `6)` snapshot index and active baseline semantics, `7)` segment export compaction/storage semantics.
-- Partial: targeted live FoundationDB integration coverage exists under `crates/aos-fdb/tests/`, but the full reusable conformance harness from scope `8)` is not finished.
-- Pending: hosted restore wiring and broader repository integration from scope `9)`, scope `8)` formal conformance harness, and docs/spec alignment.
+- Complete in `crates/aos-fdb`: scope `1)` FDB-first storage boundary, `2)` canonical keyspace layout, `3)` CAS, `4)` journal append/scan semantics, `5)` inbox queue semantics, `6)` snapshot index and active baseline semantics, `7)` segment export compaction/storage semantics, `8)` targeted backend-contract tests for the current early implementation.
+- Deferred beyond the current early implementation: the broader reusable conformance harness, race-heavy concurrency testing, and crash-injection matrices formerly considered under scope `8)`.
+- Pending: hosted restore wiring and broader repository integration from scope `9)`, and docs/spec alignment.
 
 ## Goal
 
@@ -380,37 +380,37 @@ Restore with segments:
 2. Replay required segments in order (if baseline points below segment horizon).
 3. Replay remaining hot journal tail from FDB.
 
-### [ ] 8) Storage protocol conformance harness
+### [x] 8) Targeted backend-contract tests
 
-Current note:
+Current stance:
 
-- We do have targeted live FoundationDB integration tests for CAS, journal, inbox, and a broader end-to-end smoke test under `crates/aos-fdb/tests/`.
-- We do not yet have the single reusable `tests/conformance.rs` harness that runs the same protocol contract across multiple backends.
+- At this stage we do not need a full reusable conformance harness.
+- We do need a small set of focused backend tests that prove the `fdb.rs` API works and that the main persistence invariants hold end-to-end.
 
-Add a reusable protocol conformance test suite:
+Implemented today under `crates/aos-fdb/tests/`:
 
-- package: `crates/aos-fdb/tests/conformance.rs`
-- runs against:
-  - FDB implementation (required in integration/nightly)
-  - in-memory behavioral reference implementation used for CI/unit tests (not a portability target)
+1. Broad smoke test covering CAS, inbox, journal, snapshots, and segment index.
+2. CAS correctness: idempotent put/get/has, external blob corruption detection, and CAS reopen durability.
+3. Journal correctness: append conflict semantics and no partial head advance on failure.
+4. Inbox correctness: enqueue ordering/pagination, cursor compare-and-swap conflict, and drain rollback on head conflict.
+5. Snapshot correctness: atomic snapshot commit and baseline promotion validation.
+6. Segment correctness: safe-range validation and export/readback behavior.
+7. Reopen durability for non-CAS state (journal, inbox cursor, active baseline, segment index/export).
+8. Explicit baseline non-regression test after baseline has advanced once.
+9. Minimal segment restore equivalence test (`segment_read_entries + hot tail == pre-compaction entries`).
 
-The harness should be structured so a later first-party embedded backend can be added without redefining the protocol.
+Deferred from this scope until the backend is less fluid:
 
-Conformance cases:
-
-1. CAS put/get/has idempotency and hash correctness.
-2. Journal append_batch conflict semantics.
-3. Inbox monotonic order with concurrent writers.
-4. Cursor monotonicity and no duplication under simulated crash.
-5. Snapshot index monotonicity and baseline non-regression.
-6. Segment export + restore equivalence.
-7. Sharded effect/timer queue scans preserve correctness under concurrent producers.
+1. Single reusable `tests/conformance.rs` harness across multiple backends.
+2. True concurrent-writer ordering/race tests.
+3. Crash-injection and retry-matrix testing.
+4. Sharded effect/timer queue correctness under concurrent producers.
 
 ### [ ] 9) Repository touch points
 
 Expected implementation touch points:
 
-- New: `crates/aos-fdb/` (FDB-first persistence implementation + protocol types + conformance harness)
+- New: `crates/aos-fdb/` (FDB-first persistence implementation + protocol types + tests)
 - Optional New: `crates/aos-fdb-objstore/` (object-store helper if split for operational concerns, but I prefer it to be part of aos-fdb to avoid too many crates unless there is a very good reason for this.)
 - Update: `crates/aos-host/` to consume `aos-fdb` operations in hosted mode
 - Update: `crates/aos-host/` startup paths to open hosted worlds by persistence identity rather than assuming a filesystem world root is the runtime authority
@@ -523,7 +523,7 @@ Guarantees:
 
 ## Deliverables / DoD
 
-1. [~] `aos-fdb` protocol/types merged with targeted integration tests and in-memory behavioral reference backend. Remaining gap: the formal reusable conformance harness is not finished.
+1. [x] `aos-fdb` protocol/types merged with targeted integration tests and in-memory behavioral reference backend. Broader reusable conformance harness work is deferred.
 2. [x] `aos-fdb` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
 3. [ ] Hosted-mode restore uses active baseline + segments + hot tail deterministically.
 4. [x] Inbox drain protocol with cursor commit is implemented and crash-safe.

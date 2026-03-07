@@ -101,3 +101,55 @@ fn segment_export_rejects_ranges_not_strictly_older_than_baseline()
 
     Ok(())
 }
+
+#[test]
+fn segment_export_preserves_restore_equivalence_with_hot_tail()
+-> Result<(), Box<dyn std::error::Error>> {
+    if common::skip_if_cluster_unreachable() {
+        return Ok(());
+    }
+
+    let ctx = common::open_test_context(common::test_config())?;
+    ctx.persistence.journal_append_batch(
+        ctx.universe,
+        ctx.world,
+        0,
+        &[
+            b"j0".to_vec(),
+            b"j1".to_vec(),
+            b"j2".to_vec(),
+            b"j3".to_vec(),
+            b"j4".to_vec(),
+        ],
+    )?;
+    let expected = ctx
+        .persistence
+        .journal_read_range(ctx.universe, ctx.world, 0, 8)?;
+    let baseline = baseline(5);
+    ctx.persistence
+        .snapshot_index(ctx.universe, ctx.world, baseline.clone())?;
+    ctx.persistence
+        .snapshot_promote_baseline(ctx.universe, ctx.world, baseline)?;
+
+    let segment = SegmentId::new(0, 2)?;
+    ctx.persistence.segment_export(
+        ctx.universe,
+        ctx.world,
+        SegmentExportRequest {
+            segment,
+            hot_tail_margin: 1,
+            delete_chunk_entries: 2,
+        },
+    )?;
+
+    let mut reconstructed =
+        ctx.persistence
+            .segment_read_entries(ctx.universe, ctx.world, segment)?;
+    reconstructed.extend(
+        ctx.persistence
+            .journal_read_range(ctx.universe, ctx.world, 3, 8)?,
+    );
+    assert_eq!(reconstructed, expected);
+
+    Ok(())
+}

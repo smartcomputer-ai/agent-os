@@ -121,3 +121,46 @@ fn baseline_promotion_requires_receipt_horizon_equal_height()
 
     Ok(())
 }
+
+#[test]
+fn baseline_promotion_cannot_regress_after_advancing() -> Result<(), Box<dyn std::error::Error>> {
+    if common::skip_if_cluster_unreachable() {
+        return Ok(());
+    }
+
+    let ctx = common::open_test_context(common::test_config())?;
+    let older_hash = ctx
+        .persistence
+        .cas_put_verified(ctx.universe, b"kernel-snapshot-old")?;
+    let newer_hash = ctx
+        .persistence
+        .cas_put_verified(ctx.universe, b"kernel-snapshot-new")?;
+    let older = snapshot_record(2, older_hash.to_hex(), Some(2));
+    let newer = snapshot_record(5, newer_hash.to_hex(), Some(5));
+
+    ctx.persistence
+        .snapshot_index(ctx.universe, ctx.world, older.clone())?;
+    ctx.persistence
+        .snapshot_index(ctx.universe, ctx.world, newer.clone())?;
+    ctx.persistence
+        .snapshot_promote_baseline(ctx.universe, ctx.world, older)?;
+    ctx.persistence
+        .snapshot_promote_baseline(ctx.universe, ctx.world, newer.clone())?;
+
+    let err = ctx
+        .persistence
+        .snapshot_promote_baseline(
+            ctx.universe,
+            ctx.world,
+            snapshot_record(2, older_hash.to_hex(), Some(2)),
+        )
+        .unwrap_err();
+    assert!(matches!(err, PersistError::Validation(_)));
+    assert_eq!(
+        ctx.persistence
+            .snapshot_active_baseline(ctx.universe, ctx.world)?,
+        newer
+    );
+
+    Ok(())
+}
