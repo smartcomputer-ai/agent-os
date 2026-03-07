@@ -342,7 +342,10 @@ pub(super) fn advance_tool_batch(
                         &mut batch,
                         &call_id,
                         "executor_unsupported",
-                        format!("domain event executor for {} requires a composite mapper: {schema}", planned.tool_name),
+                        format!(
+                            "domain event executor for {} requires a composite mapper: {schema}",
+                            planned.tool_name
+                        ),
                     );
                     continue;
                 }
@@ -423,16 +426,14 @@ pub(super) fn advance_tool_batch(
             });
         }
 
-        let current_group_complete = batch
-            .execution
-            .current_group_keys()
-            .is_some_and(|keys| {
-                keys.iter().all(|call_id| {
-                    batch.call_status
-                        .get(call_id)
-                        .is_some_and(ToolCallStatus::is_terminal)
-                })
-            });
+        let current_group_complete = batch.execution.current_group_keys().is_some_and(|keys| {
+            keys.iter().all(|call_id| {
+                batch
+                    .call_status
+                    .get(call_id)
+                    .is_some_and(ToolCallStatus::is_terminal)
+            })
+        });
         state.active_tool_batch = Some(batch);
         recompute_in_flight_effects(state);
         if emitted_for_group > 0 || !current_group_complete {

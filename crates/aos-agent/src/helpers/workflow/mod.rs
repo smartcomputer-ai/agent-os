@@ -1833,7 +1833,11 @@ mod tests {
                 vec![String::from("workspace-diff")]
             ]
         );
-        assert_eq!(out.domain_events.len(), 1, "expected workspace commit event");
+        assert_eq!(
+            out.domain_events.len(),
+            1,
+            "expected workspace commit event"
+        );
         assert!(
             out.effects
                 .iter()

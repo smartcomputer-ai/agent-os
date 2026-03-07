@@ -237,7 +237,9 @@ pub fn start_tool(
         ToolMapper::WorkspaceRead => initial_read_state(arguments_json)?,
         ToolMapper::WorkspaceApply => initial_apply_state(arguments_json)?,
         ToolMapper::WorkspaceDiff => initial_diff_state(arguments_json)?,
-        ToolMapper::WorkspaceCommit => return initial_commit_action(arguments_json, tool_name, emitted_at_ns),
+        ToolMapper::WorkspaceCommit => {
+            return initial_commit_action(arguments_json, tool_name, emitted_at_ns);
+        }
         _ => {
             return Err(crate::tools::types::ToolMappingError::unsupported(
                 "not a workspace tool",
