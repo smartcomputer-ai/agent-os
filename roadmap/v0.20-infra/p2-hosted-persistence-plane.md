@@ -3,7 +3,13 @@
 **Priority**: P2  
 **Effort**: High  
 **Risk if deferred**: High (runtime-plane work will bake wrong persistence semantics)  
-**Status**: Proposed
+**Status**: In Progress
+
+Implementation status as of 2026-03-07:
+
+- Complete in `crates/aos-fdb`: scope `1)` FDB-first storage boundary, `2)` canonical keyspace layout, `3)` CAS, `4)` journal append/scan semantics, `5)` inbox queue semantics.
+- Partial: targeted live FoundationDB integration coverage exists under `crates/aos-fdb/tests/`, but the full reusable conformance harness from scope `8)` is not finished.
+- Pending: scope `6)` snapshot/baseline integration into hosted restore flow, scope `7)` segment export compaction, scope `8)` formal conformance harness, scope `9)` broader repository integration and docs/spec alignment.
 
 ## Goal
 
@@ -49,7 +55,7 @@ This milestone is the persistence substrate only. It does not include scheduling
 
 ## Scope (Now)
 
-### 1) FDB-first storage boundary (freeze protocol first)
+### [x] 1) FDB-first storage boundary (freeze protocol first)
 
 Add a concrete FDB-focused persistence implementation crate with deterministic semantics and a narrow operation surface for host/runtime integration:
 
@@ -162,7 +168,7 @@ FDB semantic leakage is accepted and explicit:
 
 However, these remain implementation semantics of the FDB backend, not stable public protocol shapes for the runtime boundary.
 
-### 2) FDB keyspace layout (authoritative metadata + ordering + queues)
+### [x] 2) FDB keyspace layout (authoritative metadata + ordering + queues)
 
 Define canonical tuple-subspace layout (logical names; exact tuple encoding is implementation detail).
 
@@ -215,7 +221,7 @@ Recurring schedule note:
 - First-class recurring schedules (`schedule.upsert`, `schedule.cancel`, cron/interval metadata, misfire policy) are intentionally deferred until after the first hosted infra pass.
 - Future recurring schedules should compile down to the same durable timer substrate by materializing the next one-shot due item into `u/<u>/timers/due/...`; `P2` should not require a timer keyspace redesign for that later step.
 
-### 3) CAS implementation (object store + inline small objects)
+### [x] 3) CAS implementation (object store + inline small objects)
 
 Storage policy:
 
@@ -248,7 +254,7 @@ Integrity invariants:
 - Duplicate puts are no-op idempotent.
 - Inline metadata values should remain comfortably within normal FDB value-size guidance; large bodies belong in object storage.
 
-### 4) Journal append/scan semantics
+### [x] 4) Journal append/scan semantics
 
 Single writer assumption:
 
@@ -279,7 +285,7 @@ Read behavior:
 - `read_range` provides contiguous `(height, bytes)` ordered ascending.
 - Missing entry in requested existing range is a hard corruption error.
 
-### 5) Inbox queue semantics (all ingress converges here)
+### [x] 5) Inbox queue semantics (all ingress converges here)
 
 Inbox item union:
 
@@ -314,7 +320,7 @@ Important:
 - Background compactor can tombstone/delete items `< cursor` after grace period.
 - This avoids at-least-once duplication under crash between append and delete.
 
-### 6) Snapshot index and active baseline semantics
+### [ ] 6) Snapshot index and active baseline semantics
 
 Snapshot write sequence:
 
@@ -342,7 +348,7 @@ Restore algorithm contract:
 5. Replay journal entries where `height >= baseline.height` in order.
 6. Resulting head state must be replay-identical to full replay from genesis.
 
-### 7) Segment export compaction (hot/cold split)
+### [ ] 7) Segment export compaction (hot/cold split)
 
 Implement bounded-KV-growth compaction with no semantic changes.
 
@@ -374,7 +380,12 @@ Restore with segments:
 2. Replay required segments in order (if baseline points below segment horizon).
 3. Replay remaining hot journal tail from FDB.
 
-### 8) Storage protocol conformance harness
+### [ ] 8) Storage protocol conformance harness
+
+Current note:
+
+- We do have targeted live FoundationDB integration tests for CAS, journal, inbox, and a broader end-to-end smoke test under `crates/aos-fdb/tests/`.
+- We do not yet have the single reusable `tests/conformance.rs` harness that runs the same protocol contract across multiple backends.
 
 Add a reusable protocol conformance test suite:
 
@@ -395,7 +406,7 @@ Conformance cases:
 6. Segment export + restore equivalence.
 7. Sharded effect/timer queue scans preserve correctness under concurrent producers.
 
-### 9) Repository touch points
+### [ ] 9) Repository touch points
 
 Expected implementation touch points:
 
@@ -512,13 +523,13 @@ Guarantees:
 
 ## Deliverables / DoD
 
-1. `aos-fdb` protocol/types merged with conformance tests and in-memory behavioral reference backend.
-2. `aos-fdb` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
-3. Hosted-mode restore uses active baseline + segments + hot tail deterministically.
-4. Inbox drain protocol with cursor commit is implemented and crash-safe.
-5. Segment export compaction is available behind config flag and tested.
-6. Kernel remains backend-agnostic; hosted persistence coupling is outside `aos-kernel`.
-7. Spec/docs updates merged for the FDB-first hosted persistence protocol.
+1. [~] `aos-fdb` protocol/types merged with targeted integration tests and in-memory behavioral reference backend. Remaining gap: the formal reusable conformance harness is not finished.
+2. [x] `aos-fdb` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
+3. [ ] Hosted-mode restore uses active baseline + segments + hot tail deterministically.
+4. [x] Inbox drain protocol with cursor commit is implemented and crash-safe.
+5. [ ] Segment export compaction is available behind config flag and tested.
+6. [x] Kernel remains backend-agnostic; hosted persistence coupling is outside `aos-kernel`.
+7. [ ] Spec/docs updates merged for the FDB-first hosted persistence protocol.
 
 ## Explicitly Out of Scope
 
