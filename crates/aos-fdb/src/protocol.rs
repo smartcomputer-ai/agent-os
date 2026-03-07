@@ -382,6 +382,32 @@ pub struct SnapshotRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotCommitRequest {
+    pub expected_head: JournalHeight,
+    #[serde(with = "serde_bytes")]
+    pub snapshot_bytes: Vec<u8>,
+    pub record: SnapshotRecord,
+    #[serde(with = "serde_bytes")]
+    pub snapshot_journal_entry: Vec<u8>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub baseline_journal_entry: Option<Vec<u8>>,
+    #[serde(default)]
+    pub promote_baseline: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotCommitResult {
+    pub snapshot_hash: Hash,
+    pub first_height: JournalHeight,
+    pub next_head: JournalHeight,
+    pub baseline_promoted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SegmentIndexRecord {
     pub segment: SegmentId,
     pub object_key: String,
@@ -609,6 +635,13 @@ pub trait WorldPersistence: Send + Sync {
         record: SnapshotRecord,
     ) -> Result<(), PersistError>;
 
+    fn snapshot_commit(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        request: SnapshotCommitRequest,
+    ) -> Result<SnapshotCommitResult, PersistError>;
+
     fn snapshot_at_height(
         &self,
         universe: UniverseId,
@@ -657,6 +690,7 @@ pub(crate) fn ensure_monotonic_snapshot_records(
     records: &BTreeMap<JournalHeight, SnapshotRecord>,
     record: &SnapshotRecord,
 ) -> Result<(), PersistError> {
+    validate_snapshot_record(record)?;
     if let Some(existing) = records.get(&record.height) {
         if existing == record {
             return Ok(());
@@ -667,4 +701,62 @@ pub(crate) fn ensure_monotonic_snapshot_records(
         .into());
     }
     Ok(())
+}
+
+pub(crate) fn validate_snapshot_record(record: &SnapshotRecord) -> Result<(), PersistError> {
+    if record.snapshot_ref.is_empty() {
+        return Err(PersistError::validation(
+            "snapshot_ref must be non-empty for indexed snapshots",
+        ));
+    }
+    match record.manifest_hash.as_deref() {
+        Some(hash) if !hash.is_empty() => Ok(()),
+        _ => Err(PersistError::validation(
+            "snapshot index requires manifest_hash for restore root completeness",
+        )),
+    }
+}
+
+pub(crate) fn validate_baseline_promotion_record(
+    record: &SnapshotRecord,
+) -> Result<(), PersistError> {
+    validate_snapshot_record(record)?;
+    let Some(horizon) = record.receipt_horizon_height else {
+        return Err(PersistError::validation(
+            "baseline promotion requires receipt_horizon_height",
+        ));
+    };
+    if horizon != record.height {
+        return Err(PersistError::validation(format!(
+            "baseline receipt_horizon_height ({horizon}) must equal baseline height ({})",
+            record.height
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_snapshot_commit_request(
+    request: &SnapshotCommitRequest,
+) -> Result<(), PersistError> {
+    validate_snapshot_record(&request.record)?;
+    if request.snapshot_journal_entry.is_empty() {
+        return Err(PersistError::validation(
+            "snapshot commit requires a snapshot journal entry payload",
+        ));
+    }
+    match (
+        request.promote_baseline,
+        request.baseline_journal_entry.as_ref(),
+    ) {
+        (true, Some(bytes)) if !bytes.is_empty() => {
+            validate_baseline_promotion_record(&request.record)
+        }
+        (true, _) => Err(PersistError::validation(
+            "baseline promotion requires a baseline journal entry payload",
+        )),
+        (false, Some(_)) => Err(PersistError::validation(
+            "baseline journal entry payload requires promote_baseline=true",
+        )),
+        (false, None) => Ok(()),
+    }
 }

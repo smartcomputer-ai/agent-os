@@ -15,8 +15,9 @@ use futures::executor::block_on;
 
 use crate::protocol::{
     BlobStorage, CasMeta, CborPayload, InboxItem, InboxSeq, JournalHeight, PersistConflict,
-    PersistCorruption, PersistError, PersistenceConfig, SegmentIndexRecord, SnapshotRecord,
-    UniverseId, WorldId, WorldPersistence, cas_object_key,
+    PersistCorruption, PersistError, PersistenceConfig, SegmentIndexRecord, SnapshotCommitRequest,
+    SnapshotCommitResult, SnapshotRecord, UniverseId, WorldId, WorldPersistence, cas_object_key,
+    validate_baseline_promotion_record, validate_snapshot_commit_request, validate_snapshot_record,
 };
 
 pub struct FdbRuntime {
@@ -684,14 +685,23 @@ impl WorldPersistence for FdbWorldPersistence {
         world: WorldId,
         record: SnapshotRecord,
     ) -> Result<(), PersistError> {
+        validate_snapshot_record(&record)?;
         let space = self.snapshot_by_height_space(universe, world);
         let key = space.pack(&(self.to_i64(record.height, "snapshot height")?,));
         let value = self.encode(&record)?;
         self.run(|trx, _| {
             let key = key.clone();
             let value = value.clone();
+            let record = record.clone();
             async move {
-                if trx.get(&key, false).await?.is_some() {
+                if let Some(existing) = trx.get(&key, false).await? {
+                    let existing_record: SnapshotRecord = serde_cbor::from_slice(existing.as_ref())
+                        .map_err(|err| {
+                            custom_persist_error(PersistError::backend(err.to_string()))
+                        })?;
+                    if existing_record == record {
+                        return Ok(());
+                    }
                     return Err(custom_persist_error(
                         PersistConflict::SnapshotExists {
                             height: record.height,
@@ -701,6 +711,124 @@ impl WorldPersistence for FdbWorldPersistence {
                 }
                 trx.set(&key, &value);
                 Ok(())
+            }
+        })
+    }
+
+    fn snapshot_commit(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        request: SnapshotCommitRequest,
+    ) -> Result<SnapshotCommitResult, PersistError> {
+        validate_snapshot_commit_request(&request)?;
+        let snapshot_hash = self.cas_put_verified(universe, &request.snapshot_bytes)?;
+        let expected_ref = snapshot_hash.to_hex();
+        if request.record.snapshot_ref != expected_ref {
+            return Err(PersistError::validation(format!(
+                "snapshot_ref {} must equal CAS hash {}",
+                request.record.snapshot_ref, expected_ref
+            )));
+        }
+
+        let mut journal_entries = vec![request.snapshot_journal_entry.clone()];
+        if let Some(baseline_entry) = &request.baseline_journal_entry {
+            journal_entries.push(baseline_entry.clone());
+        }
+        self.validate_journal_batch(&journal_entries)?;
+
+        let snapshot_key = self
+            .snapshot_by_height_space(universe, world)
+            .pack(&(self.to_i64(request.record.height, "snapshot height")?,));
+        let baseline_key = self.baseline_active_key(universe, world);
+        let head_key = self.journal_head_key(universe, world);
+        let journal_space = self.journal_entry_space(universe, world);
+        let record = request.record.clone();
+        let record_bytes = self.encode(&record)?;
+        let expected_head = request.expected_head;
+        let promote_baseline = request.promote_baseline;
+
+        self.run(|trx, _| {
+            let snapshot_key = snapshot_key.clone();
+            let baseline_key = baseline_key.clone();
+            let head_key = head_key.clone();
+            let journal_space = journal_space.clone();
+            let record = record.clone();
+            let record_bytes = record_bytes.clone();
+            let journal_entries = journal_entries.clone();
+            async move {
+                let actual_head = match trx.get(&head_key, false).await? {
+                    Some(bytes) => decode_u64_static(bytes.as_ref())?,
+                    None => 0,
+                };
+                if actual_head != expected_head {
+                    return Err(custom_persist_error(
+                        PersistConflict::HeadAdvanced {
+                            expected: expected_head,
+                            actual: actual_head,
+                        }
+                        .into(),
+                    ));
+                }
+
+                if let Some(existing) = trx.get(&snapshot_key, false).await? {
+                    let existing_record: SnapshotRecord = serde_cbor::from_slice(existing.as_ref())
+                        .map_err(|err| {
+                            custom_persist_error(PersistError::backend(err.to_string()))
+                        })?;
+                    if existing_record != record {
+                        return Err(custom_persist_error(
+                            PersistConflict::SnapshotExists {
+                                height: record.height,
+                            }
+                            .into(),
+                        ));
+                    }
+                } else {
+                    trx.set(&snapshot_key, &record_bytes);
+                }
+
+                if promote_baseline {
+                    if let Some(active_bytes) = trx.get(&baseline_key, false).await? {
+                        let active: SnapshotRecord = serde_cbor::from_slice(active_bytes.as_ref())
+                            .map_err(|err| {
+                                custom_persist_error(PersistError::backend(err.to_string()))
+                            })?;
+                        if record.height < active.height {
+                            return Err(custom_persist_error(PersistError::validation(format!(
+                                "baseline cannot regress from {} to {}",
+                                active.height, record.height
+                            ))));
+                        }
+                        if record.height == active.height && active != record {
+                            return Err(custom_persist_error(
+                                PersistConflict::BaselineMismatch {
+                                    height: record.height,
+                                }
+                                .into(),
+                            ));
+                        }
+                    }
+                }
+
+                let first_height = actual_head;
+                let mut height = actual_head;
+                for entry in &journal_entries {
+                    let key = journal_space.pack(&(to_i64_static(height, "journal height")?,));
+                    trx.set(&key, entry);
+                    height += 1;
+                }
+                trx.set(&head_key, &height.to_be_bytes());
+                if promote_baseline {
+                    trx.set(&baseline_key, &record_bytes);
+                }
+
+                Ok(SnapshotCommitResult {
+                    snapshot_hash,
+                    first_height,
+                    next_head: height,
+                    baseline_promoted: promote_baseline,
+                })
             }
         })
     }
@@ -751,6 +879,7 @@ impl WorldPersistence for FdbWorldPersistence {
         world: WorldId,
         record: SnapshotRecord,
     ) -> Result<(), PersistError> {
+        validate_baseline_promotion_record(&record)?;
         let snapshot_key = self
             .snapshot_by_height_space(universe, world)
             .pack(&(self.to_i64(record.height, "snapshot height")?,));

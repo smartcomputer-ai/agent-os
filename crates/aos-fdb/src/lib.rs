@@ -13,6 +13,7 @@ pub use protocol::{
     EffectDispatchItem, EffectInFlightItem, ExternalInboxIngress, InboxConfig, InboxItem, InboxSeq,
     JournalConfig, JournalHeight, PersistConflict, PersistCorruption, PersistError,
     PersistenceConfig, PinReason, QueueSeq, ReceiptIngress, SegmentId, SegmentIndexRecord, ShardId,
-    SnapshotRecord, TimeBucket, TimerClaim, TimerDueItem, TimerFiredIngress, UniverseId, WorldId,
-    WorldMeta, WorldPersistence, cas_object_key,
+    SnapshotCommitRequest, SnapshotCommitResult, SnapshotRecord, TimeBucket, TimerClaim,
+    TimerDueItem, TimerFiredIngress, UniverseId, WorldId, WorldMeta, WorldPersistence,
+    cas_object_key,
 };

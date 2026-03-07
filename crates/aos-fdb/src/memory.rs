@@ -5,9 +5,10 @@ use aos_cbor::Hash;
 
 use crate::protocol::{
     BlobStorage, CasMeta, CborPayload, InboxItem, InboxSeq, JournalHeight, PersistConflict,
-    PersistCorruption, PersistError, PersistenceConfig, SegmentIndexRecord, SnapshotRecord,
-    UniverseId, WorldId, WorldPersistence, cas_object_key, ensure_monotonic_snapshot_records,
-    sample_world_meta,
+    PersistCorruption, PersistError, PersistenceConfig, SegmentIndexRecord, SnapshotCommitRequest,
+    SnapshotCommitResult, SnapshotRecord, UniverseId, WorldId, WorldPersistence, cas_object_key,
+    ensure_monotonic_snapshot_records, sample_world_meta, validate_baseline_promotion_record,
+    validate_snapshot_commit_request, validate_snapshot_record,
 };
 
 #[derive(Debug, Clone)]
@@ -494,10 +495,93 @@ impl WorldPersistence for MemoryWorldPersistence {
         world: WorldId,
         record: SnapshotRecord,
     ) -> Result<(), PersistError> {
+        validate_snapshot_record(&record)?;
         self.with_world_mut(universe, world, |world_state| {
             ensure_monotonic_snapshot_records(&world_state.snapshots, &record)?;
             world_state.snapshots.insert(record.height, record);
             Ok(())
+        })
+    }
+
+    fn snapshot_commit(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        request: SnapshotCommitRequest,
+    ) -> Result<SnapshotCommitResult, PersistError> {
+        validate_snapshot_commit_request(&request)?;
+        let snapshot_hash = self.cas_put_verified(universe, &request.snapshot_bytes)?;
+        let expected_ref = snapshot_hash.to_hex();
+        if request.record.snapshot_ref != expected_ref {
+            return Err(PersistError::validation(format!(
+                "snapshot_ref {} must equal CAS hash {}",
+                request.record.snapshot_ref, expected_ref
+            )));
+        }
+        self.validate_journal_batch(std::slice::from_ref(&request.snapshot_journal_entry))?;
+        if let Some(baseline) = &request.baseline_journal_entry {
+            self.validate_journal_batch(&[
+                request.snapshot_journal_entry.clone(),
+                baseline.clone(),
+            ])?;
+        }
+
+        self.with_world_mut(universe, world, |world_state| {
+            ensure_monotonic_snapshot_records(&world_state.snapshots, &request.record)?;
+            if world_state.journal_head != request.expected_head {
+                return Err(PersistConflict::HeadAdvanced {
+                    expected: request.expected_head,
+                    actual: world_state.journal_head,
+                }
+                .into());
+            }
+            if request.promote_baseline {
+                validate_baseline_promotion_record(&request.record)?;
+                if let Some(active) = &world_state.active_baseline {
+                    if request.record.height < active.height {
+                        return Err(PersistError::validation(format!(
+                            "baseline cannot regress from {} to {}",
+                            active.height, request.record.height
+                        )));
+                    }
+                    if request.record.height == active.height && request.record != *active {
+                        return Err(PersistConflict::BaselineMismatch {
+                            height: request.record.height,
+                        }
+                        .into());
+                    }
+                }
+            }
+
+            world_state
+                .snapshots
+                .insert(request.record.height, request.record.clone());
+
+            let first_height = world_state.journal_head;
+            world_state.journal_entries.insert(
+                world_state.journal_head,
+                request.snapshot_journal_entry.clone(),
+            );
+            world_state.journal_head += 1;
+
+            if request.promote_baseline {
+                world_state.journal_entries.insert(
+                    world_state.journal_head,
+                    request
+                        .baseline_journal_entry
+                        .clone()
+                        .expect("validated baseline journal entry"),
+                );
+                world_state.journal_head += 1;
+                world_state.active_baseline = Some(request.record.clone());
+            }
+
+            Ok(SnapshotCommitResult {
+                snapshot_hash,
+                first_height,
+                next_head: world_state.journal_head,
+                baseline_promoted: request.promote_baseline,
+            })
         })
     }
 
@@ -535,6 +619,7 @@ impl WorldPersistence for MemoryWorldPersistence {
         world: WorldId,
         record: SnapshotRecord,
     ) -> Result<(), PersistError> {
+        validate_baseline_promotion_record(&record)?;
         self.with_world_mut(universe, world, |world_state| {
             let indexed = world_state.snapshots.get(&record.height).ok_or_else(|| {
                 PersistError::not_found(format!("snapshot at height {}", record.height))
@@ -614,7 +699,7 @@ mod tests {
     use super::*;
     use crate::{
         CborPayload, InboxItem, PersistConflict, PersistCorruption, PersistenceConfig,
-        SnapshotRecord, WorldPersistence, cas_object_key,
+        SnapshotCommitRequest, SnapshotRecord, WorldPersistence, cas_object_key,
     };
     use uuid::Uuid;
 
@@ -937,6 +1022,72 @@ mod tests {
                 .unwrap(),
             s2
         );
+    }
+
+    #[test]
+    fn snapshot_commit_appends_journal_and_promotes_baseline_atomically() {
+        let persistence = MemoryWorldPersistence::new();
+        let snapshot_bytes = b"kernel-snapshot".to_vec();
+        let snapshot_hash = Hash::of_bytes(&snapshot_bytes);
+        let record = SnapshotRecord {
+            snapshot_ref: snapshot_hash.to_hex(),
+            height: 0,
+            logical_time_ns: 0,
+            receipt_horizon_height: Some(0),
+            manifest_hash: Some("sha256:manifest".into()),
+        };
+
+        let result = persistence
+            .snapshot_commit(
+                universe(),
+                world(),
+                SnapshotCommitRequest {
+                    expected_head: 0,
+                    snapshot_bytes,
+                    record: record.clone(),
+                    snapshot_journal_entry: b"snapshot".to_vec(),
+                    baseline_journal_entry: Some(b"baseline".to_vec()),
+                    promote_baseline: true,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result.snapshot_hash, snapshot_hash);
+        assert_eq!(result.first_height, 0);
+        assert_eq!(result.next_head, 2);
+        assert!(result.baseline_promoted);
+        assert_eq!(
+            persistence
+                .journal_read_range(universe(), world(), 0, 8)
+                .unwrap(),
+            vec![(0, b"snapshot".to_vec()), (1, b"baseline".to_vec())]
+        );
+        assert_eq!(
+            persistence
+                .snapshot_active_baseline(universe(), world())
+                .unwrap(),
+            record
+        );
+    }
+
+    #[test]
+    fn snapshot_promotion_requires_receipt_horizon_equal_height() {
+        let persistence = MemoryWorldPersistence::new();
+        let record = SnapshotRecord {
+            snapshot_ref: "sha256:snapshot".into(),
+            height: 2,
+            logical_time_ns: 20,
+            receipt_horizon_height: None,
+            manifest_hash: Some("sha256:manifest".into()),
+        };
+
+        persistence
+            .snapshot_index(universe(), world(), record.clone())
+            .unwrap();
+        let err = persistence
+            .snapshot_promote_baseline(universe(), world(), record)
+            .unwrap_err();
+        assert!(matches!(err, PersistError::Validation(_)));
     }
 
     #[test]

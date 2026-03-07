@@ -7,9 +7,9 @@
 
 Implementation status as of 2026-03-07:
 
-- Complete in `crates/aos-fdb`: scope `1)` FDB-first storage boundary, `2)` canonical keyspace layout, `3)` CAS, `4)` journal append/scan semantics, `5)` inbox queue semantics.
+- Complete in `crates/aos-fdb`: scope `1)` FDB-first storage boundary, `2)` canonical keyspace layout, `3)` CAS, `4)` journal append/scan semantics, `5)` inbox queue semantics, `6)` snapshot index and active baseline semantics.
 - Partial: targeted live FoundationDB integration coverage exists under `crates/aos-fdb/tests/`, but the full reusable conformance harness from scope `8)` is not finished.
-- Pending: scope `6)` snapshot/baseline integration into hosted restore flow, scope `7)` segment export compaction, scope `8)` formal conformance harness, scope `9)` broader repository integration and docs/spec alignment.
+- Pending: hosted restore wiring and broader repository integration from scope `9)`, scope `7)` segment export compaction, scope `8)` formal conformance harness, and docs/spec alignment.
 
 ## Goal
 
@@ -320,7 +320,7 @@ Important:
 - Background compactor can tombstone/delete items `< cursor` after grace period.
 - This avoids at-least-once duplication under crash between append and delete.
 
-### [ ] 6) Snapshot index and active baseline semantics
+### [x] 6) Snapshot index and active baseline semantics
 
 Snapshot write sequence:
 
