@@ -471,7 +471,15 @@ impl WorldPersistence for FdbWorldPersistence {
                 Ok(()) => match block_on(trx.commit()) {
                     Ok(_) => {
                         let committed = block_on(versionstamp).map_err(map_fdb_error)?;
-                        return Ok(InboxSeq::new(committed.as_ref().to_vec()));
+                        let tr_version: [u8; 10] = committed.as_ref().try_into().map_err(|_| {
+                            PersistError::backend(
+                                "foundationdb returned non-10-byte transaction versionstamp",
+                            )
+                        })?;
+                        let complete = Versionstamp::complete(tr_version, 0);
+                        let packed = inbox_space.pack(&(complete,));
+                        let prefix_len = inbox_space.bytes().len();
+                        return Ok(InboxSeq::new(packed[prefix_len..].to_vec()));
                     }
                     Err(err) => {
                         block_on(err.on_error()).map_err(map_fdb_error)?;
@@ -497,7 +505,7 @@ impl WorldPersistence for FdbWorldPersistence {
         }
         let inbox_space = self.inbox_entry_space(universe, world);
         let (begin, end) = inbox_space.range();
-        let prefix_len = begin.len();
+        let prefix_len = inbox_space.bytes().len();
         self.run(|trx, _| {
             let inbox_space = inbox_space.clone();
             let begin = begin.clone();
@@ -506,7 +514,7 @@ impl WorldPersistence for FdbWorldPersistence {
             async move {
                 let mut range = RangeOption::from((begin.clone(), end));
                 if let Some(after) = after_exclusive {
-                    let mut after_key = begin;
+                    let mut after_key = inbox_space.bytes().to_vec();
                     after_key.extend_from_slice(after.as_bytes());
                     range.begin = KeySelector::first_greater_than(after_key);
                 }
@@ -857,7 +865,7 @@ impl WorldPersistence for FdbWorldPersistence {
 }
 
 fn build_inbox_key(space: &Subspace, seq: &InboxSeq) -> Vec<u8> {
-    let mut key = space.range().0;
+    let mut key = space.bytes().to_vec();
     key.extend_from_slice(seq.as_bytes());
     key
 }

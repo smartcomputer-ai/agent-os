@@ -1,9 +1,11 @@
 #![cfg(feature = "foundationdb-backend")]
 
 use std::env;
+use std::fs;
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 use aos_fdb::{
     CasConfig, CborPayload, ControlIngress, FdbRuntime, FdbWorldPersistence, InboxConfig,
@@ -34,15 +36,31 @@ fn open_persistence(
 }
 
 fn cluster_is_reachable() -> bool {
-    let mut command = Command::new("fdbcli");
-    if let Some(cluster_file) = env::var_os("FDB_CLUSTER_FILE") {
-        command.arg("-C").arg(cluster_file);
-    }
-    command
-        .args(["--exec", "status minimal"])
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    let cluster_file = env::var_os("FDB_CLUSTER_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/usr/local/etc/foundationdb/fdb.cluster"));
+    let cluster_line = match fs::read_to_string(&cluster_file) {
+        Ok(contents) => contents
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        Err(_) => return false,
+    };
+    let Some(coord_part) = cluster_line.split('@').nth(1) else {
+        return false;
+    };
+    let Some(first_coord) = coord_part.split(',').next() else {
+        return false;
+    };
+    let addresses: Vec<SocketAddr> = match first_coord.to_socket_addrs() {
+        Ok(addresses) => addresses.collect(),
+        Err(_) => return false,
+    };
+    addresses
+        .into_iter()
+        .any(|address| TcpStream::connect_timeout(&address, Duration::from_secs(1)).is_ok())
 }
 
 fn universe() -> UniverseId {
