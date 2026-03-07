@@ -49,6 +49,41 @@ impl Default for CasConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JournalConfig {
+    pub max_batch_entries: usize,
+    pub max_batch_bytes: usize,
+}
+
+impl Default for JournalConfig {
+    fn default() -> Self {
+        Self {
+            max_batch_entries: 256,
+            max_batch_bytes: 256 * 1024,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InboxConfig {
+    pub inline_payload_threshold_bytes: usize,
+}
+
+impl Default for InboxConfig {
+    fn default() -> Self {
+        Self {
+            inline_payload_threshold_bytes: 4 * 1024,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PersistenceConfig {
+    pub cas: CasConfig,
+    pub journal: JournalConfig,
+    pub inbox: InboxConfig,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct UniverseId(Uuid);
@@ -192,6 +227,76 @@ pub fn cas_object_key(universe: UniverseId, hash: Hash) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CborPayload {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub inline_cbor: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cbor_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cbor_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cbor_sha256: Option<String>,
+}
+
+impl CborPayload {
+    pub fn inline(bytes: impl Into<Vec<u8>>) -> Self {
+        Self {
+            inline_cbor: Some(bytes.into()),
+            cbor_ref: None,
+            cbor_size: None,
+            cbor_sha256: None,
+        }
+    }
+
+    pub fn externalized(hash: Hash, size: u64) -> Self {
+        Self {
+            inline_cbor: None,
+            cbor_ref: Some(hash.to_hex()),
+            cbor_size: Some(size),
+            cbor_sha256: Some(hash.to_hex()),
+        }
+    }
+
+    pub fn inline_len(&self) -> usize {
+        self.inline_cbor
+            .as_ref()
+            .map(|bytes| bytes.len())
+            .unwrap_or(0)
+    }
+
+    pub fn validate(&self) -> Result<(), PersistError> {
+        let has_inline = self.inline_cbor.is_some();
+        let has_external =
+            self.cbor_ref.is_some() || self.cbor_size.is_some() || self.cbor_sha256.is_some();
+        if has_inline && has_external {
+            return Err(PersistError::validation(
+                "payload cannot contain both inline bytes and externalized metadata",
+            ));
+        }
+        if !has_inline {
+            match (&self.cbor_ref, self.cbor_size, &self.cbor_sha256) {
+                (Some(_), Some(_), Some(_)) => {}
+                (None, None, None) => {
+                    return Err(PersistError::validation(
+                        "payload must contain inline bytes or full externalized metadata",
+                    ));
+                }
+                _ => {
+                    return Err(PersistError::validation(
+                        "externalized payload requires cbor_ref, cbor_size, and cbor_sha256",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorldMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_hash: Option<String>,
@@ -208,13 +313,13 @@ pub enum InboxItem {
     Receipt(ReceiptIngress),
     Inbox(ExternalInboxIngress),
     TimerFired(TimerFiredIngress),
+    Control(ControlIngress),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DomainEventIngress {
     pub schema: String,
-    #[serde(with = "serde_bytes")]
-    pub value_cbor: Vec<u8>,
+    pub value: CborPayload,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -229,27 +334,37 @@ pub struct DomainEventIngress {
 pub struct ReceiptIngress {
     #[serde(with = "serde_bytes")]
     pub intent_hash: Vec<u8>,
+    pub effect_kind: String,
     pub adapter_id: String,
+    pub payload: CborPayload,
     #[serde(with = "serde_bytes")]
-    pub payload_cbor: Vec<u8>,
+    pub signature: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExternalInboxIngress {
-    pub source: String,
-    #[serde(with = "serde_bytes")]
-    pub payload_cbor: Vec<u8>,
+    pub inbox_name: String,
+    pub payload: CborPayload,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimerFiredIngress {
-    #[serde(with = "serde_bytes")]
-    pub intent_hash: Vec<u8>,
-    pub deliver_at_ns: u64,
+    pub timer_id: String,
+    pub payload: CborPayload,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControlIngress {
+    pub cmd: String,
+    pub payload: CborPayload,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
 }
@@ -358,20 +473,54 @@ pub enum DeliveredStatus {
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PersistError {
     #[error("conflict: {0}")]
-    Conflict(String),
+    Conflict(#[from] PersistConflict),
     #[error("not found: {0}")]
     NotFound(String),
     #[error("validation failed: {0}")]
     Validation(String),
+    #[error("corruption: {0}")]
+    Corrupt(#[from] PersistCorruption),
     #[error("backend error: {0}")]
     Backend(String),
 }
 
-impl PersistError {
-    pub fn conflict(message: impl Into<String>) -> Self {
-        Self::Conflict(message.into())
-    }
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum PersistConflict {
+    #[error("journal head advanced: expected {expected}, actual {actual}")]
+    HeadAdvanced {
+        expected: JournalHeight,
+        actual: JournalHeight,
+    },
+    #[error("inbox cursor compare-and-swap failed: expected {expected:?}, actual {actual:?}")]
+    InboxCursorAdvanced {
+        expected: Option<InboxSeq>,
+        actual: Option<InboxSeq>,
+    },
+    #[error("snapshot index at height {height} already exists")]
+    SnapshotExists { height: JournalHeight },
+    #[error("snapshot at height {height} differs from promotion record")]
+    SnapshotMismatch { height: JournalHeight },
+    #[error("baseline at height {height} already points at a different snapshot")]
+    BaselineMismatch { height: JournalHeight },
+    #[error("segment index for end height {end_height} already exists")]
+    SegmentExists { end_height: JournalHeight },
+}
 
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum PersistCorruption {
+    #[error("journal entry missing at height {height}")]
+    MissingJournalEntry { height: JournalHeight },
+    #[error("inline CAS metadata missing bytes for {hash}")]
+    MissingInlineCasBytes { hash: Hash },
+    #[error("object-store CAS metadata missing object key for {hash}")]
+    MissingCasObjectKey { hash: Hash },
+    #[error("object-store body missing for {hash} at key {object_key}")]
+    MissingCasObjectBody { hash: Hash, object_key: String },
+    #[error("CAS body hash mismatch for {expected}: loaded {actual}")]
+    CasBodyHashMismatch { expected: Hash, actual: Hash },
+}
+
+impl PersistError {
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::NotFound(message.into())
     }
@@ -443,6 +592,16 @@ pub trait WorldPersistence: Send + Sync {
         new_cursor: InboxSeq,
     ) -> Result<(), PersistError>;
 
+    fn drain_inbox_to_journal(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        old_cursor: Option<InboxSeq>,
+        new_cursor: InboxSeq,
+        expected_head: JournalHeight,
+        journal_entries: &[Vec<u8>],
+    ) -> Result<JournalHeight, PersistError>;
+
     fn snapshot_index(
         &self,
         universe: UniverseId,
@@ -502,10 +661,10 @@ pub(crate) fn ensure_monotonic_snapshot_records(
         if existing == record {
             return Ok(());
         }
-        return Err(PersistError::conflict(format!(
-            "snapshot index at height {} already exists",
-            record.height
-        )));
+        return Err(PersistConflict::SnapshotExists {
+            height: record.height,
+        }
+        .into());
     }
     Ok(())
 }

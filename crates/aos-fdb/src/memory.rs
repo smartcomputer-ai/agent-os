@@ -4,15 +4,16 @@ use std::sync::{Arc, Mutex};
 use aos_cbor::Hash;
 
 use crate::protocol::{
-    BlobStorage, CasConfig, CasMeta, InboxItem, InboxSeq, JournalHeight, PersistError,
-    SegmentIndexRecord, SnapshotRecord, UniverseId, WorldId, WorldPersistence, cas_object_key,
-    ensure_monotonic_snapshot_records, sample_world_meta,
+    BlobStorage, CasMeta, CborPayload, InboxItem, InboxSeq, JournalHeight, PersistConflict,
+    PersistCorruption, PersistError, PersistenceConfig, SegmentIndexRecord, SnapshotRecord,
+    UniverseId, WorldId, WorldPersistence, cas_object_key, ensure_monotonic_snapshot_records,
+    sample_world_meta,
 };
 
 #[derive(Debug, Clone)]
 pub struct MemoryWorldPersistence {
     state: Arc<Mutex<MemoryState>>,
-    cas_config: CasConfig,
+    config: PersistenceConfig,
 }
 
 #[derive(Debug, Default)]
@@ -59,13 +60,13 @@ impl Default for WorldState {
 
 impl MemoryWorldPersistence {
     pub fn new() -> Self {
-        Self::with_config(CasConfig::default())
+        Self::with_config(PersistenceConfig::default())
     }
 
-    pub fn with_config(cas_config: CasConfig) -> Self {
+    pub fn with_config(config: PersistenceConfig) -> Self {
         Self {
             state: Arc::new(Mutex::new(MemoryState::default())),
-            cas_config,
+            config,
         }
     }
 
@@ -106,29 +107,34 @@ impl MemoryWorldPersistence {
         entry: &CasEntry,
     ) -> Result<Vec<u8>, PersistError> {
         let bytes = match entry.meta.storage {
-            BlobStorage::Inline => entry.meta.inline_bytes.clone().ok_or_else(|| {
-                PersistError::backend(format!("inline CAS metadata missing bytes for {hash}"))
-            })?,
+            BlobStorage::Inline => entry
+                .meta
+                .inline_bytes
+                .clone()
+                .ok_or(PersistCorruption::MissingInlineCasBytes { hash })?,
             BlobStorage::ObjectStore => {
-                let key = entry.meta.object_key.as_ref().ok_or_else(|| {
-                    PersistError::backend(format!(
-                        "object-store CAS metadata missing object_key for {hash}"
-                    ))
-                })?;
+                let key = entry
+                    .meta
+                    .object_key
+                    .as_ref()
+                    .ok_or(PersistCorruption::MissingCasObjectKey { hash })?;
                 guard.cas_objects.get(key).cloned().ok_or_else(|| {
-                    PersistError::backend(format!(
-                        "object-store body missing for {hash} at key {key}"
-                    ))
+                    PersistCorruption::MissingCasObjectBody {
+                        hash,
+                        object_key: key.clone(),
+                    }
                 })?
             }
         };
 
-        if self.cas_config.verify_reads {
+        if self.config.cas.verify_reads {
             let actual = Hash::of_bytes(&bytes);
             if actual != hash {
-                return Err(PersistError::backend(format!(
-                    "CAS body hash mismatch for {hash}: loaded {actual}"
-                )));
+                return Err(PersistCorruption::CasBodyHashMismatch {
+                    expected: hash,
+                    actual,
+                }
+                .into());
             }
         }
         Ok(bytes)
@@ -149,6 +155,82 @@ impl MemoryWorldPersistence {
             .and_then(|key| guard.cas_objects.get(key).cloned());
         Some((entry.meta.clone(), object_bytes))
     }
+
+    #[cfg(test)]
+    fn debug_remove_journal_entry(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        height: JournalHeight,
+    ) {
+        let mut guard = self.state.lock().unwrap();
+        if let Some(world_state) = guard.worlds.get_mut(&(universe, world)) {
+            world_state.journal_entries.remove(&height);
+        }
+    }
+
+    fn validate_journal_batch(&self, entries: &[Vec<u8>]) -> Result<(), PersistError> {
+        if entries.is_empty() {
+            return Err(PersistError::validation(
+                "journal append batch cannot be empty",
+            ));
+        }
+        if entries.len() > self.config.journal.max_batch_entries {
+            return Err(PersistError::validation(format!(
+                "journal append batch entry count {} exceeds limit {}",
+                entries.len(),
+                self.config.journal.max_batch_entries
+            )));
+        }
+        let total_bytes: usize = entries.iter().map(|entry| entry.len()).sum();
+        if total_bytes > self.config.journal.max_batch_bytes {
+            return Err(PersistError::validation(format!(
+                "journal append batch bytes {} exceeds limit {}",
+                total_bytes, self.config.journal.max_batch_bytes
+            )));
+        }
+        Ok(())
+    }
+
+    fn normalize_payload(
+        &self,
+        universe: UniverseId,
+        payload: &mut CborPayload,
+    ) -> Result<(), PersistError> {
+        payload.validate()?;
+        if let Some(bytes) = payload.inline_cbor.take() {
+            if bytes.len() > self.config.inbox.inline_payload_threshold_bytes {
+                let hash = self.cas_put_verified(universe, &bytes)?;
+                *payload = CborPayload::externalized(hash, bytes.len() as u64);
+            } else {
+                payload.inline_cbor = Some(bytes);
+            }
+        }
+        Ok(())
+    }
+
+    fn normalize_inbox_item(
+        &self,
+        universe: UniverseId,
+        mut item: InboxItem,
+    ) -> Result<InboxItem, PersistError> {
+        match &mut item {
+            InboxItem::DomainEvent(ingress) => {
+                self.normalize_payload(universe, &mut ingress.value)?
+            }
+            InboxItem::Receipt(ingress) => {
+                self.normalize_payload(universe, &mut ingress.payload)?
+            }
+            InboxItem::Inbox(ingress) => self.normalize_payload(universe, &mut ingress.payload)?,
+            InboxItem::TimerFired(ingress) => {
+                self.normalize_payload(universe, &mut ingress.payload)?
+            }
+            InboxItem::Control(ingress) => {
+                self.normalize_payload(universe, &mut ingress.payload)?
+            }
+        }
+        Ok(item)
+    }
 }
 
 impl WorldPersistence for MemoryWorldPersistence {
@@ -163,7 +245,7 @@ impl WorldPersistence for MemoryWorldPersistence {
             return Ok(hash);
         }
 
-        let meta = if bytes.len() <= self.cas_config.inline_threshold_bytes {
+        let meta = if bytes.len() <= self.config.cas.inline_threshold_bytes {
             CasMeta {
                 size: bytes.len() as u64,
                 storage: BlobStorage::Inline,
@@ -224,17 +306,14 @@ impl WorldPersistence for MemoryWorldPersistence {
         expected_head: JournalHeight,
         entries: &[Vec<u8>],
     ) -> Result<JournalHeight, PersistError> {
-        if entries.is_empty() {
-            return Err(PersistError::validation(
-                "journal append batch cannot be empty",
-            ));
-        }
+        self.validate_journal_batch(entries)?;
         self.with_world_mut(universe, world, |world_state| {
             if world_state.journal_head != expected_head {
-                return Err(PersistError::conflict(format!(
-                    "expected journal head {expected_head}, found {}",
-                    world_state.journal_head
-                )));
+                return Err(PersistConflict::HeadAdvanced {
+                    expected: expected_head,
+                    actual: world_state.journal_head,
+                }
+                .into());
             }
             let first_height = world_state.journal_head;
             for entry in entries {
@@ -255,12 +334,22 @@ impl WorldPersistence for MemoryWorldPersistence {
         limit: u32,
     ) -> Result<Vec<(JournalHeight, Vec<u8>)>, PersistError> {
         self.with_world(universe, world, |world_state| {
-            Ok(world_state
-                .journal_entries
-                .range(from_inclusive..)
-                .take(limit as usize)
-                .map(|(height, bytes)| (*height, bytes.clone()))
-                .collect())
+            if from_inclusive >= world_state.journal_head || limit == 0 {
+                return Ok(Vec::new());
+            }
+            let end_exclusive = world_state
+                .journal_head
+                .min(from_inclusive.saturating_add(limit as u64));
+            let mut entries = Vec::with_capacity((end_exclusive - from_inclusive) as usize);
+            for height in from_inclusive..end_exclusive {
+                let bytes = world_state
+                    .journal_entries
+                    .get(&height)
+                    .cloned()
+                    .ok_or(PersistCorruption::MissingJournalEntry { height })?;
+                entries.push((height, bytes));
+            }
+            Ok(entries)
         })
     }
 
@@ -278,6 +367,7 @@ impl WorldPersistence for MemoryWorldPersistence {
         world: WorldId,
         item: InboxItem,
     ) -> Result<InboxSeq, PersistError> {
+        let item = self.normalize_inbox_item(universe, item)?;
         self.with_world_mut(universe, world, |world_state| {
             let seq = InboxSeq::from_u64(world_state.next_inbox_seq);
             world_state.next_inbox_seq += 1;
@@ -330,9 +420,11 @@ impl WorldPersistence for MemoryWorldPersistence {
     ) -> Result<(), PersistError> {
         self.with_world_mut(universe, world, |world_state| {
             if world_state.inbox_cursor != old_cursor {
-                return Err(PersistError::conflict(
-                    "inbox cursor compare-and-swap failed",
-                ));
+                return Err(PersistConflict::InboxCursorAdvanced {
+                    expected: old_cursor,
+                    actual: world_state.inbox_cursor.clone(),
+                }
+                .into());
             }
             if let Some(current) = &world_state.inbox_cursor {
                 if new_cursor < *current {
@@ -346,6 +438,53 @@ impl WorldPersistence for MemoryWorldPersistence {
             }
             world_state.inbox_cursor = Some(new_cursor);
             Ok(())
+        })
+    }
+
+    fn drain_inbox_to_journal(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        old_cursor: Option<InboxSeq>,
+        new_cursor: InboxSeq,
+        expected_head: JournalHeight,
+        journal_entries: &[Vec<u8>],
+    ) -> Result<JournalHeight, PersistError> {
+        self.validate_journal_batch(journal_entries)?;
+        self.with_world_mut(universe, world, |world_state| {
+            if world_state.inbox_cursor != old_cursor {
+                return Err(PersistConflict::InboxCursorAdvanced {
+                    expected: old_cursor,
+                    actual: world_state.inbox_cursor.clone(),
+                }
+                .into());
+            }
+            if let Some(current) = &world_state.inbox_cursor {
+                if new_cursor < *current {
+                    return Err(PersistError::validation("inbox cursor cannot regress"));
+                }
+            }
+            if !world_state.inbox_entries.contains_key(&new_cursor) {
+                return Err(PersistError::not_found(format!(
+                    "inbox sequence {new_cursor} does not exist"
+                )));
+            }
+            if world_state.journal_head != expected_head {
+                return Err(PersistConflict::HeadAdvanced {
+                    expected: expected_head,
+                    actual: world_state.journal_head,
+                }
+                .into());
+            }
+            let first_height = world_state.journal_head;
+            for entry in journal_entries {
+                world_state
+                    .journal_entries
+                    .insert(world_state.journal_head, entry.clone());
+                world_state.journal_head += 1;
+            }
+            world_state.inbox_cursor = Some(new_cursor);
+            Ok(first_height)
         })
     }
 
@@ -401,10 +540,10 @@ impl WorldPersistence for MemoryWorldPersistence {
                 PersistError::not_found(format!("snapshot at height {}", record.height))
             })?;
             if indexed != &record {
-                return Err(PersistError::conflict(format!(
-                    "snapshot at height {} does not match promotion record",
-                    record.height
-                )));
+                return Err(PersistConflict::SnapshotMismatch {
+                    height: record.height,
+                }
+                .into());
             }
             if let Some(active) = &world_state.active_baseline {
                 if record.height < active.height {
@@ -414,10 +553,10 @@ impl WorldPersistence for MemoryWorldPersistence {
                     )));
                 }
                 if record.height == active.height && record != *active {
-                    return Err(PersistError::conflict(format!(
-                        "baseline at height {} already points at a different snapshot",
-                        record.height
-                    )));
+                    return Err(PersistConflict::BaselineMismatch {
+                        height: record.height,
+                    }
+                    .into());
                 }
             }
             world_state.active_baseline = Some(record);
@@ -442,10 +581,10 @@ impl WorldPersistence for MemoryWorldPersistence {
                 if existing == &record {
                     return Ok(());
                 }
-                return Err(PersistError::conflict(format!(
-                    "segment index for end height {} already exists",
-                    record.segment.end
-                )));
+                return Err(PersistConflict::SegmentExists {
+                    end_height: record.segment.end,
+                }
+                .into());
             }
             world_state.segments.insert(record.segment.end, record);
             Ok(())
@@ -473,7 +612,10 @@ impl WorldPersistence for MemoryWorldPersistence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InboxItem, SnapshotRecord, WorldPersistence};
+    use crate::{
+        CborPayload, InboxItem, PersistConflict, PersistCorruption, PersistenceConfig,
+        SnapshotRecord, WorldPersistence, cas_object_key,
+    };
     use uuid::Uuid;
 
     fn universe() -> UniverseId {
@@ -486,8 +628,16 @@ mod tests {
 
     fn timer_ingress(seed: u8) -> InboxItem {
         InboxItem::TimerFired(crate::TimerFiredIngress {
-            intent_hash: vec![seed; 32],
-            deliver_at_ns: seed as u64,
+            timer_id: format!("timer-{seed}"),
+            payload: CborPayload::inline(vec![seed]),
+            correlation_id: None,
+        })
+    }
+
+    fn control_ingress(bytes: &[u8]) -> InboxItem {
+        InboxItem::Control(crate::ControlIngress {
+            cmd: "event-send".into(),
+            payload: CborPayload::inline(bytes.to_vec()),
             correlation_id: None,
         })
     }
@@ -518,9 +668,12 @@ mod tests {
 
     #[test]
     fn small_cas_blob_is_stored_inline() {
-        let persistence = MemoryWorldPersistence::with_config(CasConfig {
-            inline_threshold_bytes: 8,
-            verify_reads: true,
+        let persistence = MemoryWorldPersistence::with_config(PersistenceConfig {
+            cas: crate::CasConfig {
+                inline_threshold_bytes: 8,
+                verify_reads: true,
+            },
+            ..PersistenceConfig::default()
         });
         let bytes = b"small";
         let hash = persistence.cas_put_verified(universe(), bytes).unwrap();
@@ -534,9 +687,12 @@ mod tests {
 
     #[test]
     fn large_cas_blob_is_externalized_under_deterministic_object_key() {
-        let persistence = MemoryWorldPersistence::with_config(CasConfig {
-            inline_threshold_bytes: 4,
-            verify_reads: true,
+        let persistence = MemoryWorldPersistence::with_config(PersistenceConfig {
+            cas: crate::CasConfig {
+                inline_threshold_bytes: 4,
+                verify_reads: true,
+            },
+            ..PersistenceConfig::default()
         });
         let bytes = b"definitely larger than four bytes";
         let hash = persistence.cas_put_verified(universe(), bytes).unwrap();
@@ -554,9 +710,12 @@ mod tests {
 
     #[test]
     fn cas_read_detects_external_object_corruption() {
-        let persistence = MemoryWorldPersistence::with_config(CasConfig {
-            inline_threshold_bytes: 1,
-            verify_reads: true,
+        let persistence = MemoryWorldPersistence::with_config(PersistenceConfig {
+            cas: crate::CasConfig {
+                inline_threshold_bytes: 1,
+                verify_reads: true,
+            },
+            ..PersistenceConfig::default()
         });
         let bytes = b"this must be external";
         let hash = persistence.cas_put_verified(universe(), bytes).unwrap();
@@ -568,7 +727,10 @@ mod tests {
         }
 
         let err = persistence.cas_get(universe(), hash).unwrap_err();
-        assert!(matches!(err, PersistError::Backend(_)));
+        assert!(matches!(
+            err,
+            PersistError::Corrupt(PersistCorruption::CasBodyHashMismatch { .. })
+        ));
     }
 
     #[test]
@@ -581,8 +743,36 @@ mod tests {
         let err = persistence
             .journal_append_batch(universe(), world(), 0, &[b"c".to_vec()])
             .unwrap_err();
-        assert!(matches!(err, PersistError::Conflict(_)));
+        assert!(matches!(
+            err,
+            PersistError::Conflict(PersistConflict::HeadAdvanced {
+                expected: 0,
+                actual: 2
+            })
+        ));
         assert_eq!(persistence.journal_head(universe(), world()).unwrap(), 2);
+    }
+
+    #[test]
+    fn journal_read_range_detects_missing_entry_in_requested_window() {
+        let persistence = MemoryWorldPersistence::new();
+        persistence
+            .journal_append_batch(
+                universe(),
+                world(),
+                0,
+                &[b"one".to_vec(), b"two".to_vec(), b"three".to_vec()],
+            )
+            .unwrap();
+        persistence.debug_remove_journal_entry(universe(), world(), 1);
+
+        let err = persistence
+            .journal_read_range(universe(), world(), 0, 3)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            PersistError::Corrupt(PersistCorruption::MissingJournalEntry { height: 1 })
+        ));
     }
 
     #[test]
@@ -602,7 +792,10 @@ mod tests {
         let err = persistence
             .inbox_commit_cursor(universe(), world(), None, second.clone())
             .unwrap_err();
-        assert!(matches!(err, PersistError::Conflict(_)));
+        assert!(matches!(
+            err,
+            PersistError::Conflict(PersistConflict::InboxCursorAdvanced { .. })
+        ));
 
         let err = persistence
             .inbox_commit_cursor(universe(), world(), Some(first.clone()), first.clone())
@@ -626,6 +819,93 @@ mod tests {
             persistence.inbox_cursor(universe(), world()).unwrap(),
             Some(second)
         );
+    }
+
+    #[test]
+    fn inbox_enqueue_externalizes_large_payloads_to_cas() {
+        let persistence = MemoryWorldPersistence::with_config(PersistenceConfig {
+            inbox: crate::InboxConfig {
+                inline_payload_threshold_bytes: 4,
+            },
+            ..PersistenceConfig::default()
+        });
+        let payload = b"payload larger than threshold".to_vec();
+        let seq = persistence
+            .inbox_enqueue(universe(), world(), control_ingress(&payload))
+            .unwrap();
+
+        let stored = persistence
+            .inbox_read_after(universe(), world(), None, 1)
+            .unwrap()
+            .into_iter()
+            .find(|(item_seq, _)| *item_seq == seq)
+            .map(|(_, item)| item)
+            .unwrap();
+
+        match stored {
+            InboxItem::Control(control) => {
+                assert_eq!(control.payload.inline_cbor, None);
+                let hash =
+                    Hash::from_hex_str(control.payload.cbor_ref.as_deref().unwrap()).unwrap();
+                assert_eq!(
+                    control.payload.cbor_sha256.as_deref(),
+                    Some(hash.to_hex().as_str())
+                );
+                assert_eq!(control.payload.cbor_size, Some(payload.len() as u64));
+                assert_eq!(persistence.cas_get(universe(), hash).unwrap(), payload);
+            }
+            other => panic!("unexpected inbox item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn drain_inbox_to_journal_updates_head_and_cursor_atomically() {
+        let persistence = MemoryWorldPersistence::new();
+        let first = persistence
+            .inbox_enqueue(universe(), world(), timer_ingress(1))
+            .unwrap();
+        let second = persistence
+            .inbox_enqueue(universe(), world(), timer_ingress(2))
+            .unwrap();
+
+        let first_height = persistence
+            .drain_inbox_to_journal(
+                universe(),
+                world(),
+                None,
+                second.clone(),
+                0,
+                &[b"j1".to_vec(), b"j2".to_vec()],
+            )
+            .unwrap();
+        assert_eq!(first_height, 0);
+        assert_eq!(
+            persistence.inbox_cursor(universe(), world()).unwrap(),
+            Some(second)
+        );
+        assert_eq!(persistence.journal_head(universe(), world()).unwrap(), 2);
+        assert_eq!(
+            persistence
+                .journal_read_range(universe(), world(), 0, 2)
+                .unwrap(),
+            vec![(0, b"j1".to_vec()), (1, b"j2".to_vec())]
+        );
+
+        let err = persistence
+            .drain_inbox_to_journal(
+                universe(),
+                world(),
+                Some(first),
+                InboxSeq::from_u64(1),
+                0,
+                &[b"j3".to_vec()],
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            PersistError::Conflict(PersistConflict::InboxCursorAdvanced { .. })
+        ));
+        assert_eq!(persistence.journal_head(universe(), world()).unwrap(), 2);
     }
 
     #[test]
