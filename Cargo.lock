@@ -260,6 +260,7 @@ dependencies = [
  "aos-air-types",
  "aos-cbor",
  "aos-effects",
+ "aos-fdb",
  "aos-kernel",
  "aos-llm",
  "aos-store",
@@ -292,6 +293,7 @@ dependencies = [
  "url",
  "utoipa",
  "utoipa-swagger-ui",
+ "uuid",
  "walkdir",
  "wat",
 ]

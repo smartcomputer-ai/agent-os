@@ -3,13 +3,14 @@
 **Priority**: P2  
 **Effort**: High  
 **Risk if deferred**: High (runtime-plane work will bake wrong persistence semantics)  
-**Status**: In Progress
+**Status**: Complete
 
 Implementation status as of 2026-03-07:
 
 - Complete in `crates/aos-fdb`: scope `1)` FDB-first storage boundary, `2)` canonical keyspace layout, `3)` CAS, `4)` journal append/scan semantics, `5)` inbox queue semantics, `6)` snapshot index and active baseline semantics, `7)` segment export compaction/storage semantics, `8)` targeted backend-contract tests for the current early implementation.
+- Complete in `crates/aos-host`: hosted CAS/store bridge, hosted journal bridge, `WorldHost::open_hosted[_from_manifest_hash](...)`, and live integration coverage for hosted restore by `(universe_id, world_id)`.
 - Deferred beyond the current early implementation: the broader reusable conformance harness, race-heavy concurrency testing, and crash-injection matrices formerly considered under scope `8)`.
-- Pending: hosted restore wiring and broader repository integration from scope `9)`, and docs/spec alignment.
+- Pending: broader hosted runtime/orchestrator integration from `P3`.
 
 ## Goal
 
@@ -406,15 +407,15 @@ Deferred from this scope until the backend is less fluid:
 3. Crash-injection and retry-matrix testing.
 4. Sharded effect/timer queue correctness under concurrent producers.
 
-### [ ] 9) Repository touch points
+### [x] 9) Repository touch points
 
-Expected implementation touch points:
+Implemented touch points:
 
 - New: `crates/aos-fdb/` (FDB-first persistence implementation + protocol types + tests)
 - Optional New: `crates/aos-fdb-objstore/` (object-store helper if split for operational concerns, but I prefer it to be part of aos-fdb to avoid too many crates unless there is a very good reason for this.)
-- Update: `crates/aos-host/` to consume `aos-fdb` operations in hosted mode
-- Update: `crates/aos-host/` startup paths to open hosted worlds by persistence identity rather than assuming a filesystem world root is the runtime authority
-- Update: `crates/aos-kernel/` only via narrow boundary (no FDB/object-store coupling)
+- Update: `crates/aos-host/` now consumes `aos-fdb` operations in hosted mode via a hosted `Store` bridge and hosted `Journal` bridge
+- Update: `crates/aos-host/` startup paths can open hosted worlds by persistence identity rather than assuming a filesystem world root is the runtime authority
+- Update: `crates/aos-kernel/` remains behind the narrow `Store`/`Journal` boundary; hosted persistence coupling stays outside `aos-kernel`
 - Update: docs/spec alignment in `spec/02-architecture.md` and infra notes
 
 ## Transaction Protocols (Normative)
@@ -525,11 +526,11 @@ Guarantees:
 
 1. [x] `aos-fdb` protocol/types merged with targeted integration tests and in-memory behavioral reference backend. Broader reusable conformance harness work is deferred.
 2. [x] `aos-fdb` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
-3. [ ] Hosted-mode restore uses active baseline + segments + hot tail deterministically.
+3. [x] Hosted-mode restore uses active baseline + segments + hot tail deterministically.
 4. [x] Inbox drain protocol with cursor commit is implemented and crash-safe.
 5. [x] Segment export compaction is available in `aos-fdb` and tested.
 6. [x] Kernel remains backend-agnostic; hosted persistence coupling is outside `aos-kernel`.
-7. [ ] Spec/docs updates merged for the FDB-first hosted persistence protocol.
+7. [x] Spec/docs updates merged for the FDB-first hosted persistence protocol.
 
 ## Explicitly Out of Scope
 

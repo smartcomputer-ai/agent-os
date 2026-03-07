@@ -30,6 +30,11 @@ use crate::manifest_loader;
 use aos_kernel::StateReader;
 use serde::Serialize;
 
+#[cfg(feature = "foundationdb-hosted")]
+use crate::hosted::{HostedJournal, HostedStore, latest_snapshot_records, parse_hash_like};
+#[cfg(feature = "foundationdb-hosted")]
+use aos_fdb::{UniverseId, WorldId, WorldPersistence};
+
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
     DomainEvent {
@@ -84,6 +89,16 @@ pub struct WorldHost<S: Store + 'static> {
     route_diagnostics: EffectRouteDiagnostics,
     config: HostConfig,
     store: Arc<S>,
+    #[cfg(feature = "foundationdb-hosted")]
+    hosted_context: Option<HostedWorldContext>,
+}
+
+#[cfg(feature = "foundationdb-hosted")]
+#[derive(Clone)]
+struct HostedWorldContext {
+    persistence: Arc<dyn WorldPersistence>,
+    universe: UniverseId,
+    world: WorldId,
 }
 
 impl<S: Store + 'static> WorldHost<S> {
@@ -95,6 +110,25 @@ impl<S: Store + 'static> WorldHost<S> {
     ) -> Result<Self, HostError> {
         let root = manifest_path.parent().unwrap_or(Path::new("."));
         let loaded = ManifestLoader::load_from_path(store.as_ref(), manifest_path)?;
+        Self::from_loaded_manifest_with_builder(
+            store.clone(),
+            loaded,
+            KernelBuilder::new(store).with_fs_journal(root)?,
+            host_config,
+            kernel_config,
+            #[cfg(feature = "foundationdb-hosted")]
+            None,
+        )
+    }
+
+    fn from_loaded_manifest_with_builder(
+        store: Arc<S>,
+        loaded: LoadedManifest,
+        mut builder: KernelBuilder<S>,
+        host_config: HostConfig,
+        kernel_config: KernelConfig,
+        #[cfg(feature = "foundationdb-hosted")] hosted_context: Option<HostedWorldContext>,
+    ) -> Result<Self, HostError> {
         let mut kernel_config = kernel_config;
         if kernel_config.secret_resolver.is_none() {
             if let Some(resolver) = crate::util::env_secret_resolver_from_manifest(&loaded) {
@@ -110,8 +144,6 @@ impl<S: Store + 'static> WorldHost<S> {
             host_config.strict_effect_bindings,
         )?;
 
-        let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(root)?;
-
         if let Some(dir) = host_config
             .module_cache_dir
             .clone()
@@ -126,8 +158,24 @@ impl<S: Store + 'static> WorldHost<S> {
         builder = builder.allow_placeholder_secrets(host_config.allow_placeholder_secrets);
 
         let mut kernel = builder.from_loaded_manifest(loaded)?;
+        Self::rehydrate_effect_queue(&mut kernel)?;
 
-        // Rehydrate dispatch queue: queued_effects snapshot + tail intents lacking receipts.
+        let host = Self {
+            kernel,
+            adapter_registry,
+            effect_routes,
+            route_diagnostics,
+            config: host_config,
+            store,
+            #[cfg(feature = "foundationdb-hosted")]
+            hosted_context,
+        };
+        #[cfg(feature = "foundationdb-hosted")]
+        host.sync_hosted_snapshot_state()?;
+        Ok(host)
+    }
+
+    fn rehydrate_effect_queue(kernel: &mut Kernel<S>) -> Result<(), HostError> {
         let heights = kernel.heights();
         let tail = kernel.tail_scan_after(heights.snapshot.unwrap_or(0))?;
         let receipts_seen = receipts_set(&tail);
@@ -163,15 +211,7 @@ impl<S: Store + 'static> WorldHost<S> {
         if !to_dispatch.is_empty() {
             kernel.restore_effect_queue(to_dispatch);
         }
-
-        Ok(Self {
-            kernel,
-            adapter_registry,
-            effect_routes,
-            route_diagnostics,
-            config: host_config,
-            store,
-        })
+        Ok(())
     }
 }
 
@@ -223,83 +263,72 @@ impl WorldHost<FsStore> {
         host_config: HostConfig,
         kernel_config: KernelConfig,
     ) -> Result<Self, HostError> {
-        let mut kernel_config = kernel_config;
-        if kernel_config.secret_resolver.is_none() {
-            if let Some(resolver) = crate::util::env_secret_resolver_from_manifest(&loaded) {
-                kernel_config.secret_resolver = Some(resolver);
-            }
-        }
-        let adapter_registry = default_registry(store.clone(), &host_config);
-        let effect_routes = collect_effect_routes(&loaded);
-        let route_diagnostics = preflight_external_effect_routes(
-            &loaded,
-            &effect_routes,
-            &adapter_registry,
-            host_config.strict_effect_bindings,
-        )?;
+        Self::from_loaded_manifest_with_builder(
+            store.clone(),
+            loaded,
+            KernelBuilder::new(store).with_fs_journal(world_root)?,
+            host_config,
+            kernel_config,
+            #[cfg(feature = "foundationdb-hosted")]
+            None,
+        )
+    }
+}
 
-        let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(world_root)?;
+#[cfg(feature = "foundationdb-hosted")]
+impl WorldHost<HostedStore> {
+    pub fn open_hosted(
+        persistence: Arc<dyn WorldPersistence>,
+        universe: UniverseId,
+        world: WorldId,
+        host_config: HostConfig,
+        kernel_config: KernelConfig,
+    ) -> Result<Self, HostError> {
+        let active = persistence
+            .snapshot_active_baseline(universe, world)
+            .map_err(|err| HostError::Store(err.to_string()))?;
+        let manifest_hash = active
+            .manifest_hash
+            .as_deref()
+            .ok_or_else(|| HostError::Manifest("active baseline missing manifest_hash".into()))
+            .and_then(|value| {
+                parse_hash_like(value, "manifest_hash").map_err(HostError::Manifest)
+            })?;
+        Self::open_hosted_from_manifest_hash(
+            persistence,
+            universe,
+            world,
+            manifest_hash,
+            host_config,
+            kernel_config,
+        )
+    }
 
-        if let Some(dir) = host_config
-            .module_cache_dir
-            .clone()
-            .or(kernel_config.module_cache_dir.clone())
-        {
-            builder = builder.with_module_cache_dir(dir);
-        }
-        builder = builder.with_eager_module_load(host_config.eager_module_load);
-        if let Some(resolver) = kernel_config.secret_resolver.clone() {
-            builder = builder.with_secret_resolver(resolver);
-        }
-        builder = builder.allow_placeholder_secrets(host_config.allow_placeholder_secrets);
-
-        let mut kernel = builder.from_loaded_manifest(loaded)?;
-
-        // Rehydrate dispatch queue: queued_effects snapshot + tail intents lacking receipts.
-        let heights = kernel.heights();
-        let tail = kernel.tail_scan_after(heights.snapshot.unwrap_or(0))?;
-        let receipts_seen = receipts_set(&tail);
-
-        let mut to_dispatch: Vec<EffectIntent> = kernel
-            .queued_effects_snapshot()
-            .into_iter()
-            .map(|snap| snap.into_intent())
-            .collect();
-        let mut seen_intents: HashSet<[u8; 32]> =
-            to_dispatch.iter().map(|i| i.intent_hash).collect();
-
-        for TailIntent { record, .. } in tail.intents.iter() {
-            if receipts_seen.contains(&record.intent_hash) {
-                continue;
-            }
-            if seen_intents.contains(&record.intent_hash) {
-                continue;
-            }
-            let intent = EffectIntent::from_raw_params(
-                record.kind.clone().into(),
-                record.cap_name.clone(),
-                record.params_cbor.clone(),
-                record.idempotency_key,
-            )
-            .ok();
-            if let Some(intent) = intent {
-                seen_intents.insert(intent.intent_hash);
-                to_dispatch.push(intent);
-            }
-        }
-
-        if !to_dispatch.is_empty() {
-            kernel.restore_effect_queue(to_dispatch);
-        }
-
-        Ok(Self {
-            kernel,
-            adapter_registry,
-            effect_routes,
-            route_diagnostics,
-            config: host_config,
-            store,
-        })
+    pub fn open_hosted_from_manifest_hash(
+        persistence: Arc<dyn WorldPersistence>,
+        universe: UniverseId,
+        world: WorldId,
+        manifest_hash: Hash,
+        host_config: HostConfig,
+        kernel_config: KernelConfig,
+    ) -> Result<Self, HostError> {
+        let store = Arc::new(HostedStore::new(Arc::clone(&persistence), universe));
+        let loaded = ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
+            .map_err(|err| HostError::Manifest(err.to_string()))?;
+        let journal = HostedJournal::open(Arc::clone(&persistence), universe, world)
+            .map_err(|err| HostError::External(err.to_string()))?;
+        Self::from_loaded_manifest_with_builder(
+            store.clone(),
+            loaded,
+            KernelBuilder::new(store).with_journal(Box::new(journal)),
+            host_config,
+            kernel_config,
+            Some(HostedWorldContext {
+                persistence,
+                universe,
+                world,
+            }),
+        )
     }
 }
 
@@ -400,7 +429,12 @@ impl<S: Store + 'static> WorldHost<S> {
     }
 
     pub fn snapshot(&mut self) -> Result<(), HostError> {
-        Ok(self.kernel.create_snapshot()?)
+        self.kernel.create_snapshot()?;
+        #[cfg(feature = "foundationdb-hosted")]
+        if self.hosted_context.is_some() {
+            self.sync_hosted_snapshot_state()?;
+        }
+        Ok(())
     }
 
     pub async fn run_cycle(&mut self, mode: RunMode<'_>) -> Result<CycleOutcome, HostError> {
@@ -496,6 +530,36 @@ impl<S: Store + 'static> WorldHost<S> {
         &mut self.kernel
     }
 
+    #[cfg(feature = "foundationdb-hosted")]
+    fn sync_hosted_snapshot_state(&self) -> Result<(), HostError> {
+        let Some(context) = &self.hosted_context else {
+            return Ok(());
+        };
+
+        let journal = self.kernel.dump_journal()?;
+        let snapshot_records = latest_snapshot_records(&journal);
+        for record in &snapshot_records {
+            context
+                .persistence
+                .snapshot_index(context.universe, context.world, record.clone())
+                .map_err(|err| HostError::Store(err.to_string()))?;
+        }
+
+        let active_height = self.kernel.get_journal_head().active_baseline_height;
+        if let Some(record) = snapshot_records
+            .into_iter()
+            .rev()
+            .find(|record| Some(record.height) == active_height)
+        {
+            context
+                .persistence
+                .snapshot_promote_baseline(context.universe, context.world, record)
+                .map_err(|err| HostError::Store(err.to_string()))?;
+        }
+
+        Ok(())
+    }
+
     /// Create a WorldHost from an existing kernel (for TestHost use).
     pub fn from_kernel(kernel: Kernel<S>, store: Arc<S>, config: HostConfig) -> Self {
         Self::from_kernel_with_effect_routes(kernel, store, config, HashMap::new())
@@ -528,6 +592,8 @@ impl<S: Store + 'static> WorldHost<S> {
             route_diagnostics,
             config,
             store,
+            #[cfg(feature = "foundationdb-hosted")]
+            hosted_context: None,
         }
     }
 

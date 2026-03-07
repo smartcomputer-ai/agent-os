@@ -122,7 +122,7 @@ pub fn load_from_assets_with_imports_and_defs(
 
     secrets.sort_by(|a, b| a.name.cmp(&b.name));
     let hashes = write_nodes(
-        &store,
+        store.as_ref(),
         schemas,
         modules,
         caps,
@@ -131,7 +131,7 @@ pub fn load_from_assets_with_imports_and_defs(
         effects,
     )?;
     patch_manifest_refs(&mut manifest, &hashes)?;
-    let catalog = manifest_catalog(&store, manifest)?;
+    let catalog = manifest_catalog(store.as_ref(), manifest)?;
     let loaded = catalog_to_loaded(catalog);
     if let Err(err) = validate_manifest(
         &loaded.manifest,
@@ -164,8 +164,56 @@ pub fn manifest_patch_from_loaded(loaded: &LoadedManifest) -> ManifestPatch {
     }
 }
 
-fn write_nodes(
-    store: &FsStore,
+pub fn store_loaded_manifest<S: Store + ?Sized>(
+    store: &S,
+    loaded: &LoadedManifest,
+) -> Result<Hash> {
+    if !loaded.manifest.secrets.is_empty() {
+        bail!("store_loaded_manifest does not yet support manifests with defsecret references");
+    }
+    let hashes = write_nodes(
+        store,
+        loaded
+            .schemas
+            .values()
+            .filter(|schema| !schema.name.starts_with("sys/"))
+            .cloned()
+            .collect(),
+        loaded
+            .modules
+            .values()
+            .filter(|module| !module.name.starts_with("sys/"))
+            .cloned()
+            .collect(),
+        loaded
+            .caps
+            .values()
+            .filter(|cap| !cap.name.starts_with("sys/"))
+            .cloned()
+            .collect(),
+        loaded
+            .policies
+            .values()
+            .filter(|policy| !policy.name.starts_with("sys/"))
+            .cloned()
+            .collect(),
+        Vec::new(),
+        loaded
+            .effects
+            .values()
+            .filter(|effect| !effect.name.starts_with("sys/"))
+            .cloned()
+            .collect(),
+    )?;
+    let mut manifest = loaded.manifest.clone();
+    patch_manifest_refs(&mut manifest, &hashes)?;
+    store
+        .put_node(&AirNode::Manifest(manifest))
+        .context("store manifest")
+}
+
+fn write_nodes<S: Store + ?Sized>(
+    store: &S,
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
     caps: Vec<DefCap>,
@@ -419,7 +467,7 @@ fn ensure_hash_field(map: &mut serde_json::Map<String, Value>, key: &str) {
     }
 }
 
-fn manifest_catalog(store: &FsStore, manifest: Manifest) -> Result<Catalog> {
+fn manifest_catalog<S: Store>(store: &S, manifest: Manifest) -> Result<Catalog> {
     let bytes = serde_cbor::to_vec(&manifest).context("serialize manifest to CBOR")?;
     load_manifest_from_bytes(store, &bytes).context("load manifest catalog")
 }

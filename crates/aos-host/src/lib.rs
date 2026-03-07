@@ -4,6 +4,8 @@ pub mod config;
 pub mod control;
 pub mod error;
 pub mod host;
+#[cfg(feature = "foundationdb-hosted")]
+pub mod hosted;
 pub mod http;
 pub mod manifest_loader;
 pub mod modes;
@@ -16,5 +18,7 @@ pub mod testhost;
 pub use adapters::timer::TimerScheduler;
 pub use control::{ControlClient, ControlServer, RequestEnvelope, ResponseEnvelope};
 pub use host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};
+#[cfg(feature = "foundationdb-hosted")]
+pub use hosted::{HostedJournal, HostedStore};
 pub use modes::batch::{BatchRunner, StepResult};
 pub use modes::daemon::{ControlMsg, WorldDaemon};

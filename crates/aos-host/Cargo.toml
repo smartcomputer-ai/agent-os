@@ -10,6 +10,7 @@ default = ["adapter-http", "adapter-llm"]
 adapter-http = ["reqwest", "url"]
 adapter-llm = ["aos-llm"]
 e2e-tests = ["aos-air-exec", "aos-wasm-abi", "indexmap", "wat", "sha2"]
+foundationdb-hosted = ["dep:aos-fdb", "aos-fdb/foundationdb-backend"]
 
 [dependencies]
 aos-kernel = { path = "../aos-kernel" }
@@ -19,6 +20,7 @@ aos-store = { path = "../aos-store" }
 aos-air-types = { path = "../aos-air-types" }
 aos-sys = { path = "../aos-sys" }
 aos-llm = { path = "../aos-llm", optional = true }
+aos-fdb = { path = "../aos-fdb", optional = true }
 
 walkdir = "2"
 globset = "0.4"
@@ -63,6 +65,7 @@ serde_bytes = "0.11"
 aos-wasm-build = { path = "../aos-wasm-build" }
 camino = "1"
 dotenvy = "0.15"
+uuid = { version = "1", features = ["v4"] }
 
 [[test]]
 name = "demiurge_introspect_manifest_e2e"
