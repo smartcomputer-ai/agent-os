@@ -41,6 +41,11 @@ pub enum ToolMapper {
     HostFsListDir,
     InspectWorld,
     InspectWorkflow,
+    WorkspaceInspect,
+    WorkspaceList,
+    WorkspaceRead,
+    WorkspaceApply,
+    WorkspaceDiff,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

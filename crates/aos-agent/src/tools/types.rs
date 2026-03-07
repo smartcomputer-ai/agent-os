@@ -21,6 +21,15 @@ pub enum ToolEffectKind {
     IntrospectManifest,
     IntrospectWorkflowState,
     IntrospectListCells,
+    WorkspaceResolve,
+    WorkspaceEmptyRoot,
+    WorkspaceList,
+    WorkspaceReadRef,
+    WorkspaceReadBytes,
+    WorkspaceWriteBytes,
+    WorkspaceWriteRef,
+    WorkspaceRemove,
+    WorkspaceDiff,
 }
 
 impl ToolEffectKind {
@@ -41,6 +50,15 @@ impl ToolEffectKind {
             Self::IntrospectManifest => "introspect.manifest",
             Self::IntrospectWorkflowState => "introspect.workflow_state",
             Self::IntrospectListCells => "introspect.list_cells",
+            Self::WorkspaceResolve => "workspace.resolve",
+            Self::WorkspaceEmptyRoot => "workspace.empty_root",
+            Self::WorkspaceList => "workspace.list",
+            Self::WorkspaceReadRef => "workspace.read_ref",
+            Self::WorkspaceReadBytes => "workspace.read_bytes",
+            Self::WorkspaceWriteBytes => "workspace.write_bytes",
+            Self::WorkspaceWriteRef => "workspace.write_ref",
+            Self::WorkspaceRemove => "workspace.remove",
+            Self::WorkspaceDiff => "workspace.diff",
         }
     }
 }
@@ -156,5 +174,10 @@ pub fn mapper_effect_kind(mapper: ToolMapper) -> ToolEffectKind {
         ToolMapper::HostFsListDir => ToolEffectKind::HostFsListDir,
         ToolMapper::InspectWorld => ToolEffectKind::IntrospectManifest,
         ToolMapper::InspectWorkflow => ToolEffectKind::IntrospectWorkflowState,
+        ToolMapper::WorkspaceInspect => ToolEffectKind::WorkspaceResolve,
+        ToolMapper::WorkspaceList => ToolEffectKind::WorkspaceList,
+        ToolMapper::WorkspaceRead => ToolEffectKind::WorkspaceReadRef,
+        ToolMapper::WorkspaceApply => ToolEffectKind::WorkspaceWriteBytes,
+        ToolMapper::WorkspaceDiff => ToolEffectKind::WorkspaceDiff,
     }
 }

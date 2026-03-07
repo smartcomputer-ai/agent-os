@@ -26,13 +26,23 @@
           "host.fs.list_dir",
           "introspect.manifest",
           "introspect.workflow_state",
-          "introspect.list_cells"
+          "introspect.list_cells",
+          "workspace.resolve",
+          "workspace.empty_root",
+          "workspace.list",
+          "workspace.read_ref",
+          "workspace.read_bytes",
+          "workspace.write_bytes",
+          "workspace.write_ref",
+          "workspace.remove",
+          "workspace.diff"
         ],
         "cap_slots": {
           "blob": "blob",
           "llm": "llm.basic",
           "host": "host",
-          "query": "query"
+          "query": "query",
+          "workspace": "workspace"
         }
       }
     }

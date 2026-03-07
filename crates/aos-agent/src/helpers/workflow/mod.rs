@@ -1060,6 +1060,9 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
     use aos_air_types::HashRef;
+    use aos_effect_types::workspace::{
+        WorkspaceEmptyRootReceipt, WorkspaceResolveReceipt, WorkspaceWriteRefReceipt,
+    };
     use aos_effects::builtins::{
         BlobGetReceipt, BlobPutReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
         LlmToolCall, TokenUsage,
@@ -1569,6 +1572,215 @@ mod tests {
                     .any(|effect| matches!(effect, SessionEffectCommand::LlmGenerate { .. }));
         }
         assert!(emitted_llm, "expected queued follow-up llm.generate");
+    }
+
+    #[test]
+    fn workspace_apply_composite_tool_runs_to_completion() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                0,
+                SessionIngressKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )
+        .expect("host session ready");
+        let _ = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+
+        let calls = vec![ToolCallObserved {
+            call_id: "workspace-call-1".into(),
+            tool_name: "workspace_apply".into(),
+            arguments_json: serde_json::json!({
+                "workspace": "draft",
+                "operations": [
+                    {
+                        "op": "write",
+                        "path": "draft.txt",
+                        "text": "draft body"
+                    },
+                    {
+                        "op": "write",
+                        "path": "linked.bin",
+                        "blob_hash": fake_hash('9')
+                    }
+                ]
+            })
+            .to_string(),
+            arguments_ref: None,
+            provider_call_id: None,
+        }];
+        let params_hash = fake_hash('h');
+        let mut out = SessionReduceOutput::default();
+        let started = run_tool_batch(
+            &mut state,
+            RunToolBatch {
+                intent_id: fake_hash('i').as_str(),
+                params_hash: Some(&params_hash),
+                calls: &calls,
+            },
+            &mut out,
+        )
+        .expect("start tool batch");
+        assert_eq!(
+            started.started.plan.execution_plan.groups,
+            vec![vec![String::from("workspace-call-1")]]
+        );
+
+        let (resolve_hash, resolve_issuer_ref) = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::ToolEffect { kind, pending, .. }
+                    if *kind == ToolEffectKind::WorkspaceResolve =>
+                {
+                    Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
+                }
+                _ => None,
+            })
+            .expect("workspace.resolve effect");
+
+        out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                2,
+                "workspace.resolve",
+                Some(resolve_hash),
+                resolve_issuer_ref,
+                "ok",
+                &WorkspaceResolveReceipt {
+                    exists: false,
+                    resolved_version: None,
+                    head: None,
+                    root_hash: None,
+                },
+            ),
+        )
+        .expect("workspace.resolve receipt");
+
+        let (empty_root_hash, empty_root_issuer_ref) = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::ToolEffect { kind, pending, .. }
+                    if *kind == ToolEffectKind::WorkspaceEmptyRoot =>
+                {
+                    Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
+                }
+                _ => None,
+            })
+            .expect("workspace.empty_root effect");
+
+        out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                3,
+                "workspace.empty_root",
+                Some(empty_root_hash),
+                empty_root_issuer_ref,
+                "ok",
+                &WorkspaceEmptyRootReceipt {
+                    root_hash: hash_ref('c'),
+                },
+            ),
+        )
+        .expect("workspace.empty_root receipt");
+
+        let (blob_put_hash, blob_put_issuer_ref) = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::BlobPut { pending, .. } => {
+                    Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
+                }
+                _ => None,
+            })
+            .expect("blob.put effect");
+
+        out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                4,
+                "blob.put",
+                Some(blob_put_hash),
+                blob_put_issuer_ref,
+                "ok",
+                &BlobPutReceipt {
+                    blob_ref: hash_ref('d'),
+                    edge_ref: hash_ref('e'),
+                    size: 10,
+                },
+            ),
+        )
+        .expect("blob.put receipt");
+
+        let (write_ref_hash_1, write_ref_issuer_ref_1) = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::ToolEffect { kind, pending, .. }
+                    if *kind == ToolEffectKind::WorkspaceWriteRef =>
+                {
+                    Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
+                }
+                _ => None,
+            })
+            .expect("first workspace.write_ref effect");
+
+        out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                5,
+                "workspace.write_ref",
+                Some(write_ref_hash_1),
+                write_ref_issuer_ref_1,
+                "ok",
+                &WorkspaceWriteRefReceipt {
+                    new_root_hash: hash_ref('f'),
+                    blob_hash: hash_ref('d'),
+                },
+            ),
+        )
+        .expect("first workspace.write_ref receipt");
+
+        let (write_ref_hash_2, write_ref_issuer_ref_2) = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::ToolEffect { kind, pending, .. }
+                    if *kind == ToolEffectKind::WorkspaceWriteRef =>
+                {
+                    Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
+                }
+                _ => None,
+            })
+            .expect("second workspace.write_ref effect");
+
+        out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                6,
+                "workspace.write_ref",
+                Some(write_ref_hash_2),
+                write_ref_issuer_ref_2,
+                "ok",
+                &WorkspaceWriteRefReceipt {
+                    new_root_hash: hash_ref('a'),
+                    blob_hash: hash_ref('9'),
+                },
+            ),
+        )
+        .expect("second workspace.write_ref receipt");
+
+        assert!(
+            out.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. })),
+            "expected follow-up blob.put effects after tool completion"
+        );
     }
 
     #[test]

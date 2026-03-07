@@ -1,5 +1,5 @@
 pub mod registry;
-mod supported;
+pub(crate) mod supported;
 pub mod types;
 
 use crate::contracts::{ToolMapper, ToolRuntimeContext};
@@ -40,6 +40,11 @@ pub fn effect_kind_for_mapper(mapper: ToolMapper) -> ToolEffectKind {
         ToolMapper::HostFsListDir => ToolEffectKind::HostFsListDir,
         ToolMapper::InspectWorld => ToolEffectKind::IntrospectManifest,
         ToolMapper::InspectWorkflow => ToolEffectKind::IntrospectWorkflowState,
+        ToolMapper::WorkspaceInspect => ToolEffectKind::WorkspaceResolve,
+        ToolMapper::WorkspaceList => ToolEffectKind::WorkspaceList,
+        ToolMapper::WorkspaceRead => ToolEffectKind::WorkspaceReadRef,
+        ToolMapper::WorkspaceApply => ToolEffectKind::WorkspaceWriteBytes,
+        ToolMapper::WorkspaceDiff => ToolEffectKind::WorkspaceDiff,
     }
 }
 

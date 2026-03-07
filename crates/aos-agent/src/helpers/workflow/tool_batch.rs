@@ -5,7 +5,7 @@ use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use aos_air_types::HashRef;
-use aos_effects::builtins::BlobGetParams;
+use aos_effects::builtins::{BlobGetParams, BlobPutParams};
 use aos_wasm_sdk::{PendingBatch, PendingEffect, PendingEffectSet};
 
 use crate::contracts::{
@@ -13,6 +13,7 @@ use crate::contracts::{
     ToolCallObserved, ToolCallStatus, ToolExecutionPlan, ToolExecutor,
 };
 use crate::helpers::{SessionEffectCommand, SessionReduceOutput, allocate_tool_batch_id};
+use crate::tools::supported::workspace::{self, WorkspaceAction};
 use crate::tools::{
     ToolEffectKind, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
 };
@@ -223,10 +224,6 @@ pub(super) fn advance_tool_batch(
             let Some(status) = batch.call_status.get(&call_id).cloned() else {
                 continue;
             };
-            if status != ToolCallStatus::Queued {
-                continue;
-            }
-
             let Some(planned) = batch
                 .plan
                 .planned_calls
@@ -236,6 +233,13 @@ pub(super) fn advance_tool_batch(
             else {
                 continue;
             };
+
+            let pending_composite = matches!(status, ToolCallStatus::Pending)
+                && workspace::is_workspace_mapper(planned.mapper)
+                && !batch.pending_effects.contains_key(&call_id);
+            if status != ToolCallStatus::Queued && !pending_composite {
+                continue;
+            }
 
             match &planned.executor {
                 ToolExecutor::HostLoop { .. } => {
@@ -255,7 +259,9 @@ pub(super) fn advance_tool_batch(
 
             let arguments_json = if !planned.arguments_json.trim().is_empty() {
                 planned.arguments_json.clone()
-            } else if let Some(arguments_ref) = planned.arguments_ref.clone() {
+            } else if status == ToolCallStatus::Queued
+                && let Some(arguments_ref) = planned.arguments_ref.clone()
+            {
                 let blob_ref = match HashRef::new(arguments_ref) {
                     Ok(value) => value,
                     Err(err) => {
@@ -297,6 +303,41 @@ pub(super) fn advance_tool_batch(
                 );
                 continue;
             };
+
+            if workspace::is_workspace_mapper(planned.mapper) {
+                match advance_workspace_tool_call(
+                    &mut batch,
+                    &call_id,
+                    &planned,
+                    arguments_json.as_str(),
+                    status == ToolCallStatus::Queued,
+                    state.updated_at,
+                    out,
+                ) {
+                    Ok(emitted) => {
+                        emitted_for_group = emitted_for_group.saturating_add(emitted as usize);
+                    }
+                    Err(err) => {
+                        set_tool_call_status(&mut batch, &call_id, err.to_failed_status());
+                        batch.llm_results.insert(
+                            call_id.clone(),
+                            crate::contracts::ToolCallLlmResult {
+                                call_id: call_id.clone(),
+                                tool_id: planned.tool_id.clone(),
+                                tool_name: planned.tool_name.clone(),
+                                is_error: true,
+                                output_json: format!(
+                                    "{{\"ok\":false,\"error\":\"{}\",\"detail\":{}}}",
+                                    err.to_code_text(),
+                                    serde_json::to_string(&err.detail)
+                                        .unwrap_or_else(|_| "\"\"".into())
+                                ),
+                            },
+                        );
+                    }
+                }
+                continue;
+            }
 
             let mapped_args = match map_tool_arguments_to_effect_params(
                 planned.mapper,
@@ -425,12 +466,343 @@ pub(super) fn settle_tool_batch_receipt(
         (call_id, planned, batch.tool_batch_id.clone())
     };
 
+    if workspace::is_workspace_mapper(planned.mapper) {
+        let mapped = {
+            let Some(batch) = state.active_tool_batch.as_ref() else {
+                return Ok(ToolBatchReceiptMatch::Unmatched);
+            };
+            let state_json = batch
+                .llm_results
+                .get(&call_id)
+                .map(|result| result.output_json.clone())
+                .unwrap_or_default();
+            match workspace::resume_tool(
+                planned.tool_name.as_str(),
+                state_json.as_str(),
+                envelope.status.as_str(),
+                envelope.receipt_payload.as_slice(),
+            ) {
+                WorkspaceAction::Emit {
+                    effect_kind,
+                    cap_slot,
+                    params_json,
+                    state_json,
+                } => {
+                    emit_workspace_action(
+                        state,
+                        &tool_batch_id,
+                        &call_id,
+                        &planned,
+                        effect_kind,
+                        cap_slot,
+                        params_json,
+                        state_json,
+                        out,
+                    )?;
+                    None
+                }
+                WorkspaceAction::BlobPut { bytes, state_json } => {
+                    emit_workspace_blob_put(
+                        state,
+                        &tool_batch_id,
+                        &call_id,
+                        &planned,
+                        bytes,
+                        state_json,
+                        out,
+                    )?;
+                    None
+                }
+                WorkspaceAction::Complete(mapped) => Some(mapped),
+            }
+        };
+
+        if let Some(mapped) = mapped {
+            apply_mapped_tool_receipt(
+                state,
+                tool_batch_id.clone(),
+                &call_id,
+                &planned,
+                mapped,
+                out,
+            )?;
+        }
+
+        let completion = advance_tool_batch(state, out)?;
+        return Ok(ToolBatchReceiptMatch::Matched { completion });
+    }
+
     let mapped = map_tool_receipt_to_llm_result(
         planned.mapper,
         planned.tool_name.as_str(),
         envelope.status.as_str(),
         envelope.receipt_payload.as_slice(),
     );
+    apply_mapped_tool_receipt(
+        state,
+        tool_batch_id.clone(),
+        &call_id,
+        &planned,
+        mapped,
+        out,
+    )?;
+
+    let completion = advance_tool_batch(state, out)?;
+    Ok(ToolBatchReceiptMatch::Matched { completion })
+}
+
+fn advance_workspace_tool_call(
+    batch: &mut ActiveToolBatch,
+    call_id: &String,
+    planned: &PlannedToolCall,
+    arguments_json: &str,
+    is_initial: bool,
+    emitted_at_ns: u64,
+    out: &mut SessionReduceOutput,
+) -> Result<bool, crate::tools::types::ToolMappingError> {
+    let action = if is_initial {
+        workspace::start_tool(planned.mapper, planned.tool_name.as_str(), arguments_json)?
+    } else {
+        let state_json = batch
+            .llm_results
+            .get(call_id)
+            .map(|result| result.output_json.clone())
+            .unwrap_or_default();
+        workspace::continue_tool(planned.tool_name.as_str(), state_json.as_str())
+    };
+
+    match action {
+        WorkspaceAction::Complete(mapped) => {
+            batch.llm_results.insert(
+                call_id.clone(),
+                crate::contracts::ToolCallLlmResult {
+                    call_id: call_id.clone(),
+                    tool_id: planned.tool_id.clone(),
+                    tool_name: planned.tool_name.clone(),
+                    is_error: mapped.is_error,
+                    output_json: mapped.llm_output_json,
+                },
+            );
+            set_tool_call_status(batch, call_id, mapped.status);
+            Ok(false)
+        }
+        WorkspaceAction::Emit {
+            effect_kind,
+            cap_slot,
+            params_json,
+            state_json,
+        } => emit_workspace_action_in_batch(
+            batch,
+            call_id,
+            planned,
+            effect_kind,
+            cap_slot,
+            params_json,
+            state_json,
+            emitted_at_ns,
+            out,
+        ),
+        WorkspaceAction::BlobPut { bytes, state_json } => emit_workspace_blob_put_in_batch(
+            batch,
+            call_id,
+            planned,
+            bytes,
+            state_json,
+            emitted_at_ns,
+            out,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_workspace_action(
+    state: &mut SessionState,
+    tool_batch_id: &crate::contracts::ToolBatchId,
+    call_id: &String,
+    planned: &PlannedToolCall,
+    effect_kind: ToolEffectKind,
+    cap_slot: &'static str,
+    params_json: serde_json::Value,
+    state_json: String,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    if let Some(batch) = state.active_tool_batch.as_mut()
+        && &batch.tool_batch_id == tool_batch_id
+    {
+        let _ = emit_workspace_action_in_batch(
+            batch,
+            call_id,
+            planned,
+            effect_kind,
+            cap_slot,
+            params_json,
+            state_json,
+            state.updated_at,
+            out,
+        );
+    }
+    Ok(())
+}
+
+fn emit_workspace_blob_put(
+    state: &mut SessionState,
+    tool_batch_id: &crate::contracts::ToolBatchId,
+    call_id: &String,
+    planned: &PlannedToolCall,
+    bytes: Vec<u8>,
+    state_json: String,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    if let Some(batch) = state.active_tool_batch.as_mut()
+        && &batch.tool_batch_id == tool_batch_id
+    {
+        let _ = emit_workspace_blob_put_in_batch(
+            batch,
+            call_id,
+            planned,
+            bytes,
+            state_json,
+            state.updated_at,
+            out,
+        );
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_workspace_action_in_batch(
+    batch: &mut ActiveToolBatch,
+    call_id: &String,
+    planned: &PlannedToolCall,
+    effect_kind: ToolEffectKind,
+    cap_slot: &'static str,
+    params_json: serde_json::Value,
+    state_json: String,
+    emitted_at_ns: u64,
+    out: &mut SessionReduceOutput,
+) -> Result<bool, crate::tools::types::ToolMappingError> {
+    batch.llm_results.insert(
+        call_id.clone(),
+        crate::contracts::ToolCallLlmResult {
+            call_id: call_id.clone(),
+            tool_id: planned.tool_id.clone(),
+            tool_name: planned.tool_name.clone(),
+            is_error: false,
+            output_json: state_json,
+        },
+    );
+    let issuer_ref = workspace_substep_issuer_ref(call_id, effect_kind.as_str(), &params_json);
+    let pending = batch
+        .pending_effects
+        .begin_with_issuer_ref(
+            call_id.clone(),
+            effect_kind.as_str(),
+            &params_json,
+            Some(cap_slot.into()),
+            emitted_at_ns,
+            Some(issuer_ref.clone()),
+        )
+        .unwrap_or_else(|_| {
+            let fallback = PendingEffect::from_params_with_issuer_ref(
+                effect_kind.as_str(),
+                &params_json,
+                Some(cap_slot.into()),
+                emitted_at_ns,
+                Some(issuer_ref),
+            )
+            .unwrap_or_else(|_| {
+                PendingEffect::new(
+                    effect_kind.as_str(),
+                    String::new(),
+                    Some(cap_slot.into()),
+                    emitted_at_ns,
+                )
+            });
+            batch
+                .pending_effects
+                .insert(call_id.clone(), fallback.clone());
+            fallback
+        });
+    set_tool_call_status(batch, call_id, ToolCallStatus::Pending);
+    out.effects.push(SessionEffectCommand::ToolEffect {
+        kind: effect_kind,
+        params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
+        pending,
+    });
+    Ok(true)
+}
+
+fn emit_workspace_blob_put_in_batch(
+    batch: &mut ActiveToolBatch,
+    call_id: &String,
+    planned: &PlannedToolCall,
+    bytes: Vec<u8>,
+    state_json: String,
+    emitted_at_ns: u64,
+    out: &mut SessionReduceOutput,
+) -> Result<bool, crate::tools::types::ToolMappingError> {
+    batch.llm_results.insert(
+        call_id.clone(),
+        crate::contracts::ToolCallLlmResult {
+            call_id: call_id.clone(),
+            tool_id: planned.tool_id.clone(),
+            tool_name: planned.tool_name.clone(),
+            is_error: false,
+            output_json: state_json,
+        },
+    );
+    let params = BlobPutParams {
+        bytes,
+        blob_ref: None,
+        refs: Some(Vec::new()),
+    };
+    let pending = batch
+        .pending_effects
+        .begin(
+            call_id.clone(),
+            "blob.put",
+            &params,
+            Some("blob".into()),
+            emitted_at_ns,
+        )
+        .unwrap_or_else(|_| {
+            let fallback =
+                PendingEffect::from_params("blob.put", &params, Some("blob".into()), emitted_at_ns)
+                    .unwrap_or_else(|_| {
+                        PendingEffect::new(
+                            "blob.put",
+                            String::new(),
+                            Some("blob".into()),
+                            emitted_at_ns,
+                        )
+                    });
+            batch
+                .pending_effects
+                .insert(call_id.clone(), fallback.clone());
+            fallback
+        });
+    set_tool_call_status(batch, call_id, ToolCallStatus::Pending);
+    out.effects
+        .push(SessionEffectCommand::BlobPut { params, pending });
+    Ok(true)
+}
+
+fn workspace_substep_issuer_ref<T: serde::Serialize>(
+    call_id: &str,
+    effect_kind: &str,
+    params: &T,
+) -> String {
+    format!("{call_id}:{effect_kind}:{}", hash_cbor(params))
+}
+
+fn apply_mapped_tool_receipt(
+    state: &mut SessionState,
+    tool_batch_id: crate::contracts::ToolBatchId,
+    call_id: &String,
+    planned: &PlannedToolCall,
+    mapped: crate::tools::ToolMappedReceipt,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
     let expandable_blob_refs = if matches!(mapped.status, ToolCallStatus::Succeeded) {
         collect_blob_refs_from_output_json(mapped.llm_output_json.as_str())
     } else {
@@ -452,7 +824,7 @@ pub(super) fn settle_tool_batch_receipt(
             crate::contracts::ToolCallLlmResult {
                 call_id: call_id.clone(),
                 tool_id: planned.tool_id.clone(),
-                tool_name: planned.tool_name,
+                tool_name: planned.tool_name.clone(),
                 is_error: mapped.is_error,
                 output_json: mapped.llm_output_json.clone(),
             },
@@ -462,7 +834,7 @@ pub(super) fn settle_tool_batch_receipt(
         } else {
             mapped.status.clone()
         };
-        set_tool_call_status(batch, &call_id, initial_status);
+        set_tool_call_status(batch, call_id, initial_status);
     }
 
     for blob_ref in &queued_blob_refs {
@@ -495,9 +867,7 @@ pub(super) fn settle_tool_batch_receipt(
         let active = state.active_run_config.clone();
         refresh_effective_tools(state, active.as_ref())?;
     }
-
-    let completion = advance_tool_batch(state, out)?;
-    Ok(ToolBatchReceiptMatch::Matched { completion })
+    Ok(())
 }
 
 pub(super) fn collect_blob_refs_from_output_json(output_json: &str) -> Vec<String> {

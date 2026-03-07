@@ -18,6 +18,7 @@ mod host_session_open;
 mod host_session_signal;
 mod inspect_workflow;
 mod inspect_world;
+pub mod workspace;
 
 pub fn map_args(
     mapper: ToolMapper,
@@ -39,6 +40,13 @@ pub fn map_args(
         ToolMapper::HostFsListDir => host_fs_list_dir::map_args(arguments_json, runtime),
         ToolMapper::InspectWorld => inspect_world::map_args(arguments_json),
         ToolMapper::InspectWorkflow => inspect_workflow::map_args(arguments_json),
+        ToolMapper::WorkspaceInspect
+        | ToolMapper::WorkspaceList
+        | ToolMapper::WorkspaceRead
+        | ToolMapper::WorkspaceApply
+        | ToolMapper::WorkspaceDiff => Err(ToolMappingError::unsupported(
+            "workspace composite tools are handled by the workflow tool runner",
+        )),
     }
 }
 
@@ -52,6 +60,18 @@ pub fn map_receipt(
         ToolMapper::InspectWorld => return inspect_world::map_receipt(tool_name, status, payload),
         ToolMapper::InspectWorkflow => {
             return inspect_workflow::map_receipt(tool_name, status, payload);
+        }
+        ToolMapper::WorkspaceInspect
+        | ToolMapper::WorkspaceList
+        | ToolMapper::WorkspaceRead
+        | ToolMapper::WorkspaceApply
+        | ToolMapper::WorkspaceDiff => {
+            return failed_receipt(
+                tool_name,
+                status,
+                "tool_unsupported",
+                "workspace composite tools must be settled via the workspace runner",
+            );
         }
         _ => {}
     }

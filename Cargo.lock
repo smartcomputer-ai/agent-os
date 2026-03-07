@@ -111,6 +111,7 @@ dependencies = [
  "aos-effects",
  "aos-wasm-abi",
  "aos-wasm-sdk",
+ "base64 0.22.1",
  "serde",
  "serde_bytes",
  "serde_cbor",

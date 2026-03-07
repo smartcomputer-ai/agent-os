@@ -61,7 +61,16 @@
     { "name": "sys/host.fs.list_dir@1" },
     { "name": "sys/introspect.manifest@1" },
     { "name": "sys/introspect.workflow_state@1" },
-    { "name": "sys/introspect.list_cells@1" }
+    { "name": "sys/introspect.list_cells@1" },
+    { "name": "sys/workspace.resolve@1" },
+    { "name": "sys/workspace.empty_root@1" },
+    { "name": "sys/workspace.list@1" },
+    { "name": "sys/workspace.read_ref@1" },
+    { "name": "sys/workspace.read_bytes@1" },
+    { "name": "sys/workspace.write_bytes@1" },
+    { "name": "sys/workspace.write_ref@1" },
+    { "name": "sys/workspace.remove@1" },
+    { "name": "sys/workspace.diff@1" }
   ],
   "routing": {
     "subscriptions": [

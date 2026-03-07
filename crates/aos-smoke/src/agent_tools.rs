@@ -14,6 +14,12 @@ use aos_effect_types::introspect::{
     IntrospectManifestParams, IntrospectManifestReceipt, IntrospectWorkflowStateParams,
     IntrospectWorkflowStateReceipt, ReadMeta,
 };
+use aos_effect_types::workspace::{
+    WorkspaceDiffParams, WorkspaceDiffReceipt, WorkspaceEmptyRootParams, WorkspaceEmptyRootReceipt,
+    WorkspaceListParams, WorkspaceListReceipt, WorkspaceReadBytesParams, WorkspaceReadRefParams,
+    WorkspaceResolveParams, WorkspaceResolveReceipt, WorkspaceWriteBytesParams,
+    WorkspaceWriteBytesReceipt, WorkspaceWriteRefParams, WorkspaceWriteRefReceipt,
+};
 use aos_effects::builtins::{
     BlobEdge, BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, HostExecReceipt,
     HostFsExistsReceipt, HostFsListDirReceipt, HostFsReadFileReceipt, HostFsWriteFileReceipt,
@@ -47,6 +53,12 @@ const CALL_EXEC: &str = "call-exec";
 const CALL_INSPECT_WORLD: &str = "call-inspect-world";
 const CALL_INSPECT_WORKFLOW_STATE: &str = "call-inspect-workflow-state";
 const CALL_INSPECT_WORKFLOW_CELLS: &str = "call-inspect-workflow-cells";
+const CALL_WORKSPACE_INSPECT: &str = "call-workspace-inspect";
+const CALL_WORKSPACE_LIST_WORKSPACES: &str = "call-workspace-list-workspaces";
+const CALL_WORKSPACE_LIST_TREE: &str = "call-workspace-list-tree";
+const CALL_WORKSPACE_READ: &str = "call-workspace-read";
+const CALL_WORKSPACE_APPLY: &str = "call-workspace-apply";
+const CALL_WORKSPACE_DIFF: &str = "call-workspace-diff";
 
 const TOOL_SESSION_OPEN: &str = "host.session.open";
 const TOOL_FS_WRITE: &str = "host.fs.write_file";
@@ -57,6 +69,14 @@ const TOOL_EXEC: &str = "host.exec";
 const TOOL_INTROSPECT_MANIFEST: &str = "introspect.manifest";
 const TOOL_INTROSPECT_WORKFLOW_STATE: &str = "introspect.workflow_state";
 const TOOL_INTROSPECT_LIST_CELLS: &str = "introspect.list_cells";
+const TOOL_WORKSPACE_RESOLVE: &str = "workspace.resolve";
+const TOOL_WORKSPACE_EMPTY_ROOT: &str = "workspace.empty_root";
+const TOOL_WORKSPACE_LIST: &str = "workspace.list";
+const TOOL_WORKSPACE_READ_REF: &str = "workspace.read_ref";
+const TOOL_WORKSPACE_READ_BYTES: &str = "workspace.read_bytes";
+const TOOL_WORKSPACE_WRITE_BYTES: &str = "workspace.write_bytes";
+const TOOL_WORKSPACE_WRITE_REF: &str = "workspace.write_ref";
+const TOOL_WORKSPACE_DIFF: &str = "workspace.diff";
 
 const LLM_TOOL_FS_WRITE: &str = "write_file";
 const LLM_TOOL_FS_EXISTS: &str = "exists";
@@ -65,9 +85,31 @@ const LLM_TOOL_FS_LIST: &str = "list_dir";
 const LLM_TOOL_EXEC: &str = "shell";
 const LLM_TOOL_INSPECT_WORLD: &str = "inspect_world";
 const LLM_TOOL_INSPECT_WORKFLOW: &str = "inspect_workflow";
+const LLM_TOOL_WORKSPACE_INSPECT: &str = "workspace_inspect";
+const LLM_TOOL_WORKSPACE_LIST: &str = "workspace_list";
+const LLM_TOOL_WORKSPACE_READ: &str = "workspace_read";
+const LLM_TOOL_WORKSPACE_APPLY: &str = "workspace_apply";
+const LLM_TOOL_WORKSPACE_DIFF: &str = "workspace_diff";
 
 const TEST_FILE_PATH: &str = "notes/hello.txt";
 const TEST_FILE_TEXT: &str = "hello from agent-tools";
+const WORKSPACE_ALPHA: &str = "alpha";
+const WORKSPACE_BETA: &str = "beta";
+const WORKSPACE_DRAFT: &str = "draft";
+const WORKSPACE_FILE_PATH: &str = "docs/readme.txt";
+const WORKSPACE_TEXT: &str = "workspace hello";
+const ALPHA_ROOT_HASH: &str =
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const BETA_ROOT_HASH: &str =
+    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DRAFT_EMPTY_ROOT_HASH: &str =
+    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const DRAFT_TEXT_ROOT_HASH: &str =
+    "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+const DRAFT_FINAL_ROOT_HASH: &str =
+    "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+const APPLY_BLOB_HASH: &str =
+    "sha256:9999999999999999999999999999999999999999999999999999999999999999";
 
 pub fn run(example_root: &Path) -> Result<()> {
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
@@ -137,8 +179,21 @@ pub fn run(example_root: &Path) -> Result<()> {
     let state_after_tools: SessionState = host.read_state()?;
     ensure!(
         state_after_tools.lifecycle == SessionLifecycle::WaitingInput,
-        "expected WaitingInput after scripted tool + follow-up llm flow, got {:?}",
-        state_after_tools.lifecycle
+        "expected WaitingInput after scripted tool + follow-up llm flow, got {:?}; active_tool_batch={:?}; pending_effects={:?}; llm_results={:?}; pending_follow_up={:?}",
+        state_after_tools.lifecycle,
+        state_after_tools
+            .active_tool_batch
+            .as_ref()
+            .map(|batch| &batch.call_status),
+        state_after_tools
+            .active_tool_batch
+            .as_ref()
+            .map(|batch| batch.pending_effects.len()),
+        state_after_tools
+            .active_tool_batch
+            .as_ref()
+            .map(|batch| &batch.llm_results),
+        state_after_tools.pending_follow_up_turn
     );
     let batch = state_after_tools
         .active_tool_batch
@@ -153,6 +208,12 @@ pub fn run(example_root: &Path) -> Result<()> {
         CALL_INSPECT_WORLD,
         CALL_INSPECT_WORKFLOW_STATE,
         CALL_INSPECT_WORKFLOW_CELLS,
+        CALL_WORKSPACE_INSPECT,
+        CALL_WORKSPACE_LIST_WORKSPACES,
+        CALL_WORKSPACE_LIST_TREE,
+        CALL_WORKSPACE_READ,
+        CALL_WORKSPACE_APPLY,
+        CALL_WORKSPACE_DIFF,
         CALL_EXEC,
     ] {
         ensure!(
@@ -172,7 +233,13 @@ pub fn run(example_root: &Path) -> Result<()> {
             CALL_INSPECT_WORLD.to_string(),
             CALL_INSPECT_WORKFLOW_STATE.to_string(),
             CALL_INSPECT_WORKFLOW_CELLS.to_string(),
+            CALL_WORKSPACE_INSPECT.to_string(),
+            CALL_WORKSPACE_LIST_WORKSPACES.to_string(),
+            CALL_WORKSPACE_LIST_TREE.to_string(),
+            CALL_WORKSPACE_READ.to_string(),
         ],
+        vec![CALL_WORKSPACE_APPLY.to_string()],
+        vec![CALL_WORKSPACE_DIFF.to_string()],
         vec![CALL_EXEC.to_string()],
     ];
     ensure!(
@@ -189,6 +256,13 @@ pub fn run(example_root: &Path) -> Result<()> {
         TOOL_INTROSPECT_MANIFEST.to_string(),
         TOOL_INTROSPECT_WORKFLOW_STATE.to_string(),
         TOOL_INTROSPECT_LIST_CELLS.to_string(),
+        TOOL_WORKSPACE_RESOLVE.to_string(),
+        TOOL_WORKSPACE_EMPTY_ROOT.to_string(),
+        TOOL_WORKSPACE_LIST.to_string(),
+        TOOL_WORKSPACE_READ_REF.to_string(),
+        TOOL_WORKSPACE_READ_BYTES.to_string(),
+        TOOL_WORKSPACE_WRITE_REF.to_string(),
+        TOOL_WORKSPACE_DIFF.to_string(),
     ]);
     ensure!(
         script.seen_tool_effect_kinds == expected_kinds,
@@ -230,6 +304,7 @@ struct AgentToolsScript {
     llm_turn: u64,
     seen_tool_effect_kinds: BTreeSet<String>,
     opened_session_id: Option<String>,
+    workspace_write_ref_calls: u64,
 }
 
 impl AgentToolsScript {
@@ -247,6 +322,14 @@ impl AgentToolsScript {
             TOOL_INTROSPECT_MANIFEST => self.handle_introspect_manifest(intent),
             TOOL_INTROSPECT_WORKFLOW_STATE => self.handle_introspect_workflow_state(intent),
             TOOL_INTROSPECT_LIST_CELLS => self.handle_introspect_list_cells(intent),
+            TOOL_WORKSPACE_RESOLVE => self.handle_workspace_resolve(intent),
+            TOOL_WORKSPACE_EMPTY_ROOT => self.handle_workspace_empty_root(intent),
+            TOOL_WORKSPACE_LIST => self.handle_workspace_list(intent),
+            TOOL_WORKSPACE_READ_REF => self.handle_workspace_read_ref(intent),
+            TOOL_WORKSPACE_READ_BYTES => self.handle_workspace_read_bytes(intent),
+            TOOL_WORKSPACE_WRITE_BYTES => self.handle_workspace_write_bytes(intent),
+            TOOL_WORKSPACE_WRITE_REF => self.handle_workspace_write_ref(intent),
+            TOOL_WORKSPACE_DIFF => self.handle_workspace_diff(intent),
             other => bail!("unexpected effect kind in agent-tools smoke: {other}"),
         }
     }
@@ -580,9 +663,28 @@ impl AgentToolsScript {
     fn handle_introspect_list_cells(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
         let params: IntrospectListCellsParams = serde_cbor::from_slice(&intent.params_cbor)
             .context("decode introspect.list_cells params")?;
+        if params.workflow == WORKFLOW_NAME {
+            self.seen_tool_effect_kinds
+                .insert(TOOL_INTROSPECT_LIST_CELLS.into());
+            return ok_receipt(
+                intent,
+                &IntrospectListCellsReceipt {
+                    cells: vec![IntrospectCellInfo {
+                        key: Vec::new(),
+                        state_hash: EffectHashRef::new(
+                            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                        )?,
+                        size: 128,
+                        last_active_ns: 99,
+                    }],
+                    meta: smoke_read_meta()?,
+                },
+                "adapter.introspect.fake",
+            );
+        }
         ensure!(
-            params.workflow == WORKFLOW_NAME,
-            "expected workflow {}, got {}",
+            params.workflow == "sys/Workspace@1",
+            "expected workflow {} or sys/Workspace@1, got {}",
             WORKFLOW_NAME,
             params.workflow
         );
@@ -592,17 +694,283 @@ impl AgentToolsScript {
         ok_receipt(
             intent,
             &IntrospectListCellsReceipt {
-                cells: vec![IntrospectCellInfo {
-                    key: Vec::new(),
-                    state_hash: EffectHashRef::new(
-                        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-                    )?,
-                    size: 128,
-                    last_active_ns: 99,
-                }],
+                cells: vec![
+                    IntrospectCellInfo {
+                        key: serde_cbor::to_vec(&WORKSPACE_ALPHA)?,
+                        state_hash: EffectHashRef::new(ALPHA_ROOT_HASH)?,
+                        size: 256,
+                        last_active_ns: 100,
+                    },
+                    IntrospectCellInfo {
+                        key: serde_cbor::to_vec(&WORKSPACE_BETA)?,
+                        state_hash: EffectHashRef::new(BETA_ROOT_HASH)?,
+                        size: 192,
+                        last_active_ns: 101,
+                    },
+                ],
                 meta: smoke_read_meta()?,
             },
             "adapter.introspect.fake",
+        )
+    }
+
+    fn handle_workspace_resolve(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: WorkspaceResolveParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode workspace.resolve params")?;
+        self.seen_tool_effect_kinds
+            .insert(TOOL_WORKSPACE_RESOLVE.into());
+        let receipt = match params.workspace.as_str() {
+            WORKSPACE_ALPHA => WorkspaceResolveReceipt {
+                exists: true,
+                resolved_version: Some(params.version.unwrap_or(2)),
+                head: Some(3),
+                root_hash: Some(EffectHashRef::new(ALPHA_ROOT_HASH)?),
+            },
+            WORKSPACE_BETA => WorkspaceResolveReceipt {
+                exists: true,
+                resolved_version: Some(params.version.unwrap_or(5)),
+                head: Some(5),
+                root_hash: Some(EffectHashRef::new(BETA_ROOT_HASH)?),
+            },
+            WORKSPACE_DRAFT => WorkspaceResolveReceipt {
+                exists: false,
+                resolved_version: None,
+                head: None,
+                root_hash: None,
+            },
+            other => bail!("unexpected workspace.resolve workspace {other}"),
+        };
+        ok_receipt(intent, &receipt, "adapter.workspace.fake")
+    }
+
+    fn handle_workspace_empty_root(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: WorkspaceEmptyRootParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode workspace.empty_root params")?;
+        ensure!(
+            params.workspace == WORKSPACE_DRAFT,
+            "expected empty_root for draft, got {}",
+            params.workspace
+        );
+        self.seen_tool_effect_kinds
+            .insert(TOOL_WORKSPACE_EMPTY_ROOT.into());
+        ok_receipt(
+            intent,
+            &WorkspaceEmptyRootReceipt {
+                root_hash: EffectHashRef::new(DRAFT_EMPTY_ROOT_HASH)?,
+            },
+            "adapter.workspace.fake",
+        )
+    }
+
+    fn handle_workspace_list(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: WorkspaceListParams =
+            serde_cbor::from_slice(&intent.params_cbor).context("decode workspace.list params")?;
+        ensure!(
+            params.root_hash.as_str() == ALPHA_ROOT_HASH,
+            "expected workspace.list root {}, got {}",
+            ALPHA_ROOT_HASH,
+            params.root_hash
+        );
+        ensure!(
+            params.path.as_deref() == Some("docs"),
+            "expected workspace.list path docs, got {:?}",
+            params.path
+        );
+        self.seen_tool_effect_kinds
+            .insert(TOOL_WORKSPACE_LIST.into());
+        ok_receipt(
+            intent,
+            &WorkspaceListReceipt {
+                entries: vec![aos_effect_types::workspace::WorkspaceListEntry {
+                    path: WORKSPACE_FILE_PATH.into(),
+                    kind: "file".into(),
+                    hash: Some(EffectHashRef::new(
+                        "sha256:1212121212121212121212121212121212121212121212121212121212121212",
+                    )?),
+                    size: Some(WORKSPACE_TEXT.len() as u64),
+                    mode: Some(0o644),
+                }],
+                next_cursor: None,
+            },
+            "adapter.workspace.fake",
+        )
+    }
+
+    fn handle_workspace_read_ref(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: WorkspaceReadRefParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode workspace.read_ref params")?;
+        ensure!(
+            params.root_hash.as_str() == ALPHA_ROOT_HASH,
+            "expected workspace.read_ref root {}, got {}",
+            ALPHA_ROOT_HASH,
+            params.root_hash
+        );
+        ensure!(
+            params.path == WORKSPACE_FILE_PATH,
+            "expected workspace.read_ref path {}, got {}",
+            WORKSPACE_FILE_PATH,
+            params.path
+        );
+        self.seen_tool_effect_kinds
+            .insert(TOOL_WORKSPACE_READ_REF.into());
+        ok_receipt(
+            intent,
+            &Some(aos_effect_types::workspace::WorkspaceRefEntry {
+                kind: "file".into(),
+                hash: EffectHashRef::new(
+                    "sha256:1313131313131313131313131313131313131313131313131313131313131313",
+                )?,
+                size: WORKSPACE_TEXT.len() as u64,
+                mode: 0o644,
+            }),
+            "adapter.workspace.fake",
+        )
+    }
+
+    fn handle_workspace_read_bytes(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: WorkspaceReadBytesParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode workspace.read_bytes params")?;
+        ensure!(
+            params.root_hash.as_str() == ALPHA_ROOT_HASH,
+            "expected workspace.read_bytes root {}, got {}",
+            ALPHA_ROOT_HASH,
+            params.root_hash
+        );
+        ensure!(
+            params.path == WORKSPACE_FILE_PATH,
+            "expected workspace.read_bytes path {}, got {}",
+            WORKSPACE_FILE_PATH,
+            params.path
+        );
+        self.seen_tool_effect_kinds
+            .insert(TOOL_WORKSPACE_READ_BYTES.into());
+        ok_receipt(
+            intent,
+            &serde_cbor::Value::Bytes(WORKSPACE_TEXT.as_bytes().to_vec()),
+            "adapter.workspace.fake",
+        )
+    }
+
+    fn handle_workspace_write_bytes(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: WorkspaceWriteBytesParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode workspace.write_bytes params")?;
+        ensure!(
+            params.root_hash.as_str() == DRAFT_EMPTY_ROOT_HASH,
+            "expected workspace.write_bytes root {}, got {}",
+            DRAFT_EMPTY_ROOT_HASH,
+            params.root_hash
+        );
+        ensure!(
+            params.path == "draft.txt",
+            "expected workspace.write_bytes path draft.txt, got {}",
+            params.path
+        );
+        self.seen_tool_effect_kinds
+            .insert(TOOL_WORKSPACE_WRITE_BYTES.into());
+        ok_receipt(
+            intent,
+            &WorkspaceWriteBytesReceipt {
+                new_root_hash: EffectHashRef::new(DRAFT_TEXT_ROOT_HASH)?,
+                blob_hash: EffectHashRef::new(
+                    "sha256:1414141414141414141414141414141414141414141414141414141414141414",
+                )?,
+            },
+            "adapter.workspace.fake",
+        )
+    }
+
+    fn handle_workspace_write_ref(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: WorkspaceWriteRefParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode workspace.write_ref params")?;
+        self.seen_tool_effect_kinds
+            .insert(TOOL_WORKSPACE_WRITE_REF.into());
+        self.workspace_write_ref_calls = self.workspace_write_ref_calls.saturating_add(1);
+
+        match self.workspace_write_ref_calls {
+            1 => {
+                ensure!(
+                    params.root_hash.as_str() == DRAFT_EMPTY_ROOT_HASH,
+                    "expected first workspace.write_ref root {}, got {}",
+                    DRAFT_EMPTY_ROOT_HASH,
+                    params.root_hash
+                );
+                ensure!(
+                    params.path == "draft.txt",
+                    "expected first workspace.write_ref path draft.txt, got {}",
+                    params.path
+                );
+                ok_receipt(
+                    intent,
+                    &WorkspaceWriteRefReceipt {
+                        new_root_hash: EffectHashRef::new(DRAFT_TEXT_ROOT_HASH)?,
+                        blob_hash: params.blob_hash,
+                    },
+                    "adapter.workspace.fake",
+                )
+            }
+            2 => {
+                ensure!(
+                    params.root_hash.as_str() == DRAFT_TEXT_ROOT_HASH,
+                    "expected second workspace.write_ref root {}, got {}",
+                    DRAFT_TEXT_ROOT_HASH,
+                    params.root_hash
+                );
+                ensure!(
+                    params.path == "linked.bin",
+                    "expected second workspace.write_ref path linked.bin, got {}",
+                    params.path
+                );
+                ensure!(
+                    params.blob_hash.as_str() == APPLY_BLOB_HASH,
+                    "expected second workspace.write_ref blob {}, got {}",
+                    APPLY_BLOB_HASH,
+                    params.blob_hash
+                );
+                ok_receipt(
+                    intent,
+                    &WorkspaceWriteRefReceipt {
+                        new_root_hash: EffectHashRef::new(DRAFT_FINAL_ROOT_HASH)?,
+                        blob_hash: EffectHashRef::new(APPLY_BLOB_HASH)?,
+                    },
+                    "adapter.workspace.fake",
+                )
+            }
+            other => bail!("unexpected workspace.write_ref call count {other}"),
+        }
+    }
+
+    fn handle_workspace_diff(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
+        let params: WorkspaceDiffParams =
+            serde_cbor::from_slice(&intent.params_cbor).context("decode workspace.diff params")?;
+        ensure!(
+            params.root_a.as_str() == ALPHA_ROOT_HASH,
+            "expected workspace.diff left {}, got {}",
+            ALPHA_ROOT_HASH,
+            params.root_a
+        );
+        ensure!(
+            params.root_b.as_str() == BETA_ROOT_HASH,
+            "expected workspace.diff right {}, got {}",
+            BETA_ROOT_HASH,
+            params.root_b
+        );
+        self.seen_tool_effect_kinds
+            .insert(TOOL_WORKSPACE_DIFF.into());
+        ok_receipt(
+            intent,
+            &WorkspaceDiffReceipt {
+                changes: vec![aos_effect_types::workspace::WorkspaceDiffChange {
+                    path: WORKSPACE_FILE_PATH.into(),
+                    kind: "modified".into(),
+                    old_hash: Some(EffectHashRef::new(
+                        "sha256:1515151515151515151515151515151515151515151515151515151515151515",
+                    )?),
+                    new_hash: Some(EffectHashRef::new(
+                        "sha256:1616161616161616161616161616161616161616161616161616161616161616",
+                    )?),
+                }],
+            },
+            "adapter.workspace.fake",
         )
     }
 
@@ -630,6 +998,11 @@ fn configure_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()
         TOOL_EXEC.to_string(),
         TOOL_INTROSPECT_MANIFEST.to_string(),
         TOOL_INTROSPECT_WORKFLOW_STATE.to_string(),
+        "workspace.inspect".to_string(),
+        TOOL_WORKSPACE_LIST.to_string(),
+        "workspace.read".to_string(),
+        "workspace.apply".to_string(),
+        TOOL_WORKSPACE_DIFF.to_string(),
     ];
     let allowed: BTreeSet<String> = ordered.iter().cloned().collect();
     registry.retain(|name, _| allowed.contains(name));
@@ -756,6 +1129,52 @@ fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
             "view": "cells"
         }),
     )?;
+    let workspace_inspect_args = store_json_blob(
+        store,
+        &json!({
+            "workspace": WORKSPACE_ALPHA
+        }),
+    )?;
+    let workspace_list_workspaces_args = store_json_blob(store, &json!({}))?;
+    let workspace_list_tree_args = store_json_blob(
+        store,
+        &json!({
+            "workspace": WORKSPACE_ALPHA,
+            "path": "docs"
+        }),
+    )?;
+    let workspace_read_args = store_json_blob(
+        store,
+        &json!({
+            "workspace": WORKSPACE_ALPHA,
+            "path": WORKSPACE_FILE_PATH
+        }),
+    )?;
+    let workspace_apply_args = store_json_blob(
+        store,
+        &json!({
+            "workspace": WORKSPACE_DRAFT,
+            "operations": [
+                {
+                    "op": "write",
+                    "path": "draft.txt",
+                    "text": "draft body"
+                },
+                {
+                    "op": "write",
+                    "path": "linked.bin",
+                    "blob_hash": APPLY_BLOB_HASH
+                }
+            ]
+        }),
+    )?;
+    let workspace_diff_args = store_json_blob(
+        store,
+        &json!({
+            "left": { "root_hash": ALPHA_ROOT_HASH },
+            "right": { "workspace": WORKSPACE_BETA }
+        }),
+    )?;
 
     Ok(vec![
         LlmToolCall {
@@ -799,6 +1218,42 @@ fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
             tool_name: LLM_TOOL_INSPECT_WORKFLOW.into(),
             arguments_ref: inspect_workflow_cells_args,
             provider_call_id: Some("provider-call-inspect-workflow-cells".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_WORKSPACE_INSPECT.into(),
+            tool_name: LLM_TOOL_WORKSPACE_INSPECT.into(),
+            arguments_ref: workspace_inspect_args,
+            provider_call_id: Some("provider-call-workspace-inspect".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_WORKSPACE_LIST_WORKSPACES.into(),
+            tool_name: LLM_TOOL_WORKSPACE_LIST.into(),
+            arguments_ref: workspace_list_workspaces_args,
+            provider_call_id: Some("provider-call-workspace-list-workspaces".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_WORKSPACE_LIST_TREE.into(),
+            tool_name: LLM_TOOL_WORKSPACE_LIST.into(),
+            arguments_ref: workspace_list_tree_args,
+            provider_call_id: Some("provider-call-workspace-list-tree".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_WORKSPACE_READ.into(),
+            tool_name: LLM_TOOL_WORKSPACE_READ.into(),
+            arguments_ref: workspace_read_args,
+            provider_call_id: Some("provider-call-workspace-read".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_WORKSPACE_APPLY.into(),
+            tool_name: LLM_TOOL_WORKSPACE_APPLY.into(),
+            arguments_ref: workspace_apply_args,
+            provider_call_id: Some("provider-call-workspace-apply".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_WORKSPACE_DIFF.into(),
+            tool_name: LLM_TOOL_WORKSPACE_DIFF.into(),
+            arguments_ref: workspace_diff_args,
+            provider_call_id: Some("provider-call-workspace-diff".into()),
         },
         LlmToolCall {
             call_id: CALL_EXEC.into(),

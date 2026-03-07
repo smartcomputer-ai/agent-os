@@ -41,7 +41,8 @@
   ],
   "modules": [
     { "name": "aos.agent/SessionWorkflow@1" },
-    { "name": "sys/CapEnforceLlmBasic@1" }
+    { "name": "sys/CapEnforceLlmBasic@1" },
+    { "name": "sys/CapEnforceWorkspace@1" }
   ],
   "caps": [
     { "name": "demo/agent_tools_llm_basic@1" },
@@ -88,6 +89,13 @@
         "params": {
           "record": {}
         }
+      },
+      {
+        "name": "workspace",
+        "cap": "sys/workspace@1",
+        "params": {
+          "record": {}
+        }
       }
     ]
   },
@@ -103,7 +111,15 @@
     { "name": "sys/host.exec@1" },
     { "name": "sys/introspect.manifest@1" },
     { "name": "sys/introspect.workflow_state@1" },
-    { "name": "sys/introspect.list_cells@1" }
+    { "name": "sys/introspect.list_cells@1" },
+    { "name": "sys/workspace.resolve@1" },
+    { "name": "sys/workspace.empty_root@1" },
+    { "name": "sys/workspace.list@1" },
+    { "name": "sys/workspace.read_ref@1" },
+    { "name": "sys/workspace.read_bytes@1" },
+    { "name": "sys/workspace.write_bytes@1" },
+    { "name": "sys/workspace.write_ref@1" },
+    { "name": "sys/workspace.diff@1" }
   ],
   "effect_bindings": [
     { "kind": "blob.put", "adapter_id": "blob.put" },
@@ -132,7 +148,8 @@
         "blob": "blob",
         "llm": "llm",
         "host": "host",
-        "query": "query"
+        "query": "query",
+        "workspace": "workspace"
       }
     }
   }

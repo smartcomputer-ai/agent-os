@@ -56,7 +56,12 @@
         "HostFsExists": { "unit": {} },
         "HostFsListDir": { "unit": {} },
         "InspectWorld": { "unit": {} },
-        "InspectWorkflow": { "unit": {} }
+        "InspectWorkflow": { "unit": {} },
+        "WorkspaceInspect": { "unit": {} },
+        "WorkspaceList": { "unit": {} },
+        "WorkspaceRead": { "unit": {} },
+        "WorkspaceApply": { "unit": {} },
+        "WorkspaceDiff": { "unit": {} }
       }
     }
   },
