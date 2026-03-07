@@ -11,7 +11,7 @@ Ship the first complete hosted runtime plane on top of P2 persistence:
 
 1. Worlds can run on any worker with lease fencing.
 2. All ingress is durable and replay-safe.
-3. Effects and timers execute out-of-process via durable queues and return receipts through inbox.
+3. Effects and timers execute through durable queues and return receipts through inbox.
 4. Cross-world messaging is durable, idempotent, and auditable.
 5. World fork/seed from snapshots is cheap and deterministic.
 
@@ -32,38 +32,37 @@ Constraint for later follow-on work:
 - Byzantine trust model between internal services.
 - Full tenant quota/billing engine.
 - Rich workflow placement optimization (ML scheduling, cost-aware routing).
+- A mandatory central orchestrator for first hosted runtime bring-up.
 - Public internet control-plane APIs and auth hardening.
 - Embedded-universe runtime implementation.
 - Live communication or shared CAS between embedded and hosted universes.
 - Export/import movement between embedded and hosted modes.
 
-## Runtime Roles (In Scope)
+## Design Stance (v1)
 
-### 1) Orchestrator
+- Implement a single worker runtime program/crate for the first hosted runtime pass.
+- In v1, each worker fulfills all runtime responsibilities for worlds it currently holds: world execution, effect dispatch/receipt handling, and timer delivery.
+- The same program should remain capable of running in narrower modes later (for example `worker` vs `adapter` args), but that split is not required for the first implementation.
+- A dedicated orchestrator is not required for correctness in v1. Workers may coordinate by observing active worker heartbeats, collaboratively choosing candidate worlds, and relying on lease fencing for safety.
+- Desired assignment / placement policy is an optional later layer on top of the same lease protocol, not a prerequisite for P3.
 
-- Maintains worker inventory and world desired placement.
-- Writes desired assignment and revocation intents.
-- Does not execute world logic.
+## Runtime Shape (In Scope)
 
-### 2) World Worker
+### 1) Integrated Worker
 
 - Acquires/renews world lease.
 - Restores world from baseline + journal tail.
 - Drains inbox to journal, advances kernel, emits effect intents.
+- Claims and executes effect work for held worlds.
+- Claims and fires timers for held worlds.
 - Schedules snapshots and compaction triggers.
 - Stops world execution immediately when lease renewal fails.
 
-### 3) Adapter Worker Pool
+### 2) Optional Placement Controller (deferred)
 
-- Consumes global effect dispatch queue.
-- Executes external effects (HTTP/LLM/email/payments/fabric).
-- Enqueues receipts back into destination world inbox.
-
-### 4) Timer Worker
-
-- Scans due timers.
-- Enqueues timer-fired ingress into destination world inbox.
-- Ensures at-least-once durable delivery with dedupe.
+- May later maintain worker inventory and desired placement.
+- May later write assignment and revocation intents.
+- Is not required for first correctness or first rollout.
 
 ## Scope (Now)
 
@@ -75,7 +74,13 @@ Lease record (per world):
 - `epoch: u64` (strictly increasing fencing token)
 - `expires_at_ns: u64`
 
-Assignment record:
+Default operational timings for the first rollout:
+
+- `lease_ttl = 20s`
+- `renew_every = 5s`
+- `idle_release_after = 10s`
+
+Optional later assignment record:
 
 - `desired_worker_id?: text`
 - `priority?: nat`
@@ -93,25 +98,39 @@ Rules:
 
 Worker world lifecycle:
 
-1. Watch for assignments targeting worker.
-2. Attempt `acquire_lease`.
-3. Restore runtime (`active_baseline + tail`).
-4. Enter run loop:
+1. Heartbeat worker presence into hosted runtime metadata.
+2. Discover active workers and ready worlds.
+3. Compute candidate ownership for ready worlds using stable rendezvous hashing over the active worker set.
+4. Attempt `acquire_lease`.
+5. Restore runtime (`active_baseline + tail`).
+6. Enter run loop:
    - drain inbox to journal
    - tick kernel until idle or budget
-   - publish effect intents to global queue
+   - publish effect intents to durable queues
+   - claim/execute effect work for held worlds
+   - claim/fire due timers for held worlds
    - snapshot based on policy
    - renew lease
-5. On reassignment/revoke/renew failure:
-   - stop loop
-   - flush in-memory state as needed
-   - release local handles
+7. Once the world becomes quiescent, keep the host warm for `idle_release_after`.
+8. If no new work appears during that idle window, release lease and unload local world state.
+9. On renew failure or fencing:
+   - stop loop immediately
+   - drop local authority for the world
+   - release local handles as cleanup only
+
+Worker membership / claiming notes:
+
+- Workers need the active worker set, not just a worker count.
+- Rendezvous hashing is preferred for v1 because membership changes move the fewest worlds and avoid a central scheduler.
+- Ready hints are advisory; workers must re-check authoritative world state before lease acquisition.
+- Lease fencing remains the sole correctness boundary. Candidate ownership only reduces contention.
 
 Run loop budgets:
 
 - `max_inbox_batch`
 - `max_tick_steps_per_cycle`
 - `max_effects_per_cycle`
+- `max_timers_per_cycle`
 - `max_cycle_wall_ms` (operational guardrail only; deterministic outputs remain journal-defined)
 
 Runtime-shape constraints:
@@ -119,6 +138,16 @@ Runtime-shape constraints:
 - worker/runtime code should key off `(universe_id, world_id)` rather than a filesystem world root
 - phase-1 single-process multi-world hosting should be the same basic runtime shape later reused by embedded mode
 - hosted storage remains the only authoritative persistence plane in P3
+- the hosted worker should reuse `WorldHost` as the execution core rather than introducing a second world runner
+
+### 2a) Local CAS caching
+
+- CAS content is immutable and hash-addressed, so workers should be allowed to cache it locally.
+- CAS caching is independent of world lease lifetime; releasing a world lease should not flush process-local CAS cache.
+- First implementation can use a read-through process-local cache keyed by `(universe_id, hash)`.
+- Eviction is operational only (for example size-bounded LRU); correctness never depends on cache residency.
+- Journal heads, inbox cursors, leases, ready state, and other mutable runtime metadata must not be treated as cache-authoritative.
+- A later disk-backed CAS cache is acceptable, but not required for first implementation.
 
 ### 3) Durable ingress normalization path
 
@@ -127,8 +156,8 @@ All external inputs converge into `InboxItem` and are journaled only by lease ho
 Ingress producers:
 
 - API/control (`event-send`, `receipt-inject`)
-- Adapter workers (effect receipts)
-- Timer worker
+- Integrated workers (effect receipts)
+- Integrated workers (timer delivery)
 - Fabric adapter
 - Optional external inbox relays
 
@@ -138,7 +167,7 @@ Normalization requirements:
 2. Canonicalize once at journal-append boundary.
 3. Correlation identifiers preserved (`intent_hash`, `event_hash`, `correlation_id`).
 
-### 4) Global effect dispatch runtime
+### 4) Durable effect dispatch runtime
 
 Queue keys from P2:
 
@@ -163,11 +192,16 @@ Dispatch item fields:
 
 Claim/execute protocol:
 
-1. Adapter worker claims pending item from an assigned shard by moving it to inflight with lease timeout.
+1. Worker claims pending item from an assigned shard by moving it to inflight with claim timeout.
 2. Execute adapter call.
 3. Build typed receipt event.
 4. Enqueue `ReceiptIngress` into world inbox.
 5. Mark dedupe status complete and remove inflight.
+
+v1 ownership note:
+
+- In the first rollout, workers should normally execute effect items for worlds they currently hold.
+- Dedicated effect-only shard ownership is a later optional mode split, not a prerequisite for P3.
 
 Crash recovery protocol:
 
@@ -183,7 +217,7 @@ Retry semantics:
 Sharding rules:
 
 - `shard` is derived from a stable hash of `intent_hash` with a fixed configured shard count.
-- Adapter workers claim one or more shards and scan only those prefixes.
+- Workers claim one or more shards and scan only those prefixes.
 - There is no global ordering guarantee across effect shards.
 - Initial rollout may use `shard_count = 1`; the shard-aware key layout exists to avoid redesign once hosted load requires parallel queue ranges.
 
@@ -198,7 +232,7 @@ Timer queue keys from P2:
 Timer protocol:
 
 1. `timer.set` intent is persisted and enqueued as due record.
-2. Timer worker claims due item at/after due timestamp from an assigned shard and time bucket.
+2. Worker claims due item at/after due timestamp from an assigned shard and time bucket.
 3. Enqueue `TimerFiredIngress` into world inbox.
 4. Mark dedupe delivered, clear inflight.
 
@@ -207,6 +241,7 @@ Semantics:
 - At-least-once enqueue to inbox; dedupe prevents duplicate logical delivery for same intent.
 - World migration does not affect timer durability.
 - There is no global total order across timer shards; only due-time ordering within a shard scan.
+- In the first rollout, workers should normally fire timers for worlds they currently hold.
 
 Recurring schedule note:
 
@@ -223,7 +258,7 @@ Add plan-only effect kind:
 P3 scope note:
 
 - In this milestone, `fabric.send` only targets worlds that live inside the same hosted persistence plane.
-- Bridging to embedded universes is deferred.
+- Bridging to embedded worlds is deferred.
 
 Proposed built-ins:
 
@@ -315,34 +350,44 @@ Rules:
 - Ready hints may be stale; workers must re-check authoritative world state before acting.
 - Ready writes should be de-duplicated or rate-limited where practical so a single hot world does not become a write hotspot.
 - Initial rollout may use `shard_count = 1` here as well.
+- Candidate worker selection should use rendezvous hashing across the current active worker set.
+- Membership changes should not require rewriting per-world desired placement in the common case.
+- Optional explicit assignment may later override rendezvous ownership for drain, maintenance, or operator-directed pinning.
 
 ### 10) Hosted runtime metadata keyspace
 
+Universe / worker records:
+
+- `u/<u>/workers/by_id/<worker_id> -> WorkerHeartbeatRecord`
+- `u/<u>/workers/by_expiry/<expiry_bucket>/<worker_id> -> ()` (optional operational index)
+- `u/<u>/ready/<priority>/<shard>/<world_id> -> ReadyHint`
+
 Primary per-world records:
 
-- `u/<u>/w/<w>/runtime/assignment -> AssignmentRecord`
 - `u/<u>/w/<w>/runtime/lease -> LeaseRecord`
 - `u/<u>/w/<w>/runtime/ready_state -> ReadyState`
+- `u/<u>/w/<w>/runtime/assignment -> AssignmentRecord` (optional later override)
 - `u/<u>/w/<w>/fabric/dedupe/<message_id> -> DeliveredStatus`
 - `u/<u>/w/<w>/fabric/dedupe_gc/<gc_bucket>/<message_id> -> ()`
 
 Secondary indexes:
 
-- `u/<u>/assign/by_worker/<worker>/<world> -> AssignmentIndexRecord`
 - `u/<u>/lease/by_worker/<worker>/<world> -> LeaseIndexRecord`
+- `u/<u>/assign/by_worker/<worker>/<world> -> AssignmentIndexRecord` (optional later override index)
 
 Rules:
 
 - per-world records are authoritative
-- per-worker indexes are maintained transactionally as secondary indexes
-- watches on assignment or ready-state keys are latency hints only; workers must recover correctly by scanning durable state
+- per-worker indexes are maintained transactionally as secondary indexes where present
+- worker heartbeats are operational membership records, not authority records
+- watches on worker heartbeat, assignment, or ready-state keys are latency hints only; workers must recover correctly by scanning durable state
 
 ### 11) Operational APIs (internal)
 
 Required internal control surface:
 
-- `assign_world(world, worker)`
-- `unassign_world(world)`
+- `heartbeat_worker(worker)`
+- `list_active_workers(universe)`
 - `acquire_lease(world, worker)`
 - `renew_lease(world, worker, epoch)`
 - `release_lease(world, worker, epoch)`
@@ -351,14 +396,30 @@ Required internal control surface:
 - `world_fork(...)`
 - `world_create_from_seed(...)`
 
+Deferred/optional later control surface:
+
+- `assign_world(world, worker)`
+- `unassign_world(world)`
+
 All APIs must be idempotent and return typed errors.
 
 ## Transaction Protocols (Normative)
 
+### Protocol 0: `heartbeat_worker(worker)`
+
+1. Upsert worker heartbeat with fresh expiry and operational metadata.
+2. Maintain optional expiry-bucket index for efficient cleanup/scans.
+3. Commit.
+
+Guarantees:
+
+- Active worker set can be reconstructed from durable heartbeats.
+- Expired workers naturally age out without a central coordinator.
+
 ### Protocol A: `acquire_lease(world, worker)`
 
-1. Read current lease and desired assignment.
-2. Validate assignment allows worker (if configured).
+1. Read current lease and optional desired assignment.
+2. Validate assignment allows worker if an override is configured.
 3. If lease absent/expired:
    - write new lease with `epoch = old_epoch + 1`
    - update `lease/by_worker/<worker>/<world>`
@@ -392,7 +453,7 @@ Guarantees:
 
 - No double-dispatch for same intent hash.
 
-### Protocol D: `adapter_claim_execute_ack(shard, effect_seq)`
+### Protocol D: `effect_claim_execute_ack(shard, effect_seq)`
 
 1. Move pending entry to inflight with claim TTL.
 2. Execute adapter.
@@ -437,9 +498,9 @@ Guarantees:
 
 1. Worker crashes after journal append before effect publish:
    - recovery scans tail + queued effects and repopulates publish queue.
-2. Adapter crashes after external call before receipt enqueue:
+2. Worker crashes after external call before receipt enqueue:
    - inflight reaper retries with dedupe guard.
-3. Timer worker crash between claim and enqueue:
+3. Worker crashes between timer claim and enqueue:
    - expired claim reaper retries.
 
 ### Idempotency anchors
@@ -494,20 +555,22 @@ Assertions:
 
 ## Rollout Plan
 
-### Phase 1: Single orchestrator, single worker process hosting many worlds
+### Phase 1: Single runtime binary, integrated worker loops
 
-- Leases active but no contention.
-- Adapter and timer workers can be in-process sidecars.
+- One worker process can host many worlds.
+- The same process runs world execution plus effect/timer loops for worlds it holds.
+- No dedicated orchestrator is required.
 - This runtime shape should be preserved so embedded-universe mode can later reuse it with a different authoritative persistence backend.
 
 ### Phase 2: Multi-worker lease handoff
 
-- Enable reassignment and failover.
+- Enable collaborative claiming and failover across multiple workers.
 - Validate fencing under induced network partitions/timeouts.
 
-### Phase 3: Dedicated adapter/timer pools and fabric routing
+### Phase 3: Optional mode split and placement policy
 
-- Separate worker classes.
+- Allow the same runtime program to start in narrower modes if needed.
+- Optional explicit assignment / drain / maintenance policy can be layered on top.
 - Enable cross-world messaging for selected tenants/workloads.
 
 ### Phase 4: Hardening
@@ -519,14 +582,16 @@ Assertions:
 ## Deliverables / DoD
 
 1. Lease protocol with epoch fencing implemented and enforced on world mutations.
-2. Worker runtime loop can host multiple worlds and survive failover.
-3. Runtime startup/operation is keyed by persistence identity rather than filesystem world-root assumptions.
-4. Durable effect dispatch queue with adapter workers and receipt re-ingress is live.
-5. Durable timer worker path is live and migration-safe.
-6. `fabric.send` effect with idempotent destination enqueue is implemented for hosted-to-hosted delivery.
-7. World fork/seed from snapshot is implemented with explicit default effect policy.
-8. Failure-injection test suite passes with replay parity guarantees.
-9. Internal ops APIs and observability metrics/logging are in place.
+2. Worker membership heartbeat plus collaborative claiming are implemented.
+3. Worker runtime loop can host multiple worlds, survive failover, and release idle worlds after a bounded warm window.
+4. Process-local CAS caching is in place as an optimization independent of lease lifetime.
+5. Runtime startup/operation is keyed by persistence identity rather than filesystem world-root assumptions.
+6. Durable effect dispatch queue with worker-integrated adapter execution and receipt re-ingress is live.
+7. Durable timer path is live and migration-safe.
+8. `fabric.send` effect with idempotent destination enqueue is implemented for hosted-to-hosted delivery.
+9. World fork/seed from snapshot is implemented with explicit default effect policy.
+10. Failure-injection test suite passes with replay parity guarantees.
+11. Internal ops APIs and observability metrics/logging are in place.
 
 ## Explicitly Out of Scope
 
