@@ -10,6 +10,9 @@ pub enum ToolExecutor {
         effect_kind: String,
         cap_slot: Option<String>,
     },
+    DomainEvent {
+        schema: String,
+    },
     HostLoop {
         bridge: String,
     },
@@ -46,6 +49,7 @@ pub enum ToolMapper {
     WorkspaceRead,
     WorkspaceApply,
     WorkspaceDiff,
+    WorkspaceCommit,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

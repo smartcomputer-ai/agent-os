@@ -1784,6 +1784,197 @@ mod tests {
     }
 
     #[test]
+    fn workspace_commit_immediate_tool_allows_next_group_to_run() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+
+        let calls = vec![
+            ToolCallObserved {
+                call_id: "workspace-commit".into(),
+                tool_name: "workspace_commit".into(),
+                arguments_json: serde_json::json!({
+                    "workspace": "draft",
+                    "root_hash": fake_hash('e'),
+                    "owner": "agent"
+                })
+                .to_string(),
+                arguments_ref: None,
+                provider_call_id: None,
+            },
+            ToolCallObserved {
+                call_id: "workspace-diff".into(),
+                tool_name: "workspace_diff".into(),
+                arguments_json: serde_json::json!({
+                    "left": { "root_hash": fake_hash('a') },
+                    "right": { "root_hash": fake_hash('b') }
+                })
+                .to_string(),
+                arguments_ref: None,
+                provider_call_id: None,
+            },
+        ];
+        let params_hash = fake_hash('h');
+        let mut out = SessionReduceOutput::default();
+        let started = run_tool_batch(
+            &mut state,
+            RunToolBatch {
+                intent_id: fake_hash('i').as_str(),
+                params_hash: Some(&params_hash),
+                calls: &calls,
+            },
+            &mut out,
+        )
+        .expect("run tool batch");
+        assert_eq!(
+            started.started.plan.execution_plan.groups,
+            vec![
+                vec![String::from("workspace-commit")],
+                vec![String::from("workspace-diff")]
+            ]
+        );
+        assert_eq!(out.domain_events.len(), 1, "expected workspace commit event");
+        assert!(
+            out.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::ToolEffect { kind, .. } if *kind == ToolEffectKind::WorkspaceDiff)),
+            "expected workspace.diff effect after immediate commit group"
+        );
+    }
+
+    #[test]
+    fn workspace_commit_with_arguments_ref_rewinds_into_next_group() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                0,
+                SessionIngressKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )
+        .expect("host session ready");
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+
+        let calls = vec![
+            ToolCallObserved {
+                call_id: "workspace-commit".into(),
+                tool_name: "workspace_commit".into(),
+                arguments_json: String::new(),
+                arguments_ref: Some(fake_hash('c')),
+                provider_call_id: None,
+            },
+            ToolCallObserved {
+                call_id: "workspace-diff".into(),
+                tool_name: "workspace_diff".into(),
+                arguments_json: String::new(),
+                arguments_ref: Some(fake_hash('d')),
+                provider_call_id: None,
+            },
+            ToolCallObserved {
+                call_id: "shell".into(),
+                tool_name: "shell".into(),
+                arguments_json: String::new(),
+                arguments_ref: Some(fake_hash('e')),
+                provider_call_id: None,
+            },
+        ];
+        let params_hash = fake_hash('h');
+        let mut out = SessionReduceOutput::default();
+        run_tool_batch(
+            &mut state,
+            RunToolBatch {
+                intent_id: fake_hash('i').as_str(),
+                params_hash: Some(&params_hash),
+                calls: &calls,
+            },
+            &mut out,
+        )
+        .expect("run tool batch");
+
+        let commit_args_hash = out
+            .effects
+            .iter()
+            .find(|effect| matches!(effect, SessionEffectCommand::BlobGet { .. }))
+            .map(|effect| effect.params_hash().to_string())
+            .expect("expected blob.get for commit args");
+
+        let mut out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                2,
+                "blob.get",
+                Some(commit_args_hash),
+                "ok",
+                &BlobGetReceipt {
+                    blob_ref: hash_ref('c'),
+                    size: 80,
+                    bytes: serde_json::to_vec(&serde_json::json!({
+                        "workspace": "draft",
+                        "root_hash": fake_hash('e'),
+                        "owner": "agent",
+                    }))
+                    .expect("commit args"),
+                },
+            ),
+        )
+        .expect("commit args blob.get receipt");
+
+        assert_eq!(out.domain_events.len(), 1, "expected commit event");
+        assert!(
+            out.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::BlobGet { .. })),
+            "expected next group blob.get after commit"
+        );
+        assert!(
+            !out.effects.iter().any(|effect| matches!(
+                effect,
+                SessionEffectCommand::ToolEffect { kind, .. } if *kind == ToolEffectKind::HostExec
+            )),
+            "did not expect shell execution before diff args resolve"
+        );
+
+        let diff_args_hash = out
+            .effects
+            .iter()
+            .find(|effect| matches!(effect, SessionEffectCommand::BlobGet { .. }))
+            .map(|effect| effect.params_hash().to_string())
+            .expect("expected blob.get for diff args");
+
+        out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                3,
+                "blob.get",
+                Some(diff_args_hash),
+                "ok",
+                &BlobGetReceipt {
+                    blob_ref: hash_ref('d'),
+                    size: 96,
+                    bytes: serde_json::to_vec(&serde_json::json!({
+                        "left": { "root_hash": fake_hash('a') },
+                        "right": { "root_hash": fake_hash('b') },
+                    }))
+                    .expect("diff args"),
+                },
+            ),
+        )
+        .expect("diff args blob.get receipt");
+
+        assert!(
+            out.effects.iter().any(|effect| matches!(
+                effect,
+                SessionEffectCommand::ToolEffect { kind, .. } if *kind == ToolEffectKind::WorkspaceDiff
+            )),
+            "expected workspace.diff effect after diff args resolve"
+        );
+    }
+
+    #[test]
     fn collect_blob_refs_from_output_json_finds_nested_blob_refs() {
         let output_json = serde_json::json!({
             "tool": "read_file",

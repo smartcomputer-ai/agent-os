@@ -44,7 +44,8 @@ pub fn map_args(
         | ToolMapper::WorkspaceList
         | ToolMapper::WorkspaceRead
         | ToolMapper::WorkspaceApply
-        | ToolMapper::WorkspaceDiff => Err(ToolMappingError::unsupported(
+        | ToolMapper::WorkspaceDiff
+        | ToolMapper::WorkspaceCommit => Err(ToolMappingError::unsupported(
             "workspace composite tools are handled by the workflow tool runner",
         )),
     }
@@ -65,7 +66,8 @@ pub fn map_receipt(
         | ToolMapper::WorkspaceList
         | ToolMapper::WorkspaceRead
         | ToolMapper::WorkspaceApply
-        | ToolMapper::WorkspaceDiff => {
+        | ToolMapper::WorkspaceDiff
+        | ToolMapper::WorkspaceCommit => {
             return failed_receipt(
                 tool_name,
                 status,

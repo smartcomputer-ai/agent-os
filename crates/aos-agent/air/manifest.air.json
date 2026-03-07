@@ -39,7 +39,8 @@
   ],
   "modules": [
     { "name": "aos.agent/SessionWorkflow@1" },
-    { "name": "aos.agent/SessionEventEcho@1" }
+    { "name": "aos.agent/SessionEventEcho@1" },
+    { "name": "sys/Workspace@1" }
   ],
   "caps": [],
   "policies": [],
@@ -78,6 +79,11 @@
         "event": "aos.agent/SessionIngress@1",
         "module": "aos.agent/SessionWorkflow@1",
         "key_field": "session_id"
+      },
+      {
+        "event": "sys/WorkspaceCommit@1",
+        "module": "sys/Workspace@1",
+        "key_field": "workspace"
       }
     ],
     "inboxes": []

@@ -179,5 +179,8 @@ pub fn mapper_effect_kind(mapper: ToolMapper) -> ToolEffectKind {
         ToolMapper::WorkspaceRead => ToolEffectKind::WorkspaceReadRef,
         ToolMapper::WorkspaceApply => ToolEffectKind::WorkspaceWriteBytes,
         ToolMapper::WorkspaceDiff => ToolEffectKind::WorkspaceDiff,
+        ToolMapper::WorkspaceCommit => {
+            panic!("workspace commit does not map to an effect kind")
+        }
     }
 }

@@ -386,6 +386,27 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
                 resource_key: None,
             },
         ),
+        ToolSpec {
+            tool_id: "workspace.commit".into(),
+            tool_name: "workspace_commit".into(),
+            tool_ref: sha256_text(&tool_definition_bytes(
+                "workspace_commit",
+                "Publish a root hash as the next version of a named workspace.",
+                r#"{"type":"object","required":["workspace","root_hash"],"additionalProperties":false,"properties":{"workspace":{"type":"string"},"root_hash":{"type":"string"},"expected_head":{"type":"integer","minimum":0},"owner":{"type":"string"}}}"#,
+            )),
+            description:
+                "Publish a root hash as the next version of a named workspace.".into(),
+            args_schema_json: r#"{"type":"object","required":["workspace","root_hash"],"additionalProperties":false,"properties":{"workspace":{"type":"string"},"root_hash":{"type":"string"},"expected_head":{"type":"integer","minimum":0},"owner":{"type":"string"}}}"#.into(),
+            mapper: ToolMapper::WorkspaceCommit,
+            executor: ToolExecutor::DomainEvent {
+                schema: "sys/WorkspaceCommit@1".into(),
+            },
+            availability_rules: vec![ToolAvailabilityRule::Always],
+            parallelism_hint: ToolParallelismHint {
+                parallel_safe: false,
+                resource_key: Some("workspace.commit".into()),
+            },
+        },
     ];
 
     for tool in tools {
@@ -405,6 +426,7 @@ pub fn default_tool_profiles() -> BTreeMap<String, Vec<String>> {
         "workspace.read".into(),
         "workspace.apply".into(),
         "workspace.diff".into(),
+        "workspace.commit".into(),
         "host.exec".into(),
         "host.fs.read_file".into(),
         "host.fs.write_file".into(),

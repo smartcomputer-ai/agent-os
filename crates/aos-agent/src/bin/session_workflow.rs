@@ -35,6 +35,9 @@ impl Workflow for SessionWorkflow {
         let prev_lifecycle = ctx.state.lifecycle;
         let prev_run_id = ctx.state.active_run_id.clone();
         let out = apply_session_workflow_event(&mut ctx.state, &event).map_err(map_reduce_error)?;
+        for domain_event in out.domain_events {
+            domain_event.emit(ctx);
+        }
         for effect in out.effects {
             effect.emit(ctx);
         }

@@ -105,9 +105,24 @@ impl SessionEffectCommand {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionDomainEventCommand {
+    pub schema: &'static str,
+    pub payload_json: String,
+}
+
+impl SessionDomainEventCommand {
+    pub fn emit(self, ctx: &mut WorkflowCtx<SessionState, Value>) {
+        let payload: serde_json::Value =
+            serde_json::from_str(&self.payload_json).unwrap_or(serde_json::Value::Null);
+        ctx.intent(self.schema).payload(&payload).send();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SessionReduceOutput {
     pub effects: alloc::vec::Vec<SessionEffectCommand>,
+    pub domain_events: alloc::vec::Vec<SessionDomainEventCommand>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

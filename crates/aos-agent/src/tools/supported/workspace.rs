@@ -17,6 +17,7 @@ use serde_cbor::Value as CborValue;
 use serde_json::{Value, json};
 
 const WORKSPACE_WORKFLOW_NAME: &str = "sys/Workspace@1";
+const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 
 #[derive(Debug)]
 pub enum WorkspaceAction {
@@ -25,6 +26,11 @@ pub enum WorkspaceAction {
         cap_slot: &'static str,
         params_json: Value,
         state_json: String,
+    },
+    EmitEvent {
+        schema: &'static str,
+        payload_json: Value,
+        receipt: ToolMappedReceipt,
     },
     BlobPut {
         bytes: Vec<u8>,
@@ -85,6 +91,14 @@ struct WorkspaceDiffArgs {
     left: WorkspaceRefInput,
     right: WorkspaceRefInput,
     prefix: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceCommitArgs {
+    workspace: String,
+    root_hash: String,
+    expected_head: Option<u64>,
+    owner: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +221,7 @@ pub fn is_workspace_mapper(mapper: ToolMapper) -> bool {
             | ToolMapper::WorkspaceRead
             | ToolMapper::WorkspaceApply
             | ToolMapper::WorkspaceDiff
+            | ToolMapper::WorkspaceCommit
     )
 }
 
@@ -214,6 +229,7 @@ pub fn start_tool(
     mapper: ToolMapper,
     tool_name: &str,
     arguments_json: &str,
+    emitted_at_ns: u64,
 ) -> Result<WorkspaceAction, crate::tools::types::ToolMappingError> {
     let initial = match mapper {
         ToolMapper::WorkspaceInspect => initial_inspect_state(arguments_json, tool_name)?,
@@ -221,6 +237,7 @@ pub fn start_tool(
         ToolMapper::WorkspaceRead => initial_read_state(arguments_json)?,
         ToolMapper::WorkspaceApply => initial_apply_state(arguments_json)?,
         ToolMapper::WorkspaceDiff => initial_diff_state(arguments_json)?,
+        ToolMapper::WorkspaceCommit => return initial_commit_action(arguments_json, tool_name, emitted_at_ns),
         _ => {
             return Err(crate::tools::types::ToolMappingError::unsupported(
                 "not a workspace tool",
@@ -555,6 +572,62 @@ fn initial_diff_state(
         right: args.right,
         prefix: args.prefix,
     }))
+}
+
+fn initial_commit_action(
+    arguments_json: &str,
+    tool_name: &str,
+    emitted_at_ns: u64,
+) -> Result<WorkspaceAction, crate::tools::types::ToolMappingError> {
+    let args: WorkspaceCommitArgs = parse_args(arguments_json)?;
+    if args.workspace.trim().is_empty() {
+        return Err(crate::tools::types::ToolMappingError::invalid_args(
+            "'workspace' must be a non-empty string",
+        ));
+    }
+    if args.root_hash.trim().is_empty() {
+        return Err(crate::tools::types::ToolMappingError::invalid_args(
+            "'root_hash' must be a non-empty string",
+        ));
+    }
+    let owner = args
+        .owner
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "agent".into());
+    let payload_json = json!({
+        "workspace": args.workspace,
+        "expected_head": args.expected_head,
+        "meta": {
+            "root_hash": args.root_hash,
+            "owner": owner,
+            "created_at": emitted_at_ns,
+        }
+    });
+    let receipt = success_receipt(
+        tool_name,
+        json!({
+            "workspace": payload_json.get("workspace").cloned().unwrap_or(Value::Null),
+            "expected_head": args.expected_head,
+            "root_hash": payload_json
+                .get("meta")
+                .and_then(|value| value.get("root_hash"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "owner": payload_json
+                .get("meta")
+                .and_then(|value| value.get("owner"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "created_at": emitted_at_ns,
+            "emitted": true,
+            "schema": WORKSPACE_COMMIT_SCHEMA,
+        }),
+    );
+    Ok(WorkspaceAction::EmitEvent {
+        schema: WORKSPACE_COMMIT_SCHEMA,
+        payload_json,
+        receipt,
+    })
 }
 
 fn advance_state(

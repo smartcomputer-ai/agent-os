@@ -216,7 +216,6 @@ pub(super) fn advance_tool_batch(
             .current_group_keys()
             .map(|group| group.to_vec())
             .unwrap_or_default();
-        let _ = batch.execution.advance();
 
         let runtime_ctx = state.tool_runtime_context.clone();
         let mut emitted_for_group = 0usize;
@@ -236,7 +235,8 @@ pub(super) fn advance_tool_batch(
 
             let pending_composite = matches!(status, ToolCallStatus::Pending)
                 && workspace::is_workspace_mapper(planned.mapper)
-                && !batch.pending_effects.contains_key(&call_id);
+                && !batch.pending_effects.contains_key(&call_id)
+                && batch.llm_results.contains_key(&call_id);
             if status != ToolCallStatus::Queued && !pending_composite {
                 continue;
             }
@@ -246,15 +246,7 @@ pub(super) fn advance_tool_batch(
                     set_tool_call_status(&mut batch, &call_id, ToolCallStatus::Pending);
                     continue;
                 }
-                ToolExecutor::Effect { .. } => {}
-            }
-
-            let (executor_effect_kind, cap_slot) = match &planned.executor {
-                ToolExecutor::Effect {
-                    effect_kind,
-                    cap_slot,
-                } => (effect_kind.clone(), cap_slot.clone()),
-                ToolExecutor::HostLoop { .. } => unreachable!(),
+                ToolExecutor::Effect { .. } | ToolExecutor::DomainEvent { .. } => {}
             };
 
             let arguments_json = if !planned.arguments_json.trim().is_empty() {
@@ -339,6 +331,23 @@ pub(super) fn advance_tool_batch(
                 continue;
             }
 
+            let (executor_effect_kind, cap_slot) = match &planned.executor {
+                ToolExecutor::Effect {
+                    effect_kind,
+                    cap_slot,
+                } => (effect_kind.clone(), cap_slot.clone()),
+                ToolExecutor::HostLoop { .. } => unreachable!(),
+                ToolExecutor::DomainEvent { schema } => {
+                    fail_tool_call(
+                        &mut batch,
+                        &call_id,
+                        "executor_unsupported",
+                        format!("domain event executor for {} requires a composite mapper: {schema}", planned.tool_name),
+                    );
+                    continue;
+                }
+            };
+
             let mapped_args = match map_tool_arguments_to_effect_params(
                 planned.mapper,
                 arguments_json.as_str(),
@@ -414,9 +423,19 @@ pub(super) fn advance_tool_batch(
             });
         }
 
+        let current_group_complete = batch
+            .execution
+            .current_group_keys()
+            .is_some_and(|keys| {
+                keys.iter().all(|call_id| {
+                    batch.call_status
+                        .get(call_id)
+                        .is_some_and(ToolCallStatus::is_terminal)
+                })
+            });
         state.active_tool_batch = Some(batch);
         recompute_in_flight_effects(state);
-        if emitted_for_group > 0 {
+        if emitted_for_group > 0 || !current_group_complete {
             return Ok(None);
         }
     }
@@ -513,6 +532,7 @@ pub(super) fn settle_tool_batch_receipt(
                     )?;
                     None
                 }
+                WorkspaceAction::EmitEvent { receipt, .. } => Some(receipt),
                 WorkspaceAction::Complete(mapped) => Some(mapped),
             }
         };
@@ -561,7 +581,12 @@ fn advance_workspace_tool_call(
     out: &mut SessionReduceOutput,
 ) -> Result<bool, crate::tools::types::ToolMappingError> {
     let action = if is_initial {
-        workspace::start_tool(planned.mapper, planned.tool_name.as_str(), arguments_json)?
+        workspace::start_tool(
+            planned.mapper,
+            planned.tool_name.as_str(),
+            arguments_json,
+            emitted_at_ns,
+        )?
     } else {
         let state_json = batch
             .llm_results
@@ -611,6 +636,30 @@ fn advance_workspace_tool_call(
             emitted_at_ns,
             out,
         ),
+        WorkspaceAction::EmitEvent {
+            schema,
+            payload_json,
+            receipt,
+        } => {
+            batch.llm_results.insert(
+                call_id.clone(),
+                crate::contracts::ToolCallLlmResult {
+                    call_id: call_id.clone(),
+                    tool_id: planned.tool_id.clone(),
+                    tool_name: planned.tool_name.clone(),
+                    is_error: receipt.is_error,
+                    output_json: receipt.llm_output_json,
+                },
+            );
+            set_tool_call_status(batch, call_id, receipt.status);
+            out.domain_events
+                .push(crate::helpers::SessionDomainEventCommand {
+                    schema,
+                    payload_json: serde_json::to_string(&payload_json)
+                        .unwrap_or_else(|_| "{}".into()),
+                });
+            Ok(false)
+        }
     }
 }
 

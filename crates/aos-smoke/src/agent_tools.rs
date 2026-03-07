@@ -58,6 +58,7 @@ const CALL_WORKSPACE_LIST_WORKSPACES: &str = "call-workspace-list-workspaces";
 const CALL_WORKSPACE_LIST_TREE: &str = "call-workspace-list-tree";
 const CALL_WORKSPACE_READ: &str = "call-workspace-read";
 const CALL_WORKSPACE_APPLY: &str = "call-workspace-apply";
+const CALL_WORKSPACE_COMMIT: &str = "call-workspace-commit";
 const CALL_WORKSPACE_DIFF: &str = "call-workspace-diff";
 
 const TOOL_SESSION_OPEN: &str = "host.session.open";
@@ -89,6 +90,7 @@ const LLM_TOOL_WORKSPACE_INSPECT: &str = "workspace_inspect";
 const LLM_TOOL_WORKSPACE_LIST: &str = "workspace_list";
 const LLM_TOOL_WORKSPACE_READ: &str = "workspace_read";
 const LLM_TOOL_WORKSPACE_APPLY: &str = "workspace_apply";
+const LLM_TOOL_WORKSPACE_COMMIT: &str = "workspace_commit";
 const LLM_TOOL_WORKSPACE_DIFF: &str = "workspace_diff";
 
 const TEST_FILE_PATH: &str = "notes/hello.txt";
@@ -213,6 +215,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         CALL_WORKSPACE_LIST_TREE,
         CALL_WORKSPACE_READ,
         CALL_WORKSPACE_APPLY,
+        CALL_WORKSPACE_COMMIT,
         CALL_WORKSPACE_DIFF,
         CALL_EXEC,
     ] {
@@ -239,6 +242,7 @@ pub fn run(example_root: &Path) -> Result<()> {
             CALL_WORKSPACE_READ.to_string(),
         ],
         vec![CALL_WORKSPACE_APPLY.to_string()],
+        vec![CALL_WORKSPACE_COMMIT.to_string()],
         vec![CALL_WORKSPACE_DIFF.to_string()],
         vec![CALL_EXEC.to_string()],
     ];
@@ -1002,6 +1006,7 @@ fn configure_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()
         TOOL_WORKSPACE_LIST.to_string(),
         "workspace.read".to_string(),
         "workspace.apply".to_string(),
+        "workspace.commit".to_string(),
         TOOL_WORKSPACE_DIFF.to_string(),
     ];
     let allowed: BTreeSet<String> = ordered.iter().cloned().collect();
@@ -1041,6 +1046,7 @@ fn send_session_event(
 fn drive_scripted_effects(host: &mut ExampleHost, script: &mut AgentToolsScript) -> Result<()> {
     let store = host.store();
     for _ in 0..256 {
+        host.kernel_mut().tick_until_idle()?;
         let intents = host.kernel_mut().drain_effects()?;
         if intents.is_empty() {
             return Ok(());
@@ -1175,6 +1181,14 @@ fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
             "right": { "workspace": WORKSPACE_BETA }
         }),
     )?;
+    let workspace_commit_args = store_json_blob(
+        store,
+        &json!({
+            "workspace": WORKSPACE_DRAFT,
+            "root_hash": DRAFT_FINAL_ROOT_HASH,
+            "owner": "agent-tools"
+        }),
+    )?;
 
     Ok(vec![
         LlmToolCall {
@@ -1248,6 +1262,12 @@ fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
             tool_name: LLM_TOOL_WORKSPACE_APPLY.into(),
             arguments_ref: workspace_apply_args,
             provider_call_id: Some("provider-call-workspace-apply".into()),
+        },
+        LlmToolCall {
+            call_id: CALL_WORKSPACE_COMMIT.into(),
+            tool_name: LLM_TOOL_WORKSPACE_COMMIT.into(),
+            arguments_ref: workspace_commit_args,
+            provider_call_id: Some("provider-call-workspace-commit".into()),
         },
         LlmToolCall {
             call_id: CALL_WORKSPACE_DIFF.into(),

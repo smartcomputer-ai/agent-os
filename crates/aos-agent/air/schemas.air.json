@@ -61,7 +61,8 @@
         "WorkspaceList": { "unit": {} },
         "WorkspaceRead": { "unit": {} },
         "WorkspaceApply": { "unit": {} },
-        "WorkspaceDiff": { "unit": {} }
+        "WorkspaceDiff": { "unit": {} },
+        "WorkspaceCommit": { "unit": {} }
       }
     }
   },
@@ -74,6 +75,11 @@
           "record": {
             "effect_kind": { "text": {} },
             "cap_slot": { "option": { "text": {} } }
+          }
+        },
+        "DomainEvent": {
+          "record": {
+            "schema": { "text": {} }
           }
         },
         "HostLoop": {
