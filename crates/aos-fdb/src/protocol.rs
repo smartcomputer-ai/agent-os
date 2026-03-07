@@ -34,6 +34,21 @@ pub type ShardId = u16;
 pub type TimeBucket = u64;
 pub type QueueSeq = InboxSeq;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CasConfig {
+    pub inline_threshold_bytes: usize,
+    pub verify_reads: bool,
+}
+
+impl Default for CasConfig {
+    fn default() -> Self {
+        Self {
+            inline_threshold_bytes: 4 * 1024,
+            verify_reads: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct UniverseId(Uuid);
@@ -169,6 +184,11 @@ pub struct CasMeta {
         with = "serde_bytes_opt"
     )]
     pub inline_bytes: Option<Vec<u8>>,
+}
+
+pub fn cas_object_key(universe: UniverseId, hash: Hash) -> String {
+    let hash_hex = hex::encode(hash.as_bytes());
+    format!("cas/{universe}/sha256/{hash_hex}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

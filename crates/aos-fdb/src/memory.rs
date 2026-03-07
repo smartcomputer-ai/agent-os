@@ -4,19 +4,27 @@ use std::sync::{Arc, Mutex};
 use aos_cbor::Hash;
 
 use crate::protocol::{
-    InboxItem, InboxSeq, JournalHeight, PersistError, SegmentIndexRecord, SnapshotRecord,
-    UniverseId, WorldId, WorldPersistence, ensure_monotonic_snapshot_records, sample_world_meta,
+    BlobStorage, CasConfig, CasMeta, InboxItem, InboxSeq, JournalHeight, PersistError,
+    SegmentIndexRecord, SnapshotRecord, UniverseId, WorldId, WorldPersistence, cas_object_key,
+    ensure_monotonic_snapshot_records, sample_world_meta,
 };
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct MemoryWorldPersistence {
     state: Arc<Mutex<MemoryState>>,
+    cas_config: CasConfig,
 }
 
 #[derive(Debug, Default)]
 struct MemoryState {
-    cas: BTreeMap<UniverseId, BTreeMap<Hash, Vec<u8>>>,
+    cas: BTreeMap<UniverseId, BTreeMap<Hash, CasEntry>>,
+    cas_objects: BTreeMap<String, Vec<u8>>,
     worlds: BTreeMap<(UniverseId, WorldId), WorldState>,
+}
+
+#[derive(Debug, Clone)]
+struct CasEntry {
+    meta: CasMeta,
 }
 
 #[derive(Debug)]
@@ -51,7 +59,14 @@ impl Default for WorldState {
 
 impl MemoryWorldPersistence {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_config(CasConfig::default())
+    }
+
+    pub fn with_config(cas_config: CasConfig) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(MemoryState::default())),
+            cas_config,
+        }
     }
 
     fn with_world_mut<R>(
@@ -83,6 +98,57 @@ impl MemoryWorldPersistence {
         })?;
         f(world_state)
     }
+
+    fn cas_payload_for_read(
+        &self,
+        guard: &MemoryState,
+        hash: Hash,
+        entry: &CasEntry,
+    ) -> Result<Vec<u8>, PersistError> {
+        let bytes = match entry.meta.storage {
+            BlobStorage::Inline => entry.meta.inline_bytes.clone().ok_or_else(|| {
+                PersistError::backend(format!("inline CAS metadata missing bytes for {hash}"))
+            })?,
+            BlobStorage::ObjectStore => {
+                let key = entry.meta.object_key.as_ref().ok_or_else(|| {
+                    PersistError::backend(format!(
+                        "object-store CAS metadata missing object_key for {hash}"
+                    ))
+                })?;
+                guard.cas_objects.get(key).cloned().ok_or_else(|| {
+                    PersistError::backend(format!(
+                        "object-store body missing for {hash} at key {key}"
+                    ))
+                })?
+            }
+        };
+
+        if self.cas_config.verify_reads {
+            let actual = Hash::of_bytes(&bytes);
+            if actual != hash {
+                return Err(PersistError::backend(format!(
+                    "CAS body hash mismatch for {hash}: loaded {actual}"
+                )));
+            }
+        }
+        Ok(bytes)
+    }
+
+    #[cfg(test)]
+    fn debug_cas_entry(
+        &self,
+        universe: UniverseId,
+        hash: Hash,
+    ) -> Option<(CasMeta, Option<Vec<u8>>)> {
+        let guard = self.state.lock().ok()?;
+        let entry = guard.cas.get(&universe)?.get(&hash)?;
+        let object_bytes = entry
+            .meta
+            .object_key
+            .as_ref()
+            .and_then(|key| guard.cas_objects.get(key).cloned());
+        Some((entry.meta.clone(), object_bytes))
+    }
 }
 
 impl WorldPersistence for MemoryWorldPersistence {
@@ -92,8 +158,37 @@ impl WorldPersistence for MemoryWorldPersistence {
             .state
             .lock()
             .map_err(|_| PersistError::backend("memory persistence mutex poisoned"))?;
-        let entry = guard.cas.entry(universe).or_default();
-        entry.entry(hash).or_insert_with(|| bytes.to_vec());
+        if let Some(existing) = guard.cas.entry(universe).or_default().get(&hash).cloned() {
+            let _ = self.cas_payload_for_read(&guard, hash, &existing)?;
+            return Ok(hash);
+        }
+
+        let meta = if bytes.len() <= self.cas_config.inline_threshold_bytes {
+            CasMeta {
+                size: bytes.len() as u64,
+                storage: BlobStorage::Inline,
+                object_key: None,
+                inline_bytes: Some(bytes.to_vec()),
+            }
+        } else {
+            let object_key = cas_object_key(universe, hash);
+            guard
+                .cas_objects
+                .entry(object_key.clone())
+                .or_insert_with(|| bytes.to_vec());
+            CasMeta {
+                size: bytes.len() as u64,
+                storage: BlobStorage::ObjectStore,
+                object_key: Some(object_key),
+                inline_bytes: None,
+            }
+        };
+
+        guard
+            .cas
+            .entry(universe)
+            .or_default()
+            .insert(hash, CasEntry { meta });
         Ok(hash)
     }
 
@@ -102,12 +197,12 @@ impl WorldPersistence for MemoryWorldPersistence {
             .state
             .lock()
             .map_err(|_| PersistError::backend("memory persistence mutex poisoned"))?;
-        guard
+        let entry = guard
             .cas
             .get(&universe)
             .and_then(|universe_cas| universe_cas.get(&hash))
-            .cloned()
-            .ok_or_else(|| PersistError::not_found(format!("cas object {hash}")))
+            .ok_or_else(|| PersistError::not_found(format!("cas object {hash}")))?;
+        self.cas_payload_for_read(&guard, hash, entry)
     }
 
     fn cas_has(&self, universe: UniverseId, hash: Hash) -> Result<bool, PersistError> {
@@ -419,6 +514,61 @@ mod tests {
         assert_eq!(first, second);
         assert!(persistence.cas_has(universe(), first).unwrap());
         assert_eq!(persistence.cas_get(universe(), first).unwrap(), bytes);
+    }
+
+    #[test]
+    fn small_cas_blob_is_stored_inline() {
+        let persistence = MemoryWorldPersistence::with_config(CasConfig {
+            inline_threshold_bytes: 8,
+            verify_reads: true,
+        });
+        let bytes = b"small";
+        let hash = persistence.cas_put_verified(universe(), bytes).unwrap();
+
+        let (meta, object_bytes) = persistence.debug_cas_entry(universe(), hash).unwrap();
+        assert_eq!(meta.storage, BlobStorage::Inline);
+        assert_eq!(meta.inline_bytes, Some(bytes.to_vec()));
+        assert_eq!(meta.object_key, None);
+        assert_eq!(object_bytes, None);
+    }
+
+    #[test]
+    fn large_cas_blob_is_externalized_under_deterministic_object_key() {
+        let persistence = MemoryWorldPersistence::with_config(CasConfig {
+            inline_threshold_bytes: 4,
+            verify_reads: true,
+        });
+        let bytes = b"definitely larger than four bytes";
+        let hash = persistence.cas_put_verified(universe(), bytes).unwrap();
+
+        let (meta, object_bytes) = persistence.debug_cas_entry(universe(), hash).unwrap();
+        assert_eq!(meta.storage, BlobStorage::ObjectStore);
+        assert_eq!(meta.inline_bytes, None);
+        assert_eq!(
+            meta.object_key.as_deref(),
+            Some(cas_object_key(universe(), hash).as_str())
+        );
+        assert_eq!(object_bytes, Some(bytes.to_vec()));
+        assert_eq!(persistence.cas_get(universe(), hash).unwrap(), bytes);
+    }
+
+    #[test]
+    fn cas_read_detects_external_object_corruption() {
+        let persistence = MemoryWorldPersistence::with_config(CasConfig {
+            inline_threshold_bytes: 1,
+            verify_reads: true,
+        });
+        let bytes = b"this must be external";
+        let hash = persistence.cas_put_verified(universe(), bytes).unwrap();
+        let object_key = cas_object_key(universe(), hash);
+
+        {
+            let mut guard = persistence.state.lock().unwrap();
+            guard.cas_objects.insert(object_key, b"tampered".to_vec());
+        }
+
+        let err = persistence.cas_get(universe(), hash).unwrap_err();
+        assert!(matches!(err, PersistError::Backend(_)));
     }
 
     #[test]
