@@ -1,7 +1,5 @@
-use std::fs::{self, OpenOptions};
 use std::future::Future;
-use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use aos_cbor::{Hash, to_canonical_cbor};
@@ -13,6 +11,7 @@ use foundationdb::{
 };
 use futures::executor::block_on;
 
+use crate::object_store::{DynBlobObjectStore, filesystem_object_store};
 use crate::protocol::{
     BlobStorage, CasMeta, CborPayload, InboxItem, InboxSeq, JournalHeight, PersistConflict,
     PersistCorruption, PersistError, PersistenceConfig, SegmentIndexRecord, SnapshotCommitRequest,
@@ -34,7 +33,7 @@ impl FdbRuntime {
 pub struct FdbWorldPersistence {
     _runtime: Arc<FdbRuntime>,
     db: Arc<Database>,
-    object_store_root: PathBuf,
+    object_store: DynBlobObjectStore,
     config: PersistenceConfig,
 }
 
@@ -53,22 +52,25 @@ impl FdbWorldPersistence {
         object_store_root: impl AsRef<Path>,
         config: PersistenceConfig,
     ) -> Result<Self, PersistError> {
+        let object_store = filesystem_object_store(object_store_root)?;
+        Self::open_with_object_store(runtime, cluster_file, object_store, config)
+    }
+
+    pub fn open_with_object_store(
+        runtime: Arc<FdbRuntime>,
+        cluster_file: Option<impl AsRef<Path>>,
+        object_store: DynBlobObjectStore,
+        config: PersistenceConfig,
+    ) -> Result<Self, PersistError> {
         let db = match cluster_file {
             Some(path) => Database::from_path(&path.as_ref().to_string_lossy()),
             None => Database::default(),
         }
         .map_err(map_fdb_error)?;
-        let object_store_root = object_store_root.as_ref().to_path_buf();
-        fs::create_dir_all(&object_store_root).map_err(|err| {
-            PersistError::backend(format!(
-                "create object store root {}: {err}",
-                object_store_root.display()
-            ))
-        })?;
         Ok(Self {
             _runtime: runtime,
             db: Arc::new(db),
-            object_store_root,
+            object_store,
             config,
         })
     }
@@ -159,41 +161,6 @@ impl FdbWorldPersistence {
             .subspace(&("segments", world.to_string()))
     }
 
-    fn object_path(&self, object_key: &str) -> PathBuf {
-        self.object_store_root.join(object_key)
-    }
-
-    fn write_object_once(&self, object_key: &str, bytes: &[u8]) -> Result<(), PersistError> {
-        let path = self.object_path(object_key);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
-                PersistError::backend(format!("create object parent {}: {err}", parent.display()))
-            })?;
-        }
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                file.write_all(bytes).map_err(|err| {
-                    PersistError::backend(format!("write object {}: {err}", path.display()))
-                })?;
-                file.sync_all().map_err(|err| {
-                    PersistError::backend(format!("sync object {}: {err}", path.display()))
-                })?;
-                Ok(())
-            }
-            Err(err) if err.kind() == ErrorKind::AlreadyExists => Ok(()),
-            Err(err) => Err(PersistError::backend(format!(
-                "open object {}: {err}",
-                path.display()
-            ))),
-        }
-    }
-
-    fn read_object(&self, object_key: &str) -> Result<Vec<u8>, PersistError> {
-        let path = self.object_path(object_key);
-        fs::read(&path)
-            .map_err(|err| PersistError::backend(format!("read object {}: {err}", path.display())))
-    }
-
     fn normalize_payload(
         &self,
         universe: UniverseId,
@@ -259,7 +226,7 @@ impl WorldPersistence for FdbWorldPersistence {
             }
         } else {
             let object_key = cas_object_key(universe, hash);
-            self.write_object_once(&object_key, bytes)?;
+            self.object_store.put_if_absent(&object_key, bytes)?;
             CasMeta {
                 size: bytes.len() as u64,
                 storage: BlobStorage::ObjectStore,
@@ -301,7 +268,15 @@ impl WorldPersistence for FdbWorldPersistence {
                 let object_key = meta
                     .object_key
                     .ok_or(PersistCorruption::MissingCasObjectKey { hash })?;
-                self.read_object(&object_key)?
+                match self.object_store.get(&object_key) {
+                    Ok(bytes) => bytes,
+                    Err(PersistError::NotFound(_)) => {
+                        return Err(
+                            PersistCorruption::MissingCasObjectBody { hash, object_key }.into()
+                        );
+                    }
+                    Err(err) => return Err(err),
+                }
             }
         };
         if self.config.cas.verify_reads {
