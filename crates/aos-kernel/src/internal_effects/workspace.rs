@@ -143,6 +143,21 @@ struct WorkspaceWriteBytesReceipt {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceWriteRefParams {
+    root_hash: String,
+    path: String,
+    blob_hash: String,
+    #[serde(default)]
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceWriteRefReceipt {
+    new_root_hash: HashRef,
+    blob_hash: HashRef,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct WorkspaceRemoveParams {
     root_hash: String,
     path: String,
@@ -840,6 +855,45 @@ where
             mode,
         )?;
         let receipt = WorkspaceWriteBytesReceipt {
+            new_root_hash: hash_ref_from_hash(&new_root)?,
+            blob_hash: blob_ref,
+        };
+        Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
+    }
+
+    pub(super) fn handle_workspace_write_ref(
+        &self,
+        intent: &EffectIntent,
+    ) -> Result<Vec<u8>, KernelError> {
+        let params: WorkspaceWriteRefParams = intent
+            .params()
+            .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
+        let root_hash = parse_hash_str(&params.root_hash)?;
+        let blob_hash = parse_hash_str(&params.blob_hash)?;
+        let path_segments = validate_path(&params.path)?;
+        let store = self.store();
+        let existing = resolve_entry(store.as_ref(), &root_hash, &path_segments)?;
+        if matches!(existing.as_ref().map(|e| e.kind.as_str()), Some("dir")) {
+            return Err(KernelError::Query("path is a directory".into()));
+        }
+        if !store.has_blob(blob_hash)? {
+            return Err(KernelError::Query(format!(
+                "blob not found: {}",
+                params.blob_hash
+            )));
+        }
+        let mode = resolve_file_mode(existing.as_ref(), params.mode)?;
+        let size = store.get_blob(blob_hash)?.len() as u64;
+        let blob_ref = hash_ref_from_hash(&blob_hash)?;
+        let new_root = write_file_at_path(
+            store.as_ref(),
+            &root_hash,
+            &path_segments,
+            &blob_ref,
+            size,
+            mode,
+        )?;
+        let receipt = WorkspaceWriteRefReceipt {
             new_root_hash: hash_ref_from_hash(&new_root)?,
             blob_hash: blob_ref,
         };

@@ -13,18 +13,11 @@ export type SessionLifecycle =
   | { $tag: "Failed"; $value?: null }
   | { $tag: "Cancelled"; $value?: null };
 
-export interface WorkspaceBinding {
-  workspace: string;
-  version?: number | null;
-}
-
 export interface SessionConfig {
   provider: string;
   model: string;
   reasoning_effort?: ReasoningEffort | null;
   max_tokens?: number | null;
-  workspace_binding?: WorkspaceBinding | null;
-  default_prompt_pack?: string | null;
   default_prompt_refs?: string[] | null;
   default_tool_profile?: string | null;
   default_tool_enable?: string[] | null;

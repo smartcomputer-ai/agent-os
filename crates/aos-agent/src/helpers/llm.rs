@@ -1,21 +1,10 @@
-use super::workspace::materialize_workspace_step_inputs;
-use crate::contracts::{ReasoningEffort, RunConfig, WorkspaceSnapshot};
+use crate::contracts::{ReasoningEffort, RunConfig};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use aos_air_types::HashRef;
+use aos_effects::builtins::{LlmGenerateParams, LlmRuntimeArgs, LlmToolChoice, TextOrSecretRef};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "$tag", content = "$value")]
-pub enum LlmToolChoice {
-    Auto,
-    #[serde(rename = "None")]
-    NoneChoice,
-    Required,
-    Tool {
-        name: String,
-    },
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct LlmStepContext {
@@ -29,31 +18,7 @@ pub struct LlmStepContext {
     pub metadata: Option<BTreeMap<String, String>>,
     pub provider_options_ref: Option<String>,
     pub response_format_ref: Option<String>,
-    pub api_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct SysLlmRuntimeArgs {
-    pub temperature: Option<String>,
-    pub top_p: Option<String>,
-    pub max_tokens: Option<u64>,
-    pub tool_refs: Option<Vec<String>>,
-    pub tool_choice: Option<LlmToolChoice>,
-    pub reasoning_effort: Option<String>,
-    pub stop_sequences: Option<Vec<String>>,
-    pub metadata: Option<BTreeMap<String, String>>,
-    pub provider_options_ref: Option<String>,
-    pub response_format_ref: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct SysLlmGenerateParams {
-    pub correlation_id: Option<String>,
-    pub provider: String,
-    pub model: String,
-    pub message_refs: Vec<String>,
-    pub runtime: SysLlmRuntimeArgs,
-    pub api_key: Option<String>,
+    pub api_key: Option<TextOrSecretRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +26,7 @@ pub enum LlmMappingError {
     MissingProvider,
     MissingModel,
     EmptyMessageRefs,
+    InvalidHashRef,
 }
 
 impl LlmMappingError {
@@ -69,6 +35,7 @@ impl LlmMappingError {
             Self::MissingProvider => "missing provider",
             Self::MissingModel => "missing model",
             Self::EmptyMessageRefs => "message_refs must not be empty",
+            Self::InvalidHashRef => "invalid hash ref",
         }
     }
 }
@@ -84,7 +51,7 @@ impl core::error::Error for LlmMappingError {}
 pub fn materialize_llm_generate_params(
     run_config: &RunConfig,
     step: &LlmStepContext,
-) -> Result<SysLlmGenerateParams, LlmMappingError> {
+) -> Result<LlmGenerateParams, LlmMappingError> {
     let provider = run_config.provider.trim();
     if provider.is_empty() {
         return Err(LlmMappingError::MissingProvider);
@@ -99,65 +66,78 @@ pub fn materialize_llm_generate_params(
         return Err(LlmMappingError::EmptyMessageRefs);
     }
 
-    Ok(SysLlmGenerateParams {
+    let message_refs = step
+        .message_refs
+        .iter()
+        .cloned()
+        .map(parse_hash_ref)
+        .collect::<Result<Vec<_>, _>>()?;
+    let tool_refs = step
+        .tool_refs
+        .as_ref()
+        .map(|values| {
+            values
+                .iter()
+                .cloned()
+                .map(parse_hash_ref)
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    let provider_options_ref = step
+        .provider_options_ref
+        .as_ref()
+        .map(|value| parse_hash_ref(value.clone()))
+        .transpose()?;
+    let response_format_ref = step
+        .response_format_ref
+        .as_ref()
+        .map(|value| parse_hash_ref(value.clone()))
+        .transpose()?;
+
+    Ok(LlmGenerateParams {
         correlation_id: step.correlation_id.clone(),
         provider: provider.into(),
         model: model.into(),
-        message_refs: step.message_refs.clone(),
-        runtime: SysLlmRuntimeArgs {
+        message_refs,
+        runtime: LlmRuntimeArgs {
             temperature: step.temperature.clone(),
             top_p: step.top_p.clone(),
             max_tokens: run_config.max_tokens,
-            tool_refs: step.tool_refs.clone(),
+            tool_refs,
             tool_choice: step.tool_choice.clone(),
             reasoning_effort: run_config.reasoning_effort.map(reasoning_effort_text),
             stop_sequences: step.stop_sequences.clone(),
             metadata: step.metadata.clone(),
-            provider_options_ref: step.provider_options_ref.clone(),
-            response_format_ref: step.response_format_ref.clone(),
+            provider_options_ref,
+            response_format_ref,
         },
         api_key: step.api_key.clone(),
     })
 }
 
-/// Apply active workspace prompt refs to a step context.
-pub fn apply_workspace_snapshot_to_step_context(
-    active_snapshot: Option<&WorkspaceSnapshot>,
-    mut step: LlmStepContext,
-) -> LlmStepContext {
-    let derived = materialize_workspace_step_inputs(
-        active_snapshot,
-        core::mem::take(&mut step.message_refs),
-        None,
-    );
-    step.message_refs = derived.message_refs;
-    step
-}
-
-/// Apply prompt refs from run config or workspace snapshot.
-pub fn apply_prompt_sources_to_step_context(
+/// Apply prompt refs from run config to a step context.
+pub fn apply_prompt_refs_to_step_context(
     run_config: &RunConfig,
-    active_snapshot: Option<&WorkspaceSnapshot>,
     mut step: LlmStepContext,
 ) -> LlmStepContext {
-    let derived = materialize_workspace_step_inputs(
-        active_snapshot,
-        core::mem::take(&mut step.message_refs),
-        run_config.prompt_refs.clone(),
-    );
-    step.message_refs = derived.message_refs;
+    let mut message_refs = run_config.prompt_refs.clone().unwrap_or_default();
+    message_refs.extend(core::mem::take(&mut step.message_refs));
+    step.message_refs = message_refs;
     step
 }
 
-/// Convenience wrapper that applies workspace prompt refs and then maps to
+/// Convenience wrapper that applies prompt refs and then maps to
 /// `sys/llm.generate` params.
-pub fn materialize_llm_generate_params_with_workspace(
+pub fn materialize_llm_generate_params_with_prompt_refs(
     run_config: &RunConfig,
-    active_snapshot: Option<&WorkspaceSnapshot>,
     step: LlmStepContext,
-) -> Result<SysLlmGenerateParams, LlmMappingError> {
-    let step = apply_prompt_sources_to_step_context(run_config, active_snapshot, step);
+) -> Result<LlmGenerateParams, LlmMappingError> {
+    let step = apply_prompt_refs_to_step_context(run_config, step);
     materialize_llm_generate_params(run_config, &step)
+}
+
+fn parse_hash_ref(value: String) -> Result<HashRef, LlmMappingError> {
+    HashRef::new(value).map_err(|_| LlmMappingError::InvalidHashRef)
 }
 
 fn reasoning_effort_text(value: ReasoningEffort) -> String {
@@ -171,27 +151,22 @@ fn reasoning_effort_text(value: ReasoningEffort) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::{ReasoningEffort, RunConfig, WorkspaceSnapshot};
+    use crate::contracts::{ReasoningEffort, RunConfig};
     use alloc::collections::BTreeMap;
     use alloc::vec;
+    use aos_air_types::HashRef;
 
     fn hash(seed: char) -> String {
         let mut value = String::from("sha256:");
+        let nibble = b"0123456789abcdef"[seed as usize % 16] as char;
         for _ in 0..64 {
-            value.push(seed);
+            value.push(nibble);
         }
         value
     }
 
-    fn workspace_snapshot() -> WorkspaceSnapshot {
-        WorkspaceSnapshot {
-            workspace: "agent".into(),
-            version: Some(3),
-            root_hash: Some(hash('f')),
-            index_ref: Some(hash('g')),
-            prompt_pack: Some("default".into()),
-            prompt_pack_ref: Some(hash('p')),
-        }
+    fn hash_ref(seed: char) -> HashRef {
+        HashRef::new(hash(seed)).expect("valid hash ref")
     }
 
     fn run_config() -> RunConfig {
@@ -200,8 +175,6 @@ mod tests {
             model: "gpt-5.2".into(),
             reasoning_effort: Some(ReasoningEffort::Medium),
             max_tokens: Some(512),
-            workspace_binding: None,
-            prompt_pack: None,
             prompt_refs: None,
             tool_profile: None,
             tool_enable: None,
@@ -230,7 +203,7 @@ mod tests {
             metadata: Some(metadata),
             provider_options_ref: Some(hash('c')),
             response_format_ref: Some(hash('d')),
-            api_key: Some("secret-ref".into()),
+            api_key: Some(TextOrSecretRef::literal("secret-ref")),
         };
 
         let mapped = materialize_llm_generate_params(&run, &step).expect("map params");
@@ -247,12 +220,18 @@ mod tests {
         assert_eq!(decoded.runtime.max_tokens, Some(512));
         assert_eq!(decoded.runtime.reasoning_effort.as_deref(), Some("medium"));
         assert_eq!(
+            decoded.api_key,
+            Some(aos_effects::builtins::TextOrSecretRef::literal(
+                "secret-ref"
+            ))
+        );
+        assert_eq!(
             decoded
                 .runtime
                 .provider_options_ref
                 .as_ref()
                 .map(|h| h.as_str()),
-            Some("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+            Some(hash('c').as_str())
         );
         assert_eq!(
             decoded
@@ -260,12 +239,12 @@ mod tests {
                 .response_format_ref
                 .as_ref()
                 .map(|h| h.as_str()),
-            Some("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+            Some(hash('d').as_str())
         );
     }
 
     #[test]
-    fn applies_workspace_prompt_refs_to_step_context() {
+    fn applies_run_prompt_refs_to_step_context() {
         let run = run_config();
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
@@ -273,29 +252,31 @@ mod tests {
         };
 
         let mapped =
-            materialize_llm_generate_params_with_workspace(&run, Some(&workspace_snapshot()), step)
-                .expect("map with workspace snapshot");
-        assert_eq!(mapped.message_refs, vec![hash('p'), hash('a')]);
+            materialize_llm_generate_params_with_prompt_refs(&run, step).expect("map params");
+        assert_eq!(mapped.message_refs, vec![hash_ref('a')]);
         assert_eq!(mapped.runtime.tool_refs, None);
     }
 
     #[test]
-    fn explicit_tool_refs_are_preserved() {
+    fn explicit_tool_refs_are_preserved_when_prompt_refs_applied() {
+        let run = RunConfig {
+            prompt_refs: Some(vec![hash('r')]),
+            ..run_config()
+        };
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
             tool_refs: Some(vec![hash('z')]),
             ..LlmStepContext::default()
         };
 
-        let applied = apply_workspace_snapshot_to_step_context(Some(&workspace_snapshot()), step);
+        let applied = apply_prompt_refs_to_step_context(&run, step);
         assert_eq!(applied.tool_refs, Some(vec![hash('z')]));
-        assert_eq!(applied.message_refs, vec![hash('p'), hash('a')]);
+        assert_eq!(applied.message_refs, vec![hash('r'), hash('a')]);
     }
 
     #[test]
-    fn run_prompt_refs_override_workspace_prompt_pack() {
+    fn run_prompt_refs_prepend_to_history() {
         let run = RunConfig {
-            prompt_pack: Some("default".into()),
             prompt_refs: Some(vec![hash('r')]),
             ..run_config()
         };
@@ -304,10 +285,9 @@ mod tests {
             ..LlmStepContext::default()
         };
 
-        let mapped =
-            materialize_llm_generate_params_with_workspace(&run, Some(&workspace_snapshot()), step)
-                .expect("map with direct prompt refs");
-        assert_eq!(mapped.message_refs, vec![hash('r'), hash('a')]);
+        let mapped = materialize_llm_generate_params_with_prompt_refs(&run, step)
+            .expect("map with direct prompt refs");
+        assert_eq!(mapped.message_refs, vec![hash_ref('r'), hash_ref('a')]);
     }
 
     #[test]

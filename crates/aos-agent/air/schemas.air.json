@@ -54,7 +54,15 @@
         "HostFsGlob": { "unit": {} },
         "HostFsStat": { "unit": {} },
         "HostFsExists": { "unit": {} },
-        "HostFsListDir": { "unit": {} }
+        "HostFsListDir": { "unit": {} },
+        "InspectWorld": { "unit": {} },
+        "InspectWorkflow": { "unit": {} },
+        "WorkspaceInspect": { "unit": {} },
+        "WorkspaceList": { "unit": {} },
+        "WorkspaceRead": { "unit": {} },
+        "WorkspaceApply": { "unit": {} },
+        "WorkspaceDiff": { "unit": {} },
+        "WorkspaceCommit": { "unit": {} }
       }
     }
   },
@@ -67,6 +75,11 @@
           "record": {
             "effect_kind": { "text": {} },
             "cap_slot": { "option": { "text": {} } }
+          }
+        },
+        "DomainEvent": {
+          "record": {
+            "schema": { "text": {} }
           }
         },
         "HostLoop": {
@@ -245,13 +258,8 @@
             "value": { "ref": "aos.agent/ToolCallStatus@1" }
           }
         },
-        "pending_by_params_hash": {
-          "map": {
-            "key": { "hash": {} },
-            "value": { "list": { "text": {} } }
-          }
-        },
-        "next_group_index": { "nat": {} },
+        "pending_effects": { "ref": "sys/PendingEffectSetText@1" },
+        "execution": { "ref": "sys/PendingBatchText@1" },
         "llm_results": {
           "map": {
             "key": { "text": {} },
@@ -285,50 +293,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/WorkspaceBinding@1",
-    "type": {
-      "record": {
-        "workspace": { "text": {} },
-        "version": { "option": { "nat": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/WorkspaceApplyMode@1",
-    "type": {
-      "variant": {
-        "NextRun": { "unit": {} },
-        "ImmediateIfIdle": { "unit": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/WorkspaceSnapshot@1",
-    "type": {
-      "record": {
-        "workspace": { "text": {} },
-        "version": { "option": { "nat": {} } },
-        "root_hash": { "option": { "hash": {} } },
-        "index_ref": { "option": { "hash": {} } },
-        "prompt_pack": { "option": { "text": {} } },
-        "prompt_pack_ref": { "option": { "hash": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/WorkspaceSnapshotReady@1",
-    "type": {
-      "record": {
-        "snapshot": { "ref": "aos.agent/WorkspaceSnapshot@1" },
-        "prompt_pack_bytes": { "option": { "bytes": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "aos.agent/SessionConfig@1",
     "type": {
       "record": {
@@ -336,8 +300,6 @@
         "model": { "text": {} },
         "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
         "max_tokens": { "option": { "nat": {} } },
-        "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
-        "default_prompt_pack": { "option": { "text": {} } },
         "default_prompt_refs": { "option": { "list": { "hash": {} } } },
         "default_tool_profile": { "option": { "text": {} } },
         "default_tool_enable": { "option": { "list": { "text": {} } } },
@@ -355,8 +317,6 @@
         "model": { "text": {} },
         "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
         "max_tokens": { "option": { "nat": {} } },
-        "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
-        "prompt_pack": { "option": { "text": {} } },
         "prompt_refs": { "option": { "list": { "hash": {} } } },
         "tool_profile": { "option": { "text": {} } },
         "tool_enable": { "option": { "list": { "text": {} } } },
@@ -413,31 +373,6 @@
           }
         },
         "HostCommandReceived": { "ref": "aos.agent/HostCommand@1" },
-        "WorkspaceSyncRequested": {
-          "record": {
-            "workspace_binding": { "ref": "aos.agent/WorkspaceBinding@1" },
-            "prompt_pack": { "option": { "text": {} } }
-          }
-        },
-        "WorkspaceSyncUnchanged": {
-          "record": {
-            "workspace": { "text": {} },
-            "version": { "option": { "nat": {} } }
-          }
-        },
-        "WorkspaceSnapshotReady": { "ref": "aos.agent/WorkspaceSnapshotReady@1" },
-        "WorkspaceSyncFailed": {
-          "record": {
-            "workspace": { "text": {} },
-            "stage": { "text": {} },
-            "detail": { "text": {} }
-          }
-        },
-        "WorkspaceApplyRequested": {
-          "record": {
-            "mode": { "ref": "aos.agent/WorkspaceApplyMode@1" }
-          }
-        },
         "ToolRegistrySet": {
           "record": {
             "registry": {
@@ -502,14 +437,15 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/PendingIntent@1",
+    "name": "aos.agent/SessionLifecycleChanged@1",
     "type": {
       "record": {
-        "effect_kind": { "text": {} },
-        "params_hash": { "hash": {} },
-        "intent_id": { "option": { "hash": {} } },
-        "cap_slot": { "option": { "text": {} } },
-        "emitted_at_ns": { "time": {} }
+        "session_id": { "ref": "aos.agent/SessionId@1" },
+        "observed_at_ns": { "time": {} },
+        "from": { "ref": "aos.agent/SessionLifecycle@1" },
+        "to": { "ref": "aos.agent/SessionLifecycle@1" },
+        "run_id": { "option": { "ref": "aos.agent/RunId@1" } },
+        "in_flight_effects": { "nat": {} }
       }
     }
   },
@@ -593,6 +529,26 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/SharedPendingBlobGet@1",
+    "type": {
+      "record": {
+        "pending": { "ref": "sys/PendingEffect@1" },
+        "waiters": { "list": { "ref": "aos.agent/PendingBlobGet@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SharedPendingBlobPut@1",
+    "type": {
+      "record": {
+        "pending": { "ref": "sys/PendingEffect@1" },
+        "waiters": { "list": { "ref": "aos.agent/PendingBlobPut@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/SessionState@1",
     "type": {
       "record": {
@@ -604,22 +560,22 @@
         "active_run_id": { "option": { "ref": "aos.agent/RunId@1" } },
         "active_run_config": { "option": { "ref": "aos.agent/RunConfig@1" } },
         "active_tool_batch": { "option": { "ref": "aos.agent/ActiveToolBatch@1" } },
-        "pending_intents": {
+        "pending_effects": {
           "map": {
             "key": { "hash": {} },
-            "value": { "ref": "aos.agent/PendingIntent@1" }
+            "value": { "ref": "sys/PendingEffect@1" }
           }
         },
         "pending_blob_gets": {
           "map": {
             "key": { "hash": {} },
-            "value": { "list": { "ref": "aos.agent/PendingBlobGet@1" } }
+            "value": { "ref": "aos.agent/SharedPendingBlobGet@1" }
           }
         },
         "pending_blob_puts": {
           "map": {
             "key": { "hash": {} },
-            "value": { "list": { "ref": "aos.agent/PendingBlobPut@1" } }
+            "value": { "ref": "aos.agent/SharedPendingBlobPut@1" }
           }
         },
         "pending_follow_up_turn": {
@@ -629,11 +585,6 @@
         "conversation_message_refs": { "list": { "hash": {} } },
         "tool_refs_materialized": { "bool": {} },
         "in_flight_effects": { "nat": {} },
-        "active_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },
-        "pending_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },
-        "pending_workspace_apply_mode": {
-          "option": { "ref": "aos.agent/WorkspaceApplyMode@1" }
-        },
         "tool_registry": {
           "map": {
             "key": { "text": {} },

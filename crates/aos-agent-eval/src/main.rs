@@ -24,12 +24,12 @@ use aos_host::config::{HostConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig}
 use aos_store::{FsStore, Store};
 use casefile::{EvalCase, FileExpectation, load_cases};
 use clap::{Parser, Subcommand, ValueEnum};
-use eval_host::{EvalHost, EvalHostConfig};
+use eval_host::{EvalHost, EvalHostConfig, EvalModuleBuild, EvalModulePatch};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
+const DIRECT_EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
 const EVAL_ASSETS_ROOT: &str = "crates/aos-agent-eval/fixtures/eval-world/air";
 const CASES_ROOT: &str = "crates/aos-agent-eval/cases";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
@@ -143,19 +143,25 @@ impl EvalInvocation {
         let assets_root = workspace_root().join(EVAL_ASSETS_ROOT);
         let sdk_air_root = workspace_root().join(SDK_AIR_ROOT);
         let import_roots = vec![sdk_air_root];
+        let module_patches = vec![EvalModulePatch {
+            module_name: WORKFLOW_NAME,
+            build: EvalModuleBuild::CargoBin {
+                package: SDK_WASM_PACKAGE,
+                bin: SDK_WASM_BIN,
+            },
+        }];
         let host = EvalHost::prepare(EvalHostConfig {
             world_root: &world_root,
             assets_root: &assets_root,
             import_roots: &import_roots,
             workspace_root: workspace_root().as_path(),
             workflow_name: WORKFLOW_NAME,
-            event_schema: EVENT_SCHEMA,
+            event_schema: DIRECT_EVENT_SCHEMA,
             host_config: HostConfig {
                 llm: None,
                 ..HostConfig::default()
             },
-            module_package: SDK_WASM_PACKAGE,
-            module_bin: SDK_WASM_BIN,
+            module_patches: &module_patches,
         })?;
 
         Ok(Self {
@@ -389,8 +395,6 @@ fn run_attempt(
                 model: provider.model.clone(),
                 reasoning_effort: None,
                 max_tokens: case.run.max_tokens,
-                workspace_binding: None,
-                default_prompt_pack: None,
                 default_prompt_refs: None,
                 default_tool_profile: Some(default_profile_id),
                 default_tool_enable: case.run.tool_enable.clone(),
@@ -628,14 +632,12 @@ fn resolve_tool_ids(state: &SessionState, llm_tool_names: &BTreeSet<String>) -> 
 
 fn bootstrap_host_session(host: &EvalHost, workdir: &Path) -> Result<String> {
     let params = HostSessionOpenParams {
-        target: HostTarget {
-            local: Some(HostLocalTarget {
-                mounts: None,
-                workdir: Some(workdir.to_string_lossy().to_string()),
-                env: None,
-                network_mode: "none".into(),
-            }),
-        },
+        target: HostTarget::local(HostLocalTarget {
+            mounts: None,
+            workdir: Some(workdir.to_string_lossy().to_string()),
+            env: None,
+            network_mode: "none".into(),
+        }),
         session_ttl_ns: None,
         labels: None,
     };
@@ -740,7 +742,7 @@ fn execute_live_llm_intent(
 ) -> Result<EffectReceipt> {
     let mut params: LlmGenerateParams =
         serde_cbor::from_slice(&intent.params_cbor).context("decode llm.generate params")?;
-    params.api_key = Some(api_key.to_string());
+    params.api_key = Some(api_key.to_string().into());
 
     let patched_intent = EffectIntent::from_raw_params(
         EffectKind::llm_generate(),
@@ -782,7 +784,10 @@ fn execute_live_llm_intent(
     Ok(receipt)
 }
 
-fn collect_conversation_observations(store: &FsStore, state: &SessionState) -> ConversationObservations {
+fn collect_conversation_observations(
+    store: &FsStore,
+    state: &SessionState,
+) -> ConversationObservations {
     let mut assistant_fragments = Vec::new();
     let mut tools = BTreeSet::new();
     let mut tool_outputs = Vec::new();
@@ -850,11 +855,7 @@ fn walk_message_value(
                     };
                     tools.insert(name.to_string());
                     if let Some(arguments) = call_obj.get("arguments") {
-                        tool_arguments.push(format!(
-                            "{} {}",
-                            name,
-                            value_compact_text(arguments)
-                        ));
+                        tool_arguments.push(format!("{} {}", name, value_compact_text(arguments)));
                     }
                 }
             }

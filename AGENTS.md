@@ -19,7 +19,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 Reference shelves:
 - **spec/schemas/** (JSON Schemas)
-- **spec/defs/** (built-ins: Timer/Blob/HTTP/LLM/Workspace/Introspect)
+- **spec/defs/** (built-ins: Timer/Blob/HTTP/LLM/Workspace/Introspect plus SDK support schemas)
 - **spec/patch.md** (historical notes)
 
 ## Core Architecture (TL;DR)

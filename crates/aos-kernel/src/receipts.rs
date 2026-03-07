@@ -22,6 +22,7 @@ pub struct WorkflowEffectContext {
     pub origin_instance_key: Option<Vec<u8>>,
     pub effect_kind: String,
     pub params_cbor: Vec<u8>,
+    pub issuer_ref: Option<String>,
     pub intent_id: [u8; 32],
     pub emitted_at_seq: u64,
     pub module_version: Option<String>,
@@ -33,6 +34,7 @@ impl WorkflowEffectContext {
         origin_instance_key: Option<Vec<u8>>,
         effect_kind: String,
         params_cbor: Vec<u8>,
+        issuer_ref: Option<String>,
         intent_id: [u8; 32],
         emitted_at_seq: u64,
         module_version: Option<String>,
@@ -42,6 +44,7 @@ impl WorkflowEffectContext {
             origin_instance_key,
             effect_kind,
             params_cbor,
+            issuer_ref,
             intent_id,
             emitted_at_seq,
             module_version,
@@ -62,6 +65,8 @@ struct WorkflowReceiptEnvelope {
     effect_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     params_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    issuer_ref: Option<String>,
     #[serde(with = "serde_bytes")]
     receipt_payload: Vec<u8>,
     status: ReceiptStatus,
@@ -86,6 +91,8 @@ struct WorkflowStreamFrameEnvelope {
     effect_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     params_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    issuer_ref: Option<String>,
     emitted_at_seq: u64,
     seq: u64,
     kind: String,
@@ -111,6 +118,8 @@ struct WorkflowReceiptRejected {
     effect_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     params_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    issuer_ref: Option<String>,
     adapter_id: String,
     status: ReceiptStatus,
     error_code: String,
@@ -160,6 +169,7 @@ pub fn build_workflow_receipt_event(
         intent_id: hash_to_hex(&ctx.intent_id),
         effect_kind: ctx.effect_kind.clone(),
         params_hash: Some(Hash::of_bytes(&ctx.params_cbor).to_hex()),
+        issuer_ref: ctx.issuer_ref.clone(),
         receipt_payload: receipt.payload_cbor.clone(),
         status: receipt.status.clone(),
         emitted_at_seq: ctx.emitted_at_seq,
@@ -182,6 +192,7 @@ pub fn build_workflow_receipt_rejected_event(
         intent_id: hash_to_hex(&ctx.intent_id),
         effect_kind: ctx.effect_kind.clone(),
         params_hash: Some(Hash::of_bytes(&ctx.params_cbor).to_hex()),
+        issuer_ref: ctx.issuer_ref.clone(),
         adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
         error_code: error_code.to_string(),
@@ -203,6 +214,7 @@ pub fn build_workflow_stream_frame_event(
         intent_id: hash_to_hex(&ctx.intent_id),
         effect_kind: ctx.effect_kind.clone(),
         params_hash: Some(Hash::of_bytes(&ctx.params_cbor).to_hex()),
+        issuer_ref: ctx.issuer_ref.clone(),
         emitted_at_seq: ctx.emitted_at_seq,
         seq: frame.seq,
         kind: frame.kind.clone(),
@@ -358,6 +370,7 @@ mod tests {
             Some(b"order-123".to_vec()),
             effect_kind.into(),
             vec![],
+            Some("op-1".into()),
             [7u8; 32],
             42,
             Some("sha256:deadbeef".into()),

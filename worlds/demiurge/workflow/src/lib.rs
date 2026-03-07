@@ -3,155 +3,120 @@
 
 extern crate alloc;
 
-use aos_agent::{
-    EffectReceiptRejected, EffectStreamFrameEnvelope, SessionId, SessionIngress, SessionIngressKind,
-    SessionState, SessionWorkflowEvent, ToolBatchId, ToolCallStatus,
-    helpers::{
-        SessionEffectCommand, SessionReduceError, SessionRuntimeLimits, SysLlmGenerateParams,
-        SysLlmRuntimeArgs, apply_session_workflow_event_with_catalog_and_limits,
-    },
-};
-use aos_wasm_sdk::{EffectReceiptEnvelope, ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use aos_agent::{
+    EffectReceiptRejected, RunId, SessionConfig, SessionId, SessionLifecycle,
+    SessionLifecycleChanged, default_tool_registry,
+    helpers::{
+        LocalSessionSpawnRequest, SessionHandoffRequest, SpawnOrHandoffSessionPlan,
+        SpawnOrHandoffSessionRequest, emit_session_ingresses, spawn_or_handoff_session,
+    },
+};
+use aos_effects::builtins::{BlobPutReceipt, HostSessionOpenReceipt};
+use aos_wasm_sdk::{
+    BlobPutParams, EffectReceiptEnvelope, ReduceError, Value, Workflow, WorkflowCtx, aos_workflow,
+};
 use serde::{Deserialize, Serialize};
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn main() {}
 
 aos_workflow!(Demiurge);
 
-const KNOWN_PROVIDERS: &[&str] = &["openai-responses", "anthropic", "openai-compatible", "mock"];
-const KNOWN_MODELS: &[&str] = &[
-    "gpt-5.2",
-    "gpt-5-mini",
-    "gpt-5.2-codex",
-    "claude-sonnet-4-5",
-    "gpt-mock",
-];
-const RUNTIME_LIMITS: SessionRuntimeLimits = SessionRuntimeLimits {
-    max_pending_intents: Some(64),
-};
+const DEFAULT_PROVIDER: &str = "openai-responses";
+const DEFAULT_MODEL: &str = "gpt-5.3-codex";
+const DEFAULT_MAX_TOKENS: u64 = 4096;
+const EFFECT_HOST_SESSION_OPEN: &str = "host.session.open";
+const EFFECT_BLOB_PUT: &str = "blob.put";
 
-const OPENAI_SECRET_ALIAS: &str = "llm/openai_api";
-const ANTHROPIC_SECRET_ALIAS: &str = "llm/anthropic_api";
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TaskConfig {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<aos_agent::ReasoningEffort>,
+    pub max_tokens: Option<u64>,
+    pub tool_profile: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub tool_enable: Option<Vec<String>>,
+    pub tool_disable: Option<Vec<String>>,
+    pub tool_force: Option<Vec<String>>,
+    pub session_ttl_ns: Option<u64>,
+}
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct SecretRef {
-    alias: String,
-    version: u64,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TaskSubmitted {
+    pub task_id: SessionId,
+    pub observed_at_ns: u64,
+    pub workdir: String,
+    pub task: String,
+    pub config: Option<TaskConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum TaskStatus {
+    #[default]
+    Idle,
+    Bootstrapping,
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TaskFailure {
+    pub code: String,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "$tag", content = "$value")]
-enum TextOrSecretRef {
-    #[serde(rename = "literal")]
-    Literal(String),
-    #[serde(rename = "secret")]
-    Secret(SecretRef),
+pub enum PendingStage {
+    AwaitBlobPut,
+    AwaitHostSessionOpen,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct LlmGenerateParamsWithSecret {
-    correlation_id: Option<String>,
-    provider: String,
-    model: String,
-    message_refs: Vec<String>,
-    runtime: SysLlmRuntimeArgs,
-    api_key: Option<TextOrSecretRef>,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TaskFinished {
+    pub task_id: SessionId,
+    pub observed_at_ns: u64,
+    pub status: TaskStatus,
+    pub failure: Option<TaskFailure>,
+    pub run_id: Option<RunId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct DemiurgeState {
-    pub session: SessionState,
-    pub pending_tool_call: Option<PendingToolCall>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PendingToolCall {
-    pub tool_batch_id: ToolBatchId,
-    pub call_id: String,
-    pub finalize_batch: bool,
-    pub stage: PendingToolStage,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "$tag", content = "$value")]
-pub enum PendingToolStage {
-    AwaitIntrospectManifest,
-    AwaitWorkspaceResolve { path: String },
-    AwaitWorkspaceReadBytes,
-}
-
-impl PendingToolStage {
-    fn effect_kind(&self) -> &'static str {
-        match self {
-            Self::AwaitIntrospectManifest => "introspect.manifest",
-            Self::AwaitWorkspaceResolve { .. } => "workspace.resolve",
-            Self::AwaitWorkspaceReadBytes => "workspace.read_bytes",
-        }
-    }
+    pub task_id: SessionId,
+    pub status: TaskStatus,
+    pub workdir: Option<String>,
+    pub task: Option<String>,
+    pub config: Option<TaskConfig>,
+    pub input_ref: Option<String>,
+    pub host_session_id: Option<String>,
+    pub pending_stage: Option<PendingStage>,
+    pub next_observed_at_ns: u64,
+    pub finished: bool,
+    pub failure: Option<TaskFailure>,
+    pub last_updated_at_ns: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(tag = "$tag", content = "$value")]
 pub enum DemiurgeWorkflowEvent {
-    Ingress(SessionIngress),
+    TaskSubmitted(TaskSubmitted),
+    SessionLifecycleChanged(SessionLifecycleChanged),
     Receipt(EffectReceiptEnvelope),
     ReceiptRejected(EffectReceiptRejected),
-    StreamFrame(EffectStreamFrameEnvelope),
-    ToolCallRequested(ToolCallRequested),
+    StreamFrame(aos_agent::EffectStreamFrameEnvelope),
     #[default]
     Noop,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ToolCallRequested {
-    pub session_id: SessionId,
-    pub observed_at_ns: u64,
-    pub tool_batch_id: ToolBatchId,
-    pub call_id: String,
-    pub finalize_batch: bool,
-    pub params: ToolCallParams,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "$tag", content = "$value")]
-pub enum ToolCallParams {
-    IntrospectManifest { consistency: String },
-    WorkspaceReadBytes {
-        workspace: String,
-        version: Option<u64>,
-        path: String,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct IntrospectManifestParams {
-    consistency: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct WorkspaceResolveParams {
-    workspace: String,
-    version: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct WorkspaceReadBytesParams {
-    root_hash: String,
-    path: String,
-    range: Option<WorkspaceReadRange>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct WorkspaceReadRange {
-    start: u64,
-    end: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct WorkspaceResolveReceipt {
-    exists: bool,
-    root_hash: Option<String>,
 }
 
 #[derive(Default)]
@@ -167,423 +132,438 @@ impl Workflow for Demiurge {
         event: Self::Event,
         ctx: &mut WorkflowCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
+        ctx.state.last_updated_at_ns = event_observed_at_ns(&event);
+
         match event {
-            DemiurgeWorkflowEvent::Ingress(ingress) => {
-                apply_sdk_event(ctx, SessionWorkflowEvent::Ingress(ingress))
+            DemiurgeWorkflowEvent::TaskSubmitted(task) => on_task_submitted(ctx, task),
+            DemiurgeWorkflowEvent::SessionLifecycleChanged(changed) => {
+                on_session_lifecycle_changed(ctx, changed)
             }
-            DemiurgeWorkflowEvent::StreamFrame(frame) => {
-                apply_sdk_event(ctx, SessionWorkflowEvent::StreamFrame(frame))
-            }
-            DemiurgeWorkflowEvent::Receipt(receipt) => {
-                if handle_custom_tool_receipt(ctx, &receipt)? {
-                    Ok(())
-                } else {
-                    apply_sdk_event(ctx, SessionWorkflowEvent::Receipt(receipt))
-                }
-            }
-            DemiurgeWorkflowEvent::ReceiptRejected(rejected) => {
-                if handle_custom_tool_rejection(ctx, &rejected)? {
-                    Ok(())
-                } else {
-                    apply_sdk_event(ctx, SessionWorkflowEvent::ReceiptRejected(rejected))
-                }
-            }
-            DemiurgeWorkflowEvent::ToolCallRequested(requested) => handle_tool_call_requested(ctx, requested),
-            DemiurgeWorkflowEvent::Noop => apply_sdk_event(ctx, SessionWorkflowEvent::Noop),
+            DemiurgeWorkflowEvent::Receipt(receipt) => on_receipt(ctx, receipt),
+            DemiurgeWorkflowEvent::ReceiptRejected(rejected) => on_receipt_rejected(ctx, rejected),
+            DemiurgeWorkflowEvent::StreamFrame(_) | DemiurgeWorkflowEvent::Noop => Ok(()),
         }
     }
 }
 
-fn apply_sdk_event(
+fn on_task_submitted(
     ctx: &mut WorkflowCtx<DemiurgeState, Value>,
-    event: SessionWorkflowEvent,
+    task: TaskSubmitted,
 ) -> Result<(), ReduceError> {
-    let out = apply_session_workflow_event_with_catalog_and_limits(
-        &mut ctx.state.session,
-        &event,
-        KNOWN_PROVIDERS,
-        KNOWN_MODELS,
-        RUNTIME_LIMITS,
-    )
-    .map_err(map_reduce_error)?;
-    emit_session_effects(ctx, out.effects);
-    Ok(())
-}
-
-fn emit_session_effects(ctx: &mut WorkflowCtx<DemiurgeState, Value>, effects: Vec<SessionEffectCommand>) {
-    for effect in effects {
-        match effect {
-            SessionEffectCommand::LlmGenerate {
-                params, cap_slot, ..
-            } => {
-                let params = llm_params_with_secret(params);
-                ctx.effects()
-                    .emit_raw("llm.generate", &params, cap_slot.as_deref())
-            }
-        }
-    }
-}
-
-fn llm_params_with_secret(params: SysLlmGenerateParams) -> LlmGenerateParamsWithSecret {
-    let api_key = params
-        .api_key
-        .map(TextOrSecretRef::Literal)
-        .or_else(|| {
-            llm_provider_secret_alias(&params.provider).map(|alias| {
-                TextOrSecretRef::Secret(SecretRef {
-                    alias: alias.into(),
-                    version: 1,
-                })
-            })
-        });
-
-    LlmGenerateParamsWithSecret {
-        correlation_id: params.correlation_id,
-        provider: params.provider,
-        model: params.model,
-        message_refs: params.message_refs,
-        runtime: params.runtime,
-        api_key,
-    }
-}
-
-fn llm_provider_secret_alias(provider: &str) -> Option<&'static str> {
-    match provider {
-        "openai-responses" | "openai-chat" | "openai-compatible" | "openai" => {
-            Some(OPENAI_SECRET_ALIAS)
-        }
-        "anthropic" => Some(ANTHROPIC_SECRET_ALIAS),
-        _ => None,
-    }
-}
-
-fn handle_tool_call_requested(
-    ctx: &mut WorkflowCtx<DemiurgeState, Value>,
-    requested: ToolCallRequested,
-) -> Result<(), ReduceError> {
-    if ctx.state.pending_tool_call.is_some() {
-        settle_tool_call(
-            ctx,
-            &requested.session_id,
-            requested.observed_at_ns,
-            &requested.tool_batch_id,
-            &requested.call_id,
-            ToolCallStatus::Failed {
-                code: "tool_busy".into(),
-                detail: "previous tool call is still in flight".into(),
-            },
-            requested.finalize_batch,
-        )?;
+    if !matches!(ctx.state.status, TaskStatus::Idle) {
         return Ok(());
     }
 
-    match requested.params {
-        ToolCallParams::IntrospectManifest { consistency } => {
-            ctx.effects().emit_raw(
-                "introspect.manifest",
-                &IntrospectManifestParams { consistency },
-                Some("query"),
-            );
-            ctx.state.pending_tool_call = Some(PendingToolCall {
-                tool_batch_id: requested.tool_batch_id,
-                call_id: requested.call_id,
-                finalize_batch: requested.finalize_batch,
-                stage: PendingToolStage::AwaitIntrospectManifest,
-            });
-        }
-        ToolCallParams::WorkspaceReadBytes {
-            workspace,
-            version,
-            path,
-        } => {
-            ctx.effects().emit_raw(
-                "workspace.resolve",
-                &WorkspaceResolveParams { workspace, version },
-                Some("workspace"),
-            );
-            ctx.state.pending_tool_call = Some(PendingToolCall {
-                tool_batch_id: requested.tool_batch_id,
-                call_id: requested.call_id,
-                finalize_batch: requested.finalize_batch,
-                stage: PendingToolStage::AwaitWorkspaceResolve { path },
-            });
-        }
+    let config = task.config.clone().unwrap_or_default();
+
+    if task.task_id.0.trim().is_empty() {
+        return fail_task(
+            ctx,
+            task.observed_at_ns,
+            "invalid_task_id",
+            "task_id must be a non-empty UUID string",
+            None,
+        );
     }
+
+    if task.workdir.trim().is_empty() || !is_absolute_path(task.workdir.as_str()) {
+        return fail_task(
+            ctx,
+            task.observed_at_ns,
+            "invalid_workdir",
+            "workdir must be a non-empty absolute path",
+            None,
+        );
+    }
+
+    if let Some(err) = validate_allowed_tools(config.allowed_tools.as_deref()) {
+        return fail_task(ctx, task.observed_at_ns, err.code.as_str(), err.detail.as_str(), None);
+    }
+
+    ctx.state.task_id = task.task_id.clone();
+    ctx.state.status = TaskStatus::Bootstrapping;
+    ctx.state.workdir = Some(task.workdir.clone());
+    ctx.state.task = Some(task.task.clone());
+    ctx.state.config = Some(config);
+    ctx.state.next_observed_at_ns = task.observed_at_ns.saturating_add(1);
+
+    let message_blob = UserMessageBlob {
+        role: "user".into(),
+        content: task.task,
+    };
+    let bytes = serde_json::to_vec(&message_blob)
+        .map_err(|_| ReduceError::new("failed to encode task message JSON"))?;
+
+    let mut effects = ctx.effects();
+    effects.sys().blob_put(
+        &BlobPutParams {
+            bytes,
+            blob_ref: None,
+            refs: None,
+        },
+        "blob",
+    );
+    ctx.state.pending_stage = Some(PendingStage::AwaitBlobPut);
     Ok(())
 }
 
-fn handle_custom_tool_receipt(
+fn on_receipt(
     ctx: &mut WorkflowCtx<DemiurgeState, Value>,
-    receipt: &EffectReceiptEnvelope,
-) -> Result<bool, ReduceError> {
-    let Some(pending) = ctx.state.pending_tool_call.clone() else {
-        return Ok(false);
+    receipt: EffectReceiptEnvelope,
+) -> Result<(), ReduceError> {
+    if ctx.state.finished {
+        return Ok(());
+    }
+
+    let Some(stage) = ctx.state.pending_stage.clone() else {
+        return Ok(());
     };
-    if pending.stage.effect_kind() != receipt.effect_kind {
-        return Ok(false);
-    }
 
-    let observed_at_ns = receipt.emitted_at_seq;
-    if receipt.status != "ok" {
-        ctx.state.pending_tool_call = None;
-        let session_id = ctx.state.session.session_id.clone();
-        settle_tool_call(
-            ctx,
-            &session_id,
-            observed_at_ns,
-            &pending.tool_batch_id,
-            &pending.call_id,
-            ToolCallStatus::Failed {
-                code: "tool_effect_failed".into(),
-                detail: format!(
-                    "{} receipt status={} adapter={}",
-                    receipt.effect_kind, receipt.status, receipt.adapter_id
-                ),
-            },
-            pending.finalize_batch,
-        )?;
-        return Ok(true);
-    }
-
-    match pending.stage {
-        PendingToolStage::AwaitIntrospectManifest => {
-            ctx.state.pending_tool_call = None;
-            let session_id = ctx.state.session.session_id.clone();
-            settle_tool_call(
-                ctx,
-                &session_id,
-                observed_at_ns,
-                &pending.tool_batch_id,
-                &pending.call_id,
-                ToolCallStatus::Succeeded,
-                pending.finalize_batch,
-            )?;
-        }
-        PendingToolStage::AwaitWorkspaceResolve { path } => {
-            let resolved: WorkspaceResolveReceipt = serde_cbor::from_slice(&receipt.receipt_payload)
-                .map_err(|_| ReduceError::new("workspace.resolve receipt decode failed"))?;
-
-            if !resolved.exists {
-                ctx.state.pending_tool_call = None;
-                let session_id = ctx.state.session.session_id.clone();
-                settle_tool_call(
+    match stage {
+        PendingStage::AwaitBlobPut => {
+            if receipt.effect_kind != EFFECT_BLOB_PUT {
+                return Ok(());
+            }
+            if receipt.status != "ok" {
+                return fail_task(
                     ctx,
-                    &session_id,
-                    observed_at_ns,
-                    &pending.tool_batch_id,
-                    &pending.call_id,
-                    ToolCallStatus::Failed {
-                        code: "workspace_not_found".into(),
-                        detail: "workspace.resolve returned exists=false".into(),
-                    },
-                    pending.finalize_batch,
-                )?;
-                return Ok(true);
+                    receipt.emitted_at_seq,
+                    "blob_put_failed",
+                    "blob.put receipt status was not ok",
+                    None,
+                );
             }
 
-            let Some(root_hash) = resolved.root_hash else {
-                ctx.state.pending_tool_call = None;
-                let session_id = ctx.state.session.session_id.clone();
-                settle_tool_call(
-                    ctx,
-                    &session_id,
-                    observed_at_ns,
-                    &pending.tool_batch_id,
-                    &pending.call_id,
-                    ToolCallStatus::Failed {
-                        code: "workspace_root_missing".into(),
-                        detail: "workspace.resolve returned no root_hash".into(),
-                    },
-                    pending.finalize_batch,
-                )?;
-                return Ok(true);
+            let payload: BlobPutReceipt = serde_cbor::from_slice(&receipt.receipt_payload)
+                .map_err(|_| ReduceError::new("blob.put receipt decode failed"))?;
+
+            ctx.state.input_ref = Some(payload.blob_ref.as_str().into());
+            let workdir = ctx
+                .state
+                .workdir
+                .clone()
+                .ok_or_else(|| ReduceError::new("missing workdir for host.session.open"))?;
+            let cfg = ctx.state.config.clone().unwrap_or_default();
+
+            let params = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::SpawnLocal(
+                LocalSessionSpawnRequest {
+                    workdir,
+                    session_ttl_ns: cfg.session_ttl_ns,
+                },
+            )) {
+                SpawnOrHandoffSessionPlan::OpenHostSession(params) => params,
+                SpawnOrHandoffSessionPlan::Handoff(_) => unreachable!(),
             };
-
-            ctx.effects().emit_raw(
-                "workspace.read_bytes",
-                &WorkspaceReadBytesParams {
-                    root_hash,
-                    path,
-                    range: None,
-                },
-                Some("workspace"),
-            );
-            ctx.state.pending_tool_call = Some(PendingToolCall {
-                tool_batch_id: pending.tool_batch_id,
-                call_id: pending.call_id,
-                finalize_batch: pending.finalize_batch,
-                stage: PendingToolStage::AwaitWorkspaceReadBytes,
-            });
+            ctx.effects()
+                .emit_raw(EFFECT_HOST_SESSION_OPEN, &params, Some("host"));
+            ctx.state.pending_stage = Some(PendingStage::AwaitHostSessionOpen);
+            Ok(())
         }
-        PendingToolStage::AwaitWorkspaceReadBytes => {
-            ctx.state.pending_tool_call = None;
-            let session_id = ctx.state.session.session_id.clone();
-            settle_tool_call(
-                ctx,
-                &session_id,
-                observed_at_ns,
-                &pending.tool_batch_id,
-                &pending.call_id,
-                ToolCallStatus::Succeeded,
-                pending.finalize_batch,
-            )?;
+        PendingStage::AwaitHostSessionOpen => {
+            if receipt.effect_kind != EFFECT_HOST_SESSION_OPEN {
+                return Ok(());
+            }
+            let payload: HostSessionOpenReceipt = serde_cbor::from_slice(&receipt.receipt_payload)
+                .unwrap_or(HostSessionOpenReceipt {
+                    session_id: String::new(),
+                    status: String::from("error"),
+                    started_at_ns: 0,
+                    expires_at_ns: None,
+                    error_code: Some(String::from("receipt_decode_error")),
+                    error_message: Some(String::from("host.session.open receipt decode failed")),
+                });
+
+            if receipt.status != "ok" {
+                let detail = format!(
+                    "host.session.open envelope_status={} payload_status={} error_code={} error_message={}",
+                    receipt.status,
+                    payload.status,
+                    payload.error_code.unwrap_or_default(),
+                    payload.error_message.unwrap_or_default(),
+                );
+                return fail_task(
+                    ctx,
+                    receipt.emitted_at_seq,
+                    "host_session_open_failed",
+                    detail.as_str(),
+                    None,
+                );
+            }
+
+            if payload.status != "ready" || payload.session_id.trim().is_empty() {
+                let detail = format!(
+                    "host.session.open returned status={} session_id={} error_code={} error_message={}",
+                    payload.status,
+                    payload.session_id,
+                    payload.error_code.unwrap_or_default(),
+                    payload.error_message.unwrap_or_default(),
+                );
+                return fail_task(
+                    ctx,
+                    receipt.emitted_at_seq,
+                    "host_session_not_ready",
+                    detail.as_str(),
+                    None,
+                );
+            }
+
+            ctx.state.host_session_id = Some(payload.session_id.clone());
+            ctx.state.pending_stage = None;
+            ctx.state.status = TaskStatus::Running;
+            emit_session_bootstrap(ctx, payload.session_id.as_str())?;
+            Ok(())
         }
     }
-
-    Ok(true)
 }
 
-fn handle_custom_tool_rejection(
+fn on_receipt_rejected(
     ctx: &mut WorkflowCtx<DemiurgeState, Value>,
-    rejected: &EffectReceiptRejected,
-) -> Result<bool, ReduceError> {
-    let Some(pending) = ctx.state.pending_tool_call.clone() else {
-        return Ok(false);
-    };
-    if pending.stage.effect_kind() != rejected.effect_kind {
-        return Ok(false);
-    }
-
-    ctx.state.pending_tool_call = None;
-    let session_id = ctx.state.session.session_id.clone();
-    settle_tool_call(
-        ctx,
-        &session_id,
-        rejected.emitted_at_seq,
-        &pending.tool_batch_id,
-        &pending.call_id,
-        ToolCallStatus::Failed {
-            code: rejected.error_code.clone(),
-            detail: rejected.error_message.clone(),
-        },
-        pending.finalize_batch,
-    )?;
-    Ok(true)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn settle_tool_call(
-    ctx: &mut WorkflowCtx<DemiurgeState, Value>,
-    session_id: &SessionId,
-    observed_at_ns: u64,
-    tool_batch_id: &ToolBatchId,
-    call_id: &str,
-    status: ToolCallStatus,
-    finalize_batch: bool,
+    rejected: EffectReceiptRejected,
 ) -> Result<(), ReduceError> {
-    let settled = SessionIngressKind::ToolCallSettled {
-        tool_batch_id: tool_batch_id.clone(),
-        call_id: call_id.into(),
-        status,
-    };
-    apply_sdk_event(
-        ctx,
-        SessionWorkflowEvent::Ingress(SessionIngress {
-            session_id: session_id.clone(),
-            observed_at_ns,
-            ingress: settled,
-        }),
-    )?;
-
-    if finalize_batch {
-        apply_sdk_event(
-            ctx,
-            SessionWorkflowEvent::Ingress(SessionIngress {
-                session_id: session_id.clone(),
-                observed_at_ns: observed_at_ns.saturating_add(1),
-                ingress: SessionIngressKind::ToolBatchSettled {
-                    tool_batch_id: tool_batch_id.clone(),
-                    results_ref: None,
-                },
-            }),
-        )?;
+    if ctx.state.finished {
+        return Ok(());
     }
+
+    let Some(stage) = ctx.state.pending_stage.clone() else {
+        return Ok(());
+    };
+
+    let expected = match stage {
+        PendingStage::AwaitBlobPut => EFFECT_BLOB_PUT,
+        PendingStage::AwaitHostSessionOpen => EFFECT_HOST_SESSION_OPEN,
+    };
+    if rejected.effect_kind != expected {
+        return Ok(());
+    }
+
+    let detail = format!(
+        "{}: {}",
+        rejected.error_code.as_str(),
+        rejected.error_message.as_str()
+    );
+    fail_task(
+        ctx,
+        rejected.emitted_at_seq,
+        "effect_rejected",
+        detail.as_str(),
+        None,
+    )
+}
+
+fn emit_session_bootstrap(
+    ctx: &mut WorkflowCtx<DemiurgeState, Value>,
+    host_session_id: &str,
+) -> Result<(), ReduceError> {
+    let input_ref = ctx
+        .state
+        .input_ref
+        .clone()
+        .ok_or_else(|| ReduceError::new("missing input_ref for run request"))?;
+    let cfg = ctx.state.config.clone().unwrap_or_default();
+
+    let provider = cfg
+        .provider
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_PROVIDER.into());
+    let model = cfg
+        .model
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_MODEL.into());
+
+    let run_overrides = SessionConfig {
+        provider,
+        model,
+        reasoning_effort: cfg.reasoning_effort,
+        max_tokens: Some(cfg.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS)),
+        default_prompt_refs: None,
+        default_tool_profile: cfg.tool_profile.clone(),
+        default_tool_enable: cfg.tool_enable,
+        default_tool_disable: cfg.tool_disable,
+        default_tool_force: cfg.tool_force,
+    };
+
+    let first_observed_at_ns = next_observed_at_ns(&mut ctx.state);
+    let plan = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::Handoff(
+        SessionHandoffRequest {
+            first_observed_at_ns,
+            session_id: ctx.state.task_id.clone(),
+            input_ref,
+            host_session_id: host_session_id.into(),
+            run_overrides,
+            allowed_tools: cfg.allowed_tools,
+        },
+    )) {
+        SpawnOrHandoffSessionPlan::Handoff(plan) => plan,
+        SpawnOrHandoffSessionPlan::OpenHostSession(_) => unreachable!(),
+    };
+    emit_session_ingresses(ctx, &plan.ingresses);
+    ctx.state.next_observed_at_ns = plan.next_observed_at_ns;
 
     Ok(())
 }
 
-fn map_reduce_error(err: SessionReduceError) -> ReduceError {
-    match err {
-        SessionReduceError::InvalidLifecycleTransition => {
-            ReduceError::new("invalid lifecycle transition")
-        }
-        SessionReduceError::HostCommandRejected => ReduceError::new("host command rejected"),
-        SessionReduceError::ToolBatchAlreadyActive => ReduceError::new("tool batch already active"),
-        SessionReduceError::ToolBatchNotActive => ReduceError::new("tool batch not active"),
-        SessionReduceError::ToolBatchIdMismatch => ReduceError::new("tool batch id mismatch"),
-        SessionReduceError::ToolCallUnknown => ReduceError::new("tool call id not expected"),
-        SessionReduceError::ToolBatchNotSettled => ReduceError::new("tool batch not settled"),
-        SessionReduceError::MissingProvider => ReduceError::new("run config provider missing"),
-        SessionReduceError::MissingModel => ReduceError::new("run config model missing"),
-        SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),
-        SessionReduceError::UnknownModel => ReduceError::new("run config model unknown"),
-        SessionReduceError::RunAlreadyActive => ReduceError::new("run already active"),
-        SessionReduceError::InvalidWorkspacePromptPackJson => {
-            ReduceError::new("workspace prompt pack JSON invalid")
-        }
-        SessionReduceError::MissingWorkspacePromptPackBytes => {
-            ReduceError::new("workspace prompt pack bytes missing for validation")
-        }
-        SessionReduceError::TooManyPendingIntents => ReduceError::new("too many pending intents"),
-        SessionReduceError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
-        SessionReduceError::UnknownToolOverride => ReduceError::new("unknown tool override"),
-        SessionReduceError::RunNotActive => ReduceError::new("run not active"),
+fn on_session_lifecycle_changed(
+    ctx: &mut WorkflowCtx<DemiurgeState, Value>,
+    changed: SessionLifecycleChanged,
+) -> Result<(), ReduceError> {
+    if ctx.state.finished {
+        return Ok(());
     }
+    if changed.session_id != ctx.state.task_id {
+        return Ok(());
+    }
+
+    match changed.to {
+        SessionLifecycle::Running => {
+            ctx.state.status = TaskStatus::Running;
+            Ok(())
+        }
+        SessionLifecycle::WaitingInput | SessionLifecycle::Completed => {
+            finish_task(ctx, changed.observed_at_ns, TaskStatus::Succeeded, None, changed.run_id)
+        }
+        SessionLifecycle::Failed => {
+            finish_task(
+                ctx,
+                changed.observed_at_ns,
+                TaskStatus::Failed,
+                Some(TaskFailure {
+                    code: "session_failed".into(),
+                    detail: "aos.agent session entered Failed lifecycle".into(),
+                }),
+                changed.run_id,
+            )
+        }
+        SessionLifecycle::Cancelled => {
+            finish_task(ctx, changed.observed_at_ns, TaskStatus::Cancelled, None, changed.run_id)
+        }
+        SessionLifecycle::Idle | SessionLifecycle::Paused | SessionLifecycle::Cancelling => Ok(()),
+    }
+}
+
+fn finish_task(
+    ctx: &mut WorkflowCtx<DemiurgeState, Value>,
+    observed_at_ns: u64,
+    status: TaskStatus,
+    failure: Option<TaskFailure>,
+    run_id: Option<RunId>,
+) -> Result<(), ReduceError> {
+    if ctx.state.finished {
+        return Ok(());
+    }
+
+    ctx.state.status = status.clone();
+    ctx.state.failure = failure.clone();
+    ctx.state.pending_stage = None;
+    ctx.state.finished = true;
+    let task_id = ctx.state.task_id.clone();
+
+    ctx.intent("demiurge/TaskFinished@1")
+        .payload(&TaskFinished {
+            task_id,
+            observed_at_ns,
+            status,
+            failure,
+            run_id,
+        })
+        .send();
+
+    Ok(())
+}
+
+fn fail_task(
+    ctx: &mut WorkflowCtx<DemiurgeState, Value>,
+    observed_at_ns: u64,
+    code: &str,
+    detail: &str,
+    run_id: Option<RunId>,
+) -> Result<(), ReduceError> {
+    finish_task(
+        ctx,
+        observed_at_ns,
+        TaskStatus::Failed,
+        Some(TaskFailure {
+            code: code.into(),
+            detail: detail.into(),
+        }),
+        run_id,
+    )
+}
+
+fn next_observed_at_ns(state: &mut DemiurgeState) -> u64 {
+    if state.next_observed_at_ns == 0 {
+        state.next_observed_at_ns = state.last_updated_at_ns.saturating_add(1);
+    }
+    let current = state.next_observed_at_ns;
+    state.next_observed_at_ns = state.next_observed_at_ns.saturating_add(1);
+    current
+}
+
+fn validate_allowed_tools(allowed_tools: Option<&[String]>) -> Option<TaskFailure> {
+    let Some(allowed_tools) = allowed_tools else {
+        return None;
+    };
+    if allowed_tools.is_empty() {
+        return Some(TaskFailure {
+            code: "invalid_allowed_tools".into(),
+            detail: "allowed_tools must not be empty".into(),
+        });
+    }
+
+    let registry = default_tool_registry();
+    for tool_id in allowed_tools {
+        if !registry.contains_key(tool_id) {
+            return Some(TaskFailure {
+                code: "unknown_allowed_tool".into(),
+                detail: format!("unknown tool_id in allowed_tools: {tool_id}"),
+            });
+        }
+    }
+    None
+}
+
+fn is_absolute_path(value: &str) -> bool {
+    value.starts_with('/') || value.starts_with("\\\\") || has_windows_drive_prefix(value)
+}
+
+fn has_windows_drive_prefix(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\'
+}
+
+fn event_observed_at_ns(event: &DemiurgeWorkflowEvent) -> u64 {
+    match event {
+        DemiurgeWorkflowEvent::TaskSubmitted(task) => task.observed_at_ns,
+        DemiurgeWorkflowEvent::SessionLifecycleChanged(changed) => changed.observed_at_ns,
+        DemiurgeWorkflowEvent::Receipt(receipt) => receipt.emitted_at_seq,
+        DemiurgeWorkflowEvent::ReceiptRejected(rejected) => rejected.emitted_at_seq,
+        DemiurgeWorkflowEvent::StreamFrame(frame) => frame.emitted_at_seq,
+        DemiurgeWorkflowEvent::Noop => 0,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct UserMessageBlob {
+    role: String,
+    content: String,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::ToString;
-    use alloc::vec;
 
-    fn make_params(provider: &str, api_key: Option<&str>) -> SysLlmGenerateParams {
-        SysLlmGenerateParams {
-            correlation_id: Some("run-1".into()),
-            provider: provider.into(),
-            model: "gpt-5.2".into(),
-            message_refs: vec!["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into()],
-            runtime: SysLlmRuntimeArgs::default(),
-            api_key: api_key.map(str::to_string),
-        }
+    #[test]
+    fn absolute_path_validation_accepts_unix_and_windows() {
+        assert!(is_absolute_path("/tmp/repo"));
+        assert!(is_absolute_path("C:\\repo"));
+        assert!(!is_absolute_path("repo"));
     }
 
     #[test]
-    fn openai_provider_maps_to_secret_ref() {
-        let mapped = llm_params_with_secret(make_params("openai-responses", None));
-        assert_eq!(
-            mapped.api_key,
-            Some(TextOrSecretRef::Secret(SecretRef {
-                alias: OPENAI_SECRET_ALIAS.into(),
-                version: 1,
-            }))
-        );
-    }
-
-    #[test]
-    fn anthropic_provider_maps_to_secret_ref() {
-        let mapped = llm_params_with_secret(make_params("anthropic", None));
-        assert_eq!(
-            mapped.api_key,
-            Some(TextOrSecretRef::Secret(SecretRef {
-                alias: ANTHROPIC_SECRET_ALIAS.into(),
-                version: 1,
-            }))
-        );
-    }
-
-    #[test]
-    fn explicit_api_key_literal_is_preserved() {
-        let mapped = llm_params_with_secret(make_params("openai-responses", Some("literal-key")));
-        assert_eq!(
-            mapped.api_key,
-            Some(TextOrSecretRef::Literal("literal-key".into()))
-        );
-    }
-
-    #[test]
-    fn provider_without_mapping_emits_no_secret_ref() {
-        let mapped = llm_params_with_secret(make_params("mock", None));
-        assert_eq!(mapped.api_key, None);
+    fn unknown_allowed_tool_is_rejected() {
+        let err = validate_allowed_tools(Some(&["host.fs.nope".into()]))
+            .expect("expected tool validation failure");
+        assert_eq!(err.code, "unknown_allowed_tool");
     }
 }

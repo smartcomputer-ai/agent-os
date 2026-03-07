@@ -1,6 +1,7 @@
 use crate::contracts::{HostSessionStatus, ToolCallStatus, ToolMapper};
 use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(tag = "$tag", content = "$value")]
@@ -17,6 +18,18 @@ pub enum ToolEffectKind {
     HostFsStat,
     HostFsExists,
     HostFsListDir,
+    IntrospectManifest,
+    IntrospectWorkflowState,
+    IntrospectListCells,
+    WorkspaceResolve,
+    WorkspaceEmptyRoot,
+    WorkspaceList,
+    WorkspaceReadRef,
+    WorkspaceReadBytes,
+    WorkspaceWriteBytes,
+    WorkspaceWriteRef,
+    WorkspaceRemove,
+    WorkspaceDiff,
 }
 
 impl ToolEffectKind {
@@ -34,6 +47,41 @@ impl ToolEffectKind {
             Self::HostFsStat => "host.fs.stat",
             Self::HostFsExists => "host.fs.exists",
             Self::HostFsListDir => "host.fs.list_dir",
+            Self::IntrospectManifest => "introspect.manifest",
+            Self::IntrospectWorkflowState => "introspect.workflow_state",
+            Self::IntrospectListCells => "introspect.list_cells",
+            Self::WorkspaceResolve => "workspace.resolve",
+            Self::WorkspaceEmptyRoot => "workspace.empty_root",
+            Self::WorkspaceList => "workspace.list",
+            Self::WorkspaceReadRef => "workspace.read_ref",
+            Self::WorkspaceReadBytes => "workspace.read_bytes",
+            Self::WorkspaceWriteBytes => "workspace.write_bytes",
+            Self::WorkspaceWriteRef => "workspace.write_ref",
+            Self::WorkspaceRemove => "workspace.remove",
+            Self::WorkspaceDiff => "workspace.diff",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolMappedArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_kind: Option<ToolEffectKind>,
+    pub params_json: Value,
+}
+
+impl ToolMappedArgs {
+    pub fn params(params_json: Value) -> Self {
+        Self {
+            effect_kind: None,
+            params_json,
+        }
+    }
+
+    pub fn with_effect_kind(effect_kind: ToolEffectKind, params_json: Value) -> Self {
+        Self {
+            effect_kind: Some(effect_kind),
+            params_json,
         }
     }
 }
@@ -124,5 +172,15 @@ pub fn mapper_effect_kind(mapper: ToolMapper) -> ToolEffectKind {
         ToolMapper::HostFsStat => ToolEffectKind::HostFsStat,
         ToolMapper::HostFsExists => ToolEffectKind::HostFsExists,
         ToolMapper::HostFsListDir => ToolEffectKind::HostFsListDir,
+        ToolMapper::InspectWorld => ToolEffectKind::IntrospectManifest,
+        ToolMapper::InspectWorkflow => ToolEffectKind::IntrospectWorkflowState,
+        ToolMapper::WorkspaceInspect => ToolEffectKind::WorkspaceResolve,
+        ToolMapper::WorkspaceList => ToolEffectKind::WorkspaceList,
+        ToolMapper::WorkspaceRead => ToolEffectKind::WorkspaceReadRef,
+        ToolMapper::WorkspaceApply => ToolEffectKind::WorkspaceWriteBytes,
+        ToolMapper::WorkspaceDiff => ToolEffectKind::WorkspaceDiff,
+        ToolMapper::WorkspaceCommit => {
+            panic!("workspace commit does not map to an effect kind")
+        }
     }
 }

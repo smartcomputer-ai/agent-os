@@ -219,56 +219,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/WorkflowContext@1",
-    "type": {
-      "record": {
-        "now_ns": { "nat": {} },
-        "logical_now_ns": { "nat": {} },
-        "journal_height": { "nat": {} },
-        "entropy": { "bytes": {} },
-        "event_hash": { "hash": {} },
-        "manifest_hash": { "hash": {} },
-        "workflow": { "text": {}, "$comment": "Name-formatted string" },
-        "key": { "option": { "bytes": {} } },
-        "cell_mode": { "bool": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/PureContext@1",
-    "type": {
-      "record": {
-        "logical_now_ns": { "nat": {} },
-        "journal_height": { "nat": {} },
-        "manifest_hash": { "hash": {} },
-        "module": { "text": {}, "$comment": "Name-formatted string" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/PlanHandle@1",
-    "type": {
-      "record": {
-        "instance_id": { "nat": {} },
-        "plan": { "text": {}, "$comment": "Name-formatted string" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/PlanError@1",
-    "type": {
-      "record": {
-        "code": { "text": {} },
-        "message": { "text": {} }
-      }
-    }
-  },
-
-  {
-    "$kind": "defschema",
     "name": "sys/BlobPutParams@1",
     "type": {
       "record": {
@@ -353,66 +303,6 @@
       }
     }
   },
-  {
-    "$kind": "defschema",
-    "name": "sys/EffectReceiptEnvelope@1",
-    "type": {
-      "record": {
-        "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
-        "origin_instance_key": { "option": { "bytes": {} } },
-        "intent_id": { "hash": {} },
-        "effect_kind": { "text": {} },
-        "params_hash": { "option": { "hash": {} } },
-        "receipt_payload": { "bytes": {} },
-        "status": { "text": {} },
-        "emitted_at_seq": { "nat": {} },
-        "adapter_id": { "text": {} },
-        "cost_cents": { "option": { "nat": {} } },
-        "signature": { "bytes": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/EffectStreamFrame@1",
-    "type": {
-      "record": {
-        "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
-        "origin_instance_key": { "option": { "bytes": {} } },
-        "intent_id": { "hash": {} },
-        "effect_kind": { "text": {} },
-        "params_hash": { "option": { "hash": {} } },
-        "emitted_at_seq": { "nat": {} },
-        "seq": { "nat": {} },
-        "kind": { "text": {} },
-        "payload": { "bytes": {} },
-        "payload_ref": { "option": { "hash": {} } },
-        "adapter_id": { "text": {} },
-        "signature": { "bytes": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/EffectReceiptRejected@1",
-    "type": {
-      "record": {
-        "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
-        "origin_instance_key": { "option": { "bytes": {} } },
-        "intent_id": { "hash": {} },
-        "effect_kind": { "text": {} },
-        "params_hash": { "option": { "hash": {} } },
-        "adapter_id": { "text": {} },
-        "status": { "text": {} },
-        "error_code": { "text": {} },
-        "error_message": { "text": {} },
-        "payload_hash": { "hash": {} },
-        "payload_size": { "nat": {} },
-        "emitted_at_seq": { "nat": {} }
-      }
-    }
-  },
-
   {
     "$kind": "defschema",
     "name": "sys/HttpRequestParams@1",
@@ -1207,6 +1097,28 @@
   {
     "$kind": "defschema",
     "name": "sys/WorkspaceWriteBytesReceipt@1",
+    "type": {
+      "record": {
+        "new_root_hash": { "hash": {} },
+        "blob_hash": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceWriteRefParams@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} },
+        "path": { "text": {} },
+        "blob_hash": { "hash": {} },
+        "mode": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceWriteRefReceipt@1",
     "type": {
       "record": {
         "new_root_hash": { "hash": {} },

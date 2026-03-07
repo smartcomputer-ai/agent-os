@@ -10,6 +10,7 @@ pub mod typecheck;
 pub mod validate;
 pub mod value_normalize;
 
+pub use aos_effect_types::SecretRef;
 pub use model::*;
 pub use refs::{HashRef, RefError, SchemaRef};
 pub use typecheck::{ValueTypeError, validate_value_literal};

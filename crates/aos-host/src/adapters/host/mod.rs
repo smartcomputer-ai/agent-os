@@ -216,22 +216,7 @@ impl AsyncEffectAdapter for HostSessionOpenAdapter {
             }
         };
 
-        let Some(target_local) = params.target.local else {
-            let payload = HostSessionOpenReceipt {
-                session_id: String::new(),
-                status: "error".into(),
-                started_at_ns,
-                expires_at_ns: None,
-                error_code: Some("unsupported_target".into()),
-                error_message: Some("target.local is required".into()),
-            };
-            return Ok(build_receipt(
-                intent,
-                EffectKind::HOST_SESSION_OPEN,
-                ReceiptStatus::Error,
-                &payload,
-            )?);
-        };
+        let target_local = params.target.as_local();
 
         let requested_workdir = target_local
             .workdir
@@ -272,7 +257,12 @@ impl AsyncEffectAdapter for HostSessionOpenAdapter {
             session_id.clone(),
             SessionRecord {
                 workdir,
-                env: target_local.env.unwrap_or_default().into_iter().collect(),
+                env: target_local
+                    .env
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect(),
                 expires_at_ns,
                 closed: false,
                 ended_at_ns: None,
@@ -702,7 +692,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                     content: None,
                     truncated: None,
                     size_bytes: None,
+                    mtime_ns: None,
                     error_code: Some(err.code.into()),
+                    error_message: None,
                 };
                 let receipt_status = if status == "error" {
                     ReceiptStatus::Error
@@ -726,7 +718,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                     content: None,
                     truncated: None,
                     size_bytes: None,
+                    mtime_ns: None,
                     error_code: None,
+                    error_message: None,
                 };
                 return build_receipt(
                     intent,
@@ -744,7 +738,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                 content: None,
                 truncated: None,
                 size_bytes: None,
+                mtime_ns: None,
                 error_code: None,
+                error_message: None,
             };
             return build_receipt(
                 intent,
@@ -777,7 +773,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                         content: None,
                         truncated: None,
                         size_bytes: Some(size_bytes),
+                        mtime_ns: None,
                         error_code: Some("inline_required_too_large".into()),
+                        error_message: None,
                     };
                     return build_receipt(
                         intent,
@@ -799,7 +797,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                         content: None,
                         truncated: None,
                         size_bytes: Some(size_bytes),
+                        mtime_ns: None,
                         error_code: Some("invalid_utf8".into()),
+                        error_message: None,
                     };
                     return build_receipt(
                         intent,
@@ -824,7 +824,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                         content: None,
                         truncated: None,
                         size_bytes: Some(size_bytes),
+                        mtime_ns: None,
                         error_code: Some("inline_required_too_large".into()),
+                        error_message: None,
                     };
                     return build_receipt(
                         intent,
@@ -850,7 +852,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
             content,
             truncated: Some(truncated),
             size_bytes: Some(size_bytes),
+            mtime_ns: None,
             error_code: None,
+            error_message: None,
         };
         build_receipt(
             intent,
@@ -1938,7 +1942,9 @@ fn fs_read_error(
         content: None,
         truncated: None,
         size_bytes: None,
+        mtime_ns: None,
         error_code: Some(code.into()),
+        error_message: None,
     };
     let mut receipt = build_receipt(
         intent,
@@ -2717,14 +2723,12 @@ mod tests {
 
     fn open_params(workdir: &str) -> HostSessionOpenParams {
         HostSessionOpenParams {
-            target: HostTarget {
-                local: Some(HostLocalTarget {
-                    mounts: None,
-                    workdir: Some(workdir.into()),
-                    env: None,
-                    network_mode: "none".into(),
-                }),
-            },
+            target: HostTarget::local(HostLocalTarget {
+                mounts: None,
+                workdir: Some(workdir.into()),
+                env: None,
+                network_mode: "none".into(),
+            }),
             session_ttl_ns: None,
             labels: None,
         }

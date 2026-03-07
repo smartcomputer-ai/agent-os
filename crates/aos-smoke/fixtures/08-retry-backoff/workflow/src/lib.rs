@@ -203,5 +203,5 @@ fn schedule_retry(ctx: &mut WorkflowCtx<RetryState, ()>) {
         key: Some(ctx.state.req_id.clone()),
     };
     ctx.state.timers_scheduled = ctx.state.timers_scheduled.saturating_add(1);
-    ctx.effects().timer_set(&params, "default");
+    ctx.effects().sys().timer_set(&params, "default");
 }

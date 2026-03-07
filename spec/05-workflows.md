@@ -67,6 +67,7 @@ Settled effects produce a generic workflow receipt envelope (schema family inclu
 - origin instance key (if keyed)
 - intent identity
 - effect kind
+- optional issuer reference echoed from the emitted effect
 - receipt payload bytes
 - receipt status
 - emitted sequence metadata

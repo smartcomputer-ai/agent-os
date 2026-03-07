@@ -7,6 +7,8 @@ use serde_json;
 use crate::{DefCap, DefEffect, DefModule, DefSchema, HashRef};
 
 static BUILTIN_SCHEMAS_RAW: &str = include_str!("../../../spec/defs/builtin-schemas.air.json");
+static BUILTIN_SCHEMAS_SDK_RAW: &str =
+    include_str!("../../../spec/defs/builtin-schemas-sdk.air.json");
 static BUILTIN_SCHEMAS_HOST_RAW: &str =
     include_str!("../../../spec/defs/builtin-schemas-host.air.json");
 static BUILTIN_EFFECTS_RAW: &str = include_str!("../../../spec/defs/builtin-effects.air.json");
@@ -44,10 +46,16 @@ pub struct BuiltinModule {
 static BUILTIN_SCHEMAS: Lazy<Vec<BuiltinSchema>> = Lazy::new(|| {
     let defs: Vec<DefSchema> = serde_json::from_str(BUILTIN_SCHEMAS_RAW)
         .expect("spec/defs/builtin-schemas.air.json must parse");
+    let sdk_defs: Vec<DefSchema> = serde_json::from_str(BUILTIN_SCHEMAS_SDK_RAW)
+        .expect("spec/defs/builtin-schemas-sdk.air.json must parse");
     let host_defs: Vec<DefSchema> = serde_json::from_str(BUILTIN_SCHEMAS_HOST_RAW)
         .expect("spec/defs/builtin-schemas-host.air.json must parse");
     let mut merged: BTreeMap<String, DefSchema> = BTreeMap::new();
-    for schema in defs.into_iter().chain(host_defs.into_iter()) {
+    for schema in defs
+        .into_iter()
+        .chain(sdk_defs.into_iter())
+        .chain(host_defs.into_iter())
+    {
         merged.insert(schema.name.clone(), schema);
     }
     merged
@@ -247,12 +255,15 @@ mod tests {
         assert!(names.contains(&"sys/BlobGetParams@1"));
         assert!(names.contains(&"sys/BlobGetReceipt@1"));
         assert!(names.contains(&"sys/BlobGetResult@1"));
+        assert!(names.contains(&"sys/WorkflowContext@1"));
+        assert!(names.contains(&"sys/PureContext@1"));
+        assert!(names.contains(&"sys/PendingEffect@1"));
         assert!(names.contains(&"sys/EffectReceiptEnvelope@1"));
         assert!(names.contains(&"sys/EffectStreamFrame@1"));
         assert!(names.contains(&"sys/EffectReceiptRejected@1"));
-        // Plan composition
-        assert!(names.contains(&"sys/PlanHandle@1"));
-        assert!(names.contains(&"sys/PlanError@1"));
+        assert!(names.contains(&"sys/PendingEffectSetText@1"));
+        assert!(names.contains(&"sys/PendingBatchGroupText@1"));
+        assert!(names.contains(&"sys/PendingBatchText@1"));
         // HTTP/LLM
         assert!(names.contains(&"sys/HttpRequestParams@1"));
         assert!(names.contains(&"sys/HttpRequestReceipt@1"));
@@ -305,6 +316,8 @@ mod tests {
         assert!(names.contains(&"sys/WorkspaceReadBytesReceipt@1"));
         assert!(names.contains(&"sys/WorkspaceWriteBytesParams@1"));
         assert!(names.contains(&"sys/WorkspaceWriteBytesReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceWriteRefParams@1"));
+        assert!(names.contains(&"sys/WorkspaceWriteRefReceipt@1"));
         assert!(names.contains(&"sys/WorkspaceRemoveParams@1"));
         assert!(names.contains(&"sys/WorkspaceRemoveReceipt@1"));
         assert!(names.contains(&"sys/WorkspaceDiffParams@1"));

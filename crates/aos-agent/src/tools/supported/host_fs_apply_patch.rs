@@ -2,14 +2,14 @@ use super::{
     optional_bool, parse_json_object, require_string, session_id_from_args_or_runtime, value_object,
 };
 use crate::contracts::ToolRuntimeContext;
-use crate::tools::types::ToolMappingError;
+use crate::tools::types::{ToolMappedArgs, ToolMappingError};
 use alloc::string::ToString;
 use serde_json::{Map, Value};
 
 pub fn map_args(
     arguments_json: &str,
     runtime: &ToolRuntimeContext,
-) -> Result<Value, ToolMappingError> {
+) -> Result<ToolMappedArgs, ToolMappingError> {
     let args = parse_json_object(arguments_json)?;
     let session_id = session_id_from_args_or_runtime(&args, runtime)?;
     let patch_text = require_string(&args, "patch")?;
@@ -31,7 +31,7 @@ pub fn map_args(
         out.insert("dry_run".into(), Value::Bool(dry_run));
     }
 
-    Ok(value_object(out))
+    Ok(ToolMappedArgs::params(value_object(out)))
 }
 
 #[cfg(test)]
@@ -52,7 +52,7 @@ mod tests {
         )
         .expect("map args");
 
-        let cbor = serde_cbor::to_vec(&mapped).expect("encode mapped args");
+        let cbor = serde_cbor::to_vec(&mapped.params_json).expect("encode mapped args");
         let decoded: HostFsApplyPatchParams =
             serde_cbor::from_slice(&cbor).expect("decode host params");
         assert_eq!(decoded.session_id, "hs_1");

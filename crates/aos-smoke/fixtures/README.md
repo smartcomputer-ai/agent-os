@@ -21,8 +21,8 @@ Grouping:
 | 10  | trace-failure-classification | Trace-get/diagnose failure conformance |
 | 11  | workflow-runtime-hardening | Single-scenario workflow runtime conformance + summaries |
 | 12  | performance | Non-keyed vs keyed event throughput |
-| 20  | agent-session  | SDK session lifecycle replay |
-| 21  | chat-live (opt-in) | Live provider tool orchestration smoke |
+| 20  | chat-live (opt-in) | Live provider tool orchestration smoke |
+| 21  | agent-session  | SDK session lifecycle replay |
 | 22  | agent-live (opt-in) | SDK-driven live agent with iterative tools + follow-up |
 | 23  | agent-tools  | SDK built-in tool mapping e2e + replay |
 
@@ -40,7 +40,7 @@ Run with:
 - `cargo run -p aos-smoke -- agent-tools` (scripted built-in host tools e2e smoke)
 
 Live smoke notes:
-- Uses `fixtures/21-chat-live` AIR with secret-injected API keys (`env:OPENAI_API_KEY`, `env:ANTHROPIC_API_KEY`).
+- Uses `fixtures/20-chat-live` AIR with secret-injected API keys (`env:OPENAI_API_KEY`, `env:ANTHROPIC_API_KEY`).
 - Reads secrets from process env or `.env` files at repo root.
 - Runs a multi-tool agent flow (`echo_payload`, `sum_pair`) plus a follow-up user turn.
 - Ends with replay verification.

@@ -526,6 +526,7 @@ impl<S: Store + 'static> Kernel<S> {
                 IntentOriginRecord::Workflow {
                     name: workflow_name.clone(),
                     instance_key: key.clone(),
+                    issuer_ref: effect.issuer_ref.clone(),
                     emitted_at_seq: Some(emitted_at_seq),
                 },
             )?;
@@ -536,6 +537,7 @@ impl<S: Store + 'static> Kernel<S> {
                     key.clone(),
                     effect.kind.clone(),
                     effect.params_cbor.clone(),
+                    effect.issuer_ref.clone(),
                     intent.intent_hash,
                     emitted_at_seq,
                     self.module_defs

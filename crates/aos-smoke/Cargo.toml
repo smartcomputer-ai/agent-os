@@ -8,6 +8,7 @@ anyhow = "1"
 aos-air-types = { path = "../aos-air-types" }
 aos-agent = { path = "../aos-agent" }
 aos-cbor = { path = "../aos-cbor" }
+aos-effect-types = { path = "../aos-effect-types" }
 aos-kernel = { path = "../aos-kernel" }
 aos-sys = { path = "../aos-sys" }
 aos-store = { path = "../aos-store" }

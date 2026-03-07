@@ -15,9 +15,6 @@
       "name": "demo/SafeUpgradeEvent@1"
     },
     {
-      "name": "sys/EffectReceiptEnvelope@1"
-    },
-    {
       "name": "sys/HttpRequestParams@1"
     },
     {

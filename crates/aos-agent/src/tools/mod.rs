@@ -1,17 +1,17 @@
 pub mod registry;
-mod supported;
+pub(crate) mod supported;
 pub mod types;
 
 use crate::contracts::{ToolMapper, ToolRuntimeContext};
 use alloc::string::String;
 use supported::{map_args as map_supported_args, map_receipt as map_supported_receipt};
-pub use types::{ToolEffectKind, ToolMappedReceipt, ToolMappingError};
+pub use types::{ToolEffectKind, ToolMappedArgs, ToolMappedReceipt, ToolMappingError};
 
 pub fn map_tool_arguments_to_effect_params(
     mapper: ToolMapper,
     arguments_json: &str,
     runtime: &ToolRuntimeContext,
-) -> Result<serde_json::Value, ToolMappingError> {
+) -> Result<ToolMappedArgs, ToolMappingError> {
     map_supported_args(mapper, arguments_json, runtime)
 }
 
@@ -38,6 +38,16 @@ pub fn effect_kind_for_mapper(mapper: ToolMapper) -> ToolEffectKind {
         ToolMapper::HostFsStat => ToolEffectKind::HostFsStat,
         ToolMapper::HostFsExists => ToolEffectKind::HostFsExists,
         ToolMapper::HostFsListDir => ToolEffectKind::HostFsListDir,
+        ToolMapper::InspectWorld => ToolEffectKind::IntrospectManifest,
+        ToolMapper::InspectWorkflow => ToolEffectKind::IntrospectWorkflowState,
+        ToolMapper::WorkspaceInspect => ToolEffectKind::WorkspaceResolve,
+        ToolMapper::WorkspaceList => ToolEffectKind::WorkspaceList,
+        ToolMapper::WorkspaceRead => ToolEffectKind::WorkspaceReadRef,
+        ToolMapper::WorkspaceApply => ToolEffectKind::WorkspaceWriteBytes,
+        ToolMapper::WorkspaceDiff => ToolEffectKind::WorkspaceDiff,
+        ToolMapper::WorkspaceCommit => {
+            panic!("workspace commit does not map to an effect kind")
+        }
     }
 }
 
@@ -55,6 +65,9 @@ pub fn mapper_for_effect_kind(effect_kind: &str) -> Option<ToolMapper> {
         "host.fs.stat" => Some(ToolMapper::HostFsStat),
         "host.fs.exists" => Some(ToolMapper::HostFsExists),
         "host.fs.list_dir" => Some(ToolMapper::HostFsListDir),
+        "introspect.manifest" => Some(ToolMapper::InspectWorld),
+        "introspect.workflow_state" => Some(ToolMapper::InspectWorkflow),
+        "introspect.list_cells" => Some(ToolMapper::InspectWorkflow),
         _ => None,
     }
 }

@@ -48,7 +48,7 @@ fn workflow_orchestration_completes_after_receipt() {
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&HttpRequestReceipt {
             status: 200,
-            headers: IndexMap::new(),
+            headers: Default::default(),
             body_ref: None,
             timings: RequestTimings {
                 start_ns: 1,
@@ -110,7 +110,7 @@ fn workflow_effects_share_outbox_without_interference() {
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
                     url: "https://example.com/shared".into(),
-                    headers: IndexMap::new(),
+                    headers: Default::default(),
                     body_ref: None,
                 })
                 .unwrap(),
@@ -516,7 +516,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
                 url: "https://example.com/first".into(),
-                headers: IndexMap::new(),
+                headers: Default::default(),
                 body_ref: None,
             })
             .unwrap(),
@@ -532,7 +532,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
                 url: "https://example.com/after-receipt".into(),
-                headers: IndexMap::new(),
+                headers: Default::default(),
                 body_ref: None,
             })
             .unwrap(),
@@ -566,7 +566,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
                     url: "https://example.com/after-event".into(),
-                    headers: IndexMap::new(),
+                    headers: Default::default(),
                     body_ref: None,
                 })
                 .unwrap(),
@@ -672,7 +672,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&HttpRequestReceipt {
             status: 200,
-            headers: IndexMap::new(),
+            headers: Default::default(),
             body_ref: None,
             timings: RequestTimings {
                 start_ns: 1,
@@ -722,7 +722,7 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
                     url: "https://example.com/ready".into(),
-                    headers: IndexMap::new(),
+                    headers: Default::default(),
                     body_ref: None,
                 })
                 .unwrap(),
@@ -751,7 +751,7 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
                     url: "https://example.com/other".into(),
-                    headers: IndexMap::new(),
+                    headers: Default::default(),
                     body_ref: None,
                 })
                 .unwrap(),
@@ -852,7 +852,7 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
                 url: "https://example.com/keyed".into(),
-                headers: IndexMap::new(),
+                headers: Default::default(),
                 body_ref: None,
             })
             .unwrap(),
@@ -971,7 +971,7 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&HttpRequestReceipt {
             status: 200,
-            headers: IndexMap::new(),
+            headers: Default::default(),
             body_ref: None,
             timings: RequestTimings {
                 start_ns: 10,
@@ -1065,7 +1065,7 @@ fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
                 url: "https://example.com/workflow".into(),
-                headers: IndexMap::new(),
+                headers: Default::default(),
                 body_ref: None,
             })
             .unwrap(),

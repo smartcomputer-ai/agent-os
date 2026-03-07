@@ -38,6 +38,7 @@ use crate::http::{HttpState, control_call};
         workspace_read_bytes,
         workspace_annotations_get,
         workspace_write_bytes,
+        workspace_write_ref,
         workspace_remove,
         workspace_annotations_set,
         workspace_empty_root,
@@ -73,6 +74,8 @@ use crate::http::{HttpState, control_call};
             WorkspaceAnnotationsResponse,
             WorkspaceWriteBytesRequest,
             WorkspaceWriteBytesResponse,
+            WorkspaceWriteRefRequest,
+            WorkspaceWriteRefResponse,
             WorkspaceRemoveRequest,
             WorkspaceRemoveResponse,
             WorkspaceAnnotationsSetRequest,
@@ -252,6 +255,25 @@ struct WorkspaceWriteBytesResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct WorkspaceWriteRefRequest {
+    /// Provide either `root_hash` or (`workspace`, `version`).
+    root_hash: Option<String>,
+    /// Workspace name (used when `root_hash` is omitted).
+    workspace: Option<String>,
+    /// Workspace version (used when `root_hash` is omitted).
+    version: Option<u64>,
+    path: String,
+    blob_hash: String,
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct WorkspaceWriteRefResponse {
+    new_root_hash: String,
+    blob_hash: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct WorkspaceRemoveRequest {
     /// Provide either `root_hash` or (`workspace`, `version`).
     root_hash: Option<String>,
@@ -386,6 +408,7 @@ pub fn router() -> Router<HttpState> {
         .route("/workspace/read-bytes", get(workspace_read_bytes))
         .route("/workspace/annotations", get(workspace_annotations_get))
         .route("/workspace/write-bytes", post(workspace_write_bytes))
+        .route("/workspace/write-ref", post(workspace_write_ref))
         .route("/workspace/remove", post(workspace_remove))
         .route("/workspace/annotations", post(workspace_annotations_set))
         .route("/workspace/empty-root", post(workspace_empty_root))
@@ -1052,6 +1075,40 @@ async fn workspace_write_bytes(
         "mode": payload.mode,
     });
     let result = control_call(&state, "workspace-write-bytes", payload).await?;
+    Ok(Json(result))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/workspace/write-ref",
+    tag = "workspace",
+    request_body = WorkspaceWriteRefRequest,
+    responses(
+        (status = 200, body = WorkspaceWriteRefResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
+async fn workspace_write_ref(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<impl IntoResponse, ApiError> {
+    let payload = parse_body::<WorkspaceWriteRefRequest>(&headers, &body)?;
+    let root_hash = resolve_root_hash(
+        &state,
+        payload.root_hash,
+        payload.workspace,
+        payload.version,
+    )
+    .await?;
+    let payload = serde_json::json!({
+        "root_hash": root_hash,
+        "path": payload.path,
+        "blob_hash": payload.blob_hash,
+        "mode": payload.mode,
+    });
+    let result = control_call(&state, "workspace-write-ref", payload).await?;
     Ok(Json(result))
 }
 

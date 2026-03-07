@@ -1,11 +1,10 @@
 [
   {
     "$kind": "defpolicy",
-    "name": "demiurge/session_policy@1",
+    "name": "demiurge/task_policy@1",
     "rules": [
       {
         "when": {
-          "effect_kind": "llm.generate",
           "origin_kind": "workflow",
           "origin_name": "demiurge/Demiurge@1"
         },
@@ -13,25 +12,8 @@
       },
       {
         "when": {
-          "effect_kind": "introspect.manifest",
           "origin_kind": "workflow",
-          "origin_name": "demiurge/Demiurge@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.resolve",
-          "origin_kind": "workflow",
-          "origin_name": "demiurge/Demiurge@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.read_bytes",
-          "origin_kind": "workflow",
-          "origin_name": "demiurge/Demiurge@1"
+          "origin_name": "aos.agent/SessionWorkflow@1"
         },
         "decision": "allow"
       },

@@ -28,14 +28,12 @@ fn shell_available() -> bool {
 
 fn open_params() -> HostSessionOpenParams {
     HostSessionOpenParams {
-        target: HostTarget {
-            local: Some(HostLocalTarget {
-                mounts: None,
-                workdir: None,
-                env: None,
-                network_mode: "none".into(),
-            }),
-        },
+        target: HostTarget::local(HostLocalTarget {
+            mounts: None,
+            workdir: None,
+            env: None,
+            network_mode: "none".into(),
+        }),
         session_ttl_ns: None,
         labels: None,
     }

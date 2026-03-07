@@ -18,7 +18,7 @@ Breaking changes are intentional:
 
 Completed this pass:
 
-1. Fixture workflow wrappers for `20-agent-session` and `22-agent-live` were migrated to current SDK API (`SessionWorkflowEvent`, `SessionRuntimeLimits.max_pending_intents`, updated error mapping) and now compile.
+1. Fixture workflow wrappers for `20-agent-session` and `22-agent-live` were migrated to current SDK API (`SessionWorkflowEvent`, `SessionRuntimeLimits.max_pending_effects`, updated error mapping) and now compile.
 2. Fixture manifests for `20/21/22` were migrated to active routing shape:
    - `routing.subscriptions` used in place of `routing.events`,
    - manifest `plans`/`triggers` removed.

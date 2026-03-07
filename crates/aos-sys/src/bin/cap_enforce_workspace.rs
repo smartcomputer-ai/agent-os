@@ -65,6 +65,11 @@ struct WorkspaceWriteBytesParams {
 }
 
 #[derive(Deserialize)]
+struct WorkspaceWriteRefParams {
+    path: String,
+}
+
+#[derive(Deserialize)]
 struct WorkspaceRemoveParams {
     path: String,
 }
@@ -200,6 +205,20 @@ impl PureModule for CapEnforceWorkspace {
                     ));
                 }
             }
+            "workspace.write_ref" => {
+                let params: WorkspaceWriteRefParams = match decode_cbor(&input.effect_params) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        return Ok(deny("effect_params_invalid", err.to_string()));
+                    }
+                };
+                if !path_allowed(&cap_params.path_prefixes, &params.path) {
+                    return Ok(deny(
+                        "path_not_allowed",
+                        format!("path '{}' not allowed", params.path),
+                    ));
+                }
+            }
             "workspace.remove" => {
                 let params: WorkspaceRemoveParams = match decode_cbor(&input.effect_params) {
                     Ok(value) => value,
@@ -285,7 +304,7 @@ fn op_for_kind(kind: &str) -> Option<&'static str> {
         "workspace.empty_root" => Some("write"),
         "workspace.list" => Some("list"),
         "workspace.read_ref" | "workspace.read_bytes" => Some("read"),
-        "workspace.write_bytes" | "workspace.remove" => Some("write"),
+        "workspace.write_bytes" | "workspace.write_ref" | "workspace.remove" => Some("write"),
         "workspace.diff" => Some("diff"),
         "workspace.annotations_get" => Some("read"),
         "workspace.annotations_set" => Some("write"),

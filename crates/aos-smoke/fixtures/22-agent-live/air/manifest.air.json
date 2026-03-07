@@ -23,53 +23,32 @@
     { "name": "aos.agent/ActiveToolBatch@1" },
     { "name": "aos.agent/ToolOverrideScope@1" },
     { "name": "aos.agent/ReasoningEffort@1" },
-    { "name": "aos.agent/WorkspaceBinding@1" },
-    { "name": "aos.agent/WorkspaceApplyMode@1" },
-    { "name": "aos.agent/WorkspaceSnapshot@1" },
-    { "name": "aos.agent/WorkspaceSnapshotReady@1" },
     { "name": "aos.agent/SessionConfig@1" },
     { "name": "aos.agent/RunConfig@1" },
     { "name": "aos.agent/SessionLifecycle@1" },
     { "name": "aos.agent/HostCommand@1" },
     { "name": "aos.agent/SessionIngressKind@1" },
     { "name": "aos.agent/SessionIngress@1" },
+    { "name": "aos.agent/SessionLifecycleChanged@1" },
     { "name": "aos.agent/PendingBlobPutKind@1" },
     { "name": "aos.agent/PendingBlobPut@1" },
     { "name": "aos.agent/PendingBlobGetKind@1" },
     { "name": "aos.agent/PendingBlobGet@1" },
     { "name": "aos.agent/PendingFollowUpTurn@1" },
-    { "name": "aos.agent/PendingIntent@1" },
     { "name": "aos.agent/SessionState@1" },
     { "name": "aos.agent/SessionNoop@1" },
-    { "name": "aos.agent/SessionWorkflowEvent@1" },
-    { "name": "sys/EffectReceiptEnvelope@1" },
-    { "name": "sys/EffectReceiptRejected@1" },
-    { "name": "sys/EffectStreamFrame@1" },
-    { "name": "sys/WorkspaceName@1" },
-    { "name": "sys/WorkspaceHistory@1" },
-    { "name": "sys/WorkspaceCommitMeta@1" },
-    { "name": "sys/WorkspaceCommit@1" },
-    { "name": "sys/WorkspaceResolveParams@1" },
-    { "name": "sys/WorkspaceResolveReceipt@1" },
-    { "name": "sys/WorkspaceReadRefParams@1" },
-    { "name": "sys/WorkspaceRefEntry@1" },
-    { "name": "sys/WorkspaceReadRefReceipt@1" },
-    { "name": "sys/WorkspaceReadBytesParams@1" },
-    { "name": "sys/WorkspaceReadBytesReceipt@1" }
+    { "name": "aos.agent/SessionWorkflowEvent@1" }
   ],
   "modules": [
     { "name": "aos.agent/SessionWorkflow@1" },
-    { "name": "sys/Workspace@1" },
-    { "name": "sys/CapEnforceWorkspace@1" },
     { "name": "sys/CapEnforceLlmBasic@1" }
   ],
   "caps": [
-    { "name": "demo/agent_live_llm_basic@1" },
-    { "name": "demo/agent_live_workspace_cap@1" }
+    { "name": "demo/agent_live_llm_basic@1" }
   ],
-  "policies": [{ "name": "demo/agent-live-workspace-policy@1" }],
+  "policies": [{ "name": "demo/agent-live-policy@1" }],
   "defaults": {
-    "policy": "demo/agent-live-workspace-policy@1",
+    "policy": "demo/agent-live-policy@1",
     "cap_grants": [
       {
         "name": "llm",
@@ -89,21 +68,6 @@
         }
       },
       {
-        "name": "cap_workspace",
-        "cap": "demo/agent_live_workspace_cap@1",
-        "params": {
-          "record": {
-            "workspaces": {
-              "list": [{ "text": "agent-live" }]
-            },
-            "path_prefixes": { "null": {} },
-            "ops": {
-              "set": [{ "text": "resolve" }, { "text": "read" }]
-            }
-          }
-        }
-      },
-      {
         "name": "blob",
         "cap": "sys/blob@1",
         "params": {
@@ -118,11 +82,6 @@
         "event": "aos.agent/SessionIngress@1",
         "module": "aos.agent/SessionWorkflow@1",
         "key_field": "session_id"
-      },
-      {
-        "event": "sys/WorkspaceCommit@1",
-        "module": "sys/Workspace@1",
-        "key_field": "workspace"
       }
     ],
     "inboxes": []
@@ -138,10 +97,7 @@
   "effects": [
     { "name": "sys/blob.put@1" },
     { "name": "sys/blob.get@1" },
-    { "name": "sys/llm.generate@1" },
-    { "name": "sys/workspace.resolve@1" },
-    { "name": "sys/workspace.read_ref@1" },
-    { "name": "sys/workspace.read_bytes@1" }
+    { "name": "sys/llm.generate@1" }
   ],
   "effect_bindings": [
     { "kind": "blob.put", "adapter_id": "blob.put" },

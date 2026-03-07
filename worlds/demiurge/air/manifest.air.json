@@ -10,133 +10,146 @@
     { "name": "aos.agent/ToolAvailabilityRule@1" },
     { "name": "aos.agent/ToolParallelismHint@1" },
     { "name": "aos.agent/ToolSpec@1" },
+    { "name": "aos.agent/ToolMapper@1" },
     { "name": "aos.agent/HostSessionStatus@1" },
     { "name": "aos.agent/ToolRuntimeContext@1" },
     { "name": "aos.agent/EffectiveTool@1" },
     { "name": "aos.agent/EffectiveToolSet@1" },
     { "name": "aos.agent/ToolCallObserved@1" },
+    { "name": "aos.agent/ToolCallLlmResult@1" },
     { "name": "aos.agent/PlannedToolCall@1" },
     { "name": "aos.agent/ToolExecutionPlan@1" },
     { "name": "aos.agent/ToolBatchPlan@1" },
     { "name": "aos.agent/ActiveToolBatch@1" },
     { "name": "aos.agent/ToolOverrideScope@1" },
     { "name": "aos.agent/ReasoningEffort@1" },
-    { "name": "aos.agent/WorkspaceBinding@1" },
-    { "name": "aos.agent/WorkspaceApplyMode@1" },
-    { "name": "aos.agent/WorkspaceSnapshot@1" },
-    { "name": "aos.agent/WorkspaceSnapshotReady@1" },
     { "name": "aos.agent/SessionConfig@1" },
     { "name": "aos.agent/RunConfig@1" },
     { "name": "aos.agent/SessionLifecycle@1" },
     { "name": "aos.agent/HostCommand@1" },
     { "name": "aos.agent/SessionIngressKind@1" },
     { "name": "aos.agent/SessionIngress@1" },
-    { "name": "aos.agent/PendingIntent@1" },
+    { "name": "aos.agent/SessionLifecycleChanged@1" },
+    { "name": "aos.agent/PendingBlobPutKind@1" },
+    { "name": "aos.agent/PendingBlobPut@1" },
+    { "name": "aos.agent/PendingBlobGetKind@1" },
+    { "name": "aos.agent/PendingBlobGet@1" },
+    { "name": "aos.agent/PendingFollowUpTurn@1" },
     { "name": "aos.agent/SessionState@1" },
     { "name": "aos.agent/SessionNoop@1" },
     { "name": "aos.agent/SessionWorkflowEvent@1" },
-    { "name": "sys/SecretRef@1" },
-    { "name": "sys/TextOrSecretRef@1" },
-    { "name": "sys/BytesOrSecretRef@1" },
-    { "name": "sys/EffectReceiptEnvelope@1" },
-    { "name": "sys/EffectReceiptRejected@1" },
-    { "name": "sys/EffectStreamFrame@1" },
-    { "name": "demiurge/ToolCallParams@1" },
-    { "name": "demiurge/ToolCallRequested@1" },
-    { "name": "demiurge/PendingToolStage@1" },
-    { "name": "demiurge/PendingToolCall@1" },
+    { "name": "demiurge/TaskConfig@1" },
+    { "name": "demiurge/TaskSubmitted@1" },
+    { "name": "demiurge/TaskStatus@1" },
+    { "name": "demiurge/TaskFailure@1" },
+    { "name": "demiurge/PendingStage@1" },
+    { "name": "demiurge/TaskFinished@1" },
     { "name": "demiurge/State@1" },
-    { "name": "demiurge/WorkflowEvent@1" },
-    { "name": "sys/WorkspaceName@1" },
-    { "name": "sys/WorkspaceHistory@1" },
-    { "name": "sys/WorkspaceCommitMeta@1" },
-    { "name": "sys/WorkspaceCommit@1" },
-    { "name": "sys/WorkspaceResolveParams@1" },
-    { "name": "sys/WorkspaceResolveReceipt@1" },
-    { "name": "sys/WorkspaceReadRefParams@1" },
-    { "name": "sys/WorkspaceRefEntry@1" },
-    { "name": "sys/WorkspaceReadRefReceipt@1" },
-    { "name": "sys/WorkspaceReadBytesParams@1" },
-    { "name": "sys/WorkspaceReadBytesReceipt@1" },
-    { "name": "sys/IntrospectManifestParams@1" },
-    { "name": "sys/IntrospectManifestReceipt@1" }
+    { "name": "demiurge/WorkflowEvent@1" }
   ],
   "modules": [
     { "name": "demiurge/Demiurge@1" },
-    { "name": "sys/Workspace@1" },
-    { "name": "sys/CapEnforceWorkspace@1" },
+    { "name": "aos.agent/SessionWorkflow@1" },
     { "name": "sys/CapEnforceLlmBasic@1" }
   ],
   "caps": [
-    { "name": "sys/query@1" },
-    { "name": "sys/workspace@1" },
-    { "name": "sys/llm.basic@1" }
+    { "name": "demiurge/task_llm_basic@1" },
+    { "name": "demiurge/task_host@1" },
+    { "name": "sys/blob@1" }
   ],
-  "policies": [{ "name": "demiurge/session_policy@1" }],
+  "policies": [
+    { "name": "demiurge/task_policy@1" }
+  ],
   "secrets": [
     { "name": "llm/openai_api@1" },
     { "name": "llm/anthropic_api@1" }
   ],
   "defaults": {
-    "policy": "demiurge/session_policy@1",
+    "policy": "demiurge/task_policy@1",
     "cap_grants": [
       {
-        "name": "cap_query",
-        "cap": "sys/query@1",
-        "params": {
-          "record": {}
-        }
-      },
-      {
-        "name": "cap_workspace",
-        "cap": "sys/workspace@1",
-        "params": {
-          "record": {
-            "workspaces": {
-              "list": [{ "text": "demiurge" }]
-            },
-            "ops": {
-              "set": [{ "text": "resolve" }, { "text": "read" }]
-            }
-          }
-        }
-      },
-      {
         "name": "llm",
-        "cap": "sys/llm.basic@1",
+        "cap": "demiurge/task_llm_basic@1",
         "params": {
           "record": {
             "models": {
               "set": [
                 { "text": "gpt-5.2" },
+                { "text": "gpt-5.3-codex" },
                 { "text": "gpt-5-mini" },
-                { "text": "gpt-5.2-codex" },
-                { "text": "claude-sonnet-4-5" },
-                { "text": "gpt-mock" }
+                { "text": "claude-sonnet-4-5" }
               ]
             },
-            "max_tokens": { "nat": 4096 }
+            "max_tokens": { "nat": 100000 }
           }
+        }
+      },
+      {
+        "name": "blob",
+        "cap": "sys/blob@1",
+        "params": {
+          "record": {}
+        }
+      },
+      {
+        "name": "host",
+        "cap": "demiurge/task_host@1",
+        "params": {
+          "record": {}
         }
       }
     ]
   },
+  "effects": [
+    { "name": "sys/blob.put@1" },
+    { "name": "sys/blob.get@1" },
+    { "name": "sys/llm.generate@1" },
+    { "name": "sys/host.session.open@1" },
+    { "name": "sys/host.exec@1" },
+    { "name": "sys/host.session.signal@1" },
+    { "name": "sys/host.fs.read_file@1" },
+    { "name": "sys/host.fs.write_file@1" },
+    { "name": "sys/host.fs.edit_file@1" },
+    { "name": "sys/host.fs.apply_patch@1" },
+    { "name": "sys/host.fs.grep@1" },
+    { "name": "sys/host.fs.glob@1" },
+    { "name": "sys/host.fs.stat@1" },
+    { "name": "sys/host.fs.exists@1" },
+    { "name": "sys/host.fs.list_dir@1" }
+  ],
+  "effect_bindings": [
+    { "kind": "blob.put", "adapter_id": "blob.put" },
+    { "kind": "blob.get", "adapter_id": "blob.get" },
+    { "kind": "llm.generate", "adapter_id": "llm.generate" },
+    { "kind": "host.session.open", "adapter_id": "host.session.open" },
+    { "kind": "host.exec", "adapter_id": "host.exec" },
+    { "kind": "host.session.signal", "adapter_id": "host.session.signal" },
+    { "kind": "host.fs.read_file", "adapter_id": "host.fs.read_file" },
+    { "kind": "host.fs.write_file", "adapter_id": "host.fs.write_file" },
+    { "kind": "host.fs.edit_file", "adapter_id": "host.fs.edit_file" },
+    { "kind": "host.fs.apply_patch", "adapter_id": "host.fs.apply_patch" },
+    { "kind": "host.fs.grep", "adapter_id": "host.fs.grep" },
+    { "kind": "host.fs.glob", "adapter_id": "host.fs.glob" },
+    { "kind": "host.fs.stat", "adapter_id": "host.fs.stat" },
+    { "kind": "host.fs.exists", "adapter_id": "host.fs.exists" },
+    { "kind": "host.fs.list_dir", "adapter_id": "host.fs.list_dir" }
+  ],
   "routing": {
     "subscriptions": [
       {
+        "event": "demiurge/TaskSubmitted@1",
+        "module": "demiurge/Demiurge@1",
+        "key_field": "task_id"
+      },
+      {
+        "event": "aos.agent/SessionLifecycleChanged@1",
+        "module": "demiurge/Demiurge@1",
+        "key_field": "session_id"
+      },
+      {
         "event": "aos.agent/SessionIngress@1",
-        "module": "demiurge/Demiurge@1",
+        "module": "aos.agent/SessionWorkflow@1",
         "key_field": "session_id"
-      },
-      {
-        "event": "demiurge/ToolCallRequested@1",
-        "module": "demiurge/Demiurge@1",
-        "key_field": "session_id"
-      },
-      {
-        "event": "sys/WorkspaceCommit@1",
-        "module": "sys/Workspace@1",
-        "key_field": "workspace"
       }
     ],
     "inboxes": []
@@ -144,16 +157,16 @@
   "module_bindings": {
     "demiurge/Demiurge@1": {
       "slots": {
+        "blob": "blob",
+        "host": "host"
+      }
+    },
+    "aos.agent/SessionWorkflow@1": {
+      "slots": {
+        "blob": "blob",
         "llm": "llm",
-        "query": "cap_query",
-        "workspace": "cap_workspace"
+        "host": "host"
       }
     }
-  },
-  "effects": [
-    { "name": "sys/llm.generate@1" },
-    { "name": "sys/workspace.resolve@1" },
-    { "name": "sys/workspace.read_bytes@1" },
-    { "name": "sys/introspect.manifest@1" }
-  ]
+  }
 }

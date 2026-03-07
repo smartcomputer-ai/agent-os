@@ -181,6 +181,8 @@ pub struct WorkflowReceiptSnapshot {
     pub origin_instance_key: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer_ref: Option<String>,
     #[serde(default)]
     pub emitted_at_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -234,6 +236,7 @@ impl WorkflowReceiptSnapshot {
             effect_kind: ctx.effect_kind.clone(),
             origin_instance_key: ctx.origin_instance_key.clone(),
             params_cbor: ctx.params_cbor.clone(),
+            issuer_ref: ctx.issuer_ref.clone(),
             emitted_at_seq: ctx.emitted_at_seq,
             module_version: ctx.module_version.clone(),
         }
@@ -245,6 +248,7 @@ impl WorkflowReceiptSnapshot {
             self.origin_instance_key,
             self.effect_kind,
             self.params_cbor,
+            self.issuer_ref,
             self.intent_hash,
             self.emitted_at_seq,
             self.module_version,

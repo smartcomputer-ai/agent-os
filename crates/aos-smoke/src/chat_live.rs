@@ -15,8 +15,8 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "demo/LiveChat@1";
 const EVENT_SCHEMA: &str = "demo/LiveEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/21-chat-live/workflow";
-const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/21-chat-live";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/20-chat-live/workflow";
+const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/20-chat-live";
 
 const OPENAI_KEY_ENV: &str = "OPENAI_API_KEY";
 const OPENAI_MODEL_ENV: &str = "OPENAI_LIVE_MODEL";
