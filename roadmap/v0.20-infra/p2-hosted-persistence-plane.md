@@ -7,9 +7,9 @@
 
 Implementation status as of 2026-03-07:
 
-- Complete in `crates/aos-fdb`: scope `1)` FDB-first storage boundary, `2)` canonical keyspace layout, `3)` CAS, `4)` journal append/scan semantics, `5)` inbox queue semantics, `6)` snapshot index and active baseline semantics.
+- Complete in `crates/aos-fdb`: scope `1)` FDB-first storage boundary, `2)` canonical keyspace layout, `3)` CAS, `4)` journal append/scan semantics, `5)` inbox queue semantics, `6)` snapshot index and active baseline semantics, `7)` segment export compaction/storage semantics.
 - Partial: targeted live FoundationDB integration coverage exists under `crates/aos-fdb/tests/`, but the full reusable conformance harness from scope `8)` is not finished.
-- Pending: hosted restore wiring and broader repository integration from scope `9)`, scope `7)` segment export compaction, scope `8)` formal conformance harness, and docs/spec alignment.
+- Pending: hosted restore wiring and broader repository integration from scope `9)`, scope `8)` formal conformance harness, and docs/spec alignment.
 
 ## Goal
 
@@ -348,7 +348,7 @@ Restore algorithm contract:
 5. Replay journal entries where `height >= baseline.height` in order.
 6. Resulting head state must be replay-identical to full replay from genesis.
 
-### [ ] 7) Segment export compaction (hot/cold split)
+### [x] 7) Segment export compaction (hot/cold split)
 
 Implement bounded-KV-growth compaction with no semantic changes.
 
@@ -527,7 +527,7 @@ Guarantees:
 2. [x] `aos-fdb` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
 3. [ ] Hosted-mode restore uses active baseline + segments + hot tail deterministically.
 4. [x] Inbox drain protocol with cursor commit is implemented and crash-safe.
-5. [ ] Segment export compaction is available behind config flag and tested.
+5. [x] Segment export compaction is available in `aos-fdb` and tested.
 6. [x] Kernel remains backend-agnostic; hosted persistence coupling is outside `aos-kernel`.
 7. [ ] Spec/docs updates merged for the FDB-first hosted persistence protocol.
 

@@ -14,9 +14,14 @@ use futures::executor::block_on;
 use crate::object_store::{DynBlobObjectStore, filesystem_object_store};
 use crate::protocol::{
     BlobStorage, CasMeta, CborPayload, InboxItem, InboxSeq, JournalHeight, PersistConflict,
-    PersistCorruption, PersistError, PersistenceConfig, SegmentIndexRecord, SnapshotCommitRequest,
-    SnapshotCommitResult, SnapshotRecord, UniverseId, WorldId, WorldPersistence, cas_object_key,
-    validate_baseline_promotion_record, validate_snapshot_commit_request, validate_snapshot_record,
+    PersistCorruption, PersistError, PersistenceConfig, SegmentExportRequest, SegmentExportResult,
+    SegmentId, SegmentIndexRecord, SnapshotCommitRequest, SnapshotCommitResult, SnapshotRecord,
+    UniverseId, WorldId, WorldPersistence, cas_object_key, validate_baseline_promotion_record,
+    validate_snapshot_commit_request, validate_snapshot_record,
+};
+use crate::segment::{
+    decode_segment_entries, encode_segment_entries, segment_checksum, segment_object_key,
+    validate_segment_export_request,
 };
 
 pub struct FdbRuntime {
@@ -159,6 +164,17 @@ impl FdbWorldPersistence {
     fn segment_index_space(&self, universe: UniverseId, world: WorldId) -> Subspace {
         self.universe_root(universe)
             .subspace(&("segments", world.to_string()))
+    }
+
+    fn segment_index_key(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        end_height: JournalHeight,
+    ) -> Result<Vec<u8>, PersistError> {
+        Ok(self
+            .segment_index_space(universe, world)
+            .pack(&(self.to_i64(end_height, "segment end height")?,)))
     }
 
     fn normalize_payload(
@@ -921,8 +937,16 @@ impl WorldPersistence for FdbWorldPersistence {
         self.run(|trx, _| {
             let key = key.clone();
             let value = value.clone();
+            let record = record.clone();
             async move {
-                if trx.get(&key, false).await?.is_some() {
+                if let Some(existing) = trx.get(&key, false).await? {
+                    let existing_record: SegmentIndexRecord =
+                        serde_cbor::from_slice(existing.as_ref()).map_err(|err| {
+                            custom_persist_error(PersistError::backend(err.to_string()))
+                        })?;
+                    if existing_record == record {
+                        return Ok(());
+                    }
                     return Err(custom_persist_error(
                         PersistConflict::SegmentExists {
                             end_height: record.segment.end,
@@ -933,6 +957,104 @@ impl WorldPersistence for FdbWorldPersistence {
                 trx.set(&key, &value);
                 Ok(())
             }
+        })
+    }
+
+    fn segment_export(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        request: SegmentExportRequest,
+    ) -> Result<SegmentExportResult, PersistError> {
+        validate_segment_export_request(&request)?;
+        let baseline = self.snapshot_active_baseline(universe, world)?;
+        let safe_exclusive_end = baseline.height.saturating_sub(request.hot_tail_margin);
+        if request.segment.end >= safe_exclusive_end {
+            return Err(PersistError::validation(format!(
+                "segment end {} must be strictly below active baseline {} with hot-tail margin {}",
+                request.segment.end, baseline.height, request.hot_tail_margin
+            )));
+        }
+        let head = self.journal_head(universe, world)?;
+        if request.segment.end >= head {
+            return Err(PersistError::validation(format!(
+                "segment end {} must be below current journal head {}",
+                request.segment.end, head
+            )));
+        }
+
+        let expected_entries = request.segment.end - request.segment.start + 1;
+        let object_key = segment_object_key(universe, world, request.segment);
+        let segment_key = self.segment_index_key(universe, world, request.segment.end)?;
+        let existing: Option<SegmentIndexRecord> = self.run(|trx, _| {
+            let segment_key = segment_key.clone();
+            async move {
+                trx.get(&segment_key, false)
+                    .await?
+                    .map(|value| {
+                        serde_cbor::from_slice(value.as_ref()).map_err(|err| {
+                            custom_persist_error(PersistError::backend(err.to_string()))
+                        })
+                    })
+                    .transpose()
+            }
+        })?;
+        let record = if let Some(existing) = existing {
+            if existing.segment != request.segment {
+                return Err(PersistConflict::SegmentExists {
+                    end_height: request.segment.end,
+                }
+                .into());
+            }
+            if !self.object_store.exists(&existing.object_key)? {
+                return Err(PersistCorruption::MissingSegmentObject {
+                    segment: request.segment,
+                    object_key: existing.object_key.clone(),
+                }
+                .into());
+            }
+            existing
+        } else {
+            let entries = self.journal_read_range(
+                universe,
+                world,
+                request.segment.start,
+                expected_entries as u32,
+            )?;
+            let object_bytes = encode_segment_entries(request.segment, &entries)?;
+            self.object_store
+                .put_if_absent(&object_key, &object_bytes)?;
+            let record = SegmentIndexRecord {
+                segment: request.segment,
+                object_key: object_key.clone(),
+                checksum: segment_checksum(&object_bytes),
+            };
+            self.segment_index_put(universe, world, record.clone())?;
+            record
+        };
+
+        let journal_space = self.journal_entry_space(universe, world);
+        let mut chunk_start = request.segment.start;
+        while chunk_start <= request.segment.end {
+            let chunk_end =
+                (chunk_start + request.delete_chunk_entries as u64 - 1).min(request.segment.end);
+            self.run(|trx, _| {
+                let journal_space = journal_space.clone();
+                async move {
+                    for height in chunk_start..=chunk_end {
+                        let key = journal_space.pack(&(to_i64_static(height, "journal height")?,));
+                        trx.clear(&key);
+                    }
+                    Ok(())
+                }
+            })?;
+            chunk_start = chunk_end.saturating_add(1);
+        }
+
+        Ok(SegmentExportResult {
+            record,
+            exported_entries: expected_entries,
+            deleted_entries: expected_entries,
         })
     }
 
@@ -965,6 +1087,40 @@ impl WorldPersistence for FdbWorldPersistence {
                 Ok(records)
             }
         })
+    }
+
+    fn segment_read_entries(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        segment: SegmentId,
+    ) -> Result<Vec<(JournalHeight, Vec<u8>)>, PersistError> {
+        let segment_key = self.segment_index_key(universe, world, segment.end)?;
+        let record: SegmentIndexRecord = self.run(|trx, _| {
+            let segment_key = segment_key.clone();
+            async move {
+                let value = trx.get(&segment_key, false).await?.ok_or_else(|| {
+                    custom_persist_error(PersistError::not_found(format!("segment {:?}", segment)))
+                })?;
+                serde_cbor::from_slice(value.as_ref())
+                    .map_err(|err| custom_persist_error(PersistError::backend(err.to_string())))
+            }
+        })?;
+        if record.segment != segment {
+            return Err(PersistError::not_found(format!("segment {:?}", segment)));
+        }
+        let bytes = match self.object_store.get(&record.object_key) {
+            Ok(bytes) => bytes,
+            Err(PersistError::NotFound(_)) => {
+                return Err(PersistCorruption::MissingSegmentObject {
+                    segment,
+                    object_key: record.object_key.clone(),
+                }
+                .into());
+            }
+            Err(err) => return Err(err),
+        };
+        decode_segment_entries(&record, &bytes)
     }
 }
 

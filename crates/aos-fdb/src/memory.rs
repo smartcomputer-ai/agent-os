@@ -5,10 +5,15 @@ use aos_cbor::Hash;
 
 use crate::protocol::{
     BlobStorage, CasMeta, CborPayload, InboxItem, InboxSeq, JournalHeight, PersistConflict,
-    PersistCorruption, PersistError, PersistenceConfig, SegmentIndexRecord, SnapshotCommitRequest,
-    SnapshotCommitResult, SnapshotRecord, UniverseId, WorldId, WorldPersistence, cas_object_key,
-    ensure_monotonic_snapshot_records, sample_world_meta, validate_baseline_promotion_record,
-    validate_snapshot_commit_request, validate_snapshot_record,
+    PersistCorruption, PersistError, PersistenceConfig, SegmentExportRequest, SegmentExportResult,
+    SegmentIndexRecord, SnapshotCommitRequest, SnapshotCommitResult, SnapshotRecord, UniverseId,
+    WorldId, WorldPersistence, cas_object_key, ensure_monotonic_snapshot_records,
+    sample_world_meta, validate_baseline_promotion_record, validate_snapshot_commit_request,
+    validate_snapshot_record,
+};
+use crate::segment::{
+    decode_segment_entries, encode_segment_entries, segment_checksum, segment_object_key,
+    validate_segment_export_request,
 };
 
 #[derive(Debug, Clone)]
@@ -21,6 +26,7 @@ pub struct MemoryWorldPersistence {
 struct MemoryState {
     cas: BTreeMap<UniverseId, BTreeMap<Hash, CasEntry>>,
     cas_objects: BTreeMap<String, Vec<u8>>,
+    segment_objects: BTreeMap<String, Vec<u8>>,
     worlds: BTreeMap<(UniverseId, WorldId), WorldState>,
 }
 
@@ -676,6 +682,92 @@ impl WorldPersistence for MemoryWorldPersistence {
         })
     }
 
+    fn segment_export(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        request: SegmentExportRequest,
+    ) -> Result<SegmentExportResult, PersistError> {
+        validate_segment_export_request(&request)?;
+        let mut state = self.state.lock().unwrap();
+        let object_key = segment_object_key(universe, world, request.segment);
+        let (record, object_bytes_to_insert) = {
+            let world_state = state.worlds.entry((universe, world)).or_default();
+            let baseline = world_state.active_baseline.clone().ok_or_else(|| {
+                PersistError::validation("segment export requires active baseline")
+            })?;
+            let safe_exclusive_end = baseline.height.saturating_sub(request.hot_tail_margin);
+            if request.segment.end >= safe_exclusive_end {
+                return Err(PersistError::validation(format!(
+                    "segment end {} must be strictly below active baseline {} with hot-tail margin {}",
+                    request.segment.end, baseline.height, request.hot_tail_margin
+                )));
+            }
+            if request.segment.end >= world_state.journal_head {
+                return Err(PersistError::validation(format!(
+                    "segment end {} must be below current journal head {}",
+                    request.segment.end, world_state.journal_head
+                )));
+            }
+
+            let existing_record = world_state.segments.get(&request.segment.end).cloned();
+            if let Some(existing) = existing_record {
+                if existing.segment != request.segment {
+                    return Err(PersistConflict::SegmentExists {
+                        end_height: request.segment.end,
+                    }
+                    .into());
+                }
+                (existing, None)
+            } else {
+                let mut entries = Vec::new();
+                for height in request.segment.start..=request.segment.end {
+                    let entry = world_state
+                        .journal_entries
+                        .get(&height)
+                        .cloned()
+                        .ok_or(PersistCorruption::MissingJournalEntry { height })?;
+                    entries.push((height, entry));
+                }
+                let object_bytes = encode_segment_entries(request.segment, &entries)?;
+                let record = SegmentIndexRecord {
+                    segment: request.segment,
+                    object_key: object_key.clone(),
+                    checksum: segment_checksum(&object_bytes),
+                };
+                world_state
+                    .segments
+                    .insert(request.segment.end, record.clone());
+                (record, Some(object_bytes))
+            }
+        };
+        if let Some(object_bytes) = object_bytes_to_insert {
+            state
+                .segment_objects
+                .insert(object_key.clone(), object_bytes);
+        }
+
+        let world_state = state.worlds.get_mut(&(universe, world)).unwrap();
+        let mut deleted_entries = 0u64;
+        let mut chunk_start = request.segment.start;
+        while chunk_start <= request.segment.end {
+            let chunk_end =
+                (chunk_start + request.delete_chunk_entries as u64 - 1).min(request.segment.end);
+            for height in chunk_start..=chunk_end {
+                if world_state.journal_entries.remove(&height).is_some() {
+                    deleted_entries += 1;
+                }
+            }
+            chunk_start = chunk_end.saturating_add(1);
+        }
+
+        Ok(SegmentExportResult {
+            record,
+            exported_entries: request.segment.end - request.segment.start + 1,
+            deleted_entries,
+        })
+    }
+
     fn segment_index_read_from(
         &self,
         universe: UniverseId,
@@ -692,6 +784,34 @@ impl WorldPersistence for MemoryWorldPersistence {
                 .collect())
         })
     }
+
+    fn segment_read_entries(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        segment: crate::SegmentId,
+    ) -> Result<Vec<(JournalHeight, Vec<u8>)>, PersistError> {
+        let state = self.state.lock().unwrap();
+        let world_state = state.worlds.get(&(universe, world)).ok_or_else(|| {
+            PersistError::not_found(format!("world {universe}/{world} not found"))
+        })?;
+        let record = world_state
+            .segments
+            .get(&segment.end)
+            .ok_or_else(|| PersistError::not_found(format!("segment {:?}", segment)))?;
+        if record.segment != segment {
+            return Err(PersistError::not_found(format!("segment {:?}", segment)));
+        }
+        let bytes = state
+            .segment_objects
+            .get(&record.object_key)
+            .cloned()
+            .ok_or_else(|| PersistCorruption::MissingSegmentObject {
+                segment,
+                object_key: record.object_key.clone(),
+            })?;
+        decode_segment_entries(record, &bytes)
+    }
 }
 
 #[cfg(test)]
@@ -699,7 +819,8 @@ mod tests {
     use super::*;
     use crate::{
         CborPayload, InboxItem, PersistConflict, PersistCorruption, PersistenceConfig,
-        SnapshotCommitRequest, SnapshotRecord, WorldPersistence, cas_object_key,
+        SegmentExportRequest, SnapshotCommitRequest, SnapshotRecord, WorldPersistence,
+        cas_object_key,
     };
     use uuid::Uuid;
 
@@ -1116,6 +1237,59 @@ mod tests {
                 .segment_index_read_from(universe(), world(), 0, 8)
                 .unwrap(),
             vec![first]
+        );
+    }
+
+    #[test]
+    fn segment_export_moves_hot_journal_entries_into_segment_object() {
+        let persistence = MemoryWorldPersistence::new();
+        persistence
+            .journal_append_batch(
+                universe(),
+                world(),
+                0,
+                &[b"j0".to_vec(), b"j1".to_vec(), b"j2".to_vec()],
+            )
+            .unwrap();
+        let baseline = SnapshotRecord {
+            snapshot_ref: "sha256:snapshot".into(),
+            height: 3,
+            logical_time_ns: 30,
+            receipt_horizon_height: Some(3),
+            manifest_hash: Some("sha256:manifest".into()),
+        };
+        persistence
+            .snapshot_index(universe(), world(), baseline.clone())
+            .unwrap();
+        persistence
+            .snapshot_promote_baseline(universe(), world(), baseline)
+            .unwrap();
+
+        let result = persistence
+            .segment_export(
+                universe(),
+                world(),
+                SegmentExportRequest {
+                    segment: crate::SegmentId::new(0, 1).unwrap(),
+                    hot_tail_margin: 0,
+                    delete_chunk_entries: 1,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result.exported_entries, 2);
+        assert_eq!(result.deleted_entries, 2);
+        assert_eq!(
+            persistence
+                .segment_read_entries(universe(), world(), crate::SegmentId::new(0, 1).unwrap())
+                .unwrap(),
+            vec![(0, b"j0".to_vec()), (1, b"j1".to_vec())]
+        );
+        assert_eq!(
+            persistence
+                .journal_read_range(universe(), world(), 2, 8)
+                .unwrap(),
+            vec![(2, b"j2".to_vec())]
         );
     }
 }

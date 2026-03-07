@@ -414,6 +414,20 @@ pub struct SegmentIndexRecord {
     pub checksum: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SegmentExportRequest {
+    pub segment: SegmentId,
+    pub hot_tail_margin: JournalHeight,
+    pub delete_chunk_entries: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentExportResult {
+    pub record: SegmentIndexRecord,
+    pub exported_entries: u64,
+    pub deleted_entries: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinReason {
     pub reason: String,
@@ -544,6 +558,19 @@ pub enum PersistCorruption {
     MissingCasObjectBody { hash: Hash, object_key: String },
     #[error("CAS body hash mismatch for {expected}: loaded {actual}")]
     CasBodyHashMismatch { expected: Hash, actual: Hash },
+    #[error("segment object missing for {segment:?} at key {object_key}")]
+    MissingSegmentObject {
+        segment: SegmentId,
+        object_key: String,
+    },
+    #[error("segment checksum mismatch for {segment:?}: expected {expected}, loaded {actual}")]
+    SegmentChecksumMismatch {
+        segment: SegmentId,
+        expected: String,
+        actual: String,
+    },
+    #[error("malformed segment object for {segment:?}: {detail}")]
+    MalformedSegment { segment: SegmentId, detail: String },
 }
 
 impl PersistError {
@@ -669,6 +696,13 @@ pub trait WorldPersistence: Send + Sync {
         record: SegmentIndexRecord,
     ) -> Result<(), PersistError>;
 
+    fn segment_export(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        request: SegmentExportRequest,
+    ) -> Result<SegmentExportResult, PersistError>;
+
     fn segment_index_read_from(
         &self,
         universe: UniverseId,
@@ -676,6 +710,13 @@ pub trait WorldPersistence: Send + Sync {
         from_end_inclusive: JournalHeight,
         limit: u32,
     ) -> Result<Vec<SegmentIndexRecord>, PersistError>;
+
+    fn segment_read_entries(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        segment: SegmentId,
+    ) -> Result<Vec<(JournalHeight, Vec<u8>)>, PersistError>;
 }
 
 pub(crate) fn sample_world_meta() -> WorldMeta {
