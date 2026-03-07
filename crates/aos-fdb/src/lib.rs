@@ -1,7 +1,11 @@
+#[cfg(feature = "foundationdb-backend")]
+mod fdb;
 mod keyspace;
 mod memory;
 mod protocol;
 
+#[cfg(feature = "foundationdb-backend")]
+pub use fdb::{FdbRuntime, FdbWorldPersistence};
 pub use keyspace::{FdbKeyspace, KeyPart, TupleKey, UniverseKeyspace, WorldKeyspace};
 pub use memory::MemoryWorldPersistence;
 pub use protocol::{

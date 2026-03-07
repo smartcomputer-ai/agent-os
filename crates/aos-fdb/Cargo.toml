@@ -3,12 +3,23 @@ name = "aos-fdb"
 version = "0.1.0"
 edition = "2024"
 publish = false
+build = "build.rs"
+
+[features]
+default = []
+foundationdb-backend = ["dep:foundationdb", "dep:futures"]
 
 [dependencies]
 aos-cbor = { path = "../aos-cbor" }
+foundationdb = { version = "0.10.0", default-features = false, features = ["fdb-7_3", "embedded-fdb-include"], optional = true }
+futures = { version = "0.3", optional = true }
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
+serde_cbor = "0.11"
 thiserror = "1"
 uuid = { version = "1", features = ["serde"] }
 
+[dev-dependencies]
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
