@@ -35,7 +35,7 @@ fn http_enforcer_module_denies_host() {
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
                 url: "https://denied.example/path".into(),
-                headers: IndexMap::new(),
+                headers: Default::default(),
                 body_ref: None,
             })
             .unwrap(),

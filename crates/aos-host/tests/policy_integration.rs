@@ -7,13 +7,12 @@ use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
 use aos_wasm_abi::{PureOutput, WorkflowEffect, WorkflowOutput};
 use helpers::fixtures::{self, TestStore, TestWorld, zero_hash};
-use indexmap::IndexMap;
 
 mod helpers;
 use helpers::{attach_default_policy, def_text_record_schema, text_type};
 
 fn http_workflow_output(url: &str) -> WorkflowOutput {
-    let mut headers = IndexMap::new();
+    let mut headers = aos_effects::builtins::HeaderMap::new();
     headers.insert("x-test".into(), "1".into());
     let params = HttpRequestParams {
         method: "POST".into(),

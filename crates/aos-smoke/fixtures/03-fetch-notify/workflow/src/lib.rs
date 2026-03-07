@@ -214,6 +214,7 @@ mod tests {
                 .into(),
             effect_kind: "http.request".into(),
             params_hash: None,
+            issuer_ref: None,
             receipt_payload: serde_cbor::to_vec(&receipt_payload).expect("payload"),
             status: "ok".into(),
             emitted_at_seq: 1,

@@ -14,6 +14,7 @@ AIR (Agent Intermediate Representation) is a small, typed, canonical control‑p
 
 **Built-in catalogs** (data files; loaded by the kernel):
 - spec/defs/builtin-schemas.air.json
+- spec/defs/builtin-schemas-sdk.air.json
 - spec/defs/builtin-schemas-host.air.json
 - spec/defs/builtin-effects.air.json
 - spec/defs/builtin-caps.air.json
@@ -250,18 +251,18 @@ Use workflow modules (reducer ABI) for stateful logic; use pure modules for dete
 Modules may declare a `context` schema in their ABI. If omitted, the kernel does **not**
 send a context envelope to that module. Built-in contexts:
 
-- `sys/ReducerContext@1`: reducer call context (now/logical time, entropy, journal metadata, reducer/key).
+- `sys/WorkflowContext@1`: workflow call context (now/logical time, entropy, journal metadata, workflow/key).
 - `sys/PureContext@1`: pure module call context (logical time + journal/manifest metadata).
 
-`sys/ReducerContext@1` fields include `now_ns`, `logical_now_ns`, `journal_height`, `entropy` (64 bytes),
-`event_hash`, `manifest_hash`, `reducer`, `key`, and `cell_mode`. `sys/PureContext@1` includes
+`sys/WorkflowContext@1` fields include `now_ns`, `logical_now_ns`, `journal_height`, `entropy` (64 bytes),
+`event_hash`, `manifest_hash`, `workflow`, `key`, and `cell_mode`. `sys/PureContext@1` includes
 `logical_now_ns`, `journal_height`, `manifest_hash`, and `module`.
 
 See: spec/schemas/defmodule.schema.json
 
 ## 7) Effect Catalog (Built-in v1)
 
-`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so workflow modules, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions by deriving enums from the `defeffect` set.
+`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical effect parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so workflow modules, reducers, and adapters all hash the same shapes. Workflow SDK/runtime support schemas live under `spec/defs/builtin-schemas-sdk.air.json`. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions by deriving enums from the `defeffect` set.
 
 `origin_scope` on each `defeffect` gates who may emit it. The current schema uses compatibility labels: `"reducer"` means workflow-module reducer ABI emission, `"plan"` means non-reducer orchestration origins (system/governance/tooling), and `"both"` allows either. “Micro-effects” are those whose `origin_scope` allows reducers (currently `blob.put`, `blob.get`, `timer.set` in v1).
 
@@ -339,6 +340,10 @@ Example secret ref in `llm.generate` params:
 - params: `{ root_hash:hash, path:text, bytes:bytes, mode?:nat }`
 - receipt: `{ new_root_hash:hash, blob_hash:hash }`
 
+**workspace.write_ref** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+- params: `{ root_hash:hash, path:text, blob_hash:hash, mode?:nat }`
+- receipt: `{ new_root_hash:hash, blob_hash:hash }`
+
 **workspace.remove** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
 - params: `{ root_hash:hash, path:text }`
 - receipt: `{ new_root_hash:hash }`
@@ -372,15 +377,15 @@ Workflow modules that emit effects receive normalized receipt events. AIR v1 res
 
 | Schema | Purpose | Fields |
 | --- | --- | --- |
-| **`sys/EffectReceiptEnvelope@1`** | Canonical receipt envelope for workflow-origin effects. | `origin_module_id:text` (Name format), `origin_instance_key?:bytes`, `intent_id:text`, `effect_kind:text`, `params_hash?:text`, `receipt_payload:bytes`, `status:"ok" \| "error" \| "timeout"`, `emitted_at_seq:nat`, `adapter_id:text`, `cost_cents?:nat`, `signature:bytes` |
-| **`sys/EffectReceiptRejected@1`** | Receipt fault envelope emitted when receipt payload/schema normalization fails. | `origin_module_id:text` (Name format), `origin_instance_key?:bytes`, `intent_id:text`, `effect_kind:text`, `params_hash?:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `error_code:text`, `error_message:text`, `payload_hash:text`, `payload_size:nat`, `emitted_at_seq:nat` |
+| **`sys/EffectReceiptEnvelope@1`** | Canonical receipt envelope for workflow-origin effects. | `origin_module_id:text` (Name format), `origin_instance_key?:bytes`, `intent_id:text`, `effect_kind:text`, `params_hash?:text`, `issuer_ref?:text`, `receipt_payload:bytes`, `status:"ok" \| "error" \| "timeout"`, `emitted_at_seq:nat`, `adapter_id:text`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/EffectReceiptRejected@1`** | Receipt fault envelope emitted when receipt payload/schema normalization fails. | `origin_module_id:text` (Name format), `origin_instance_key?:bytes`, `intent_id:text`, `effect_kind:text`, `params_hash?:text`, `issuer_ref?:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `error_code:text`, `error_message:text`, `payload_hash:text`, `payload_size:nat`, `emitted_at_seq:nat` |
 | **`sys/TimerFired@1`** | Delivery of a `timer.set` receipt back to the originating reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text` (always `"timer.set"` in v1), `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/TimerSetParams@1`, `receipt:sys/TimerSetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 | **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 | **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 
 Workflow reducers should include `sys/EffectReceiptEnvelope@1` in ABI event variants as the primary receipt path. `sys/EffectReceiptRejected@1` is optional; if absent and a receipt is malformed, the kernel settles that receipt, marks the instance failed, and drops remaining pending receipts for that instance to avoid clogging execution. Legacy typed receipt events (`sys/TimerFired@1`, `sys/BlobPutResult@1`, `sys/BlobGetResult@1`) are compatibility fallbacks when reducer event schemas still expect those shapes.
 
-Canonical JSON definitions for these schemas (plus their parameter/receipt companions) live in `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so manifests can hash and reference them directly.
+Canonical JSON definitions for built-in effect parameter/receipt schemas live in `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json`. Workflow continuation envelopes, runtime contexts, and reusable SDK state schemas live in `spec/defs/builtin-schemas-sdk.air.json`.
 
 ## 8) Effect Intents and Receipts
 

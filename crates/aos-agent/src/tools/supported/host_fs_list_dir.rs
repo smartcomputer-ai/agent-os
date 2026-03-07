@@ -2,13 +2,13 @@ use super::{
     optional_string, optional_u64, parse_json_object, session_id_from_args_or_runtime, value_object,
 };
 use crate::contracts::ToolRuntimeContext;
-use crate::tools::types::ToolMappingError;
+use crate::tools::types::{ToolMappedArgs, ToolMappingError};
 use serde_json::{Map, Value};
 
 pub fn map_args(
     arguments_json: &str,
     runtime: &ToolRuntimeContext,
-) -> Result<Value, ToolMappingError> {
+) -> Result<ToolMappedArgs, ToolMappingError> {
     let args = parse_json_object(arguments_json)?;
     let session_id = session_id_from_args_or_runtime(&args, runtime)?;
 
@@ -22,5 +22,5 @@ pub fn map_args(
         out.insert("max_results".into(), Value::Number(max_results.into()));
     }
 
-    Ok(value_object(out))
+    Ok(ToolMappedArgs::params(value_object(out)))
 }

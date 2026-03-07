@@ -136,9 +136,9 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
     }
 
     for reference in &mut patch.manifest.modules {
-        if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-        } else if let Some(hash) = module_hashes.get(&reference.name) {
+        // Preserve existing hashes for built-in sys/* modules. Their wasm_hash values are
+        // environment-resolved at load time, while builtin specs carry placeholder zeros.
+        if let Some(hash) = module_hashes.get(&reference.name) {
             reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
                 KernelError::Manifest(format!("module hash '{}': {err}", reference.name))
             })?;
@@ -202,5 +202,42 @@ fn parse_nonzero_hash(value: &str) -> Result<Option<Hash>, KernelError> {
         Ok(None)
     } else {
         Ok(Some(hash))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aos_air_types::{CURRENT_AIR_VERSION, Manifest, NamedRef};
+    use indexmap::IndexMap;
+
+    #[test]
+    fn normalize_patch_manifest_refs_keeps_builtin_module_hash() {
+        let original_hash = format!("sha256:{}", "1".repeat(64));
+        assert!(builtins::find_builtin_module("sys/CapEnforceLlmBasic@1").is_some());
+
+        let mut patch = ManifestPatch {
+            manifest: Manifest {
+                air_version: CURRENT_AIR_VERSION.to_string(),
+                schemas: Vec::new(),
+                modules: vec![NamedRef {
+                    name: "sys/CapEnforceLlmBasic@1".into(),
+                    hash: HashRef::new(original_hash.clone()).expect("valid hash"),
+                }],
+                effects: Vec::new(),
+                effect_bindings: Vec::new(),
+                caps: Vec::new(),
+                policies: Vec::new(),
+                secrets: Vec::new(),
+                defaults: None,
+                module_bindings: IndexMap::new(),
+                routing: None,
+            },
+            nodes: Vec::new(),
+        };
+
+        normalize_patch_manifest_refs(&mut patch).expect("normalize refs");
+
+        assert_eq!(patch.manifest.modules[0].hash.as_str(), original_hash);
     }
 }

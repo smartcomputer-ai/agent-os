@@ -6,6 +6,8 @@ version = 4
 name = "aos-agent"
 version = "0.1.0"
 dependencies = [
+ "aos-air-types",
+ "aos-effects",
  "aos-wasm-abi",
  "aos-wasm-sdk",
  "serde",
@@ -13,6 +15,55 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "aos-air-types"
+version = "0.1.0"
+dependencies = [
+ "aos-cbor",
+ "aos-effect-types",
+ "indexmap",
+ "once_cell",
+ "petgraph",
+ "serde",
+ "serde_cbor",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "aos-cbor"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_cbor",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "aos-effect-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_bytes",
+ "serde_cbor",
+]
+
+[[package]]
+name = "aos-effects"
+version = "0.1.0"
+dependencies = [
+ "aos-air-types",
+ "aos-cbor",
+ "aos-effect-types",
+ "serde",
+ "serde_bytes",
+ "serde_cbor",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -29,10 +80,12 @@ dependencies = [
 name = "aos-wasm-sdk"
 version = "0.1.0"
 dependencies = [
+ "aos-effect-types",
  "aos-wasm-abi",
  "serde",
  "serde_bytes",
  "serde_cbor",
+ "sha2",
 ]
 
 [[package]]
@@ -74,9 +127,11 @@ name = "demiurge-workflow"
 version = "0.1.0"
 dependencies = [
  "aos-agent",
+ "aos-effects",
  "aos-wasm-sdk",
  "serde",
  "serde_cbor",
+ "serde_json",
 ]
 
 [[package]]
@@ -88,6 +143,18 @@ dependencies = [
  "block-buffer",
  "crypto-common",
 ]
+
+[[package]]
+name = "equivalent"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+
+[[package]]
+name = "fixedbitset"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "generic-array"
@@ -106,6 +173,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b43ede17f21864e81be2fa654110bf1e793774238d86ef8555c37e6519c0403"
 
 [[package]]
+name = "hashbrown"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "indexmap"
+version = "2.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
+dependencies = [
+ "equivalent",
+ "hashbrown",
+ "serde",
+ "serde_core",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -122,6 +213,22 @@ name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
+
+[[package]]
+name = "once_cell"
+version = "1.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+
+[[package]]
+name = "petgraph"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
+dependencies = [
+ "fixedbitset",
+ "indexmap",
+]
 
 [[package]]
 name = "proc-macro2"

@@ -123,6 +123,37 @@ fn host_tool(
     }
 }
 
+fn effect_tool(
+    tool_id: &str,
+    tool_name: &str,
+    description: &str,
+    args_schema_json: &str,
+    mapper: ToolMapper,
+    cap_slot: &str,
+    hint: ToolParallelismHint,
+) -> ToolSpec {
+    assert!(
+        is_valid_llm_tool_name(tool_name),
+        "invalid llm tool name '{}'",
+        tool_name
+    );
+    let tool_def_bytes = tool_definition_bytes(tool_name, description, args_schema_json);
+    ToolSpec {
+        tool_id: tool_id.to_string(),
+        tool_name: tool_name.to_string(),
+        tool_ref: sha256_text(&tool_def_bytes),
+        description: description.to_string(),
+        args_schema_json: args_schema_json.to_string(),
+        mapper,
+        executor: ToolExecutor::Effect {
+            effect_kind: tool_id.to_string(),
+            cap_slot: Some(cap_slot.into()),
+        },
+        availability_rules: vec![ToolAvailabilityRule::Always],
+        parallelism_hint: hint,
+    }
+}
+
 pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
     let mut registry = BTreeMap::new();
 
@@ -271,6 +302,111 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
                 resource_key: None,
             },
         ),
+        effect_tool(
+            "introspect.manifest",
+            "inspect_world",
+            "Inspect world summary, modules, routing, capabilities, policies, and manifest defaults.",
+            r#"{"type":"object","additionalProperties":false,"properties":{}}"#,
+            ToolMapper::InspectWorld,
+            "query",
+            ToolParallelismHint {
+                parallel_safe: true,
+                resource_key: None,
+            },
+        ),
+        effect_tool(
+            "introspect.workflow_state",
+            "inspect_workflow",
+            "Inspect a workflow's current state or list its cells.",
+            r#"{"type":"object","required":["workflow"],"properties":{"workflow":{"type":"string"},"view":{"type":"string","enum":["state","cells"]},"cell_key":{"type":"object","required":["encoding","value"],"properties":{"encoding":{"type":"string","enum":["utf8","hex"]},"value":{"type":"string"}},"additionalProperties":false}},"additionalProperties":false}"#,
+            ToolMapper::InspectWorkflow,
+            "query",
+            ToolParallelismHint {
+                parallel_safe: true,
+                resource_key: None,
+            },
+        ),
+        effect_tool(
+            "workspace.inspect",
+            "workspace_inspect",
+            "Resolve a workspace to its current or requested root, or inspect a specific root hash.",
+            r#"{"type":"object","additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"}}}"#,
+            ToolMapper::WorkspaceInspect,
+            "workspace",
+            ToolParallelismHint {
+                parallel_safe: true,
+                resource_key: None,
+            },
+        ),
+        effect_tool(
+            "workspace.list",
+            "workspace_list",
+            "List workspaces or list entries in a workspace tree.",
+            r#"{"type":"object","additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"},"path":{"type":"string"},"scope":{"type":"string","enum":["dir","subtree"]},"limit":{"type":"integer","minimum":0}}}"#,
+            ToolMapper::WorkspaceList,
+            "workspace",
+            ToolParallelismHint {
+                parallel_safe: true,
+                resource_key: None,
+            },
+        ),
+        effect_tool(
+            "workspace.read",
+            "workspace_read",
+            "Read workspace entry metadata and file content.",
+            r#"{"type":"object","required":["path"],"additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"},"path":{"type":"string"},"range":{"type":"object","required":["start","end"],"properties":{"start":{"type":"integer","minimum":0},"end":{"type":"integer","minimum":0}},"additionalProperties":false}}}"#,
+            ToolMapper::WorkspaceRead,
+            "workspace",
+            ToolParallelismHint {
+                parallel_safe: true,
+                resource_key: None,
+            },
+        ),
+        effect_tool(
+            "workspace.apply",
+            "workspace_apply",
+            "Apply writes and removals to a workspace tree and return a new root hash.",
+            r#"{"type":"object","required":["operations"],"additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"},"operations":{"type":"array","items":{"type":"object","required":["op","path"],"properties":{"op":{"type":"string","enum":["write","remove"]},"path":{"type":"string"},"text":{"type":"string"},"bytes_b64":{"type":"string"},"blob_hash":{"type":"string"},"mode":{"type":"integer","minimum":0}},"additionalProperties":false}}}}"#,
+            ToolMapper::WorkspaceApply,
+            "workspace",
+            ToolParallelismHint {
+                parallel_safe: false,
+                resource_key: Some("workspace.apply".into()),
+            },
+        ),
+        effect_tool(
+            "workspace.diff",
+            "workspace_diff",
+            "Diff two workspace roots or named workspace versions.",
+            r#"{"type":"object","required":["left","right"],"additionalProperties":false,"properties":{"left":{"type":"object","additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"}}},"right":{"type":"object","additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"}}},"prefix":{"type":"string"}}}"#,
+            ToolMapper::WorkspaceDiff,
+            "workspace",
+            ToolParallelismHint {
+                parallel_safe: true,
+                resource_key: None,
+            },
+        ),
+        ToolSpec {
+            tool_id: "workspace.commit".into(),
+            tool_name: "workspace_commit".into(),
+            tool_ref: sha256_text(&tool_definition_bytes(
+                "workspace_commit",
+                "Publish a root hash as the next version of a named workspace.",
+                r#"{"type":"object","required":["workspace","root_hash"],"additionalProperties":false,"properties":{"workspace":{"type":"string"},"root_hash":{"type":"string"},"expected_head":{"type":"integer","minimum":0},"owner":{"type":"string"}}}"#,
+            )),
+            description:
+                "Publish a root hash as the next version of a named workspace.".into(),
+            args_schema_json: r#"{"type":"object","required":["workspace","root_hash"],"additionalProperties":false,"properties":{"workspace":{"type":"string"},"root_hash":{"type":"string"},"expected_head":{"type":"integer","minimum":0},"owner":{"type":"string"}}}"#.into(),
+            mapper: ToolMapper::WorkspaceCommit,
+            executor: ToolExecutor::DomainEvent {
+                schema: "sys/WorkspaceCommit@1".into(),
+            },
+            availability_rules: vec![ToolAvailabilityRule::Always],
+            parallelism_hint: ToolParallelismHint {
+                parallel_safe: false,
+                resource_key: Some("workspace.commit".into()),
+            },
+        },
     ];
 
     for tool in tools {
@@ -283,6 +419,14 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
 
 pub fn default_tool_profiles() -> BTreeMap<String, Vec<String>> {
     let common = vec![
+        "introspect.manifest".into(),
+        "introspect.workflow_state".into(),
+        "workspace.inspect".into(),
+        "workspace.list".into(),
+        "workspace.read".into(),
+        "workspace.apply".into(),
+        "workspace.diff".into(),
+        "workspace.commit".into(),
         "host.exec".into(),
         "host.fs.read_file".into(),
         "host.fs.write_file".into(),

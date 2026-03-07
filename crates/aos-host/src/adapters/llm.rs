@@ -35,6 +35,26 @@ impl<S: Store> LlmAdapter<S> {
         self.config.providers.get(name)
     }
 
+    fn resolve_api_key(params: &LlmGenerateParams) -> Result<String, String> {
+        let Some(api_key) = params.api_key.as_ref() else {
+            return Err(
+                "api_key missing (use secret ref in params and kernel secret injection)".into(),
+            );
+        };
+        match api_key {
+            aos_effects::builtins::TextOrSecretRef::Literal(value) if !value.is_empty() => {
+                Ok(value.clone())
+            }
+            aos_effects::builtins::TextOrSecretRef::Literal(_) => {
+                Err("api_key literal was empty".into())
+            }
+            aos_effects::builtins::TextOrSecretRef::Secret(secret) => Err(format!(
+                "api_key secret ref unresolved: {}@{}",
+                secret.alias, secret.version
+            )),
+        }
+    }
+
     fn failure_receipt(
         &self,
         intent: &EffectIntent,
@@ -243,14 +263,14 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        let api_key = match params.api_key.clone() {
-            Some(key) if !key.is_empty() => key,
-            _ => {
+        let api_key = match Self::resolve_api_key(&params) {
+            Ok(key) => key,
+            Err(message) => {
                 return Ok(self.failure_receipt(
                     intent,
                     &provider_id,
                     ReceiptStatus::Error,
-                    "api_key missing",
+                    message,
                 ));
             }
         };

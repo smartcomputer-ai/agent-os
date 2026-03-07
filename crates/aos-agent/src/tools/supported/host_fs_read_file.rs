@@ -3,13 +3,13 @@ use super::{
     session_id_from_args_or_runtime, value_object,
 };
 use crate::contracts::ToolRuntimeContext;
-use crate::tools::types::ToolMappingError;
+use crate::tools::types::{ToolMappedArgs, ToolMappingError};
 use serde_json::{Map, Value};
 
 pub fn map_args(
     arguments_json: &str,
     runtime: &ToolRuntimeContext,
-) -> Result<Value, ToolMappingError> {
+) -> Result<ToolMappedArgs, ToolMappingError> {
     let args = parse_json_object(arguments_json)?;
     let session_id = session_id_from_args_or_runtime(&args, runtime)?;
     let path = require_string(&args, "path")?;
@@ -26,5 +26,5 @@ pub fn map_args(
     if let Some(encoding) = optional_string(&args, "encoding") {
         out.insert("encoding".into(), Value::String(encoding));
     }
-    Ok(value_object(out))
+    Ok(ToolMappedArgs::params(value_object(out)))
 }

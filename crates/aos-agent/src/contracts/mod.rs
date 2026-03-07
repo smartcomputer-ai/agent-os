@@ -8,7 +8,6 @@ mod lifecycle;
 mod llm;
 mod state;
 mod tooling;
-mod workspace;
 
 pub use batch::*;
 pub use config::*;
@@ -20,4 +19,3 @@ pub use lifecycle::*;
 pub use llm::*;
 pub use state::*;
 pub use tooling::*;
-pub use workspace::*;

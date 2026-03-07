@@ -7,7 +7,7 @@ extern crate alloc;
 
 use aos_agent::{
     SessionState, SessionWorkflowEvent,
-    helpers::{SessionEffectCommand, SessionReduceError, apply_session_workflow_event},
+    helpers::{apply_session_workflow_event, emit_session_lifecycle_changed, map_reduce_error},
 };
 use aos_wasm_sdk::{ReduceError, Value, Workflow, WorkflowCtx, aos_workflow};
 
@@ -32,63 +32,16 @@ impl Workflow for SessionWorkflow {
         event: Self::Event,
         ctx: &mut WorkflowCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
+        let prev_lifecycle = ctx.state.lifecycle;
+        let prev_run_id = ctx.state.active_run_id.clone();
         let out = apply_session_workflow_event(&mut ctx.state, &event).map_err(map_reduce_error)?;
+        for domain_event in out.domain_events {
+            domain_event.emit(ctx);
+        }
         for effect in out.effects {
-            match effect {
-                SessionEffectCommand::LlmGenerate {
-                    params, cap_slot, ..
-                } => ctx
-                    .effects()
-                    .emit_raw("llm.generate", &params, cap_slot.as_deref()),
-                SessionEffectCommand::ToolEffect {
-                    kind,
-                    params_json,
-                    cap_slot,
-                    ..
-                } => {
-                    let params: serde_json::Value =
-                        serde_json::from_str(&params_json).unwrap_or(serde_json::Value::Null);
-                    ctx.effects()
-                        .emit_raw(kind.as_str(), &params, cap_slot.as_deref());
-                }
-                SessionEffectCommand::BlobPut {
-                    params, cap_slot, ..
-                } => ctx
-                    .effects()
-                    .emit_raw("blob.put", &params, cap_slot.as_deref()),
-                SessionEffectCommand::BlobGet {
-                    params, cap_slot, ..
-                } => ctx
-                    .effects()
-                    .emit_raw("blob.get", &params, cap_slot.as_deref()),
-            }
+            effect.emit(ctx);
         }
+        emit_session_lifecycle_changed(ctx, prev_lifecycle, prev_run_id);
         Ok(())
-    }
-}
-
-fn map_reduce_error(err: SessionReduceError) -> ReduceError {
-    match err {
-        SessionReduceError::InvalidLifecycleTransition => {
-            ReduceError::new("invalid lifecycle transition")
-        }
-        SessionReduceError::HostCommandRejected => ReduceError::new("host command rejected"),
-        SessionReduceError::ToolBatchAlreadyActive => ReduceError::new("tool batch already active"),
-        SessionReduceError::MissingProvider => ReduceError::new("run config provider missing"),
-        SessionReduceError::MissingModel => ReduceError::new("run config model missing"),
-        SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),
-        SessionReduceError::UnknownModel => ReduceError::new("run config model unknown"),
-        SessionReduceError::RunAlreadyActive => ReduceError::new("run already active"),
-        SessionReduceError::RunNotActive => ReduceError::new("run not active"),
-        SessionReduceError::InvalidWorkspacePromptPackJson => {
-            ReduceError::new("workspace prompt pack JSON invalid")
-        }
-        SessionReduceError::MissingWorkspacePromptPackBytes => {
-            ReduceError::new("workspace prompt pack bytes missing for validation")
-        }
-        SessionReduceError::TooManyPendingIntents => ReduceError::new("too many pending intents"),
-        SessionReduceError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
-        SessionReduceError::UnknownToolOverride => ReduceError::new("unknown tool override"),
-        SessionReduceError::InvalidToolRegistry => ReduceError::new("invalid tool registry"),
     }
 }

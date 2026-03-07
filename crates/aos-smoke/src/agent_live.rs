@@ -6,8 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent::{
     LlmToolCallList, SessionConfig, SessionId, SessionIngress, SessionIngressKind, SessionState,
-    ToolAvailabilityRule, ToolExecutor, ToolParallelismHint, ToolSpec, WorkspaceApplyMode,
-    WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
+    ToolAvailabilityRule, ToolExecutor, ToolParallelismHint, ToolSpec,
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
@@ -19,11 +18,9 @@ use aos_host::adapters::llm::LlmAdapter;
 use aos_host::adapters::traits::AsyncEffectAdapter;
 use aos_host::config::{HostConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_store::Store;
-use aos_sys::{WorkspaceCommit, WorkspaceCommitMeta, WorkspaceEntry, WorkspaceTree};
 use clap::ValueEnum;
 use serde_json::{Value, json};
 use tokio::runtime::Builder;
-use walkdir::WalkDir;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
@@ -33,12 +30,31 @@ const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
-const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
-const AGENT_WORKSPACE_NAME: &str = "agent-live";
-const AGENT_WORKSPACE_DIR: &str = "agent-ws";
-const DEFAULT_PROMPT_PACK: &str = "default";
 const SEARCH_TOOL_NAME: &str = "search_step";
 const SEARCH_TOOL_PROFILE: &str = "search-live";
+const SEARCH_TOOL_ARGS_SCHEMA_JSON: &str = "{\"type\":\"object\",\"properties\":{\"cursor\":{\"type\":\"string\"}},\"required\":[\"cursor\"]}";
+const DEFAULT_PROMPT_PACK_JSON: &str = r#"[
+  {
+    "role": "system",
+    "content": "You are a deterministic search agent. Use tool outputs as ground truth, avoid guessing, and return concise structured answers."
+  }
+]"#;
+const DEFAULT_TOOL_CATALOG_JSON: &str = r#"{
+  "tools": [
+    {
+      "name": "search_step",
+      "description": "Traverse one hop in the search graph using the current cursor.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cursor": { "type": "string" }
+        },
+        "required": ["cursor"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}"#;
 
 const SESSION_ID: &str = "22222222-2222-2222-2222-222222222222";
 
@@ -140,47 +156,8 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     );
 
     let mut event_clock = 0_u64;
-    let workspace_root_hash =
-        seed_workspace_commit(&mut host, &fixture_root.join(AGENT_WORKSPACE_DIR))?;
-    let workspace_binding = WorkspaceBinding {
-        workspace: AGENT_WORKSPACE_NAME.into(),
-        version: None,
-    };
-    send_session_event(
-        &mut host,
-        &mut event_clock,
-        SessionIngressKind::WorkspaceSyncRequested {
-            workspace_binding: workspace_binding.clone(),
-            prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
-        },
-    )?;
-    let snapshot_ready = build_workspace_snapshot_ready(
-        &host,
-        &fixture_root.join(AGENT_WORKSPACE_DIR),
-        workspace_root_hash,
-    )?;
-    send_session_event(
-        &mut host,
-        &mut event_clock,
-        SessionIngressKind::WorkspaceSnapshotReady(snapshot_ready),
-    )?;
-    let synced_state: SessionState = host.read_state()?;
-    ensure!(
-        synced_state.pending_workspace_snapshot.is_some(),
-        "expected pending workspace snapshot after sync"
-    );
-    send_session_event(
-        &mut host,
-        &mut event_clock,
-        SessionIngressKind::WorkspaceApplyRequested {
-            mode: WorkspaceApplyMode::NextRun,
-        },
-    )?;
-    configure_search_tool_registry(
-        &mut host,
-        &mut event_clock,
-        &fixture_root.join(AGENT_WORKSPACE_DIR),
-    )?;
+    let default_prompt_ref = store_default_prompt_ref(&host)?;
+    configure_search_tool_registry(&mut host, &mut event_clock)?;
 
     send_session_event(
         &mut host,
@@ -192,9 +169,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 model: provider.model.clone(),
                 reasoning_effort: None,
                 max_tokens: Some(768),
-                workspace_binding: Some(workspace_binding),
-                default_prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
-                default_prompt_refs: None,
+                default_prompt_refs: Some(vec![default_prompt_ref]),
                 default_tool_profile: Some(SEARCH_TOOL_PROFILE.into()),
                 default_tool_enable: None,
                 default_tool_disable: None,
@@ -202,15 +177,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             }),
         },
     )?;
-    let state_after_run_request: SessionState = host.read_state()?;
-    ensure!(
-        state_after_run_request
-            .active_workspace_snapshot
-            .as_ref()
-            .map(|snap| snap.workspace.as_str())
-            == Some(AGENT_WORKSPACE_NAME),
-        "expected active workspace snapshot applied on next run"
-    );
     let mut history: Vec<Value> = vec![json!({
         "role": "user",
         "content": format!(
@@ -264,14 +230,13 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             metadata: None,
             provider_options_ref: None,
             response_format_ref: None,
-            api_key: Some(provider.api_key.clone()),
+            api_key: Some(provider.api_key.clone().into()),
         };
         let params = to_core_llm_params(
             state
                 .active_run_config
                 .as_ref()
                 .ok_or_else(|| anyhow!("missing active_run_config"))?,
-            state.active_workspace_snapshot.as_ref(),
             &step_ctx,
         )?;
 
@@ -438,17 +403,11 @@ fn send_session_event(
     host.send_event(&event)
 }
 
-fn configure_search_tool_registry(
-    host: &mut ExampleHost,
-    clock: &mut u64,
-    workspace_dir: &Path,
-) -> Result<()> {
-    let tool_catalog_path = workspace_dir.join("tools/catalogs/default.json");
-    let tool_catalog_bytes = fs::read(&tool_catalog_path)
-        .with_context(|| format!("read tool catalog {}", tool_catalog_path.display()))?;
+fn configure_search_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()> {
+    let tool_catalog_bytes = DEFAULT_TOOL_CATALOG_JSON.as_bytes();
     let tool_ref = host
         .store()
-        .put_blob(&tool_catalog_bytes)
+        .put_blob(tool_catalog_bytes)
         .context("store search tool catalog blob")?
         .to_hex();
 
@@ -460,7 +419,7 @@ fn configure_search_tool_registry(
             tool_name: SEARCH_TOOL_NAME.into(),
             tool_ref,
             description: "Traverse one hop in the search graph.".into(),
-            args_schema_json: "{\"type\":\"object\",\"properties\":{\"cursor\":{\"type\":\"string\"}},\"required\":[\"cursor\"]}".into(),
+            args_schema_json: SEARCH_TOOL_ARGS_SCHEMA_JSON.into(),
             mapper: aos_agent::ToolMapper::HostExec,
             executor: ToolExecutor::HostLoop {
                 bridge: SEARCH_TOOL_NAME.into(),
@@ -489,7 +448,6 @@ fn configure_search_tool_registry(
 
 fn to_core_llm_params(
     run_config: &aos_agent::RunConfig,
-    active_workspace_snapshot: Option<&aos_agent::WorkspaceSnapshot>,
     step_ctx: &StepContext,
 ) -> Result<LlmGenerateParams> {
     let provider = run_config.provider.trim();
@@ -497,15 +455,7 @@ fn to_core_llm_params(
     let model = run_config.model.trim();
     ensure!(!model.is_empty(), "run model missing");
 
-    let mut message_refs = if let Some(explicit) = &run_config.prompt_refs {
-        explicit.clone()
-    } else if let Some(prompt_pack_ref) =
-        active_workspace_snapshot.and_then(|snapshot| snapshot.prompt_pack_ref.clone())
-    {
-        vec![prompt_pack_ref]
-    } else {
-        Vec::new()
-    };
+    let mut message_refs = run_config.prompt_refs.clone().unwrap_or_default();
     message_refs.extend(step_ctx.message_refs.clone());
     ensure!(!message_refs.is_empty(), "message_refs must not be empty");
 
@@ -552,11 +502,14 @@ fn to_core_llm_params(
             tool_choice: step_ctx.tool_choice.clone(),
             reasoning_effort: run_config.reasoning_effort.map(reasoning_effort_text),
             stop_sequences: step_ctx.stop_sequences.clone(),
-            metadata: step_ctx.metadata.clone(),
+            metadata: step_ctx
+                .metadata
+                .clone()
+                .map(|metadata| metadata.into_iter().collect::<BTreeMap<_, _>>()),
             provider_options_ref,
             response_format_ref,
         },
-        api_key: step_ctx.api_key.clone(),
+        api_key: step_ctx.api_key.clone().map(Into::into),
     })
 }
 
@@ -671,138 +624,12 @@ fn store_history_blob(host: &ExampleHost, history: &[Value]) -> Result<String> {
     Ok(hash.to_hex())
 }
 
-fn seed_workspace_commit(host: &mut ExampleHost, workspace_dir: &Path) -> Result<String> {
-    let root_hash = build_workspace_root_hash(host.store().as_ref(), workspace_dir)?;
-    let commit = WorkspaceCommit {
-        workspace: AGENT_WORKSPACE_NAME.into(),
-        expected_head: None,
-        meta: WorkspaceCommitMeta {
-            root_hash: root_hash.clone(),
-            owner: "aos-smoke".into(),
-            created_at: now_nonce(),
-        },
-    };
-    host.send_event_as(WORKSPACE_COMMIT_SCHEMA, &commit)?;
-    Ok(root_hash)
-}
-
-fn build_workspace_snapshot_ready(
-    host: &ExampleHost,
-    workspace_dir: &Path,
-    root_hash: String,
-) -> Result<WorkspaceSnapshotReady> {
-    let index_path = workspace_dir.join("agent.workspace.json");
-    let prompt_pack_path = workspace_dir.join("prompts/packs/default.json");
-
-    let index_bytes = fs::read(&index_path)
-        .with_context(|| format!("read workspace index {}", index_path.display()))?;
-    let prompt_pack_bytes = fs::read(&prompt_pack_path)
-        .with_context(|| format!("read prompt pack {}", prompt_pack_path.display()))?;
-
-    let store = host.store();
-    let index_ref = store
-        .put_blob(&index_bytes)
-        .context("store workspace index blob")?
-        .to_hex();
-    let prompt_pack_ref = store
-        .put_blob(&prompt_pack_bytes)
-        .context("store workspace prompt pack blob")?
-        .to_hex();
-
-    Ok(WorkspaceSnapshotReady {
-        snapshot: WorkspaceSnapshot {
-            workspace: AGENT_WORKSPACE_NAME.into(),
-            version: Some(1),
-            root_hash: Some(root_hash),
-            index_ref: Some(index_ref),
-            prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
-            prompt_pack_ref: Some(prompt_pack_ref),
-        },
-        prompt_pack_bytes: Some(prompt_pack_bytes),
-    })
-}
-
-#[derive(Default)]
-struct WorkspaceDirNode {
-    dirs: BTreeMap<String, WorkspaceDirNode>,
-    files: BTreeMap<String, Vec<u8>>,
-}
-
-fn build_workspace_root_hash(store: &aos_store::FsStore, workspace_dir: &Path) -> Result<String> {
-    let mut root = WorkspaceDirNode::default();
-    for entry in WalkDir::new(workspace_dir) {
-        let entry = entry.context("walk workspace dir entry")?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let full_path = entry.path();
-        let rel = full_path
-            .strip_prefix(workspace_dir)
-            .with_context(|| format!("strip workspace prefix for {}", full_path.display()))?;
-        let rel_text = rel
-            .to_str()
-            .ok_or_else(|| anyhow!("non-utf8 workspace path {}", rel.display()))?
-            .replace('\\', "/");
-        let bytes = fs::read(full_path)
-            .with_context(|| format!("read workspace file {}", full_path.display()))?;
-        insert_workspace_file(&mut root, &rel_text, bytes)?;
-    }
-    ensure!(
-        !root.files.is_empty() || !root.dirs.is_empty(),
-        "workspace dir is empty: {}",
-        workspace_dir.display()
-    );
-    encode_workspace_dir(store, &root)
-}
-
-fn insert_workspace_file(
-    root: &mut WorkspaceDirNode,
-    rel_path: &str,
-    bytes: Vec<u8>,
-) -> Result<()> {
-    let mut segments = rel_path.split('/').peekable();
-    let mut cursor = root;
-    while let Some(segment) = segments.next() {
-        if segment.is_empty() {
-            return Err(anyhow!("invalid workspace path segment in {rel_path}"));
-        }
-        if segments.peek().is_none() {
-            cursor.files.insert(segment.to_string(), bytes);
-            return Ok(());
-        }
-        cursor = cursor.dirs.entry(segment.to_string()).or_default();
-    }
-    Err(anyhow!("empty workspace file path"))
-}
-
-fn encode_workspace_dir(store: &aos_store::FsStore, node: &WorkspaceDirNode) -> Result<String> {
-    let mut entries: Vec<WorkspaceEntry> = Vec::new();
-    for (name, child) in &node.dirs {
-        let child_hash = encode_workspace_dir(store, child)?;
-        entries.push(WorkspaceEntry {
-            name: name.clone(),
-            kind: "dir".into(),
-            hash: child_hash,
-            size: 0,
-            mode: 0o755,
-        });
-    }
-    for (name, bytes) in &node.files {
-        let blob_hash = store
-            .put_blob(bytes)
-            .with_context(|| format!("store workspace file blob {name}"))?;
-        entries.push(WorkspaceEntry {
-            name: name.clone(),
-            kind: "file".into(),
-            hash: blob_hash.to_hex(),
-            size: bytes.len() as u64,
-            mode: 0o644,
-        });
-    }
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
-
-    let tree = WorkspaceTree { entries };
-    let hash = store.put_node(&tree).context("store workspace tree node")?;
+fn store_default_prompt_ref(host: &ExampleHost) -> Result<String> {
+    let prompt_pack_bytes = DEFAULT_PROMPT_PACK_JSON.as_bytes();
+    let hash = host
+        .store()
+        .put_blob(prompt_pack_bytes)
+        .context("store prompt pack blob")?;
     Ok(hash.to_hex())
 }
 

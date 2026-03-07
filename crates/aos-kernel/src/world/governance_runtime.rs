@@ -450,6 +450,7 @@ mod tests {
                 None,
                 "timer.set".into(),
                 vec![],
+                None,
                 [2u8; 32],
                 0,
                 None,

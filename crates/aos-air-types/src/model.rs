@@ -1,4 +1,4 @@
-use crate::{HashRef, SchemaRef};
+use crate::{HashRef, SchemaRef, SecretRef};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -116,13 +116,6 @@ pub struct ValueVariant {
     pub tag: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Box<ValueLiteral>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(deny_unknown_fields)]
-pub struct SecretRef {
-    pub alias: SecretAlias,
-    pub version: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -789,6 +782,7 @@ impl EffectKind {
     pub const WORKSPACE_READ_REF: &'static str = "workspace.read_ref";
     pub const WORKSPACE_READ_BYTES: &'static str = "workspace.read_bytes";
     pub const WORKSPACE_WRITE_BYTES: &'static str = "workspace.write_bytes";
+    pub const WORKSPACE_WRITE_REF: &'static str = "workspace.write_ref";
     pub const WORKSPACE_REMOVE: &'static str = "workspace.remove";
     pub const WORKSPACE_DIFF: &'static str = "workspace.diff";
     pub const WORKSPACE_ANNOTATIONS_GET: &'static str = "workspace.annotations_get";
@@ -916,6 +910,10 @@ impl EffectKind {
 
     pub fn workspace_write_bytes() -> Self {
         Self::new(Self::WORKSPACE_WRITE_BYTES)
+    }
+
+    pub fn workspace_write_ref() -> Self {
+        Self::new(Self::WORKSPACE_WRITE_REF)
     }
 
     pub fn workspace_remove() -> Self {

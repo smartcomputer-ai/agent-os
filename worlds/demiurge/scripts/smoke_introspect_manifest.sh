@@ -76,34 +76,6 @@ send_session_ingress() {
   "${AOS_BIN}" -w "${WORLD_DIR}" event send "aos.agent/SessionIngress@1" "${payload}"
 }
 
-send_tool_request() {
-  local params_json="$1"
-  local tool_batch_json="$2"
-  local finalize="${3:-true}"
-  local observed_at
-  observed_at="$(next_observed_at)"
-  local payload
-  payload="$(python3 - <<'PY' "${SESSION_ID}" "${observed_at}" "${tool_batch_json}" "${finalize}" "${params_json}"
-import json,sys
-session_id = sys.argv[1]
-observed_at = int(sys.argv[2])
-tool_batch_id = json.loads(sys.argv[3])
-finalize_batch = sys.argv[4].lower() == "true"
-params = json.loads(sys.argv[5])
-payload = {
-    "session_id": session_id,
-    "observed_at_ns": observed_at,
-    "tool_batch_id": tool_batch_id,
-    "call_id": "call_1",
-    "finalize_batch": finalize_batch,
-    "params": params,
-}
-print(json.dumps(payload, separators=(",", ":")))
-PY
-)"
-  "${AOS_BIN}" -w "${WORLD_DIR}" event send "demiurge/ToolCallRequested@1" "${payload}"
-}
-
 read_state_json() {
   "${AOS_BIN}" --json --quiet -w "${WORLD_DIR}" state get demiurge/Demiurge@1 --key "${SESSION_ID}"
 }
@@ -121,123 +93,7 @@ AOS_BIN="${REPO_DIR}/target/debug/aos"
 
 export AOS_MODE=batch
 
-# 1) Workspace snapshot apply + run.
-send_session_ingress '{"$tag":"WorkspaceSyncRequested","$value":{"workspace_binding":{"workspace":"demiurge","version":null},"prompt_pack":"default"}}'
-send_session_ingress '{"$tag":"WorkspaceSnapshotReady","$value":{"snapshot":{"workspace":"demiurge","version":null,"root_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index_ref":null,"prompt_pack":"default","prompt_pack_ref":null},"prompt_pack_bytes":null}}'
-
-HAS_PENDING="no"
-for _ in $(seq 1 10); do
-  "${AOS_BIN}" --quiet -w "${WORLD_DIR}" run --batch >/dev/null || true
-  STATE_JSON="$(read_state_json)"
-  HAS_PENDING="$(python3 - <<'PY' "${STATE_JSON}"
-import json,sys
-raw=sys.argv[1]
-start=raw.find('{')
-if start == -1:
-    print('no')
-    raise SystemExit
-obj=json.loads(raw[start:])
-pending=(((obj.get('data') or {}).get('session') or {}).get('pending_workspace_snapshot'))
-print('yes' if isinstance(pending, dict) else 'no')
-PY
-  )"
-  if [ "${HAS_PENDING}" = "yes" ]; then
-    break
-  fi
-done
-if [ "${HAS_PENDING}" != "yes" ]; then
-  echo "${STATE_JSON}" >&2
-  fail "workspace snapshot did not stage pending snapshot"
-fi
-
-send_session_ingress '{"$tag":"WorkspaceApplyRequested","$value":{"mode":{"$tag":"ImmediateIfIdle"}}}'
-
-TOOL_BATCH_JSON="$(python3 - <<'PY' "${SESSION_ID}"
-import json,sys
-session_id=sys.argv[1]
-print(json.dumps({
-  'run_id': {
-    'session_id': session_id,
-    'run_seq': 1
-  },
-  'batch_seq': 1
-}, separators=(',',':')))
-PY
-)"
-
-TOOL_BATCH_INGRESS="$(python3 - <<'PY'
-import json
-print(json.dumps({
-  '$tag':'ToolCallsObserved',
-  '$value':{
-    'intent_id': 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-    'params_hash': None,
-    'calls': [{
-      'call_id': 'call_1',
-      'tool_name': 'host.session.open',
-      'arguments_ref': 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-      'provider_call_id': None
-    }]
-  }
-}, separators=(',',':')))
-PY
-)"
-send_session_ingress "${TOOL_BATCH_INGRESS}"
-
-send_tool_request '{"$tag":"WorkspaceReadBytes","$value":{"workspace":"demiurge","version":null,"path":"agent.workspace.json"}}' "${TOOL_BATCH_JSON}" "true"
-
-for _ in $(seq 1 20); do
-  OUTCOME="$("${AOS_BIN}" --json --quiet -w "${WORLD_DIR}" run --batch 2>/dev/null || true)"
-  if [ -z "${OUTCOME}" ]; then
-    break
-  fi
-  DISPATCHED="$(python3 - <<'PY' "${OUTCOME}"
-import json,sys
-raw=sys.argv[1].strip()
-if not raw:
-    print('0,0')
-    raise SystemExit
-start=raw.find('{')
-obj=json.loads(raw[start:])
-data=obj.get('data') or {}
-print(f"{data.get('effects_dispatched',0)},{data.get('receipts_applied',0)}")
-PY
-  )"
-  if [ "${DISPATCHED}" = "0,0" ]; then
-    break
-  fi
-done
-
-STATE_JSON="$(read_state_json)"
-CHECK_RESULT="$(python3 - <<'PY' "${STATE_JSON}"
-import json,sys
-raw=sys.argv[1]
-start=raw.find('{')
-if start == -1:
-    print('no||')
-    raise SystemExit
-obj=json.loads(raw[start:])
-state=(obj.get('data') or {}).get('session') or {}
-batch=state.get('active_tool_batch') or {}
-status=((batch.get('call_status') or {}).get('call_1') or {}).get('$tag')
-prompt_pack=((state.get('active_workspace_snapshot') or {}).get('prompt_pack'))
-ok='yes' if status == 'Succeeded' else 'no'
-print(f"{ok}|{prompt_pack or ''}")
-PY
-)"
-OK_FLAG="${CHECK_RESULT%%|*}"
-ACTIVE_PROMPT="${CHECK_RESULT#*|}"
-
-if [ "${OK_FLAG}" != "yes" ]; then
-  echo "${STATE_JSON}" >&2
-  fail "tool batch was not settled with a successful call"
-fi
-if [ "${ACTIVE_PROMPT}" != "default" ]; then
-  echo "${STATE_JSON}" >&2
-  fail "workspace snapshot defaults were not applied to active run"
-fi
-
-# 2) Direct refs run (no workspace binding required).
+# Direct refs run.
 PROMPT_FILE="$(run_json_file "${AOS_BIN}" --json --quiet -w "${WORLD_DIR}" blob put "@${WORLD_DIR}/agent-ws/prompts/packs/default.json")"
 PROMPT_HASH="$(python3 - <<'PY' "${PROMPT_FILE}"
 import json,sys
@@ -258,8 +114,6 @@ print(json.dumps({
       'model':'gpt-mock',
       'reasoning_effort': None,
       'max_tokens': 128,
-      'workspace_binding': None,
-      'default_prompt_pack': None,
       'default_prompt_refs': [prompt_hash],
       'default_tool_profile': 'openai',
       'default_tool_enable': ['host.session.open'],
@@ -284,9 +138,8 @@ obj=json.loads(raw[start:])
 session=((obj.get('data') or {}).get('session') or {})
 cfg=session.get('active_run_config') or {}
 prompt_refs=cfg.get('prompt_refs') or []
-workspace_binding=cfg.get('workspace_binding')
 tool_profile=cfg.get('tool_profile')
-strict=(len(prompt_refs)==1 and prompt_refs[0].startswith('sha256:') and workspace_binding is None and tool_profile in {'openai','anthropic','gemini'})
+strict=(len(prompt_refs)==1 and prompt_refs[0].startswith('sha256:') and tool_profile in {'openai','anthropic','gemini'})
 lifecycle=((session.get('lifecycle') or {}).get('$tag'))
 next_run_seq=session.get('next_run_seq') or 0
 weak=(next_run_seq >= 1 and lifecycle in {'Running','WaitingInput','Failed'})

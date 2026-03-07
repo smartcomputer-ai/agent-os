@@ -2,7 +2,7 @@
 //!
 //! This crate provides common data structures used by built-in system workflows
 //! like `sys/Workspace@1`. The types mirror the schemas in
-//! `spec/defs/builtin-schemas.air.json`.
+//! `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-sdk.air.json`.
 
 #![no_std]
 

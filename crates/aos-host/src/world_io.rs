@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, DefSecret, Manifest, SecretEntry,
+    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, DefSecret, HashRef, Manifest,
     builtins,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
@@ -214,6 +214,18 @@ pub fn build_patch_document(
     base_manifest_hash: &str,
 ) -> Result<PatchDocument> {
     let mut patches = Vec::new();
+    let mut secrets_pre_state = base_manifest.secrets.clone();
+    let referenced_secret_names: std::collections::BTreeSet<String> = bundle
+        .manifest
+        .secrets
+        .iter()
+        .filter_map(|entry| match entry {
+            aos_air_types::SecretEntry::Ref(named) if !is_sys_name(named.name.as_str()) => {
+                Some(named.name.to_string())
+            }
+            _ => None,
+        })
+        .collect();
 
     for schema in &bundle.schemas {
         if is_sys_name(schema.name.as_str()) {
@@ -271,9 +283,12 @@ pub fn build_patch_document(
         });
     }
     for secret in &bundle.secrets {
-        if is_sys_name(secret.name.as_str()) {
+        if is_sys_name(secret.name.as_str())
+            || !referenced_secret_names.contains(secret.name.as_str())
+        {
             continue;
         }
+        apply_placeholder_secret_ref(&mut secrets_pre_state, secret.name.as_str())?;
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
                 kind: "defsecret".to_string(),
@@ -303,18 +318,8 @@ pub fn build_patch_document(
         "defeffect",
         &filter_sys_refs(&bundle.manifest.effects),
     ));
-    for secret in &bundle.manifest.secrets {
-        if let SecretEntry::Ref(named) = secret {
-            if is_sys_name(named.name.as_str()) {
-                continue;
-            }
-            add_refs.push(ManifestRef {
-                kind: "defsecret".to_string(),
-                name: named.name.clone(),
-                hash: named.hash.as_str().to_string(),
-            });
-        }
-    }
+    // Secrets are updated atomically via SetSecrets below. Adding defsecret refs
+    // here would mutate manifest.secrets before SetSecrets pre-hash verification.
     if !add_refs.is_empty() {
         patches.push(PatchOp::SetManifestRefs {
             set_manifest_refs: SetManifestRefs {
@@ -382,8 +387,8 @@ pub fn build_patch_document(
         },
     });
 
-    let pre_hash = Hash::of_cbor(&base_manifest.secrets)
-        .context("hash base secrets")?
+    let pre_hash = Hash::of_cbor(&secrets_pre_state)
+        .context("hash pre-state secrets for set_secrets")?
         .to_hex();
     patches.push(PatchOp::SetSecrets {
         set_secrets: SetSecrets {
@@ -624,6 +629,28 @@ fn filter_sys_refs(refs: &[aos_air_types::NamedRef]) -> Vec<aos_air_types::Named
         .collect()
 }
 
+fn apply_placeholder_secret_ref(
+    secrets: &mut Vec<aos_air_types::SecretEntry>,
+    name: &str,
+) -> Result<()> {
+    let zero_hash = HashRef::new(format!("sha256:{}", "0".repeat(64)))?;
+    if let Some(pos) = secrets
+        .iter()
+        .position(|entry| matches!(entry, aos_air_types::SecretEntry::Ref(named) if named.name.as_str() == name))
+    {
+        secrets[pos] = aos_air_types::SecretEntry::Ref(aos_air_types::NamedRef {
+            name: name.to_string(),
+            hash: zero_hash,
+        });
+    } else {
+        secrets.push(aos_air_types::SecretEntry::Ref(aos_air_types::NamedRef {
+            name: name.to_string(),
+            hash: zero_hash,
+        }));
+    }
+    Ok(())
+}
+
 fn write_json(path: &Path, value: &AirNode) -> Result<()> {
     let json = serde_json::to_string_pretty(value).context("serialize AIR node")?;
     fs::write(path, json).with_context(|| format!("write {}", path.display()))
@@ -847,10 +874,12 @@ fn manifest_from_path(path: &Path) -> Result<Manifest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aos_air_types::DefSecret;
     use aos_air_types::{
-        CURRENT_AIR_VERSION, DefSchema, EmptyObject, HashRef, NamedRef, TypeExpr, TypePrimitive,
-        TypePrimitiveBool,
+        CURRENT_AIR_VERSION, DefSchema, EmptyObject, HashRef, NamedRef, SecretEntry, TypeExpr,
+        TypePrimitive, TypePrimitiveBool,
     };
+    use aos_kernel::patch_doc::compile_patch_document;
     use aos_store::{MemStore, Store};
     use tempfile::tempdir;
 
@@ -1034,5 +1063,54 @@ mod tests {
                 .any(|node| matches!(node, AirNode::Defschema(def) if def.name == schema.name)),
             "defs bundle should include schema"
         );
+    }
+
+    #[test]
+    fn patch_doc_compile_with_secret_defs_uses_set_secrets_only() {
+        let store = MemStore::new();
+        let base_manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: Vec::new(),
+            modules: Vec::new(),
+            effects: Vec::new(),
+            effect_bindings: vec![],
+            caps: Vec::new(),
+            policies: Vec::new(),
+            secrets: Vec::new(),
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: None,
+        };
+        let base_hash = store.put_node(&base_manifest).expect("store base").to_hex();
+
+        let secret = DefSecret {
+            name: "llm/openai_api@1".into(),
+            binding_id: "env:OPENAI_API_KEY".into(),
+            expected_digest: None,
+            allowed_caps: vec!["llm".into()],
+        };
+        let secret_hash = store
+            .put_node(&AirNode::Defsecret(secret.clone()))
+            .expect("store secret")
+            .to_hex();
+        let mut bundle_manifest = base_manifest.clone();
+        bundle_manifest.secrets = vec![SecretEntry::Ref(NamedRef {
+            name: secret.name.clone(),
+            hash: HashRef::new(secret_hash).expect("hash ref"),
+        })];
+        let bundle = WorldBundle {
+            manifest: bundle_manifest,
+            schemas: Vec::new(),
+            modules: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            effects: Vec::new(),
+            secrets: vec![secret],
+            wasm_blobs: None,
+        };
+
+        let doc =
+            build_patch_document(&bundle, &base_manifest, &base_hash).expect("build patch doc");
+        compile_patch_document(&store, doc).expect("compile patch doc");
     }
 }

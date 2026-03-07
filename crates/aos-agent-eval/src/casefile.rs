@@ -123,4 +123,3 @@ pub fn load_cases(cases_dir: &Path) -> Result<Vec<EvalCase>> {
 
     Ok(out)
 }
-

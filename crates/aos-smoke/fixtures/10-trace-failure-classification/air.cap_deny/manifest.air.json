@@ -6,7 +6,6 @@
     { "name": "demo/FetchNotifyState@1" },
     { "name": "demo/FetchNotifyStart@1" },
     { "name": "demo/FetchNotifyEvent@1" },
-    { "name": "sys/EffectReceiptEnvelope@1" },
     { "name": "sys/HttpRequestParams@1" },
     { "name": "sys/HttpRequestReceipt@1" }
   ],

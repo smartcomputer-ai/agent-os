@@ -265,6 +265,15 @@
   },
   {
     "$kind": "defeffect",
+    "name": "sys/workspace.write_ref@1",
+    "kind": "workspace.write_ref",
+    "params_schema": "sys/WorkspaceWriteRefParams@1",
+    "receipt_schema": "sys/WorkspaceWriteRefReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
     "name": "sys/workspace.remove@1",
     "kind": "workspace.remove",
     "params_schema": "sys/WorkspaceRemoveParams@1",

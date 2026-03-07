@@ -17,9 +17,13 @@ Ship the first complete hosted runtime plane on top of P2 persistence:
 
 This milestone turns hosted storage into a working distributed runtime.
 
+Constraint for later follow-on work:
+
+- The worker loop and world-lifecycle boundary established here should remain reusable by a later embedded-universe mode, even though P3 itself is hosted-only.
+
 ## Dependencies
 
-- Requires `v0.11-infra/p2-hosted-persistence-plane.md` merged.
+- Requires `v0.20-infra/p2-hosted-persistence-plane.md` merged.
 - Requires P1 semantics already active (`BlobEdge`, baseline rules, snapshot root completeness).
 
 ## Non-Goals (P3)
@@ -29,6 +33,9 @@ This milestone turns hosted storage into a working distributed runtime.
 - Full tenant quota/billing engine.
 - Rich workflow placement optimization (ML scheduling, cost-aware routing).
 - Public internet control-plane APIs and auth hardening.
+- Embedded-universe runtime implementation.
+- Live communication or shared CAS between embedded and hosted universes.
+- Export/import movement between embedded and hosted modes.
 
 ## Runtime Roles (In Scope)
 
@@ -107,6 +114,12 @@ Run loop budgets:
 - `max_effects_per_cycle`
 - `max_cycle_wall_ms` (operational guardrail only; deterministic outputs remain journal-defined)
 
+Runtime-shape constraints:
+
+- worker/runtime code should key off `(universe_id, world_id)` rather than a filesystem world root
+- phase-1 single-process multi-world hosting should be the same basic runtime shape later reused by embedded mode
+- hosted storage remains the only authoritative persistence plane in P3
+
 ### 3) Durable ingress normalization path
 
 All external inputs converge into `InboxItem` and are journaled only by lease holder.
@@ -129,24 +142,28 @@ Normalization requirements:
 
 Queue keys from P2:
 
-- `u/<u>/effects/pending/<seq> -> EffectDispatchItem`
-- `u/<u>/effects/inflight/<seq> -> EffectInFlightItem`
+- `u/<u>/effects/pending/<shard>/<seq> -> EffectDispatchItem`
+- `u/<u>/effects/inflight/<shard>/<seq> -> EffectInFlightItem`
 - `u/<u>/effects/dedupe/<intent_hash> -> DispatchStatus`
 
 Dispatch item fields:
 
+- `shard`
 - `universe_id`
 - `world_id`
 - `intent_hash`
 - `effect_kind`
-- `params_cbor`
+- `params_inline_cbor?`
+- `params_ref?`
+- `params_size?`
+- `params_sha256?`
 - `origin_name`
 - `policy_context_hash`
 - `enqueued_at_ns`
 
 Claim/execute protocol:
 
-1. Adapter worker claims pending item by moving it to inflight with lease timeout.
+1. Adapter worker claims pending item from an assigned shard by moving it to inflight with lease timeout.
 2. Execute adapter call.
 3. Build typed receipt event.
 4. Enqueue `ReceiptIngress` into world inbox.
@@ -163,18 +180,25 @@ Retry semantics:
 - Runtime-level retries create new attempt records but same `intent_hash`.
 - Terminal receipt states: `ok | error | timeout`.
 
+Sharding rules:
+
+- `shard` is derived from a stable hash of `intent_hash` with a fixed configured shard count.
+- Adapter workers claim one or more shards and scan only those prefixes.
+- There is no global ordering guarantee across effect shards.
+- Initial rollout may use `shard_count = 1`; the shard-aware key layout exists to avoid redesign once hosted load requires parallel queue ranges.
+
 ### 5) Durable timer runtime
 
 Timer queue keys from P2:
 
-- `u/<u>/timers/due/<deliver_at_ns>/<intent_hash> -> TimerDueItem`
-- `u/<u>/timers/inflight/<intent_hash> -> TimerClaim`
+- `u/<u>/timers/due/<shard>/<time_bucket>/<deliver_at_ns>/<intent_hash> -> TimerDueItem`
+- `u/<u>/timers/inflight/<shard>/<intent_hash> -> TimerClaim`
 - `u/<u>/timers/dedupe/<intent_hash> -> DeliveredStatus`
 
 Timer protocol:
 
 1. `timer.set` intent is persisted and enqueued as due record.
-2. Timer worker claims due item at/after due timestamp.
+2. Timer worker claims due item at/after due timestamp from an assigned shard and time bucket.
 3. Enqueue `TimerFiredIngress` into world inbox.
 4. Mark dedupe delivered, clear inflight.
 
@@ -182,12 +206,24 @@ Semantics:
 
 - At-least-once enqueue to inbox; dedupe prevents duplicate logical delivery for same intent.
 - World migration does not affect timer durability.
+- There is no global total order across timer shards; only due-time ordering within a shard scan.
+
+Recurring schedule note:
+
+- `P3` only implements durable delivery for one-shot `timer.set` intents.
+- Recurring schedules are deferred until after the first hosted runtime pass, once leases, wakeups, migration, and one-shot durability are proven end to end.
+- When added later, the schedule engine should own recurring metadata and materialize one-shot timer instances onto the existing due queue, rather than replacing the timer runtime itself.
 
 ### 6) Fabric cross-world messaging (`fabric.send`)
 
 Add plan-only effect kind:
 
 - `fabric.send`
+
+P3 scope note:
+
+- In this milestone, `fabric.send` only targets worlds that live inside the same hosted persistence plane.
+- Bridging to embedded universes is deferred.
 
 Proposed built-ins:
 
@@ -210,7 +246,7 @@ Proposed built-ins:
 Delivery protocol:
 
 1. Compute `message_id = intent_hash` unless explicitly overridden by policy.
-2. Transaction checks `world/<dest>/fabric_dedupe/<message_id>`.
+2. Transaction checks `u/<u>/w/<dest>/fabric/dedupe/<message_id>`.
 3. If exists, return `already_enqueued`.
 4. Else enqueue inbox item on destination world and set dedupe key.
 5. Return receipt to sender via normal receipt ingress.
@@ -221,7 +257,24 @@ Ordering:
 - Cross-world: no global order guarantee.
 - Causal metadata (`from_world`, `from_height`) attached for optional reducer-level enforcement.
 
-### 7) World fork and seed from snapshot
+### 7) Dedupe retention and GC
+
+Dedupe records are correctness-critical but must not grow without bound.
+
+Required shape:
+
+- terminal status records store `completed_at_ns` and `gc_after_ns`
+- each dedupe family has a matching GC index keyed by coarse expiry bucket
+- deletion is always best-effort background work and never in the correctness-critical fast path
+
+Retention rules:
+
+- effect dispatch dedupe must outlive receipt enqueue and any expected runtime-level retries
+- timer dedupe must outlive successful timer-fire enqueue and any expected reaper retries
+- fabric dedupe must outlive destination enqueue visibility and sender retry windows
+- exact retention windows are operational policy, but the storage model must support bounded cleanup
+
+### 8) World fork and seed from snapshot
 
 Add hosted world management primitives:
 
@@ -241,7 +294,7 @@ Default effect policy on fork:
 - Clear pending effect dispatch state and idempotency caches for the new world.
 - Rationale: avoid duplicating external side effects when branching.
 
-### 8) Scheduling and readiness model
+### 9) Scheduling and readiness model
 
 Readiness signal:
 
@@ -252,14 +305,39 @@ Readiness signal:
 
 Suggested queue:
 
-- `u/<u>/ready/<priority>/<world_id> -> ReadyHint`
+- `u/<u>/ready/<priority>/<shard>/<world_id> -> ReadyHint`
 
 Rules:
 
 - Ready queue is hint-based and idempotent (duplicate hints acceptable).
 - Authoritative truth remains world state in journal/inbox metadata.
+- `shard` for ready hints should be derived from a stable hash of `world_id`.
+- Ready hints may be stale; workers must re-check authoritative world state before acting.
+- Ready writes should be de-duplicated or rate-limited where practical so a single hot world does not become a write hotspot.
+- Initial rollout may use `shard_count = 1` here as well.
 
-### 9) Operational APIs (internal)
+### 10) Hosted runtime metadata keyspace
+
+Primary per-world records:
+
+- `u/<u>/w/<w>/runtime/assignment -> AssignmentRecord`
+- `u/<u>/w/<w>/runtime/lease -> LeaseRecord`
+- `u/<u>/w/<w>/runtime/ready_state -> ReadyState`
+- `u/<u>/w/<w>/fabric/dedupe/<message_id> -> DeliveredStatus`
+- `u/<u>/w/<w>/fabric/dedupe_gc/<gc_bucket>/<message_id> -> ()`
+
+Secondary indexes:
+
+- `u/<u>/assign/by_worker/<worker>/<world> -> AssignmentIndexRecord`
+- `u/<u>/lease/by_worker/<worker>/<world> -> LeaseIndexRecord`
+
+Rules:
+
+- per-world records are authoritative
+- per-worker indexes are maintained transactionally as secondary indexes
+- watches on assignment or ready-state keys are latency hints only; workers must recover correctly by scanning durable state
+
+### 11) Operational APIs (internal)
 
 Required internal control surface:
 
@@ -283,6 +361,7 @@ All APIs must be idempotent and return typed errors.
 2. Validate assignment allows worker (if configured).
 3. If lease absent/expired:
    - write new lease with `epoch = old_epoch + 1`
+   - update `lease/by_worker/<worker>/<world>`
    - set expiry
 4. Commit.
 
@@ -305,7 +384,7 @@ Guarantees:
 ### Protocol C: `publish_effect_intents(world, epoch, intents[])`
 
 1. Verify lease epoch.
-2. For each intent, check dedupe key.
+2. For each intent, compute `shard`, check dedupe key, and externalize large params to CAS if needed.
 3. Insert pending queue records for new intents.
 4. Commit.
 
@@ -313,7 +392,7 @@ Guarantees:
 
 - No double-dispatch for same intent hash.
 
-### Protocol D: `adapter_claim_execute_ack(effect_seq)`
+### Protocol D: `adapter_claim_execute_ack(shard, effect_seq)`
 
 1. Move pending entry to inflight with claim TTL.
 2. Execute adapter.
@@ -325,7 +404,7 @@ Guarantees:
 
 - Durable handoff from effect queue to world inbox.
 
-### Protocol E: `timer_claim_fire_ack(intent_hash)`
+### Protocol E: `timer_claim_fire_ack(shard, intent_hash)`
 
 1. Claim due timer.
 2. Enqueue timer-fired ingress.
@@ -338,7 +417,7 @@ Guarantees:
 
 ### Protocol F: `fabric_send(dest_world, message_id)`
 
-1. Check destination dedupe key.
+1. Check `u/<u>/w/<dest>/fabric/dedupe/<message_id>`.
 2. If absent, enqueue destination inbox message and set dedupe key.
 3. Return receipt payload with enqueue seq.
 
@@ -369,6 +448,11 @@ Guarantees:
 - Fabric delivery: `message_id` (default `intent_hash`).
 - Timer delivery: `intent_hash`.
 - Journal append: `expected_head` + single writer.
+
+Deferred boundary:
+
+- P3 does not define durable delivery across hosted/embedded authority boundaries.
+- Any future embedded/hosted bridge must be specified as an explicit relay/export surface, not assumed by these protocols.
 
 ## Testing and Validation
 
@@ -414,6 +498,7 @@ Assertions:
 
 - Leases active but no contention.
 - Adapter and timer workers can be in-process sidecars.
+- This runtime shape should be preserved so embedded-universe mode can later reuse it with a different authoritative persistence backend.
 
 ### Phase 2: Multi-worker lease handoff
 
@@ -435,12 +520,13 @@ Assertions:
 
 1. Lease protocol with epoch fencing implemented and enforced on world mutations.
 2. Worker runtime loop can host multiple worlds and survive failover.
-3. Durable effect dispatch queue with adapter workers and receipt re-ingress is live.
-4. Durable timer worker path is live and migration-safe.
-5. `fabric.send` effect with idempotent destination enqueue is implemented.
-6. World fork/seed from snapshot is implemented with explicit default effect policy.
-7. Failure-injection test suite passes with replay parity guarantees.
-8. Internal ops APIs and observability metrics/logging are in place.
+3. Runtime startup/operation is keyed by persistence identity rather than filesystem world-root assumptions.
+4. Durable effect dispatch queue with adapter workers and receipt re-ingress is live.
+5. Durable timer worker path is live and migration-safe.
+6. `fabric.send` effect with idempotent destination enqueue is implemented for hosted-to-hosted delivery.
+7. World fork/seed from snapshot is implemented with explicit default effect policy.
+8. Failure-injection test suite passes with replay parity guarantees.
+9. Internal ops APIs and observability metrics/logging are in place.
 
 ## Explicitly Out of Scope
 
@@ -448,4 +534,4 @@ Assertions:
 - Multi-region consensus or geo-replication.
 - Billing/chargeback and tenant quota enforcement policies.
 - Complex policy DSL upgrades beyond current cap/policy primitives.
-
+- Embedded-universe implementation and hosted/embedded bridge semantics.

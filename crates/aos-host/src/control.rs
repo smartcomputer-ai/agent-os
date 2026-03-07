@@ -725,6 +725,16 @@ pub(crate) async fn handle_request(
                     .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
                 Ok(value)
             }
+            "workspace-write-ref" => {
+                let params: WorkspaceWriteRefPayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: WorkspaceWriteRefReceipt =
+                    internal_effect(control_tx, EffectKind::workspace_write_ref(), &params)
+                        .await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
+            }
             "workspace-remove" => {
                 let params: WorkspaceRemoveParams = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
@@ -1072,6 +1082,21 @@ struct WorkspaceWriteBytesParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WorkspaceWriteBytesReceipt {
+    new_root_hash: String,
+    blob_hash: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct WorkspaceWriteRefPayload {
+    root_hash: String,
+    path: String,
+    blob_hash: String,
+    #[serde(default)]
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceWriteRefReceipt {
     new_root_hash: String,
     blob_hash: String,
 }

@@ -146,12 +146,51 @@ async fn control_workspace_internal_effects() {
         .expect("new_root_hash missing")
         .to_string();
 
+    let blob_put = RequestEnvelope {
+        v: 1,
+        id: "blob-put".into(),
+        cmd: "blob-put".into(),
+        payload: json!({
+            "data_b64": BASE64_STANDARD.encode(b"linked through cas"),
+        }),
+    };
+    let resp = client.request(&blob_put).await.unwrap();
+    assert!(resp.ok, "blob-put failed: {:?}", resp.error);
+    let blob_hash = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("hash"))
+        .and_then(|v| v.as_str())
+        .expect("blob hash missing")
+        .to_string();
+
+    let write_ref = RequestEnvelope {
+        v: 1,
+        id: "write-ref".into(),
+        cmd: "workspace-write-ref".into(),
+        payload: json!({
+            "root_hash": new_root.clone(),
+            "path": "linked.txt",
+            "blob_hash": blob_hash.clone(),
+            "mode": 0o644u64,
+        }),
+    };
+    let resp = client.request(&write_ref).await.unwrap();
+    assert!(resp.ok, "workspace-write-ref failed: {:?}", resp.error);
+    let linked_root = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("new_root_hash"))
+        .and_then(|v| v.as_str())
+        .expect("linked new_root_hash missing")
+        .to_string();
+
     let read = RequestEnvelope {
         v: 1,
         id: "read".into(),
         cmd: "workspace-read-bytes".into(),
         payload: json!({
-            "root_hash": new_root.clone(),
+            "root_hash": linked_root.clone(),
             "path": "README.md",
         }),
     };
@@ -171,7 +210,7 @@ async fn control_workspace_internal_effects() {
         id: "list".into(),
         cmd: "workspace-list".into(),
         payload: json!({
-            "root_hash": new_root.clone(),
+            "root_hash": linked_root.clone(),
             "path": null,
             "scope": "dir",
             "limit": 0u64,
@@ -192,14 +231,20 @@ async fn control_workspace_internal_effects() {
             .any(|e| e.get("path").and_then(|p| p.as_str()) == Some("README.md")),
         "expected README.md entry"
     );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.get("path").and_then(|p| p.as_str()) == Some("linked.txt")),
+        "expected linked.txt entry"
+    );
 
     let read_ref = RequestEnvelope {
         v: 1,
         id: "ref".into(),
         cmd: "workspace-read-ref".into(),
         payload: json!({
-            "root_hash": new_root.clone(),
-            "path": "README.md",
+            "root_hash": linked_root.clone(),
+            "path": "linked.txt",
         }),
     };
     let resp = client.request(&read_ref).await.unwrap();
@@ -211,6 +256,37 @@ async fn control_workspace_internal_effects() {
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     assert_eq!(kind, "file");
+    let read_ref_hash = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("hash"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    assert_eq!(read_ref_hash, blob_hash);
+
+    let read_linked = RequestEnvelope {
+        v: 1,
+        id: "read-linked".into(),
+        cmd: "workspace-read-bytes".into(),
+        payload: json!({
+            "root_hash": linked_root.clone(),
+            "path": "linked.txt",
+        }),
+    };
+    let resp = client.request(&read_linked).await.unwrap();
+    assert!(
+        resp.ok,
+        "workspace-read-bytes for linked.txt failed: {:?}",
+        resp.error
+    );
+    let data_b64 = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("data_b64"))
+        .and_then(|v| v.as_str())
+        .expect("linked data_b64 missing");
+    let bytes = BASE64_STANDARD.decode(data_b64).unwrap();
+    assert_eq!(bytes, b"linked through cas");
 
     let diff = RequestEnvelope {
         v: 1,
@@ -218,7 +294,7 @@ async fn control_workspace_internal_effects() {
         cmd: "workspace-diff".into(),
         payload: json!({
             "root_a": root_hash,
-            "root_b": new_root,
+            "root_b": linked_root,
         }),
     };
     let resp = client.request(&diff).await.unwrap();

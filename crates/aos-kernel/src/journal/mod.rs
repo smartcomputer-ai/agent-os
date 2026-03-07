@@ -172,6 +172,8 @@ pub enum IntentOriginRecord {
         )]
         instance_key: Option<Vec<u8>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        issuer_ref: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         emitted_at_seq: Option<u64>,
     },
     Plan {

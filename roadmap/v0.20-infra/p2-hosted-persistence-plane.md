@@ -14,6 +14,8 @@ Design stance for P2:
 - FoundationDB is the primary and only production metadata/ordering store target in this milestone.
 - We do not introduce a "portable multi-DB" abstraction layer.
 - We do keep a narrow operation boundary between host runtime and storage implementation so kernel/runtime logic is not coupled to raw FDB client APIs.
+- That boundary should remain suitable for a later first-party embedded backend for isolated local universes, but that backend is not implemented in P2.
+- P2 does not attempt live hosted/embedded communication or two-way sync; movement between modes is deferred to later export/import work.
 
 Core outcomes:
 
@@ -27,7 +29,7 @@ This milestone is the persistence substrate only. It does not include scheduling
 
 ## Dependency
 
-- Requires `v0.11-infra/p1-protocol-roots-and-baselines.md` merged.
+- Requires `v0.20-infra/p1-protocol-roots-and-baselines.md` merged.
 - P2 assumes:
   - `BlobEdge` and `blob.put@1` normalization are active.
   - Baseline promotion checks are active.
@@ -39,6 +41,8 @@ This milestone is the persistence substrate only. It does not include scheduling
 - Multi-worker scheduling/orchestrator decisions (P3).
 - Cross-world `fabric.send` adapter (P3).
 - Timer worker and global effect worker pools (P3).
+- Embedded-universe mode implementation (follow-on milestone).
+- Live communication or shared CAS between embedded and hosted universes.
 - Mark-and-sweep deletion execution and retention policy UI.
 - Multi-region replication strategy.
 - A backend-portable storage layer across unrelated databases.
@@ -49,7 +53,7 @@ This milestone is the persistence substrate only. It does not include scheduling
 
 Add a concrete FDB-focused persistence implementation crate with deterministic semantics and a narrow operation surface for host/runtime integration:
 
-- Suggested crate: `crates/aos-db` (name can vary, FDB-first stance cannot).
+- Suggested crate: `crates/aos-fdb` (name can vary, FDB-first stance cannot).
 - Provide canonical types and operations for:
   - CAS
   - World journal
@@ -57,18 +61,25 @@ Add a concrete FDB-focused persistence implementation crate with deterministic s
   - Snapshot index + active baseline
   - Segment index (for cold log materialization)
 
+Boundary design constraints:
+
+- This is a runtime/storage protocol boundary, not a promise of arbitrary backend portability.
+- Public protocol types should not expose raw FoundationDB client types directly, even if the FDB implementation uses them internally.
+- The boundary should be reusable later by a first-party embedded backend for isolated local universes.
+- World runtime integration should key off `(universe_id, world_id)`, not a filesystem world root.
+
 Suggested core types:
 
 - `UniverseId = Uuid`
 - `WorldId = Uuid`
 - `JournalHeight = u64`
-- `InboxSeq = [u8; 10]` (FDB versionstamp bytes; this is intentionally FDB-shaped)
+- `InboxSeq = opaque, serializable, totally ordered cursor token` (FDB may encode this as versionstamp bytes internally)
 - `SegmentId = { start: u64, end: u64 }`
 
 Suggested operation surface (illustrative):
 
 ```rust
-pub trait HostedPersistence {
+pub trait WorldPersistence {
     fn cas_put_verified(&self, universe: UniverseId, bytes: &[u8]) -> Result<Hash, PersistError>;
     fn cas_get(&self, universe: UniverseId, hash: Hash) -> Result<Vec<u8>, PersistError>;
     fn cas_has(&self, universe: UniverseId, hash: Hash) -> Result<bool, PersistError>;
@@ -149,6 +160,8 @@ FDB semantic leakage is accepted and explicit:
 - transaction chunking limits shape large batch behavior,
 - monotonic cursor/baseline constraints are enforced with compare-and-swap semantics.
 
+However, these remain implementation semantics of the FDB backend, not stable public protocol shapes for the runtime boundary.
+
 ### 2) FDB keyspace layout (authoritative metadata + ordering + queues)
 
 Define canonical tuple-subspace layout (logical names; exact tuple encoding is implementation detail).
@@ -156,9 +169,14 @@ Define canonical tuple-subspace layout (logical names; exact tuple encoding is i
 Universe global:
 
 - `u/<u>/cas/meta/<hash> -> { size, storage, object_key?, inline_bytes? }`
-- `u/<u>/effects/pending/<seq> -> EffectDispatchItem` (written in P2; consumed in P3)
-- `u/<u>/effects/inflight/<seq> -> EffectInFlightItem` (written in P2; consumed in P3)
-- `u/<u>/timers/due/<deliver_at_ns>/<intent_hash> -> TimerDueItem` (written in P2; consumed in P3)
+- `u/<u>/effects/pending/<shard>/<seq> -> EffectDispatchItem` (written in P2; consumed in P3)
+- `u/<u>/effects/inflight/<shard>/<seq> -> EffectInFlightItem` (written in P2; consumed in P3)
+- `u/<u>/effects/dedupe/<intent_hash> -> DispatchStatus` (written in P2; consumed in P3)
+- `u/<u>/effects/dedupe_gc/<gc_bucket>/<intent_hash> -> ()`
+- `u/<u>/timers/due/<shard>/<time_bucket>/<deliver_at_ns>/<intent_hash> -> TimerDueItem` (written in P2; consumed in P3)
+- `u/<u>/timers/inflight/<shard>/<intent_hash> -> TimerClaim` (written in P2; consumed in P3)
+- `u/<u>/timers/dedupe/<intent_hash> -> DeliveredStatus` (written in P2; consumed in P3)
+- `u/<u>/timers/dedupe_gc/<gc_bucket>/<intent_hash> -> ()`
 - `u/<u>/segments/<world>/<end_height> -> SegmentIndexRecord`
 
 Per world:
@@ -170,7 +188,7 @@ Per world:
 - `u/<u>/w/<w>/baseline/active -> SnapshotRecord`
 - `u/<u>/w/<w>/inbox/e/<seq> -> InboxItem`
 - `u/<u>/w/<w>/inbox/cursor -> Option<seq>`
-- `u/<u>/w/<w>/notify/counter -> u64`
+- `u/<u>/w/<w>/notify/counter -> u64` (atomic-add hint only)
 - `u/<u>/w/<w>/gc/pin/<hash> -> PinReason` (optional, if explicit pin-index is materialized)
 
 Rules:
@@ -179,13 +197,29 @@ Rules:
 - `snapshot/by_height` immutable once written.
 - `baseline/active` may advance, never regress.
 - `inbox/cursor` monotonic increasing only.
-- `notify/counter` best-effort latency signal only; not correctness-critical.
+- global effect and timer queues are sharded; there is no universe-wide total order across shards.
+- `shard` should be derived from a stable hash (normally `intent_hash`) with a fixed configured shard count.
+- timer queues are additionally bucketed by time to keep scans bounded.
+- `notify/counter` uses atomic add and is a best-effort latency signal only; not correctness-critical.
+- watches on `notify/counter` are optional wakeup hints only; correctness comes from scanning durable state.
+- queue and inbox values must stay small; large payloads are externalized to CAS and referenced from queue records.
+
+Initial rollout note:
+
+- The shard dimension is part of the keyspace from the start, but the first implementation may run with `shard_count = 1`.
+- This keeps the initial runtime simple while avoiding a later keyspace migration for global hot queues.
+
+Recurring schedule note:
+
+- `P2` only defines durable one-shot timer storage for `timer.set`.
+- First-class recurring schedules (`schedule.upsert`, `schedule.cancel`, cron/interval metadata, misfire policy) are intentionally deferred until after the first hosted infra pass.
+- Future recurring schedules should compile down to the same durable timer substrate by materializing the next one-shot due item into `u/<u>/timers/due/...`; `P2` should not require a timer keyspace redesign for that later step.
 
 ### 3) CAS implementation (object store + inline small objects)
 
 Storage policy:
 
-- `len(bytes) <= INLINE_THRESHOLD` (default 16 KiB): inline in FDB metadata value.
+- `len(bytes) <= INLINE_THRESHOLD` (default 4 KiB): inline in FDB metadata value.
 - `len(bytes) > INLINE_THRESHOLD`: body in object store, metadata in FDB.
 
 Object key convention:
@@ -212,6 +246,7 @@ Integrity invariants:
 - CAS metadata and body are immutable.
 - Body content must match key hash.
 - Duplicate puts are no-op idempotent.
+- Inline metadata values should remain comfortably within normal FDB value-size guidance; large bodies belong in object storage.
 
 ### 4) Journal append/scan semantics
 
@@ -227,6 +262,12 @@ Single writer assumption:
 3. Write `journal/e/head+1 .. head+n`.
 4. Write `journal/head = head+n`.
 5. Commit atomically.
+
+Batch sizing constraints:
+
+- Journal appends must be bounded by bytes as well as entry count.
+- Hosted runtime should target transactions well below FoundationDB's 1 MiB "red flag" affected-data threshold and never approach the hard 10 MB limit.
+- Retry loops must assume FoundationDB's five-second transaction lifetime.
 
 Conflict behavior:
 
@@ -247,6 +288,10 @@ Inbox item union:
 - `InboxIngress { inbox_name, payload_cbor, headers? }`
 - `TimerFiredIngress { timer_id, payload_cbor }`
 - `ControlIngress { cmd, payload_cbor }`
+
+Payload sizing rule:
+
+- Any large `*_cbor` field should be externalized to CAS above a queue payload threshold and represented by companion `{ *_ref, *_size, *_sha256 }` metadata instead of large inline values.
 
 Enqueue transaction:
 
@@ -333,10 +378,12 @@ Restore with segments:
 
 Add a reusable protocol conformance test suite:
 
-- package: `crates/aos-db/tests/conformance.rs`
+- package: `crates/aos-fdb/tests/conformance.rs`
 - runs against:
   - FDB implementation (required in integration/nightly)
   - in-memory behavioral reference implementation used for CI/unit tests (not a portability target)
+
+The harness should be structured so a later first-party embedded backend can be added without redefining the protocol.
 
 Conformance cases:
 
@@ -346,14 +393,16 @@ Conformance cases:
 4. Cursor monotonicity and no duplication under simulated crash.
 5. Snapshot index monotonicity and baseline non-regression.
 6. Segment export + restore equivalence.
+7. Sharded effect/timer queue scans preserve correctness under concurrent producers.
 
 ### 9) Repository touch points
 
 Expected implementation touch points:
 
-- New: `crates/aos-db/` (FDB-first persistence implementation + protocol types + conformance harness)
-- Optional New: `crates/aos-db-objstore/` (object-store helper if split for operational concerns)
-- Update: `crates/aos-host/` to consume `aos-db` operations in hosted mode
+- New: `crates/aos-fdb/` (FDB-first persistence implementation + protocol types + conformance harness)
+- Optional New: `crates/aos-fdb-objstore/` (object-store helper if split for operational concerns, but I prefer it to be part of aos-fdb to avoid too many crates unless there is a very good reason for this.)
+- Update: `crates/aos-host/` to consume `aos-fdb` operations in hosted mode
+- Update: `crates/aos-host/` startup paths to open hosted worlds by persistence identity rather than assuming a filesystem world root is the runtime authority
 - Update: `crates/aos-kernel/` only via narrow boundary (no FDB/object-store coupling)
 - Update: docs/spec alignment in `spec/02-architecture.md` and infra notes
 
@@ -452,17 +501,19 @@ Guarantees:
 2. Metadata commit succeeds but read path sees missing object: hard error, no silent heal.
 3. Head conflict under concurrent appends returns typed conflict.
 4. Cursor regression attempt is rejected.
+5. Sharded pending/timer queues continue operating when one shard is hot or one shard reaper crashes.
 
 ### Scale tests (target envelope)
 
 1. 10k worlds, sparse activity: metadata reads/writes remain bounded.
 2. 1k active worlds with sustained inbox ingress: no per-world starvation.
 3. Segment export under sustained appends does not stall foreground writes.
+4. Global effect/timer dispatch throughput scales with shard count rather than a single hot range.
 
 ## Deliverables / DoD
 
-1. `aos-db` protocol/types merged with conformance tests and in-memory behavioral reference backend.
-2. `aos-db` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
+1. `aos-fdb` protocol/types merged with conformance tests and in-memory behavioral reference backend.
+2. `aos-fdb` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
 3. Hosted-mode restore uses active baseline + segments + hot tail deterministically.
 4. Inbox drain protocol with cursor commit is implemented and crash-safe.
 5. Segment export compaction is available behind config flag and tested.
@@ -474,5 +525,7 @@ Guarantees:
 - Orchestrator assignment strategy and leases execution loop (P3).
 - Effect/timer worker scheduling and retries (P3).
 - Fabric adapter and cross-world semantics (P3).
+- Embedded-universe runtime implementation and hosted/embedded bridge semantics.
+- Export/import movement between embedded and hosted modes.
 - Automated mark-and-sweep deletion execution.
 - Quota/billing enforcement.

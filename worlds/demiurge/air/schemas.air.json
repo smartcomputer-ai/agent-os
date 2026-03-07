@@ -1,62 +1,81 @@
 [
   {
     "$kind": "defschema",
-    "name": "demiurge/ToolCallParams@1",
+    "name": "demiurge/TaskConfig@1",
     "type": {
-      "variant": {
-        "IntrospectManifest": {
-          "record": {
-            "consistency": { "text": {} }
-          }
+      "record": {
+        "provider": { "option": { "text": {} } },
+        "model": { "option": { "text": {} } },
+        "reasoning_effort": {
+          "option": { "ref": "aos.agent/ReasoningEffort@1" }
         },
-        "WorkspaceReadBytes": {
-          "record": {
-            "workspace": { "text": {} },
-            "version": { "option": { "nat": {} } },
-            "path": { "text": {} }
-          }
-        }
+        "max_tokens": { "option": { "nat": {} } },
+        "tool_profile": { "option": { "text": {} } },
+        "allowed_tools": { "option": { "list": { "text": {} } } },
+        "tool_enable": { "option": { "list": { "text": {} } } },
+        "tool_disable": { "option": { "list": { "text": {} } } },
+        "tool_force": { "option": { "list": { "text": {} } } },
+        "session_ttl_ns": { "option": { "nat": {} } }
       }
     }
   },
   {
     "$kind": "defschema",
-    "name": "demiurge/ToolCallRequested@1",
+    "name": "demiurge/TaskSubmitted@1",
     "type": {
       "record": {
-        "session_id": { "ref": "aos.agent/SessionId@1" },
+        "task_id": { "ref": "aos.agent/SessionId@1" },
         "observed_at_ns": { "time": {} },
-        "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
-        "call_id": { "text": {} },
-        "finalize_batch": { "bool": {} },
-        "params": { "ref": "demiurge/ToolCallParams@1" }
+        "workdir": { "text": {} },
+        "task": { "text": {} },
+        "config": { "option": { "ref": "demiurge/TaskConfig@1" } }
       }
     }
   },
   {
     "$kind": "defschema",
-    "name": "demiurge/PendingToolStage@1",
+    "name": "demiurge/TaskStatus@1",
     "type": {
       "variant": {
-        "AwaitIntrospectManifest": { "unit": {} },
-        "AwaitWorkspaceResolve": {
-          "record": {
-            "path": { "text": {} }
-          }
-        },
-        "AwaitWorkspaceReadBytes": { "unit": {} }
+        "Idle": { "unit": {} },
+        "Bootstrapping": { "unit": {} },
+        "Running": { "unit": {} },
+        "Succeeded": { "unit": {} },
+        "Failed": { "unit": {} },
+        "Cancelled": { "unit": {} }
       }
     }
   },
   {
     "$kind": "defschema",
-    "name": "demiurge/PendingToolCall@1",
+    "name": "demiurge/TaskFailure@1",
     "type": {
       "record": {
-        "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
-        "call_id": { "text": {} },
-        "finalize_batch": { "bool": {} },
-        "stage": { "ref": "demiurge/PendingToolStage@1" }
+        "code": { "text": {} },
+        "detail": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/PendingStage@1",
+    "type": {
+      "variant": {
+        "AwaitBlobPut": { "unit": {} },
+        "AwaitHostSessionOpen": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/TaskFinished@1",
+    "type": {
+      "record": {
+        "task_id": { "ref": "aos.agent/SessionId@1" },
+        "observed_at_ns": { "time": {} },
+        "status": { "ref": "demiurge/TaskStatus@1" },
+        "failure": { "option": { "ref": "demiurge/TaskFailure@1" } },
+        "run_id": { "option": { "ref": "aos.agent/RunId@1" } }
       }
     }
   },
@@ -65,10 +84,18 @@
     "name": "demiurge/State@1",
     "type": {
       "record": {
-        "session": { "ref": "aos.agent/SessionState@1" },
-        "pending_tool_call": {
-          "option": { "ref": "demiurge/PendingToolCall@1" }
-        }
+        "task_id": { "ref": "aos.agent/SessionId@1" },
+        "status": { "ref": "demiurge/TaskStatus@1" },
+        "workdir": { "option": { "text": {} } },
+        "task": { "option": { "text": {} } },
+        "config": { "option": { "ref": "demiurge/TaskConfig@1" } },
+        "input_ref": { "option": { "hash": {} } },
+        "host_session_id": { "option": { "text": {} } },
+        "pending_stage": { "option": { "ref": "demiurge/PendingStage@1" } },
+        "next_observed_at_ns": { "nat": {} },
+        "finished": { "bool": {} },
+        "failure": { "option": { "ref": "demiurge/TaskFailure@1" } },
+        "last_updated_at_ns": { "time": {} }
       }
     }
   },
@@ -77,11 +104,13 @@
     "name": "demiurge/WorkflowEvent@1",
     "type": {
       "variant": {
-        "Ingress": { "ref": "aos.agent/SessionIngress@1" },
+        "TaskSubmitted": { "ref": "demiurge/TaskSubmitted@1" },
+        "SessionLifecycleChanged": {
+          "ref": "aos.agent/SessionLifecycleChanged@1"
+        },
         "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" },
         "ReceiptRejected": { "ref": "sys/EffectReceiptRejected@1" },
         "StreamFrame": { "ref": "sys/EffectStreamFrame@1" },
-        "ToolCallRequested": { "ref": "demiurge/ToolCallRequested@1" },
         "Noop": { "ref": "aos.agent/SessionNoop@1" }
       }
     }

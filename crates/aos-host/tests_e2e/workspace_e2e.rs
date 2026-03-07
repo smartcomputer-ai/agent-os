@@ -127,6 +127,20 @@ struct WorkspaceWriteBytesReceipt {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceWriteRefParams {
+    root_hash: String,
+    path: String,
+    blob_hash: String,
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceWriteRefReceipt {
+    new_root_hash: String,
+    blob_hash: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct WorkspaceRemoveParams {
     root_hash: String,
     path: String,
@@ -535,6 +549,67 @@ async fn workspace_tree_effects_roundtrip() {
     .expect("intent");
     let list_receipt: WorkspaceListReceipt = handle_internal(&mut world.kernel, intent);
     assert!(list_receipt.entries.is_empty());
+}
+
+#[tokio::test]
+async fn workspace_write_ref_links_existing_blob() {
+    let store = fixtures::new_mem_store();
+    let loaded = build_workspace_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), loaded).expect("world");
+
+    let empty_root = store
+        .put_node(&WorkspaceTree {
+            entries: Vec::new(),
+        })
+        .expect("root tree");
+    let blob_hash = store.put_blob(b"linked from cas").expect("blob").to_hex();
+
+    let write_params = WorkspaceWriteRefParams {
+        root_hash: empty_root.to_hex(),
+        path: "assets/logo.txt".into(),
+        blob_hash: blob_hash.clone(),
+        mode: Some(0o644),
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_write_ref(),
+        "sys/workspace@1",
+        &write_params,
+    )
+    .build()
+    .expect("intent");
+    let write_receipt: WorkspaceWriteRefReceipt = handle_internal(&mut world.kernel, intent);
+    assert_eq!(write_receipt.blob_hash, blob_hash);
+
+    let read_ref_params = WorkspaceReadRefParams {
+        root_hash: write_receipt.new_root_hash.clone(),
+        path: "assets/logo.txt".into(),
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_read_ref(),
+        "sys/workspace@1",
+        &read_ref_params,
+    )
+    .build()
+    .expect("intent");
+    let entry: Option<WorkspaceRefEntry> = handle_internal(&mut world.kernel, intent);
+    let entry = entry.expect("entry");
+    assert_eq!(entry.hash, blob_hash);
+    assert_eq!(entry.size, 15);
+
+    let read_bytes_params = WorkspaceReadBytesParams {
+        root_hash: write_receipt.new_root_hash,
+        path: "assets/logo.txt".into(),
+        range: None,
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_read_bytes(),
+        "sys/workspace@1",
+        &read_bytes_params,
+    )
+    .build()
+    .expect("intent");
+    let bytes = handle_internal_bytes(&mut world.kernel, intent);
+    assert_eq!(bytes, b"linked from cas".to_vec());
 }
 
 #[tokio::test]

@@ -3,9 +3,13 @@
 extern crate alloc;
 
 mod pure;
+mod shared_effects;
+mod workflow_effects;
 mod workflows;
 
 pub use pure::*;
+pub use shared_effects::*;
+pub use workflow_effects::*;
 pub use workflows::*;
 
 pub use serde_cbor::Value;

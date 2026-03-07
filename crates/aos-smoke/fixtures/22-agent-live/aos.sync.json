@@ -21,12 +21,5 @@
   },
   "build": {
     "workflow_dir": "workflow"
-  },
-  "workspaces": [
-    {
-      "ref": "agent-live",
-      "dir": "agent-ws",
-      "ignore": [".aos/"]
-    }
-  ]
+  }
 }

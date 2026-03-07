@@ -26,6 +26,22 @@ pub struct EvalHost {
     runtime: Runtime,
 }
 
+pub enum EvalModuleBuild<'a> {
+    CargoBin {
+        package: &'a str,
+        bin: &'a str,
+    },
+    CargoManifestLib {
+        manifest_path: &'a Path,
+        artifact_stem: &'a str,
+    },
+}
+
+pub struct EvalModulePatch<'a> {
+    pub module_name: &'a str,
+    pub build: EvalModuleBuild<'a>,
+}
+
 pub struct EvalHostConfig<'a> {
     pub world_root: &'a Path,
     pub assets_root: &'a Path,
@@ -34,8 +50,7 @@ pub struct EvalHostConfig<'a> {
     pub workflow_name: &'a str,
     pub event_schema: &'a str,
     pub host_config: HostConfig,
-    pub module_package: &'a str,
-    pub module_bin: &'a str,
+    pub module_patches: &'a [EvalModulePatch<'a>],
 }
 
 impl EvalHost {
@@ -48,32 +63,57 @@ impl EvalHost {
             .join("aos-agent-eval")
             .join("cache")
             .join("modules");
-        let wasm_bytes = compile_wasm_bin(
-            cfg.workspace_root,
-            cfg.module_package,
-            cfg.module_bin,
-            &module_cache,
-        )
-        .with_context(|| {
-            format!(
-                "compile {} --bin {} for eval workflow patch",
-                cfg.module_package, cfg.module_bin
-            )
-        })?;
+        fs::create_dir_all(&module_cache)
+            .with_context(|| format!("create cache dir {}", module_cache.display()))?;
 
         let store = Arc::new(FsStore::open(cfg.world_root).context("open eval FsStore")?);
-        let wasm_hash = store
-            .put_blob(&wasm_bytes)
-            .context("store eval workflow wasm")?;
-        let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash eval workflow wasm")?;
+        let mut loaded = load_manifest(store.clone(), cfg.assets_root, cfg.import_roots)?;
 
-        let mut loaded = load_and_patch(
-            store.clone(),
-            cfg.assets_root,
-            cfg.import_roots,
-            cfg.workflow_name,
-            &wasm_hash_ref,
-        )?;
+        if cfg.module_patches.is_empty() {
+            anyhow::bail!("EvalHostConfig.module_patches must not be empty");
+        }
+
+        let mut build_cache = HashMap::<String, HashRef>::new();
+        for patch in cfg.module_patches {
+            let cache_key = module_build_cache_key(&patch.build);
+            let wasm_hash_ref = if let Some(existing) = build_cache.get(&cache_key) {
+                existing.clone()
+            } else {
+                let wasm_bytes = match &patch.build {
+                    EvalModuleBuild::CargoBin { package, bin } => {
+                        compile_wasm_bin(cfg.workspace_root, package, bin, &module_cache)
+                            .with_context(|| {
+                                format!("compile {} --bin {} for eval workflow patch", package, bin)
+                            })?
+                    }
+                    EvalModuleBuild::CargoManifestLib {
+                        manifest_path,
+                        artifact_stem,
+                    } => compile_wasm_manifest_lib(
+                        cfg.workspace_root,
+                        manifest_path,
+                        artifact_stem,
+                        &module_cache,
+                    )
+                    .with_context(|| {
+                        format!(
+                            "compile manifest {} for eval workflow patch",
+                            manifest_path.display()
+                        )
+                    })?,
+                };
+
+                let wasm_hash = store
+                    .put_blob(&wasm_bytes)
+                    .context("store eval workflow wasm")?;
+                let wasm_hash_ref =
+                    HashRef::new(wasm_hash.to_hex()).context("hash eval workflow wasm")?;
+                build_cache.insert(cache_key, wasm_hash_ref.clone());
+                wasm_hash_ref
+            };
+
+            patch_module_hash(&mut loaded, patch.module_name, &wasm_hash_ref)?;
+        }
 
         let mut sys_module_cache = HashMap::new();
         maybe_patch_sys_enforcers(
@@ -171,6 +211,16 @@ impl EvalHost {
     }
 }
 
+fn module_build_cache_key(build: &EvalModuleBuild<'_>) -> String {
+    match build {
+        EvalModuleBuild::CargoBin { package, bin } => format!("bin:{package}:{bin}"),
+        EvalModuleBuild::CargoManifestLib {
+            manifest_path,
+            artifact_stem,
+        } => format!("lib:{}:{artifact_stem}", manifest_path.display()),
+    }
+}
+
 fn kernel_config(world_root: &Path) -> Result<KernelConfig> {
     let cache_dir = world_root.join(".aos").join("cache").join("wasmtime");
     fs::create_dir_all(&cache_dir)
@@ -218,31 +268,64 @@ fn compile_wasm_bin(
     fs::read(&artifact).with_context(|| format!("read wasm artifact {}", artifact.display()))
 }
 
+fn compile_wasm_manifest_lib(
+    workspace_root: &Path,
+    manifest_path: &Path,
+    artifact_stem: &str,
+    cache_dir: &Path,
+) -> Result<Vec<u8>> {
+    fs::create_dir_all(cache_dir)
+        .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
+
+    let status = Command::new("cargo")
+        .current_dir(workspace_root)
+        .args([
+            "build",
+            "--manifest-path",
+            manifest_path
+                .to_str()
+                .ok_or_else(|| anyhow!("manifest path is not valid UTF-8"))?,
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
+        .env("CARGO_TARGET_DIR", cache_dir)
+        .status()
+        .map_err(|err| anyhow!("failed to spawn cargo build: {err}"))?;
+
+    if !status.success() {
+        anyhow::bail!(
+            "cargo build --manifest-path {} failed with status {status}",
+            manifest_path.display()
+        );
+    }
+
+    let artifact = cache_dir
+        .join("wasm32-unknown-unknown")
+        .join("debug")
+        .join(format!("{artifact_stem}.wasm"));
+    fs::read(&artifact).with_context(|| format!("read wasm artifact {}", artifact.display()))
+}
+
 fn patch_module_hash(
     loaded: &mut LoadedManifest,
-    workflow_name: &str,
+    module_name: &str,
     wasm_hash: &HashRef,
 ) -> Result<()> {
-    let patched = patch_modules(loaded, wasm_hash, |name, _| name == workflow_name);
+    let patched = patch_modules(loaded, wasm_hash, |name, _| name == module_name);
     if patched == 0 {
-        anyhow::bail!("module '{workflow_name}' missing from manifest");
+        anyhow::bail!("module '{module_name}' missing from manifest");
     }
     Ok(())
 }
 
-fn load_and_patch(
+fn load_manifest(
     store: Arc<FsStore>,
     assets_root: &Path,
     import_roots: &[PathBuf],
-    workflow_name: &str,
-    wasm_hash: &HashRef,
 ) -> Result<LoadedManifest> {
-    let mut loaded =
-        manifest_loader::load_from_assets_with_imports(store, assets_root, import_roots)
-            .context("load manifest from eval assets")?
-            .ok_or_else(|| anyhow!("eval manifest missing at {}", assets_root.display()))?;
-    patch_module_hash(&mut loaded, workflow_name, wasm_hash)?;
-    Ok(loaded)
+    manifest_loader::load_from_assets_with_imports(store, assets_root, import_roots)
+        .context("load manifest from eval assets")?
+        .ok_or_else(|| anyhow!("eval manifest missing at {}", assets_root.display()))
 }
 
 fn maybe_patch_sys_enforcers(

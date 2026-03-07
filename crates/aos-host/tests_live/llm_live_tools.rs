@@ -51,7 +51,7 @@ pub(crate) async fn run_required_tool_call(
         model: case.model.clone(),
         message_refs: vec![message_ref],
         runtime,
-        api_key: Some(case.api_key.clone()),
+        api_key: Some(case.api_key.clone().into()),
     };
 
     let receipt = adapter
@@ -160,7 +160,7 @@ async fn run_multi_tool_call(case: &ProviderRuntime) -> (Arc<MemStore>, LlmToolC
             model: case.model.clone(),
             message_refs: vec![message_ref],
             runtime,
-            api_key: Some(case.api_key.clone()),
+            api_key: Some(case.api_key.clone().into()),
         };
         let receipt = adapter
             .execute(&build_intent(&params))
@@ -239,7 +239,7 @@ pub(crate) async fn run_tool_result_roundtrip(case: &ProviderRuntime) {
         model: case.model.clone(),
         message_refs: vec![roundtrip_messages_ref.clone()],
         runtime: default_runtime(),
-        api_key: Some(case.api_key.clone()),
+        api_key: Some(case.api_key.clone().into()),
     };
     let receipt = adapter
         .execute(&build_intent(&params))
@@ -272,7 +272,7 @@ pub(crate) async fn run_tool_result_roundtrip(case: &ProviderRuntime) {
         model: case.model.clone(),
         message_refs: vec![turn3_ref],
         runtime: default_runtime(),
-        api_key: Some(case.api_key.clone()),
+        api_key: Some(case.api_key.clone().into()),
     };
     let turn3_receipt = adapter
         .execute(&build_intent(&turn3_params))
@@ -333,7 +333,7 @@ pub(crate) async fn run_multi_tool_roundtrip(case: &ProviderRuntime) {
             model: case.model.clone(),
             message_refs: vec![roundtrip_ref],
             runtime: default_runtime(),
-            api_key: Some(case.api_key.clone()),
+            api_key: Some(case.api_key.clone().into()),
         };
         let roundtrip_receipt = adapter
             .execute(&build_intent(&roundtrip_params))
@@ -406,7 +406,7 @@ pub(crate) async fn run_multi_tool_roundtrip(case: &ProviderRuntime) {
         model: case.model.clone(),
         message_refs: vec![followup_ref],
         runtime: default_runtime(),
-        api_key: Some(case.api_key.clone()),
+        api_key: Some(case.api_key.clone().into()),
     };
     let followup_receipt = adapter
         .execute(&build_intent(&followup_params))
