@@ -19,7 +19,8 @@ This milestone turns hosted storage into a working distributed runtime.
 
 Constraint for later follow-on work:
 
-- The worker loop and world-lifecycle boundary established here should remain reusable by a later embedded-universe mode, even though P3 itself is hosted-only.
+- The single-world execution core established here should remain reusable by later non-hosted modes, even though P3 itself is hosted-only.
+- P3 does not require the outer hosted worker process to be shared with filesystem/local runtime paths.
 
 ## Dependencies
 
@@ -40,11 +41,14 @@ Constraint for later follow-on work:
 
 ## Design Stance (v1)
 
-- Implement a single worker runtime program/crate for the first hosted runtime pass.
+- Implement a single hosted worker program/crate named `aos-worker` for the first hosted runtime pass.
 - In v1, each worker fulfills all runtime responsibilities for worlds it currently holds: world execution, effect dispatch/receipt handling, and timer delivery.
-- The same program should remain capable of running in narrower modes later (for example `worker` vs `adapter` args), but that split is not required for the first implementation.
+- `aos-worker` is the hosted/FDB worker process. It is not the primary local/filesystem runtime entrypoint in v1.
+- Local/filesystem execution should continue to use `aos-host` as the embeddable single-world engine, with `aos-cli` invoking that path directly where appropriate.
+- The same hosted worker program should remain capable of running in narrower modes later (for example `worker` vs `adapter` args), but that split is not required for the first implementation.
 - A dedicated orchestrator is not required for correctness in v1. Workers may coordinate by observing active worker heartbeats, collaboratively choosing candidate worlds, and relying on lease fencing for safety.
 - Desired assignment / placement policy is an optional later layer on top of the same lease protocol, not a prerequisite for P3.
+- Reuse should happen at the `WorldHost` / single-world engine boundary, not by forcing hosted worker orchestration concerns onto the local/filesystem runtime path.
 
 ## Runtime Shape (In Scope)
 
@@ -136,7 +140,7 @@ Run loop budgets:
 Runtime-shape constraints:
 
 - worker/runtime code should key off `(universe_id, world_id)` rather than a filesystem world root
-- phase-1 single-process multi-world hosting should be the same basic runtime shape later reused by embedded mode
+- `aos-worker` is a hosted runtime process, not a commitment to unify the full worker loop with filesystem/local runtime behavior
 - hosted storage remains the only authoritative persistence plane in P3
 - the hosted worker should reuse `WorldHost` as the execution core rather than introducing a second world runner
 
@@ -557,10 +561,10 @@ Assertions:
 
 ### Phase 1: Single runtime binary, integrated worker loops
 
-- One worker process can host many worlds.
+- `aos-worker` hosts many worlds against the hosted persistence plane.
 - The same process runs world execution plus effect/timer loops for worlds it holds.
 - No dedicated orchestrator is required.
-- This runtime shape should be preserved so embedded-universe mode can later reuse it with a different authoritative persistence backend.
+- Local/filesystem runtime paths remain on `aos-host` / `aos-cli`; they are not forced through `aos-worker` in this phase.
 
 ### Phase 2: Multi-worker lease handoff
 
@@ -569,7 +573,7 @@ Assertions:
 
 ### Phase 3: Optional mode split and placement policy
 
-- Allow the same runtime program to start in narrower modes if needed.
+- Allow the same hosted worker program to start in narrower modes if needed.
 - Optional explicit assignment / drain / maintenance policy can be layered on top.
 - Enable cross-world messaging for selected tenants/workloads.
 
@@ -592,6 +596,7 @@ Assertions:
 9. World fork/seed from snapshot is implemented with explicit default effect policy.
 10. Failure-injection test suite passes with replay parity guarantees.
 11. Internal ops APIs and observability metrics/logging are in place.
+12. Hosted worker concerns live in `aos-worker`, while `aos-host` remains the reusable single-world engine for local/filesystem and test flows.
 
 ## Explicitly Out of Scope
 
