@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::Store;
 use aos_air_types::{
     AirNode, DefCap, DefModule, DefPolicy, HashRef, Manifest, Name, NamedRef, TypeExpr,
     TypePrimitive, builtins, catalog::EffectCatalog, schema_index::SchemaIndex,
 };
 use aos_cbor::Hash;
-use aos_store::Store;
 
 use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::error::KernelError;

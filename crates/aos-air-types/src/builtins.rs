@@ -213,6 +213,8 @@ mod tests {
         // Timer/Blob
         assert!(names.contains(&"sys/TimerSetParams@1"));
         assert!(names.contains(&"sys/TimerSetReceipt@1"));
+        assert!(names.contains(&"sys/PortalSendParams@1"));
+        assert!(names.contains(&"sys/PortalSendReceipt@1"));
         assert!(names.contains(&"sys/TimerFired@1"));
         assert!(names.contains(&"sys/HostMount@1"));
         assert!(names.contains(&"sys/HostLocalTarget@1"));
@@ -353,6 +355,7 @@ mod tests {
         for name in [
             "sys/query@1",
             "sys/timer@1",
+            "sys/portal@1",
             "sys/blob@1",
             "sys/http.out@1",
             "sys/llm.basic@1",

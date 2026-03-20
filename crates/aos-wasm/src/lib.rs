@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use aos_wasm_abi::{PureInput, PureOutput, WorkflowInput, WorkflowOutput};
 use log::debug;
 use sha2::{Digest, Sha256};
-use wasmtime::{Config, Engine, Linker, Module, Store};
+use wasmtime::{Config, Engine, InstancePre, Linker, Module, Store};
 
 const STEP_EXPORT: &str = "step";
 const RUN_EXPORT: &str = "run";
@@ -73,10 +73,24 @@ impl WorkflowRuntime {
         self.module_from_cache(wasm_bytes)
     }
 
+    pub fn preinstantiate(&self, module: &Module) -> Result<Arc<InstancePre<()>>> {
+        Ok(Arc::new(self.linker.instantiate_pre(module)?))
+    }
+
     /// Execute an already-compiled module with the given ABI envelope.
     pub fn run_compiled(&self, module: &Module, input: &WorkflowInput) -> Result<WorkflowOutput> {
+        let instance_pre = self.preinstantiate(module)?;
+        self.run_precompiled(&instance_pre, input)
+    }
+
+    /// Execute an already prepared instance with the given ABI envelope.
+    pub fn run_precompiled(
+        &self,
+        instance_pre: &InstancePre<()>,
+        input: &WorkflowInput,
+    ) -> Result<WorkflowOutput> {
         let mut store = Store::new(&self.engine, ());
-        let instance = self.linker.instantiate(&mut store, module)?;
+        let instance = instance_pre.instantiate(&mut store)?;
         let memory = instance
             .get_memory(&mut store, MEMORY_EXPORT)
             .context("wasm export 'memory' not found")?;
@@ -283,10 +297,24 @@ impl PureRuntime {
         self.module_from_cache(wasm_bytes)
     }
 
+    pub fn preinstantiate(&self, module: &Module) -> Result<Arc<InstancePre<()>>> {
+        Ok(Arc::new(self.linker.instantiate_pre(module)?))
+    }
+
     /// Execute an already-compiled module with the given ABI envelope.
     pub fn run_compiled(&self, module: &Module, input: &PureInput) -> Result<PureOutput> {
+        let instance_pre = self.preinstantiate(module)?;
+        self.run_precompiled(&instance_pre, input)
+    }
+
+    /// Execute an already prepared instance with the given ABI envelope.
+    pub fn run_precompiled(
+        &self,
+        instance_pre: &InstancePre<()>,
+        input: &PureInput,
+    ) -> Result<PureOutput> {
         let mut store = Store::new(&self.engine, ());
-        let instance = self.linker.instantiate(&mut store, module)?;
+        let instance = instance_pre.instantiate(&mut store)?;
         let memory = instance
             .get_memory(&mut store, MEMORY_EXPORT)
             .context("wasm export 'memory' not found")?;

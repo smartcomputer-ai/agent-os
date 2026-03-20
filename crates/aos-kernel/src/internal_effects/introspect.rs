@@ -62,7 +62,7 @@ struct JournalHeadReceipt {
 
 impl<S> Kernel<S>
 where
-    S: aos_store::Store + 'static,
+    S: crate::Store + 'static,
 {
     pub(super) fn handle_manifest(&self, intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
         let params: ManifestParams = intent

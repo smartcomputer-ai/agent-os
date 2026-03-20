@@ -528,6 +528,7 @@ impl CapType {
     pub const HTTP_OUT: &'static str = "http.out";
     pub const BLOB: &'static str = "blob";
     pub const TIMER: &'static str = "timer";
+    pub const PORTAL: &'static str = "portal";
     pub const LLM_BASIC: &'static str = "llm.basic";
     pub const HOST: &'static str = "host";
     pub const SECRET: &'static str = "secret";
@@ -552,6 +553,10 @@ impl CapType {
 
     pub fn timer() -> Self {
         Self::new(Self::TIMER)
+    }
+
+    pub fn portal() -> Self {
+        Self::new(Self::PORTAL)
     }
 
     pub fn llm_basic() -> Self {
@@ -757,6 +762,7 @@ impl EffectKind {
     pub const BLOB_PUT: &'static str = "blob.put";
     pub const BLOB_GET: &'static str = "blob.get";
     pub const TIMER_SET: &'static str = "timer.set";
+    pub const PORTAL_SEND: &'static str = "portal.send";
     pub const HOST_SESSION_OPEN: &'static str = "host.session.open";
     pub const HOST_EXEC: &'static str = "host.exec";
     pub const HOST_SESSION_SIGNAL: &'static str = "host.session.signal";
@@ -810,6 +816,10 @@ impl EffectKind {
 
     pub fn timer_set() -> Self {
         Self::new(Self::TIMER_SET)
+    }
+
+    pub fn portal_send() -> Self {
+        Self::new(Self::PORTAL_SEND)
     }
 
     pub fn host_session_open() -> Self {

@@ -5,35 +5,37 @@ edition = "2024"
 publish = false
 
 [dependencies]
+aos-authoring = { path = "../aos-authoring" }
+aos-effect-types = { path = "../aos-effect-types" }
 aos-air-types = { path = "../aos-air-types" }
-aos-effects = { path = "../aos-effects" }
-aos-kernel = { path = "../aos-kernel" }
-aos-host = { path = "../aos-host" }
-aos-store = { path = "../aos-store" }
-aos-sys = { path = "../aos-sys" }
-aos-wasm-build = { path = "../aos-wasm-build" }
-camino = "1"
-clap = { version = "4", features = ["derive", "env"] }
-hex = "0.4"
-base64 = "0.22"
-serde_json = "1"
-serde_cbor = "0.11"
-tokio = { version = "1", features = ["full", "signal"] }
-anyhow = "1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt"] }
-dotenvy = "0.15"
-jsonschema = "0.17"
 aos-cbor = { path = "../aos-cbor" }
-serde = { version = "1", features = ["derive"] }
-walkdir = "2"
+aos-kernel = { path = "../aos-kernel" }
+aos-node = { path = "../aos-node" }
+aos-sqlite = { path = "../aos-sqlite" }
+aos-sys = { path = "../aos-sys" }
+aos-runtime = { path = "../aos-runtime" }
+
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
 ignore = "0.4"
+percent-encoding = "2"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+serde_cbor = "0.11"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+uuid = "1"
+walkdir = "2"
 
 [dev-dependencies]
-anyhow = "1"
-serde_json = "1"
 assert_cmd = "2"
+axum = { version = "0.8.8", features = ["json"] }
+aos-node-hosted = { path = "../aos-node-hosted" }
+predicates = "3"
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
 
 [[bin]]
 name = "aos"

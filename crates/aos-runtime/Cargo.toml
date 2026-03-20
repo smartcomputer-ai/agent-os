@@ -1,0 +1,50 @@
+[package]
+name = "aos-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+e2e-tests = []
+
+[dependencies]
+aos-air-types = { path = "../aos-air-types" }
+aos-cbor = { path = "../aos-cbor" }
+aos-effects = { path = "../aos-effects" }
+aos-effect-adapters = { path = "../aos-effect-adapters" }
+aos-kernel = { path = "../aos-kernel" }
+
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_cbor = "0.11"
+walkdir = "2"
+log = "0.4"
+base64 = "0.21"
+hex = "0.4"
+
+[dev-dependencies]
+aos-air-exec = { path = "../aos-air-exec" }
+aos-sqlite = { path = "../aos-sqlite" }
+aos-wasm-abi = { path = "../aos-wasm-abi" }
+aos-wasm-build = { path = "../aos-wasm-build" }
+camino = "1"
+dotenvy = "0.15"
+indexmap = "2"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+wat = "1"
+serde_bytes = "0.11"
+
+[[test]]
+name = "cap_enforcer_e2e"
+path = "tests_e2e/cap_enforcer_e2e.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "workspace_e2e"
+path = "tests_e2e/workspace_e2e.rs"
+required-features = ["e2e-tests"]

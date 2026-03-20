@@ -4,14 +4,15 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_air_types::HashRef;
-use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
-use aos_host::manifest_loader;
-use aos_host::trace::workflow_trace_summary;
-use aos_host::util::{is_placeholder_hash, patch_modules};
+use aos_effect_adapters::adapters::mock::{MockHttpHarness, MockHttpResponse};
+use aos_kernel::Store;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{CapDecisionOutcome, JournalRecord, PolicyDecisionOutcome};
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
-use aos_store::{FsStore, Store};
+use aos_runtime::manifest_loader;
+use aos_runtime::trace::workflow_trace_summary;
+use aos_runtime::util::{is_placeholder_hash, patch_modules};
+use aos_sqlite::FsCas;
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -51,10 +52,11 @@ struct FlowState {
 
 pub fn run(example_root: &Path) -> Result<()> {
     println!("→ Workflow Runtime Hardening demo");
-    util::reset_journal(example_root)?;
+    util::reset_runtime_state(example_root)?;
 
     let wasm_bytes = util::compile_workflow(MODULE_CRATE)?;
-    let store = Arc::new(FsStore::open(example_root).context("open fixture store")?);
+    let paths = util::local_state_paths(example_root);
+    let store = Arc::new(FsCas::open_with_paths(&paths).context("open fixture store")?);
     let wasm_hash = store.put_blob(&wasm_bytes).context("store workflow wasm")?;
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash workflow wasm")?;
     let kernel_config = util::kernel_config(example_root)?;
@@ -240,7 +242,10 @@ pub fn run(example_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn submit_event(kernel: &mut Kernel<FsStore>, value: &RuntimeHardeningEvent) -> Result<()> {
+fn submit_event<S: Store + 'static>(
+    kernel: &mut Kernel<S>,
+    value: &RuntimeHardeningEvent,
+) -> Result<()> {
     let payload = serde_cbor::to_vec(value).context("encode event")?;
     kernel
         .submit_domain_event(EVENT_SCHEMA.to_string(), payload)
@@ -248,20 +253,20 @@ fn submit_event(kernel: &mut Kernel<FsStore>, value: &RuntimeHardeningEvent) -> 
     kernel.tick_until_idle().context("tick to idle")
 }
 
-fn boot_kernel(
-    store: Arc<FsStore>,
+fn boot_kernel<S: Store + 'static>(
+    store: Arc<S>,
     assets_root: &Path,
     wasm_hash: &HashRef,
     kernel_config: KernelConfig,
     journal: Box<dyn aos_kernel::journal::Journal>,
-) -> Result<Kernel<FsStore>> {
+) -> Result<Kernel<S>> {
     let loaded = load_manifest_for_runtime(store.clone(), assets_root, wasm_hash)?;
     Kernel::from_loaded_manifest_with_config(store, loaded, journal, kernel_config)
         .context("boot kernel")
 }
 
-fn load_manifest_for_runtime(
-    store: Arc<FsStore>,
+fn load_manifest_for_runtime<S: Store + 'static>(
+    store: Arc<S>,
     assets_root: &Path,
     wasm_hash: &HashRef,
 ) -> Result<LoadedManifest> {
@@ -286,9 +291,9 @@ fn load_manifest_for_runtime(
     Ok(loaded)
 }
 
-fn maybe_patch_sys_module(
+fn maybe_patch_sys_module<S: Store + 'static>(
     assets_root: &Path,
-    store: Arc<FsStore>,
+    store: Arc<S>,
     loaded: &mut LoadedManifest,
     module_name: &str,
     bin_name: &str,
@@ -302,7 +307,7 @@ fn maybe_patch_sys_module(
         return Ok(());
     }
 
-    let cache_dir = assets_root.join(".aos").join("cache").join("modules");
+    let cache_dir = util::local_state_paths(assets_root).module_cache_dir();
     let wasm_bytes =
         util::compile_wasm_bin(crate::workspace_root(), "aos-sys", bin_name, &cache_dir)?;
     let wasm_hash = store
@@ -317,7 +322,7 @@ fn maybe_patch_sys_module(
     Ok(())
 }
 
-fn journal_counters(kernel: &Kernel<FsStore>) -> Result<serde_json::Value> {
+fn journal_counters<S: Store + 'static>(kernel: &Kernel<S>) -> Result<serde_json::Value> {
     let mut effect_intents = 0u64;
     let mut receipt_ok = 0u64;
     let mut receipt_error = 0u64;

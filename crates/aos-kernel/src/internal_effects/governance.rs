@@ -17,7 +17,7 @@ fn hash_ref_from_hex(hex: &str) -> Result<HashRef, KernelError> {
 
 impl<S> Kernel<S>
 where
-    S: aos_store::Store + 'static,
+    S: crate::Store + 'static,
 {
     pub(super) fn handle_governance_propose(
         &mut self,

@@ -14,7 +14,7 @@
           "version": "0.1.0",
           "manifest_path": "../../Cargo.toml",
           "air_dir": "air",
-          "defs_hash": "sha256:c79d23e111999da58126361adb080d650a62dc104d967f159339d652475096ed"
+          "defs_hash": "sha256:b046b62130d0660c744b27b2fdfd1eb0926e8243c10f9f75d710ab87787445f8"
         }
       }
     ]
@@ -25,6 +25,31 @@
   },
   "modules": {
     "pull": false
+  },
+  "secrets": {
+    "sources": [
+      {
+        "name": "local_env",
+        "kind": "dotenv",
+        "path": ".env"
+      }
+    ],
+    "bindings": [
+      {
+        "binding": "llm/openai_api",
+        "from": {
+          "source": "local_env",
+          "key": "OPENAI_API_KEY"
+        }
+      },
+      {
+        "binding": "llm/anthropic_api",
+        "from": {
+          "source": "local_env",
+          "key": "ANTHROPIC_API_KEY"
+        }
+      }
+    ]
   },
   "version": 1,
   "workspaces": [

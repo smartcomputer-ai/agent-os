@@ -308,7 +308,7 @@ fn validate_tree(tree: &WorkspaceTree) -> Result<(), KernelError> {
     Ok(())
 }
 
-fn load_tree<S: aos_store::Store>(store: &S, hash: &Hash) -> Result<WorkspaceTree, KernelError> {
+fn load_tree<S: crate::Store>(store: &S, hash: &Hash) -> Result<WorkspaceTree, KernelError> {
     let tree: WorkspaceTree = store.get_node(*hash)?;
     validate_tree(&tree)?;
     Ok(tree)
@@ -338,7 +338,7 @@ fn remove_entry(
     }
 }
 
-fn resolve_dir_hash<S: aos_store::Store>(
+fn resolve_dir_hash<S: crate::Store>(
     store: &S,
     root_hash: &Hash,
     path: &[String],
@@ -356,7 +356,7 @@ fn resolve_dir_hash<S: aos_store::Store>(
     Ok(current)
 }
 
-fn resolve_entry<S: aos_store::Store>(
+fn resolve_entry<S: crate::Store>(
     store: &S,
     root_hash: &Hash,
     path: &[String],
@@ -399,7 +399,7 @@ fn list_entry_from_tree(path: String, entry: &WorkspaceEntry) -> WorkspaceListEn
     }
 }
 
-fn collect_subtree_entries<S: aos_store::Store>(
+fn collect_subtree_entries<S: crate::Store>(
     store: &S,
     tree_hash: &Hash,
     base: &str,
@@ -435,7 +435,7 @@ fn resolve_file_mode(
     Ok(MODE_FILE_DEFAULT)
 }
 
-fn annotations_from_hash<S: aos_store::Store>(
+fn annotations_from_hash<S: crate::Store>(
     store: &S,
     hash: Option<&HashRef>,
 ) -> Result<Option<WorkspaceAnnotations>, KernelError> {
@@ -447,7 +447,7 @@ fn annotations_from_hash<S: aos_store::Store>(
     Ok(Some(annotations))
 }
 
-fn apply_annotations_patch<S: aos_store::Store>(
+fn apply_annotations_patch<S: crate::Store>(
     store: &S,
     current: Option<&HashRef>,
     patch: &WorkspaceAnnotationsPatch,
@@ -475,7 +475,7 @@ fn apply_annotations_patch<S: aos_store::Store>(
     hash_ref_from_hash(&new_hash)
 }
 
-fn set_annotations_at_path<S: aos_store::Store>(
+fn set_annotations_at_path<S: crate::Store>(
     store: &S,
     tree_hash: &Hash,
     path: &[String],
@@ -540,7 +540,7 @@ fn set_annotations_at_path<S: aos_store::Store>(
     Ok((new_root, annotations_hash))
 }
 
-fn write_file_at_path<S: aos_store::Store>(
+fn write_file_at_path<S: crate::Store>(
     store: &S,
     tree_hash: &Hash,
     path: &[String],
@@ -595,7 +595,7 @@ fn write_file_at_path<S: aos_store::Store>(
     Ok(store.put_node(&tree)?)
 }
 
-fn remove_entry_at_path<S: aos_store::Store>(
+fn remove_entry_at_path<S: crate::Store>(
     store: &S,
     tree_hash: &Hash,
     path: &[String],
@@ -634,7 +634,7 @@ fn remove_entry_at_path<S: aos_store::Store>(
 
 impl<S> Kernel<S>
 where
-    S: aos_store::Store + 'static,
+    S: crate::Store + 'static,
 {
     pub(super) fn handle_workspace_resolve(
         &self,
@@ -1099,7 +1099,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_store::{MemStore, Store};
+    use crate::{MemStore, Store};
 
     #[test]
     fn validate_path_rejects_invalid() {

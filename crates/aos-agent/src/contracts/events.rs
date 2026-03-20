@@ -62,6 +62,7 @@ pub struct SessionLifecycleChanged {
     pub from: SessionLifecycle,
     pub to: SessionLifecycle,
     pub run_id: Option<RunId>,
+    pub output_ref: Option<String>,
     pub in_flight_effects: u64,
 }
 

@@ -5,9 +5,10 @@ use aos_agent::{
     HostCommand, HostCommandKind, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
     SessionLifecycle, SessionState,
 };
-use aos_host::config::HostConfig;
+use aos_effect_adapters::config::EffectAdapterConfig;
+use aos_runtime::WorldConfig;
 
-use crate::example_host::{ExampleHost, HarnessConfig};
+use crate::example_host::{ExampleHost, ExampleHostConfig, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
@@ -30,9 +31,12 @@ pub fn run(example_root: &Path) -> Result<()> {
             module_crate: "",
         },
         &import_roots,
-        Some(HostConfig {
-            llm: None,
-            ..HostConfig::default()
+        Some(ExampleHostConfig {
+            world: WorldConfig::default(),
+            adapters: EffectAdapterConfig {
+                llm: None,
+                ..EffectAdapterConfig::default()
+            },
         }),
         SDK_WASM_PACKAGE,
         SDK_WASM_BIN,
@@ -141,9 +145,12 @@ fn assert_run_request_validation(example_root: &Path) -> Result<()> {
             module_crate: "",
         },
         &import_roots,
-        Some(HostConfig {
-            llm: None,
-            ..HostConfig::default()
+        Some(ExampleHostConfig {
+            world: WorldConfig::default(),
+            adapters: EffectAdapterConfig {
+                llm: None,
+                ..EffectAdapterConfig::default()
+            },
         }),
         SDK_WASM_PACKAGE,
         SDK_WASM_BIN,

@@ -1,6 +1,8 @@
 use super::*;
+use anyhow::Context;
 use aos_air_types::value_normalize::normalize_value_with_schema;
 use serde::Serialize;
+use std::time::Instant;
 
 impl<S: Store + 'static> Kernel<S> {
     const MAX_EFFECTS_PER_TICK: usize = 64;
@@ -263,6 +265,9 @@ impl<S: Store + 'static> Kernel<S> {
         &mut self,
         event: WorkflowEvent,
     ) -> Result<(), KernelError> {
+        if let Some(metrics) = self.replay_metrics.as_mut() {
+            metrics.domain_events += 1;
+        }
         let workflow_name = event.workflow.clone();
         let (keyed, wants_context) = {
             let module_def = self
@@ -303,30 +308,66 @@ impl<S: Store + 'static> Kernel<S> {
             index_root = Some(self.ensure_cell_index_root(&workflow_name)?);
         }
 
-        let state_entry = self
-            .workflow_state
-            .entry(workflow_name.clone())
-            .or_default();
         let key_bytes: &[u8] = key.as_deref().unwrap_or(MONO_KEY);
-        let current_state = if let Some(entry) = state_entry.cell_cache.get(key_bytes) {
-            Some(entry.state.clone())
+        let cached_or_delta = {
+            let state_entry = self.workflow_state_entry(&workflow_name);
+            if let Some(state_entry) = state_entry {
+                if let Some(delta) = state_entry.delta.get(key_bytes) {
+                    Some(match delta {
+                        CellDelta::Upsert {
+                            resident,
+                            state_hash,
+                            ..
+                        } => Some(match resident {
+                            Some(state) => state.clone(),
+                            None => self.store.get_blob(*state_hash)?,
+                        }),
+                        CellDelta::Delete { .. } => None,
+                    })
+                } else {
+                    state_entry
+                        .cell_cache
+                        .get_ref(key_bytes)
+                        .map(|entry| Some(entry.state.clone()))
+                }
+            } else {
+                None
+            }
+        };
+        let current_state = if let Some(entry) = cached_or_delta {
+            self.touch_delta_access(&workflow_name, key_bytes);
+            if let Some(metrics) = self.replay_metrics.as_mut() {
+                metrics.state_cache_hits += 1;
+            }
+            entry
         } else if let Some(root) = index_root {
+            let load_started = Instant::now();
             let key_hash = Hash::of_bytes(key_bytes);
             let index = CellIndex::new(self.store.as_ref());
             if let Some(meta) = index.get(root, key_hash.as_bytes())? {
                 let state_hash = Hash::from_bytes(&meta.state_hash)
                     .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
                 let state = self.store.get_blob(state_hash)?;
-                state_entry.cell_cache.insert(
-                    key_bytes.to_vec(),
-                    CellEntry {
-                        state: state.clone(),
-                        state_hash,
-                        last_active_ns: meta.last_active_ns,
-                    },
-                );
+                self.workflow_state_entry_mut(&workflow_name)
+                    .cell_cache
+                    .insert(
+                        key_bytes.to_vec(),
+                        CellEntry {
+                            state: state.clone(),
+                            state_hash,
+                            last_active_ns: meta.last_active_ns,
+                        },
+                    );
+                if let Some(metrics) = self.replay_metrics.as_mut() {
+                    metrics.state_cache_misses += 1;
+                    metrics.state_load_ns += load_started.elapsed().as_nanos();
+                }
                 Some(state)
             } else {
+                if let Some(metrics) = self.replay_metrics.as_mut() {
+                    metrics.state_cache_misses += 1;
+                    metrics.state_load_ns += load_started.elapsed().as_nanos();
+                }
                 None
             }
         } else {
@@ -367,7 +408,28 @@ impl<S: Store + 'static> Kernel<S> {
             event: event.event.clone(),
             ctx: ctx_bytes,
         };
-        let output = self.workflows.invoke(&workflow_name, &input)?;
+        let invoke_started = Instant::now();
+        let output = self
+            .workflows
+            .invoke(&workflow_name, &input)
+            .with_context(|| {
+                let key_hint = key
+                    .as_ref()
+                    .map(|value| String::from_utf8_lossy(value).into_owned())
+                    .unwrap_or_else(|| "<none>".to_string());
+                format!(
+                    "workflow '{}' trap while handling schema '{}' key='{}' journal_height={} state_present={}",
+                    workflow_name,
+                    event.event.schema,
+                    key_hint,
+                    event.stamp.journal_height,
+                    input.state.is_some()
+                )
+            })?;
+        if let Some(metrics) = self.replay_metrics.as_mut() {
+            metrics.workflow_invocations += 1;
+            metrics.workflow_invoke_ns += invoke_started.elapsed().as_nanos();
+        }
         self.handle_workflow_output_with_meta(
             workflow_name.clone(),
             key,
@@ -406,13 +468,9 @@ impl<S: Store + 'static> Kernel<S> {
             .map(|abi| abi.effects_emitted.clone())
             .unwrap_or_default();
 
-        let index_root = self.ensure_cell_index_root(&workflow_name)?;
-        let mut new_index_root: Option<Hash> = None;
-
-        let entry = self
-            .workflow_state
-            .entry(workflow_name.clone())
-            .or_default();
+        if keyed {
+            self.ensure_cell_index_root(&workflow_name)?;
+        }
 
         let key_bytes = if keyed {
             key.clone().expect("key required for keyed workflow")
@@ -425,42 +483,66 @@ impl<S: Store + 'static> Kernel<S> {
             .module_defs
             .get(&workflow_name)
             .map(|module| module.wasm_hash.as_str().to_string());
-
         match output.state {
             Some(state) => {
-                let state_hash = self.store.put_blob(&state)?;
+                let state_hash = Hash::of_bytes(&state);
                 let last_active_ns = emitted_at_seq;
-                let meta = CellMeta {
-                    key_hash: *key_hash.as_bytes(),
-                    key_bytes: key_bytes.clone(),
-                    state_hash: *state_hash.as_bytes(),
-                    size: state.len() as u64,
+                let state_size = state.len() as u64;
+                self.workflow_state_entry_mut(&workflow_name)
+                    .cell_cache
+                    .remove(&key_bytes);
+                self.set_delta_upsert(
+                    &workflow_name,
+                    key_bytes.clone(),
+                    state.clone(),
+                    state_hash,
                     last_active_ns,
-                };
-                let index = CellIndex::new(self.store.as_ref());
-                let new_root = index.upsert(index_root, meta)?;
-                new_index_root = Some(new_root);
-                entry.cell_cache.insert(
+                )?;
+                self.record_cell_projection_delta(CellProjectionDelta {
+                    workflow: workflow_name.clone(),
+                    key_hash: key_hash.as_bytes().to_vec(),
                     key_bytes,
-                    CellEntry {
-                        state,
+                    state: Some(CellProjectionDeltaState {
+                        state_bytes: state,
                         state_hash,
+                        size: state_size,
                         last_active_ns,
-                    },
-                );
+                    }),
+                });
             }
             None => {
-                let index = CellIndex::new(self.store.as_ref());
-                let (new_root, removed) = index.delete(index_root, key_hash.as_bytes())?;
+                let removed = self
+                    .workflow_state_entry(&workflow_name)
+                    .map(|entry| {
+                        entry.delta.contains_key(&key_bytes)
+                            || entry.cell_cache.get_ref(&key_bytes).is_some()
+                    })
+                    .unwrap_or(false)
+                    || self
+                        .workflow_index_roots
+                        .get(&workflow_name)
+                        .copied()
+                        .map(|root| {
+                            let index = CellIndex::new(self.store.as_ref());
+                            index
+                                .get(root, key_hash.as_bytes())
+                                .map(|meta| meta.is_some())
+                        })
+                        .transpose()?
+                        .unwrap_or(false);
+                self.workflow_state_entry_mut(&workflow_name)
+                    .cell_cache
+                    .remove(&key_bytes);
+                self.set_delta_delete(&workflow_name, key_bytes.clone());
                 if removed {
-                    new_index_root = Some(new_root);
-                    entry.cell_cache.remove(&key_bytes);
+                    self.record_cell_projection_delta(CellProjectionDelta {
+                        workflow: workflow_name.clone(),
+                        key_hash: key_hash.as_bytes().to_vec(),
+                        key_bytes,
+                        state: None,
+                    });
                 }
             }
-        }
-        if let Some(root) = new_index_root {
-            self.workflow_index_roots
-                .insert(workflow_name.clone(), root);
         }
         self.record_workflow_state_transition(
             &workflow_name,
@@ -536,7 +618,9 @@ impl<S: Store + 'static> Kernel<S> {
                     workflow_name.clone(),
                     key.clone(),
                     effect.kind.clone(),
+                    intent.cap_name.clone(),
                     effect.params_cbor.clone(),
+                    intent.idempotency_key,
                     effect.issuer_ref.clone(),
                     intent.intent_hash,
                     emitted_at_seq,
@@ -718,7 +802,7 @@ mod tests {
             ..Default::default()
         };
 
-        Kernel::<aos_store::MemStore>::enforce_workflow_output_limits(&output).expect("allowed");
+        Kernel::<crate::MemStore>::enforce_workflow_output_limits(&output).expect("allowed");
     }
 
     #[test]
@@ -731,8 +815,7 @@ mod tests {
             ..Default::default()
         };
 
-        let err =
-            Kernel::<aos_store::MemStore>::enforce_workflow_output_limits(&output).unwrap_err();
+        let err = Kernel::<crate::MemStore>::enforce_workflow_output_limits(&output).unwrap_err();
         assert!(
             matches!(err, KernelError::WorkflowOutput(ref message) if message.contains("max effects per tick")),
             "unexpected error: {err:?}"
@@ -749,8 +832,7 @@ mod tests {
             ..Default::default()
         };
 
-        let err =
-            Kernel::<aos_store::MemStore>::enforce_workflow_output_limits(&output).unwrap_err();
+        let err = Kernel::<crate::MemStore>::enforce_workflow_output_limits(&output).unwrap_err();
         assert!(
             matches!(err, KernelError::WorkflowOutput(ref message) if message.contains("max domain events per tick")),
             "unexpected error: {err:?}"
@@ -764,8 +846,7 @@ mod tests {
             ..Default::default()
         };
 
-        let err =
-            Kernel::<aos_store::MemStore>::enforce_workflow_output_limits(&output).unwrap_err();
+        let err = Kernel::<crate::MemStore>::enforce_workflow_output_limits(&output).unwrap_err();
         assert!(
             matches!(err, KernelError::WorkflowOutput(ref message) if message.contains("max output bytes per tick")),
             "unexpected error: {err:?}"
@@ -774,7 +855,7 @@ mod tests {
 
     #[test]
     fn workflow_output_rejects_undeclared_effect_kind_before_cap_resolution() {
-        let store = Arc::new(aos_store::MemStore::default());
+        let store = Arc::new(crate::MemStore::default());
         let journal = Box::new(crate::journal::mem::MemJournal::new());
         let mut kernel =
             crate::world::test_support::kernel_with_store_and_journal(store.clone(), journal);
@@ -842,13 +923,14 @@ mod tests {
     }
 
     #[test]
-    fn cell_index_root_updates_on_upsert_and_delete() {
-        let store = Arc::new(aos_store::MemStore::default());
+    fn cell_index_root_updates_on_snapshot_commit_not_each_upsert() {
+        let store = Arc::new(crate::MemStore::default());
         let journal = Box::new(crate::journal::mem::MemJournal::new());
         let mut kernel =
             crate::world::test_support::kernel_with_store_and_journal(store.clone(), journal);
         let workflow = "com.acme/Workflow@1".to_string();
         let key = b"abc".to_vec();
+        let initial_root = kernel.ensure_cell_index_root(&workflow).unwrap();
 
         kernel
             .handle_workflow_output(
@@ -862,12 +944,7 @@ mod tests {
             )
             .unwrap();
         let root1 = *kernel.workflow_index_roots.get(&workflow).unwrap();
-        let index = CellIndex::new(store.as_ref());
-        let meta1 = index
-            .get(root1, Hash::of_bytes(&key).as_bytes())
-            .unwrap()
-            .expect("meta1");
-        assert_eq!(meta1.state_hash, *Hash::of_bytes(&[1]).as_bytes());
+        assert_eq!(root1, initial_root);
 
         kernel
             .handle_workflow_output(
@@ -881,9 +958,21 @@ mod tests {
             )
             .unwrap();
         let root2 = *kernel.workflow_index_roots.get(&workflow).unwrap();
-        assert_ne!(root1, root2);
+        assert_eq!(root1, root2);
+
+        let state = kernel
+            .workflow_state_bytes(&workflow, Some(&key))
+            .unwrap()
+            .expect("head state");
+        assert_eq!(state, vec![2]);
+
+        kernel.create_snapshot().unwrap();
+        let root3 = *kernel.workflow_index_roots.get(&workflow).unwrap();
+        assert_ne!(root2, root3);
+
+        let index = CellIndex::new(store.as_ref());
         let meta2 = index
-            .get(root2, Hash::of_bytes(&key).as_bytes())
+            .get(root3, Hash::of_bytes(&key).as_bytes())
             .unwrap()
             .expect("meta2");
         assert_eq!(meta2.state_hash, *Hash::of_bytes(&[2]).as_bytes());
@@ -899,9 +988,12 @@ mod tests {
                 },
             )
             .unwrap();
-        let root3 = *kernel.workflow_index_roots.get(&workflow).unwrap();
-        assert_ne!(root2, root3);
-        let meta3 = index.get(root3, Hash::of_bytes(&key).as_bytes()).unwrap();
+        let root4 = *kernel.workflow_index_roots.get(&workflow).unwrap();
+        assert_eq!(root3, root4);
+        kernel.create_snapshot().unwrap();
+        let root5 = *kernel.workflow_index_roots.get(&workflow).unwrap();
+        assert_ne!(root4, root5);
+        let meta3 = index.get(root5, Hash::of_bytes(&key).as_bytes()).unwrap();
         assert!(meta3.is_none());
     }
 
@@ -922,7 +1014,10 @@ mod tests {
             .expect("write state");
 
         let root = kernel.workflow_index_root(&workflow);
-        assert!(root.is_some(), "expected index root for non-keyed workflow");
+        assert!(
+            root.is_none(),
+            "non-keyed workflow root should stay snapshot-anchored until snapshot"
+        );
         let cells = kernel.list_cells(&workflow).expect("list cells");
         assert_eq!(cells.len(), 1, "expected sentinel cell entry");
         assert!(
@@ -938,11 +1033,23 @@ mod tests {
             .expect("read state")
             .expect("state present");
         assert_eq!(reloaded, state_bytes);
+
+        kernel.create_snapshot().unwrap();
+        let root = kernel.workflow_index_root(&workflow);
+        assert!(root.is_some(), "expected persisted root after snapshot");
+        if let Some(entry) = kernel.workflow_state.get_mut(&workflow) {
+            entry.cell_cache.remove(MONO_KEY);
+        }
+        let reloaded_from_base = kernel
+            .workflow_state_bytes(&workflow, None)
+            .expect("read state after snapshot")
+            .expect("state present after snapshot");
+        assert_eq!(reloaded_from_base, state_bytes);
     }
 
     #[test]
     fn workflow_state_traversal_collects_only_typed_hash_refs() {
-        let store = aos_store::MemStore::default();
+        let store = crate::MemStore::default();
         let module = DefModule {
             name: "com.acme/Workflow@1".into(),
             module_kind: ModuleKind::Workflow,
@@ -1081,5 +1188,39 @@ mod tests {
             !refs.contains(&Hash::from_hex_str(&opaque).unwrap()),
             "opaque text hashes must not be auto-traversed"
         );
+    }
+
+    #[test]
+    fn large_dirty_keyed_state_spills_immediately_and_remains_readable() {
+        let store = Arc::new(crate::MemStore::default());
+        let journal = Box::new(crate::journal::mem::MemJournal::new());
+        let mut kernel = crate::world::test_support::kernel_with_store_and_journal(store, journal);
+        let workflow = "com.acme/Workflow@1".to_string();
+        let key = b"large".to_vec();
+        let state = vec![7u8; DELTA_IMMEDIATE_SPILL_BYTES];
+
+        kernel
+            .handle_workflow_output(
+                workflow.clone(),
+                Some(key.clone()),
+                true,
+                WorkflowOutput {
+                    state: Some(state.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let stats = kernel.cell_cache_stats();
+        assert_eq!(stats.spill_put_blob_count, 1);
+        assert_eq!(stats.resident_count, 0);
+        assert_eq!(stats.resident_bytes_total, 0);
+        assert_eq!(stats.delta_count, 1);
+
+        let reloaded = kernel
+            .workflow_state_bytes(&workflow, Some(&key))
+            .unwrap()
+            .expect("spilled state should still load");
+        assert_eq!(reloaded, state);
     }
 }

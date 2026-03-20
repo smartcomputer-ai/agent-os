@@ -1,11 +1,11 @@
 use super::*;
+use crate::MemStore;
 use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
 use aos_air_types::{
     CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, Routing,
     RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord, WorkflowAbi,
     catalog::EffectCatalog,
 };
-use aos_store::MemStore;
 use indexmap::IndexMap;
 use serde_cbor::Value as CborValue;
 use serde_cbor::ser::to_vec;
@@ -141,8 +141,8 @@ pub(crate) fn append_record(journal: &mut MemJournal, record: JournalRecord) {
         .expect("append record");
 }
 
-pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
-    let store = aos_store::MemStore::default();
+pub(crate) fn minimal_kernel_with_router() -> Kernel<crate::MemStore> {
+    let store = crate::MemStore::default();
     let module = DefModule {
         name: "com.acme/Workflow@1".into(),
         module_kind: ModuleKind::Workflow,
@@ -212,8 +212,8 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
     .unwrap()
 }
 
-pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemStore> {
-    let store = aos_store::MemStore::default();
+pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<crate::MemStore> {
+    let store = crate::MemStore::default();
     let module = DefModule {
         name: "com.acme/Workflow@1".into(),
         module_kind: ModuleKind::Workflow,
@@ -282,8 +282,8 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemSto
     .unwrap()
 }
 
-pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
-    let store = aos_store::MemStore::default();
+pub(crate) fn minimal_kernel_non_keyed() -> Kernel<crate::MemStore> {
+    let store = crate::MemStore::default();
     let module = DefModule {
         name: "com.acme/Workflow@1".into(),
         module_kind: ModuleKind::Workflow,
@@ -352,8 +352,8 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
     .unwrap()
 }
 
-pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemStore> {
-    let store = aos_store::MemStore::default();
+pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<crate::MemStore> {
+    let store = crate::MemStore::default();
     let module = DefModule {
         name: "com.acme/Workflow@1".into(),
         module_kind: ModuleKind::Workflow,

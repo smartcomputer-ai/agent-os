@@ -1,15 +1,7 @@
 use super::*;
 
 impl<S: Store + 'static> Kernel<S> {
-    pub fn from_loaded_manifest(
-        store: Arc<S>,
-        loaded: LoadedManifest,
-        journal: Box<dyn Journal>,
-    ) -> Result<Self, KernelError> {
-        Self::from_loaded_manifest_with_config(store, loaded, journal, KernelConfig::default())
-    }
-
-    pub fn from_loaded_manifest_with_config(
+    fn build_from_loaded_manifest_with_config(
         store: Arc<S>,
         loaded: LoadedManifest,
         journal: Box<dyn Journal>,
@@ -87,12 +79,18 @@ impl<S: Store + 'static> Kernel<S> {
             governance: GovernanceManager::new(),
             secret_resolver: secret_resolver.clone(),
             allow_placeholder_secrets: config.allow_placeholder_secrets,
+            cell_cache_size: config.cell_cache_size.max(1),
             secrets: loaded.secrets,
             active_baseline: None,
             last_snapshot_height: None,
             last_snapshot_hash: None,
             pinned_roots: Vec::new(),
             workspace_roots: Vec::new(),
+            pending_cell_projection_deltas: BTreeMap::new(),
+            replay_metrics: None,
+            cell_delta_access_tick: 0,
+            cell_spill_put_blob_count: 0,
+            cell_snapshot_put_blob_count: 0,
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
@@ -109,23 +107,52 @@ impl<S: Store + 'static> Kernel<S> {
                 }
             }
         }
+        Ok(kernel)
+    }
+
+    pub fn from_loaded_manifest(
+        store: Arc<S>,
+        loaded: LoadedManifest,
+        journal: Box<dyn Journal>,
+    ) -> Result<Self, KernelError> {
+        Self::from_loaded_manifest_with_config(store, loaded, journal, KernelConfig::default())
+    }
+
+    pub fn from_loaded_manifest_with_config(
+        store: Arc<S>,
+        loaded: LoadedManifest,
+        journal: Box<dyn Journal>,
+        config: KernelConfig,
+    ) -> Result<Self, KernelError> {
+        let mut kernel =
+            Self::build_from_loaded_manifest_with_config(store, loaded, journal, config)?;
         let journal_empty = kernel.journal.next_seq() == 0;
         kernel.replay_existing_entries()?;
         if journal_empty {
             kernel.record_manifest()?;
         }
         kernel.ensure_active_baseline()?;
+        kernel.rehydrate_effect_queue_from_runtime_state()?;
         Ok(kernel)
+    }
+
+    pub fn from_loaded_manifest_without_replay_with_config(
+        store: Arc<S>,
+        loaded: LoadedManifest,
+        journal: Box<dyn Journal>,
+        config: KernelConfig,
+    ) -> Result<Self, KernelError> {
+        Self::build_from_loaded_manifest_with_config(store, loaded, journal, config)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MemStore;
     use crate::journal::mem::MemJournal;
     use crate::world::test_support::empty_manifest;
     use aos_air_types::{SecretDecl, SecretEntry, catalog::EffectCatalog};
-    use aos_store::MemStore;
     use std::collections::HashMap;
 
     #[test]

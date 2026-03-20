@@ -1,18 +1,23 @@
-//! Shared output helpers for human and JSON modes.
-//!
-//! Human mode prints primary data to stdout and meta/notices to stderr.
-//! JSON mode wraps responses in `{ data, meta?, warnings? }` and respects
-//! `--pretty`, `--no-meta`, and `--quiet`.
-
-use std::io::Write;
-
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::opts::WorldOpts;
+#[derive(Debug, Clone, Copy)]
+pub struct OutputOpts {
+    pub json: bool,
+    pub pretty: bool,
+    pub quiet: bool,
+    pub no_meta: bool,
+    pub verbose: bool,
+}
+
+pub fn print_verbose(opts: OutputOpts, message: impl AsRef<str>) {
+    if opts.verbose {
+        eprintln!("verbose: {}", message.as_ref());
+    }
+}
 
 pub fn print_success(
-    opts: &WorldOpts,
+    opts: OutputOpts,
     data: Value,
     meta: Option<Value>,
     mut warnings: Vec<String>,
@@ -20,63 +25,32 @@ pub fn print_success(
     if opts.quiet {
         warnings.clear();
     }
-    if opts.pretty || opts.json {
-        print_json(opts, data, meta, warnings)
-    } else {
-        print_human(opts, data, meta, warnings)
-    }
-}
-
-fn print_json(
-    opts: &WorldOpts,
-    data: Value,
-    meta: Option<Value>,
-    warnings: Vec<String>,
-) -> Result<()> {
-    let mut root = json!({ "data": data });
-    if !opts.no_meta {
-        if let Some(m) = meta {
-            root.as_object_mut().unwrap().insert("meta".into(), m);
+    if opts.json || opts.pretty {
+        let mut root = json!({ "data": data });
+        if !opts.no_meta {
+            if let Some(meta) = meta {
+                root.as_object_mut().unwrap().insert("meta".into(), meta);
+            }
         }
-    }
-    if !warnings.is_empty() {
-        root.as_object_mut().unwrap().insert(
-            "warnings".into(),
-            warnings.into_iter().map(Value::String).collect(),
-        );
-    }
-    if opts.pretty {
-        println!("{}", serde_json::to_string_pretty(&root)?);
-    } else {
-        println!("{}", serde_json::to_string(&root)?);
-    }
-    Ok(())
-}
-
-fn print_human(
-    opts: &WorldOpts,
-    data: Value,
-    meta: Option<Value>,
-    warnings: Vec<String>,
-) -> Result<()> {
-    if let Some(m) = meta {
-        if !opts.no_meta && opts.json {
-            // Only emit meta in human mode when explicitly in JSON output.
-            let mut stderr = std::io::stderr();
-            writeln!(stderr, "meta: {}", serde_json::to_string_pretty(&m)?)?;
+        if !warnings.is_empty() {
+            root.as_object_mut().unwrap().insert(
+                "warnings".into(),
+                Value::Array(warnings.into_iter().map(Value::String).collect()),
+            );
         }
+        if opts.pretty {
+            println!("{}", serde_json::to_string_pretty(&root)?);
+        } else {
+            println!("{}", serde_json::to_string(&root)?);
+        }
+        return Ok(());
     }
-    for w in warnings {
-        let mut stderr = std::io::stderr();
-        writeln!(stderr, "notice: {}", w)?;
-    }
-    print_value(data)?;
-    Ok(())
-}
 
-fn print_value(value: Value) -> Result<()> {
-    match value {
-        Value::String(s) => println!("{s}"),
+    for warning in warnings {
+        eprintln!("notice: {warning}");
+    }
+    match data {
+        Value::String(text) => println!("{text}"),
         other => println!("{}", serde_json::to_string_pretty(&other)?),
     }
     Ok(())

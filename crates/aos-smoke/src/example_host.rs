@@ -5,20 +5,18 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
+use aos_authoring::{WorldBundle, open_local_runtime};
 use aos_cbor::Hash;
-use aos_host::config::HostConfig;
-use aos_host::host::CycleOutcome;
-use aos_host::host::WorldHost;
-use aos_host::manifest_loader;
-use aos_host::testhost::TestHost;
-use aos_host::util::reset_journal;
-use aos_host::util::{is_placeholder_hash, patch_modules};
+use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_kernel::LoadedManifest;
-use aos_kernel::cell_index::CellIndex;
+use aos_kernel::Store;
 use aos_kernel::journal::OwnedJournalEntry;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::{Kernel, KernelConfig};
-use aos_store::{FsStore, Store};
+use aos_node::HostedStore;
+use aos_runtime::manifest_loader;
+use aos_runtime::util::{is_placeholder_hash, patch_modules};
+use aos_runtime::{CycleOutcome, TestHost, WorldConfig};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::runtime::{Builder, Runtime};
@@ -31,6 +29,12 @@ pub struct HarnessConfig<'a> {
     pub workflow_name: &'a str,
     pub event_schema: &'a str,
     pub module_crate: &'a str,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ExampleHostConfig {
+    pub world: WorldConfig,
+    pub adapters: EffectAdapterConfig,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -48,10 +52,10 @@ impl EventDispatchTiming {
 
 /// Host-backed example driver built on TestHost, keeping explicit control flow.
 pub struct ExampleHost {
-    host: TestHost<FsStore>,
+    host: TestHost<HostedStore>,
     workflow_name: String,
     event_schema: String,
-    store: Arc<FsStore>,
+    store: Arc<HostedStore>,
     loaded: LoadedManifest,
     wasm_hash: HashRef,
     kernel_config: KernelConfig,
@@ -69,7 +73,7 @@ impl ExampleHost {
 
     pub fn prepare_with_host_config(
         cfg: HarnessConfig<'_>,
-        host_config: HostConfig,
+        host_config: ExampleHostConfig,
     ) -> Result<Self> {
         Self::prepare_with_imports_and_host_config(cfg, &[], Some(host_config))
     }
@@ -77,9 +81,9 @@ impl ExampleHost {
     pub fn prepare_with_imports_and_host_config(
         cfg: HarnessConfig<'_>,
         import_roots: &[PathBuf],
-        host_config_override: Option<HostConfig>,
+        host_config_override: Option<ExampleHostConfig>,
     ) -> Result<Self> {
-        reset_journal(cfg.example_root)?;
+        util::reset_runtime_state(cfg.example_root)?;
         let wasm_bytes = util::compile_workflow(cfg.module_crate)?;
         Self::prepare_with_wasm_bytes(cfg, import_roots, host_config_override, wasm_bytes)
     }
@@ -87,12 +91,12 @@ impl ExampleHost {
     pub fn prepare_with_imports_host_config_and_module_bin(
         cfg: HarnessConfig<'_>,
         import_roots: &[PathBuf],
-        host_config_override: Option<HostConfig>,
+        host_config_override: Option<ExampleHostConfig>,
         package: &str,
         bin: &str,
     ) -> Result<Self> {
-        reset_journal(cfg.example_root)?;
-        let cache_dir = cfg.example_root.join(".aos").join("cache").join("modules");
+        util::reset_runtime_state(cfg.example_root)?;
+        let cache_dir = util::local_state_paths(cfg.example_root).module_cache_dir();
         let wasm_bytes = util::compile_wasm_bin(crate::workspace_root(), package, bin, &cache_dir)
             .with_context(|| format!("compile {package} --bin {bin} for workflow patch"))?;
         Self::prepare_with_wasm_bytes(cfg, import_roots, host_config_override, wasm_bytes)
@@ -101,10 +105,11 @@ impl ExampleHost {
     fn prepare_with_wasm_bytes(
         cfg: HarnessConfig<'_>,
         import_roots: &[PathBuf],
-        host_config_override: Option<HostConfig>,
+        host_config_override: Option<ExampleHostConfig>,
         wasm_bytes: Vec<u8>,
     ) -> Result<Self> {
-        let store = Arc::new(FsStore::open(cfg.example_root).context("open FsStore")?);
+        let runtime_ctx = open_local_runtime(cfg.example_root, false)?;
+        let store = runtime_ctx.hosted_store();
         let wasm_hash = store
             .put_blob(&wasm_bytes)
             .context("store workflow wasm blob")?;
@@ -112,14 +117,14 @@ impl ExampleHost {
 
         let assets_root = cfg.assets_root.unwrap_or(cfg.example_root).to_path_buf();
 
-        let mut loaded_host = load_and_patch(
+        let mut assets_host = load_and_patch_assets(
             store.clone(),
             &assets_root,
             import_roots,
             cfg.workflow_name,
             &wasm_hash_ref,
         )?;
-        let mut loaded_replay = load_and_patch(
+        let mut assets_replay = load_and_patch_assets(
             store.clone(),
             &assets_root,
             import_roots,
@@ -131,27 +136,29 @@ impl ExampleHost {
         maybe_patch_sys_enforcers(
             cfg.example_root,
             store.clone(),
-            &mut loaded_host,
+            &mut assets_host.loaded,
             &mut sys_module_cache,
         )?;
         maybe_patch_sys_enforcers(
             cfg.example_root,
             store.clone(),
-            &mut loaded_replay,
+            &mut assets_replay.loaded,
             &mut sys_module_cache,
         )?;
 
         let host_config = host_config_override.unwrap_or_default();
         let kernel_config = util::kernel_config(cfg.example_root)?;
-        let world_host = WorldHost::from_loaded_manifest(
-            store.clone(),
-            loaded_host,
-            cfg.example_root,
-            host_config,
+        let bundle_host = WorldBundle::from_loaded_assets(assets_host.loaded, assets_host.secrets);
+        let boot = runtime_ctx.bootstrap_world_bundle(
+            bundle_host,
+            host_config.world,
+            host_config.adapters,
             kernel_config.clone(),
         )?;
-        let host = TestHost::from_world_host(world_host);
+        let host = TestHost::from_world_host(boot.host);
+        let store = boot.store;
         let runtime = Builder::new_current_thread().enable_all().build()?;
+        let loaded_replay = assets_replay.loaded;
 
         Ok(Self {
             host,
@@ -238,18 +245,12 @@ impl ExampleHost {
     }
 
     pub fn single_keyed_cell_key(&self) -> Result<Vec<u8>> {
-        let root = self
-            .host
-            .kernel()
-            .workflow_index_root(&self.workflow_name)
-            .ok_or_else(|| anyhow!("missing keyed index for workflow '{}'", self.workflow_name))?;
-        let index = CellIndex::new(self.store.as_ref());
-        let mut iter = index.iter(root);
+        let cells = self.host.kernel().list_cells(&self.workflow_name)?;
+        let mut iter = cells.into_iter();
         let first = iter
             .next()
-            .transpose()?
             .ok_or_else(|| anyhow!("missing keyed state for workflow '{}'", self.workflow_name))?;
-        if iter.next().transpose()?.is_some() {
+        if iter.next().is_some() {
             anyhow::bail!(
                 "workflow '{}' has multiple keyed cells; expected exactly one",
                 self.workflow_name
@@ -258,11 +259,11 @@ impl ExampleHost {
         Ok(first.key_bytes)
     }
 
-    pub fn kernel_mut(&mut self) -> &mut Kernel<FsStore> {
+    pub fn kernel_mut(&mut self) -> &mut Kernel<HostedStore> {
         self.host.kernel_mut()
     }
 
-    pub fn store(&self) -> Arc<FsStore> {
+    pub fn store(&self) -> Arc<HostedStore> {
         self.store.clone()
     }
 
@@ -286,20 +287,21 @@ impl ExampleHost {
         let journal_entries = self.host.kernel().dump_journal()?;
         let mut keyed_states = Vec::new();
         if let Some(name) = keyed_workflow {
-            if let Some(root) = self.host.kernel().workflow_index_root(name) {
-                let index = CellIndex::new(self.store.as_ref());
-                for meta in index.iter(root) {
-                    let meta = meta?;
-                    let state_hash = Hash::from_bytes(&meta.state_hash)
-                        .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
-                    let state = self.store.get_blob(state_hash)?;
-                    keyed_states.push((meta.key_bytes.clone(), state));
-                }
-            } else {
-                // fallback to explicit keys if no root (should not happen)
+            let cells = self.host.kernel().list_cells(name)?;
+            if cells.is_empty() {
                 for key in keys {
                     if let Some(bytes) = self.host.kernel().workflow_state_bytes(name, Some(key))? {
                         keyed_states.push((key.clone(), bytes));
+                    }
+                }
+            } else {
+                for meta in cells {
+                    if let Some(state) = self
+                        .host
+                        .kernel()
+                        .workflow_state_bytes(name, Some(&meta.key_bytes))?
+                    {
+                        keyed_states.push((meta.key_bytes, state));
                     }
                 }
             }
@@ -330,7 +332,7 @@ impl ExampleHost {
 }
 
 pub struct ReplayHandle {
-    store: Arc<FsStore>,
+    store: Arc<HostedStore>,
     loaded: LoadedManifest,
     final_state_bytes: Vec<u8>,
     journal_entries: Vec<OwnedJournalEntry>,
@@ -394,24 +396,24 @@ fn patch_module_hash(
     Ok(())
 }
 
-fn load_and_patch(
-    store: Arc<FsStore>,
+fn load_and_patch_assets<S: Store + 'static>(
+    store: Arc<S>,
     assets_root: &Path,
     import_roots: &[PathBuf],
     workflow_name: &str,
     wasm_hash: &HashRef,
-) -> Result<LoadedManifest> {
-    let mut loaded =
-        manifest_loader::load_from_assets_with_imports(store, assets_root, import_roots)
+) -> Result<manifest_loader::LoadedAssets> {
+    let mut assets =
+        manifest_loader::load_from_assets_with_imports_and_defs(store, assets_root, import_roots)
             .context("load manifest from assets")?
             .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
-    patch_module_hash(&mut loaded, workflow_name, wasm_hash)?;
-    Ok(loaded)
+    patch_module_hash(&mut assets.loaded, workflow_name, wasm_hash)?;
+    Ok(assets)
 }
 
-fn maybe_patch_sys_enforcers(
+fn maybe_patch_sys_enforcers<S: Store + 'static>(
     example_root: &Path,
-    store: Arc<FsStore>,
+    store: Arc<S>,
     loaded: &mut LoadedManifest,
     cache: &mut HashMap<&'static str, HashRef>,
 ) -> Result<()> {
@@ -434,9 +436,9 @@ fn maybe_patch_sys_enforcers(
     Ok(())
 }
 
-fn maybe_patch_sys_module(
+fn maybe_patch_sys_module<S: Store + 'static>(
     example_root: &Path,
-    store: Arc<FsStore>,
+    store: Arc<S>,
     loaded: &mut LoadedManifest,
     cache: &mut HashMap<&'static str, HashRef>,
     module_name: &'static str,
@@ -453,7 +455,7 @@ fn maybe_patch_sys_module(
     let wasm_hash_ref = if let Some(existing) = cache.get(module_name) {
         existing.clone()
     } else {
-        let cache_dir = example_root.join(".aos").join("cache").join("modules");
+        let cache_dir = util::local_state_paths(example_root).module_cache_dir();
         let wasm_bytes =
             util::compile_wasm_bin(crate::workspace_root(), "aos-sys", bin_name, &cache_dir)?;
         let wasm_hash = store

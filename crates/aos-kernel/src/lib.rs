@@ -12,6 +12,7 @@ pub mod governance_utils;
 pub mod internal_effects;
 pub mod journal;
 pub mod manifest;
+pub mod manifest_catalog;
 pub mod patch_doc;
 pub mod policy;
 pub mod pure;
@@ -21,6 +22,7 @@ pub mod schema_value;
 pub mod secret;
 pub mod shadow;
 pub mod snapshot;
+pub mod store;
 pub mod workflow;
 pub mod world;
 
@@ -28,6 +30,9 @@ pub use effects::{EffectManager, EffectQueue};
 pub use error::KernelError;
 pub use event::{KernelEvent, WorkflowEvent};
 pub use manifest::{LoadedManifest, ManifestLoader};
+pub use manifest_catalog::{
+    Catalog, CatalogEntry, load_manifest_from_bytes, load_manifest_from_path,
+};
 pub use pure::PureRegistry;
 pub use query::{Consistency, ReadMeta, StateRead, StateReader};
 pub use secret::{
@@ -35,8 +40,9 @@ pub use secret::{
     SecretResolverError, SharedSecretResolver,
 };
 pub use shadow::{ShadowConfig, ShadowExecutor, ShadowSummary};
+pub use store::{DynStore, EntryKind, MemStore, Store, StoreError, StoreResult};
 pub use workflow::WorkflowRegistry;
 pub use world::{
-    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, TailEntry, TailIntent,
-    TailReceipt, TailScan,
+    CellProjectionDelta, CellProjectionDeltaState, DefListing, Kernel, KernelBuilder, KernelConfig,
+    KernelHeights, TailEntry, TailIntent, TailReceipt, TailScan,
 };

@@ -446,8 +446,27 @@ pub trait Journal: Send {
     /// Loads entries starting at `from` (inclusive). Passing 0 returns the full log.
     fn load_from(&self, from: JournalSeq) -> Result<Vec<OwnedJournalEntry>, JournalError>;
 
+    /// Loads up to `limit` entries starting at `from` (inclusive).
+    ///
+    /// Backends should prefer bounded reads here; the default fallback preserves
+    /// existing behavior but may materialize the full tail before truncation.
+    fn load_batch_from(
+        &self,
+        from: JournalSeq,
+        limit: usize,
+    ) -> Result<Vec<OwnedJournalEntry>, JournalError> {
+        let mut entries = self.load_from(from)?;
+        if entries.len() > limit {
+            entries.truncate(limit);
+        }
+        Ok(entries)
+    }
+
     /// Returns the next sequence that will be assigned on append.
     fn next_seq(&self) -> JournalSeq;
+
+    /// Overrides the next sequence that will be assigned on append.
+    fn set_next_seq(&mut self, next_seq: JournalSeq);
 }
 
 /// Helper used by on-disk implementations to encode/decode entries in a stable

@@ -37,6 +37,15 @@
   },
   {
     "$kind": "defeffect",
+    "name": "sys/portal.send@1",
+    "kind": "portal.send",
+    "params_schema": "sys/PortalSendParams@1",
+    "receipt_schema": "sys/PortalSendReceipt@1",
+    "cap_type": "portal",
+    "origin_scope": "both"
+  },
+  {
+    "$kind": "defeffect",
     "name": "sys/host.session.open@1",
     "kind": "host.session.open",
     "params_schema": "sys/HostSessionOpenParams@1",

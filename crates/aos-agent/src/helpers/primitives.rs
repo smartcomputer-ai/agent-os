@@ -212,6 +212,7 @@ pub fn session_lifecycle_changed_payload(
         from: prev_lifecycle,
         to: state.lifecycle,
         run_id: state.active_run_id.clone().or(prev_run_id),
+        output_ref: state.last_output_ref.clone(),
         in_flight_effects: state.in_flight_effects,
     })
 }

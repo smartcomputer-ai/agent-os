@@ -42,10 +42,10 @@ These are based on post-warmup scoped timers plus sampling profiles from a debug
    - Per invocation, runtime creates a new `Store`, creates a `Linker`, instantiates module, resolves exports, then calls `step`.
    - In sampled runs, setup/instantiation + call stack was a major bucket (~10%+ total).
 
-3. Keyed cell-index persistence and store reads are expensive in the keyed variant.
-   - Hot path: `handle_workflow_output_with_meta -> CellIndex::upsert -> FsStore::get_node/read_entry`.
-   - This repeatedly reads/decodes hashed nodes and rewrites index structure per event.
-   - In sampled runs, this showed as another large bucket (roughly teens %, with `read_entry/get_node` clearly visible).
+3. Keyed workflows still pay for snapshot/base reads, but no longer rewrite the persistent cell index on every event.
+   - The kernel now keeps post-snapshot keyed head state in an in-memory delta and only materializes new state blobs/index roots at snapshot time.
+   - That removes the worst former write amplification path for hot keyed cells.
+   - Remaining keyed costs are now mostly journal durability plus head-view bookkeeping/reads.
 
 4. Per-event `run_to_idle` loop amplifies fixed overhead.
    - Scoped timers show `encode` is negligible, while `submit` and `drain` dominate post-warmup event cost.
@@ -68,10 +68,10 @@ These are based on post-warmup scoped timers plus sampling profiles from a debug
    - Cache exports and avoid repeated lookup where possible.
    - Add instance/store pooling (or reusable invocation context) per module.
 
-4. Optimize keyed cell-index/store access.
-   - Introduce an in-process node cache for `FsStore` node reads.
-   - Avoid full index persistence churn on every event when possible (amortize/checkpoint).
-   - Keep hot keyed state/index path in memory and flush periodically.
+4. Optimize keyed cell-index/store access further.
+   - Introduce an in-process node cache for local CAS-backed node reads.
+   - The kernel already keeps hot keyed state in memory and flushes it on snapshot/checkpoint.
+   - Next step is reducing remaining base-index/CAS lookup overhead on head reads and snapshot commit.
 
 5. Add batching mode to the smoke benchmark for comparison.
    - Current mode: send event + drain to idle per event.

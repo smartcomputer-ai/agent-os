@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::Store;
 use aos_air_types::{DefModule, Name};
 use aos_cbor::Hash;
-use aos_store::Store;
 use aos_wasm::PureRuntime;
 use aos_wasm_abi::{PureInput, PureOutput};
 
@@ -17,7 +17,8 @@ pub struct PureRegistry<S: Store> {
 }
 
 struct PureModule {
-    module: Arc<wasmtime::Module>,
+    wasm_hash: String,
+    instance_pre: Arc<wasmtime::InstancePre<()>>,
 }
 
 impl<S: Store> PureRegistry<S> {
@@ -31,8 +32,10 @@ impl<S: Store> PureRegistry<S> {
     }
 
     pub fn ensure_loaded(&mut self, name: &str, module_def: &DefModule) -> Result<(), KernelError> {
-        if self.modules.contains_key(name) {
-            return Ok(());
+        if let Some(existing) = self.modules.get(name) {
+            if existing.wasm_hash == module_def.wasm_hash.as_str() {
+                return Ok(());
+            }
         }
         let wasm_hash = Hash::from_hex_str(module_def.wasm_hash.as_str())
             .map_err(|err| KernelError::Manifest(err.to_string()))?;
@@ -41,8 +44,17 @@ impl<S: Store> PureRegistry<S> {
             .runtime
             .cached_module(&bytes)
             .map_err(KernelError::Wasm)?;
-        self.modules
-            .insert(name.to_string(), PureModule { module: compiled });
+        let instance_pre = self
+            .runtime
+            .preinstantiate(compiled.as_ref())
+            .map_err(KernelError::Wasm)?;
+        self.modules.insert(
+            name.to_string(),
+            PureModule {
+                wasm_hash: module_def.wasm_hash.to_string(),
+                instance_pre,
+            },
+        );
         Ok(())
     }
 
@@ -53,7 +65,7 @@ impl<S: Store> PureRegistry<S> {
             .ok_or_else(|| KernelError::PureNotFound(name.to_string()))?;
         let output = self
             .runtime
-            .run_compiled(&module.module, input)
+            .run_precompiled(module.instance_pre.as_ref(), input)
             .map_err(KernelError::Wasm)?;
         Ok(output)
     }

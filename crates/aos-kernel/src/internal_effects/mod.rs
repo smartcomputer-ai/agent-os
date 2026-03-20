@@ -81,7 +81,7 @@ fn to_meta(meta: &ReadMeta) -> MetaSer {
 
 impl<S> Kernel<S>
 where
-    S: aos_store::Store + 'static,
+    S: crate::Store + 'static,
 {
     /// Handle an internal effect intent and return its receipt if the kind is supported.
     pub fn handle_internal_intent(
@@ -150,11 +150,11 @@ where
 mod tests {
     use super::*;
     use crate::KernelBuilder;
+    use crate::MemStore;
     use crate::internal_effects::introspect::{
         ListCellsParams, ListCellsReceipt, ManifestParams, ManifestReceipt,
     };
     use aos_effects::IntentBuilder;
-    use aos_store::MemStore;
     use serde_json::json;
     use std::fs::File;
     use std::io::Write;

@@ -6,23 +6,24 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
-use aos_host::config::HostConfig;
-use aos_host::host::WorldHost;
-use aos_host::manifest_loader;
-use aos_host::testhost::TestHost;
-use aos_host::util::{is_placeholder_hash, patch_modules, reset_journal};
-use aos_kernel::cell_index::CellIndex;
+use aos_authoring::{WorldBundle, open_local_runtime};
+use aos_effect_adapters::config::EffectAdapterConfig;
+use aos_effect_adapters::registry::AdapterRegistry;
+use aos_kernel::Store;
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
-use aos_store::{FsStore, Store};
+use aos_node::HostedStore;
+use aos_runtime::manifest_loader;
+use aos_runtime::util::{is_placeholder_hash, patch_modules};
+use aos_runtime::{TestHost, WorldConfig};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::runtime::{Builder, Runtime};
 
 pub struct EvalHost {
-    host: TestHost<FsStore>,
+    host: TestHost<HostedStore>,
     workflow_name: String,
     event_schema: String,
-    store: Arc<FsStore>,
+    store: Arc<HostedStore>,
     runtime: Runtime,
 }
 
@@ -49,25 +50,21 @@ pub struct EvalHostConfig<'a> {
     pub workspace_root: &'a Path,
     pub workflow_name: &'a str,
     pub event_schema: &'a str,
-    pub host_config: HostConfig,
+    pub world_config: WorldConfig,
+    pub adapter_config: EffectAdapterConfig,
     pub module_patches: &'a [EvalModulePatch<'a>],
 }
 
 impl EvalHost {
     pub fn prepare(cfg: EvalHostConfig<'_>) -> Result<Self> {
-        reset_journal(cfg.world_root)?;
+        let runtime_ctx = open_local_runtime(cfg.world_root, true)?;
 
-        let module_cache = cfg
-            .workspace_root
-            .join("target")
-            .join("aos-agent-eval")
-            .join("cache")
-            .join("modules");
+        let module_cache = runtime_ctx.paths().module_cache_dir();
         fs::create_dir_all(&module_cache)
             .with_context(|| format!("create cache dir {}", module_cache.display()))?;
 
-        let store = Arc::new(FsStore::open(cfg.world_root).context("open eval FsStore")?);
-        let mut loaded = load_manifest(store.clone(), cfg.assets_root, cfg.import_roots)?;
+        let store = runtime_ctx.hosted_store();
+        let mut assets = load_manifest_assets(store.clone(), cfg.assets_root, cfg.import_roots)?;
 
         if cfg.module_patches.is_empty() {
             anyhow::bail!("EvalHostConfig.module_patches must not be empty");
@@ -112,26 +109,27 @@ impl EvalHost {
                 wasm_hash_ref
             };
 
-            patch_module_hash(&mut loaded, patch.module_name, &wasm_hash_ref)?;
+            patch_module_hash(&mut assets.loaded, patch.module_name, &wasm_hash_ref)?;
         }
 
         let mut sys_module_cache = HashMap::new();
         maybe_patch_sys_enforcers(
             cfg.workspace_root,
             store.clone(),
-            &mut loaded,
+            &mut assets.loaded,
             &mut sys_module_cache,
         )?;
 
         let kernel_config = kernel_config(cfg.world_root)?;
-        let world_host = WorldHost::from_loaded_manifest(
-            store.clone(),
-            loaded,
-            cfg.world_root,
-            cfg.host_config,
+        let bundle = WorldBundle::from_loaded_assets(assets.loaded, assets.secrets);
+        let boot = runtime_ctx.bootstrap_world_bundle(
+            bundle,
+            cfg.world_config,
+            cfg.adapter_config,
             kernel_config,
         )?;
-        let host = TestHost::from_world_host(world_host);
+        let host = TestHost::from_world_host(boot.host);
+        let store = boot.store;
         let runtime = Builder::new_current_thread().enable_all().build()?;
 
         Ok(Self {
@@ -156,15 +154,8 @@ impl EvalHost {
     }
 
     pub fn read_state_for_session<T: DeserializeOwned>(&self, session_id: &str) -> Result<T> {
-        let root = self
-            .host
-            .kernel()
-            .workflow_index_root(&self.workflow_name)
-            .ok_or_else(|| anyhow!("missing keyed index for workflow '{}'", self.workflow_name))?;
-        let index = CellIndex::new(self.store.as_ref());
         let mut matched: Option<Vec<u8>> = None;
-        for entry in index.iter(root) {
-            let entry = entry?;
+        for entry in self.host.kernel().list_cells(&self.workflow_name)? {
             let Ok(candidate) = serde_cbor::from_slice::<String>(&entry.key_bytes) else {
                 continue;
             };
@@ -194,15 +185,15 @@ impl EvalHost {
         serde_cbor::from_slice(&bytes).context("decode keyed workflow state")
     }
 
-    pub fn kernel_mut(&mut self) -> &mut Kernel<FsStore> {
+    pub fn kernel_mut(&mut self) -> &mut Kernel<HostedStore> {
         self.host.kernel_mut()
     }
 
-    pub fn store(&self) -> Arc<FsStore> {
+    pub fn store(&self) -> Arc<HostedStore> {
         self.store.clone()
     }
 
-    pub fn adapter_registry(&self) -> &aos_host::adapters::registry::AdapterRegistry {
+    pub fn adapter_registry(&self) -> &AdapterRegistry {
         self.host.adapter_registry()
     }
 
@@ -230,6 +221,7 @@ fn kernel_config(world_root: &Path) -> Result<KernelConfig> {
         eager_module_load: true,
         secret_resolver: None,
         allow_placeholder_secrets: false,
+        cell_cache_size: aos_kernel::world::DEFAULT_CELL_CACHE_SIZE,
     })
 }
 
@@ -318,19 +310,19 @@ fn patch_module_hash(
     Ok(())
 }
 
-fn load_manifest(
-    store: Arc<FsStore>,
+fn load_manifest_assets<S: Store + 'static>(
+    store: Arc<S>,
     assets_root: &Path,
     import_roots: &[PathBuf],
-) -> Result<LoadedManifest> {
-    manifest_loader::load_from_assets_with_imports(store, assets_root, import_roots)
+) -> Result<manifest_loader::LoadedAssets> {
+    manifest_loader::load_from_assets_with_imports_and_defs(store, assets_root, import_roots)
         .context("load manifest from eval assets")?
         .ok_or_else(|| anyhow!("eval manifest missing at {}", assets_root.display()))
 }
 
-fn maybe_patch_sys_enforcers(
+fn maybe_patch_sys_enforcers<S: Store + 'static>(
     workspace_root: &Path,
-    store: Arc<FsStore>,
+    store: Arc<S>,
     loaded: &mut LoadedManifest,
     cache: &mut HashMap<&'static str, HashRef>,
 ) -> Result<()> {
@@ -353,9 +345,9 @@ fn maybe_patch_sys_enforcers(
     Ok(())
 }
 
-fn maybe_patch_sys_module(
+fn maybe_patch_sys_module<S: Store + 'static>(
     workspace_root: &Path,
-    store: Arc<FsStore>,
+    store: Arc<S>,
     loaded: &mut LoadedManifest,
     cache: &mut HashMap<&'static str, HashRef>,
     module_name: &'static str,

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use crate::Store;
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
     SecretEntry, TypeExpr, TypePrimitive, builtins, schema_index::SchemaIndex,
@@ -12,7 +13,6 @@ use aos_air_types::{
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
-use aos_store::Store;
 use aos_wasm_abi::{
     ABI_VERSION, DomainEvent, PureInput, PureOutput, WorkflowInput, WorkflowOutput,
 };
@@ -67,9 +67,12 @@ pub(crate) mod test_support;
 pub use crate::governance_utils::canonicalize_patch;
 
 const RECENT_RECEIPT_CACHE: usize = 512;
-const CELL_CACHE_SIZE: usize = 128;
+pub const DEFAULT_CELL_CACHE_SIZE: usize = 4096;
 const MONO_KEY: &[u8] = b"";
 const ENTROPY_LEN: usize = 64;
+const DELTA_RESIDENT_BYTES_LIMIT: usize = 256 * 1024 * 1024;
+const DELTA_RESIDENT_BYTES_TARGET: usize = 192 * 1024 * 1024;
+const DELTA_IMMEDIATE_SPILL_BYTES: usize = 1 * 1024 * 1024;
 
 #[derive(Debug)]
 struct KernelClock {
@@ -105,12 +108,25 @@ impl KernelClock {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct KernelConfig {
     pub module_cache_dir: Option<PathBuf>,
     pub eager_module_load: bool,
     pub secret_resolver: Option<SharedSecretResolver>,
     pub allow_placeholder_secrets: bool,
+    pub cell_cache_size: usize,
+}
+
+impl Default for KernelConfig {
+    fn default() -> Self {
+        Self {
+            module_cache_dir: None,
+            eager_module_load: false,
+            secret_resolver: None,
+            allow_placeholder_secrets: false,
+            cell_cache_size: DEFAULT_CELL_CACHE_SIZE,
+        }
+    }
 }
 
 impl fmt::Debug for KernelConfig {
@@ -123,6 +139,7 @@ impl fmt::Debug for KernelConfig {
                 &self.secret_resolver.as_ref().map(|_| "<resolver>"),
             )
             .field("allow_placeholder_secrets", &self.allow_placeholder_secrets)
+            .field("cell_cache_size", &self.cell_cache_size)
             .finish()
     }
 }
@@ -160,11 +177,17 @@ pub struct Kernel<S: Store> {
     governance: GovernanceManager,
     secret_resolver: Option<SharedSecretResolver>,
     allow_placeholder_secrets: bool,
+    cell_cache_size: usize,
     active_baseline: Option<SnapshotRecord>,
     last_snapshot_height: Option<JournalSeq>,
     last_snapshot_hash: Option<Hash>,
     pinned_roots: Vec<Hash>,
     workspace_roots: Vec<Hash>,
+    pending_cell_projection_deltas: BTreeMap<(Name, Vec<u8>), CellProjectionDelta>,
+    replay_metrics: Option<ReplayMetrics>,
+    cell_delta_access_tick: u64,
+    cell_spill_put_blob_count: u64,
+    cell_snapshot_put_blob_count: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -245,6 +268,32 @@ pub struct TailScan {
     pub receipts: Vec<TailReceipt>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CellProjectionDeltaState {
+    pub state_bytes: Vec<u8>,
+    pub state_hash: Hash,
+    pub size: u64,
+    pub last_active_ns: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CellProjectionDelta {
+    pub workflow: String,
+    pub key_hash: Vec<u8>,
+    pub key_bytes: Vec<u8>,
+    pub state: Option<CellProjectionDeltaState>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ReplayMetrics {
+    pub domain_events: u64,
+    pub workflow_invocations: u64,
+    pub workflow_invoke_ns: u128,
+    pub state_cache_hits: u64,
+    pub state_cache_misses: u64,
+    pub state_load_ns: u128,
+}
+
 fn def_kind_allowed(kind: &str, filter: Option<&std::collections::HashSet<&str>>) -> bool {
     if let Some(set) = filter {
         set.contains(kind)
@@ -289,12 +338,20 @@ struct RouteBinding {
 #[derive(Clone)]
 struct WorkflowState {
     cell_cache: CellCache,
+    delta: BTreeMap<Vec<u8>, CellDelta>,
 }
 
 impl Default for WorkflowState {
     fn default() -> Self {
+        Self::new(DEFAULT_CELL_CACHE_SIZE)
+    }
+}
+
+impl WorkflowState {
+    fn new(cell_cache_size: usize) -> Self {
         Self {
-            cell_cache: CellCache::new(CELL_CACHE_SIZE),
+            cell_cache: CellCache::new(cell_cache_size),
+            delta: BTreeMap::new(),
         }
     }
 }
@@ -304,6 +361,30 @@ struct CellEntry {
     state: Vec<u8>,
     state_hash: Hash,
     last_active_ns: u64,
+}
+
+#[derive(Clone)]
+enum CellDelta {
+    Upsert {
+        resident: Option<Vec<u8>>,
+        state_hash: Hash,
+        size: u64,
+        spilled: bool,
+        last_active_ns: u64,
+        access_tick: u64,
+    },
+    Delete {
+        access_tick: u64,
+    },
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct CellCacheStats {
+    pub delta_count: u64,
+    pub resident_count: u64,
+    pub resident_bytes_total: u64,
+    pub spill_put_blob_count: u64,
+    pub snapshot_put_blob_count: u64,
 }
 
 #[derive(Clone)]
@@ -349,6 +430,16 @@ impl CellCache {
         self.map.insert(key, entry);
     }
 
+    fn insert_unbounded(&mut self, key: Vec<u8>, entry: CellEntry) {
+        if self.map.contains_key(&key) {
+            self.map.insert(key.clone(), entry);
+            self.promote(&key);
+            return;
+        }
+        self.order.push_back(key.clone());
+        self.map.insert(key, entry);
+    }
+
     fn remove(&mut self, key: &[u8]) {
         self.map.remove(key);
         self.order.retain(|k| k.as_slice() != key);
@@ -357,6 +448,316 @@ impl CellCache {
     fn promote(&mut self, key: &[u8]) {
         self.order.retain(|k| k.as_slice() != key);
         self.order.push_back(key.to_vec());
+    }
+}
+
+impl<S: Store + 'static> Kernel<S> {
+    pub fn drain_cell_projection_deltas(&mut self) -> Vec<CellProjectionDelta> {
+        std::mem::take(&mut self.pending_cell_projection_deltas)
+            .into_values()
+            .collect()
+    }
+
+    fn record_cell_projection_delta(&mut self, delta: CellProjectionDelta) {
+        self.pending_cell_projection_deltas
+            .insert((delta.workflow.clone(), delta.key_hash.clone()), delta);
+    }
+
+    pub(crate) fn flush_replay_cell_projection_deltas(&mut self) -> Result<(), KernelError> {
+        if !self.suppress_journal {
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    fn workflow_state_entry(&self, workflow: &str) -> Option<&WorkflowState> {
+        self.workflow_state.get(workflow)
+    }
+
+    fn workflow_state_entry_mut(&mut self, workflow: &str) -> &mut WorkflowState {
+        self.workflow_state
+            .entry(workflow.to_string())
+            .or_insert_with(|| WorkflowState::new(self.cell_cache_size))
+    }
+
+    fn next_cell_access_tick(&mut self) -> u64 {
+        self.cell_delta_access_tick = self.cell_delta_access_tick.saturating_add(1);
+        self.cell_delta_access_tick
+    }
+
+    fn head_cell_entry(
+        &self,
+        workflow: &str,
+        key: &[u8],
+    ) -> Result<Option<Option<CellEntry>>, KernelError> {
+        let state = match self.workflow_state_entry(workflow) {
+            Some(state) => state,
+            None => return Ok(None),
+        };
+        if let Some(delta) = state.delta.get(key) {
+            return Ok(Some(match delta {
+                CellDelta::Upsert {
+                    resident,
+                    state_hash,
+                    last_active_ns,
+                    ..
+                } => {
+                    let state = match resident {
+                        Some(bytes) => bytes.clone(),
+                        None => self.store.get_blob(*state_hash)?,
+                    };
+                    Some(CellEntry {
+                        state,
+                        state_hash: *state_hash,
+                        last_active_ns: *last_active_ns,
+                    })
+                }
+                CellDelta::Delete { .. } => None,
+            }));
+        }
+        Ok(state.cell_cache.get_ref(key).cloned().map(Some))
+    }
+
+    fn resident_delta_bytes_total(&self) -> usize {
+        self.workflow_state
+            .values()
+            .flat_map(|workflow| workflow.delta.values())
+            .map(|delta| match delta {
+                CellDelta::Upsert { resident, .. } => {
+                    resident.as_ref().map(|bytes| bytes.len()).unwrap_or(0)
+                }
+                CellDelta::Delete { .. } => 0,
+            })
+            .sum()
+    }
+
+    fn set_delta_upsert(
+        &mut self,
+        workflow: &str,
+        key_bytes: Vec<u8>,
+        state: Vec<u8>,
+        state_hash: Hash,
+        last_active_ns: u64,
+    ) -> Result<(), KernelError> {
+        let access_tick = self.next_cell_access_tick();
+        let state_size = state.len() as u64;
+        self.workflow_state_entry_mut(workflow).delta.insert(
+            key_bytes.clone(),
+            CellDelta::Upsert {
+                resident: Some(state),
+                state_hash,
+                size: state_size,
+                spilled: false,
+                last_active_ns,
+                access_tick,
+            },
+        );
+        if state_size as usize >= DELTA_IMMEDIATE_SPILL_BYTES {
+            self.spill_delta_entry(workflow, &key_bytes)?;
+        }
+        self.evict_delta_until_within_budget()?;
+        Ok(())
+    }
+
+    fn set_delta_delete(&mut self, workflow: &str, key_bytes: Vec<u8>) {
+        let access_tick = self.next_cell_access_tick();
+        self.workflow_state_entry_mut(workflow)
+            .delta
+            .insert(key_bytes, CellDelta::Delete { access_tick });
+    }
+
+    fn touch_delta_access(&mut self, workflow: &str, key_bytes: &[u8]) {
+        let access_tick = self.next_cell_access_tick();
+        if let Some(delta) = self
+            .workflow_state_entry_mut(workflow)
+            .delta
+            .get_mut(key_bytes)
+        {
+            match delta {
+                CellDelta::Upsert {
+                    access_tick: entry_access_tick,
+                    ..
+                }
+                | CellDelta::Delete {
+                    access_tick: entry_access_tick,
+                } => {
+                    *entry_access_tick = access_tick;
+                }
+            }
+        }
+    }
+
+    fn spill_delta_entry(&mut self, workflow: &str, key_bytes: &[u8]) -> Result<bool, KernelError> {
+        let spill = self
+            .workflow_state_entry(workflow)
+            .and_then(|state| state.delta.get(key_bytes))
+            .and_then(|delta| match delta {
+                CellDelta::Upsert {
+                    resident: Some(bytes),
+                    state_hash,
+                    spilled,
+                    ..
+                } if !*spilled => Some((bytes.clone(), *state_hash)),
+                _ => None,
+            });
+        let Some((bytes, expected_hash)) = spill else {
+            return Ok(false);
+        };
+        let persisted = self.store.put_blob(&bytes)?;
+        debug_assert_eq!(persisted, expected_hash);
+        self.cell_spill_put_blob_count = self.cell_spill_put_blob_count.saturating_add(1);
+        let access_tick = self.next_cell_access_tick();
+        if let Some(CellDelta::Upsert {
+            resident,
+            state_hash,
+            spilled,
+            access_tick: entry_access_tick,
+            ..
+        }) = self
+            .workflow_state_entry_mut(workflow)
+            .delta
+            .get_mut(key_bytes)
+        {
+            *resident = None;
+            *state_hash = persisted;
+            *spilled = true;
+            *entry_access_tick = access_tick;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn evict_delta_until_within_budget(&mut self) -> Result<(), KernelError> {
+        if self.resident_delta_bytes_total() <= DELTA_RESIDENT_BYTES_LIMIT {
+            return Ok(());
+        }
+        let mut candidates: Vec<(String, Vec<u8>, u64)> = self
+            .workflow_state
+            .iter()
+            .flat_map(|(workflow, state)| {
+                state
+                    .delta
+                    .iter()
+                    .filter_map(|(key_bytes, delta)| match delta {
+                        CellDelta::Upsert {
+                            resident: Some(_),
+                            access_tick,
+                            ..
+                        } => Some((workflow.clone(), key_bytes.clone(), *access_tick)),
+                        _ => None,
+                    })
+            })
+            .collect();
+        candidates.sort_by_key(|(_, _, access_tick)| *access_tick);
+        for (workflow, key_bytes, _) in candidates {
+            if self.resident_delta_bytes_total() <= DELTA_RESIDENT_BYTES_TARGET {
+                break;
+            }
+            let _ = self.spill_delta_entry(&workflow, &key_bytes)?;
+        }
+        Ok(())
+    }
+
+    pub fn cell_cache_stats(&self) -> CellCacheStats {
+        let mut stats = CellCacheStats {
+            spill_put_blob_count: self.cell_spill_put_blob_count,
+            snapshot_put_blob_count: self.cell_snapshot_put_blob_count,
+            ..Default::default()
+        };
+        for workflow in self.workflow_state.values() {
+            for delta in workflow.delta.values() {
+                stats.delta_count = stats.delta_count.saturating_add(1);
+                if let CellDelta::Upsert { resident, .. } = delta {
+                    if let Some(bytes) = resident {
+                        stats.resident_count = stats.resident_count.saturating_add(1);
+                        stats.resident_bytes_total = stats
+                            .resident_bytes_total
+                            .saturating_add(bytes.len() as u64);
+                    }
+                }
+            }
+        }
+        stats
+    }
+
+    fn materialize_cell_delta_roots_for_snapshot(&mut self) -> Result<(), KernelError> {
+        let workflows: Vec<String> = self.workflow_state.keys().cloned().collect();
+        for workflow in workflows {
+            let Some(state) = self.workflow_state.get(&workflow) else {
+                continue;
+            };
+            if state.delta.is_empty() {
+                continue;
+            }
+
+            let root = self.ensure_cell_index_root(&workflow)?;
+            let mut new_root = root;
+            let mut flushed = Vec::new();
+            {
+                let state = self
+                    .workflow_state
+                    .get(&workflow)
+                    .expect("workflow state must still exist");
+                let index = CellIndex::new(self.store.as_ref());
+                for (key_bytes, delta) in &state.delta {
+                    let key_hash = Hash::of_bytes(key_bytes);
+                    match delta {
+                        CellDelta::Upsert {
+                            resident,
+                            state_hash,
+                            size,
+                            spilled,
+                            last_active_ns,
+                            ..
+                        } => {
+                            let persisted_hash = if let Some(state) = resident {
+                                let persisted_hash = self.store.put_blob(state)?;
+                                self.cell_snapshot_put_blob_count =
+                                    self.cell_snapshot_put_blob_count.saturating_add(1);
+                                debug_assert_eq!(persisted_hash, *state_hash);
+                                persisted_hash
+                            } else {
+                                debug_assert!(*spilled);
+                                *state_hash
+                            };
+                            let meta = CellMeta {
+                                key_hash: *key_hash.as_bytes(),
+                                key_bytes: key_bytes.clone(),
+                                state_hash: *persisted_hash.as_bytes(),
+                                size: *size,
+                                last_active_ns: *last_active_ns,
+                            };
+                            new_root = index.upsert(new_root, meta)?;
+                            if let Some(state) = resident {
+                                flushed.push((
+                                    key_bytes.clone(),
+                                    CellEntry {
+                                        state: state.clone(),
+                                        state_hash: persisted_hash,
+                                        last_active_ns: *last_active_ns,
+                                    },
+                                ));
+                            }
+                        }
+                        CellDelta::Delete { .. } => {
+                            let (updated_root, _) = index.delete(new_root, key_hash.as_bytes())?;
+                            new_root = updated_root;
+                        }
+                    }
+                }
+            }
+
+            self.workflow_index_roots.insert(workflow.clone(), new_root);
+            let state = self
+                .workflow_state
+                .get_mut(&workflow)
+                .expect("workflow state must still exist");
+            for (key_bytes, entry) in flushed {
+                state.cell_cache.insert(key_bytes, entry);
+            }
+            state.delta.clear();
+        }
+        Ok(())
     }
 }
 
@@ -399,6 +800,11 @@ impl<S: Store + 'static> KernelBuilder<S> {
         self
     }
 
+    pub fn with_cell_cache_size(mut self, size: usize) -> Self {
+        self.config.cell_cache_size = size.max(1);
+        self
+    }
+
     pub fn with_secret_resolver(mut self, resolver: SharedSecretResolver) -> Self {
         self.config.secret_resolver = Some(resolver);
         self
@@ -419,6 +825,18 @@ impl<S: Store + 'static> KernelBuilder<S> {
 
     pub fn from_loaded_manifest(self, loaded: LoadedManifest) -> Result<Kernel<S>, KernelError> {
         Kernel::from_loaded_manifest_with_config(self.store, loaded, self.journal, self.config)
+    }
+
+    pub fn from_loaded_manifest_without_replay(
+        self,
+        loaded: LoadedManifest,
+    ) -> Result<Kernel<S>, KernelError> {
+        Kernel::from_loaded_manifest_without_replay_with_config(
+            self.store,
+            loaded,
+            self.journal,
+            self.config,
+        )
     }
 }
 
@@ -505,7 +923,9 @@ impl<S: Store + 'static> Kernel<S> {
                             name.clone(),
                             instance_key.clone(),
                             effect_kind.clone(),
+                            record.cap_name.clone(),
                             params_cbor.clone(),
+                            record.idempotency_key,
                             issuer_ref.clone(),
                             record.intent_hash,
                             emitted_at_seq.unwrap_or_default(),
@@ -540,6 +960,9 @@ impl<S: Store + 'static> Kernel<S> {
         last_processed_event_seq: u64,
         module_version: Option<String>,
     ) {
+        if state_bytes.is_none() {
+            self.clear_pending_receipts_for_workflow_instance(module_id, instance_key);
+        }
         let instance_id = workflow_instance_id(module_id, instance_key);
         let entry = self
             .workflow_instances
@@ -613,6 +1036,34 @@ impl<S: Store + 'static> Kernel<S> {
         refresh_workflow_status(entry);
     }
 
+    pub(crate) fn clear_pending_receipts_for_workflow_instance(
+        &mut self,
+        module_id: &str,
+        instance_key: Option<&[u8]>,
+    ) -> usize {
+        let instance_key = instance_key.map(|key| key.to_vec());
+        let pending_hashes: Vec<[u8; 32]> = self
+            .pending_workflow_receipts
+            .iter()
+            .filter_map(|(hash, pending_ctx)| {
+                if pending_ctx.origin_module_id == module_id
+                    && pending_ctx.origin_instance_key == instance_key
+                {
+                    Some(*hash)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for hash in &pending_hashes {
+            let Some(context) = self.pending_workflow_receipts.get(hash).cloned() else {
+                continue;
+            };
+            self.settle_workflow_receipt_intent(&context, *hash);
+        }
+        pending_hashes.len()
+    }
+
     pub(crate) fn workflow_stream_cursor(
         &self,
         module_id: &str,
@@ -648,13 +1099,17 @@ impl<S: Store + 'static> Kernel<S> {
         self.workflow_state_bytes(workflow, None).ok().flatten()
     }
 
-    /// Fetch workflow state bytes via the cell index (non-keyed workflows use the sentinel key).
+    /// Fetch workflow state bytes from the hot head view; the persisted cell index is the
+    /// snapshot-anchored base layer and in-memory delta overrides it.
     pub fn workflow_state_bytes(
         &self,
         workflow: &str,
         key: Option<&[u8]>,
     ) -> Result<Option<Vec<u8>>, KernelError> {
         let key = key.unwrap_or(MONO_KEY);
+        if let Some(entry) = self.head_cell_entry(workflow, key)? {
+            return Ok(entry.map(|entry| entry.state));
+        }
         let Some(root) = self.workflow_index_roots.get(workflow) else {
             return Ok(None);
         };
@@ -734,6 +1189,32 @@ impl<S: Store + 'static> Kernel<S> {
     /// Current manifest hash (canonical CBOR of manifest node).
     pub fn manifest_hash(&self) -> Hash {
         self.manifest_hash
+    }
+
+    pub fn set_journal_next_seq(&mut self, next_seq: JournalSeq) {
+        self.journal.set_next_seq(next_seq);
+    }
+
+    pub fn with_suppressed_journal<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, KernelError>,
+    ) -> Result<T, KernelError> {
+        let previous = self.suppress_journal;
+        self.suppress_journal = true;
+        let result = f(self);
+        self.suppress_journal = previous;
+        result
+    }
+
+    /// List workflow module names from the active manifest.
+    pub fn workflow_names(&self) -> Vec<String> {
+        let mut names: Vec<_> = self
+            .module_defs
+            .iter()
+            .filter_map(|(name, def)| def.abi.workflow.as_ref().map(|_| name.clone()))
+            .collect();
+        names.sort();
+        names
     }
 
     /// Look up a def node by name from the active manifest.
@@ -896,19 +1377,45 @@ impl<S: Store + 'static> Kernel<S> {
         entries
     }
 
-    /// List all cells for a workflow using the persisted CellIndex.
-    ///
-    /// Returns an empty Vec if the workflow has no cells yet.
+    /// List all cells for a workflow using the head view: snapshot-anchored base index plus
+    /// in-memory delta overrides.
     pub fn list_cells(&self, workflow: &str) -> Result<Vec<CellMeta>, KernelError> {
-        let Some(root) = self.workflow_index_roots.get(workflow) else {
-            return Ok(Vec::new());
-        };
-        let index = CellIndex::new(self.store.as_ref());
-        let mut metas = Vec::new();
-        for meta in index.iter(*root) {
-            metas.push(meta?);
+        let mut metas: BTreeMap<Vec<u8>, CellMeta> = BTreeMap::new();
+        if let Some(root) = self.workflow_index_roots.get(workflow) {
+            let index = CellIndex::new(self.store.as_ref());
+            for meta in index.iter(*root) {
+                let meta = meta?;
+                metas.insert(meta.key_bytes.clone(), meta);
+            }
         }
-        Ok(metas)
+        if let Some(state) = self.workflow_state_entry(workflow) {
+            for (key_bytes, delta) in &state.delta {
+                match delta {
+                    CellDelta::Upsert {
+                        size,
+                        state_hash,
+                        last_active_ns,
+                        ..
+                    } => {
+                        let key_hash = Hash::of_bytes(key_bytes);
+                        metas.insert(
+                            key_bytes.clone(),
+                            CellMeta {
+                                key_hash: *key_hash.as_bytes(),
+                                key_bytes: key_bytes.clone(),
+                                state_hash: *state_hash.as_bytes(),
+                                size: *size,
+                                last_active_ns: *last_active_ns,
+                            },
+                        );
+                    }
+                    CellDelta::Delete { .. } => {
+                        metas.remove(key_bytes);
+                    }
+                }
+            }
+        }
+        Ok(metas.into_values().collect())
     }
 
     pub fn heights(&self) -> KernelHeights {
@@ -934,7 +1441,8 @@ impl<S: Store + 'static> Kernel<S> {
             .collect()
     }
 
-    /// Expose workflow index root hash (if present) for keyed workflows; useful for diagnostics/tests.
+    /// Expose the persisted workflow index root hash (if present). This is the last
+    /// snapshot-materialized base root, not necessarily the latest hot head state.
     pub fn workflow_index_root(&self, workflow: &str) -> Option<Hash> {
         self.workflow_index_roots.get(workflow).copied()
     }
@@ -977,15 +1485,49 @@ impl<S: Store + 'static> Kernel<S> {
             .collect()
     }
 
+    pub fn clear_all_workflow_runtime_waits(&mut self) {
+        self.pending_workflow_receipts.clear();
+        for state in self.workflow_instances.values_mut() {
+            state.inflight_intents.clear();
+            refresh_workflow_status(state);
+        }
+    }
+
+    pub fn retain_workflow_runtime_waits(
+        &mut self,
+        valid_intents: &HashSet<[u8; 32]>,
+    ) -> (usize, usize) {
+        let pending_before = self.pending_workflow_receipts.len();
+        self.pending_workflow_receipts
+            .retain(|intent_hash, _| valid_intents.contains(intent_hash));
+        let pending_dropped = pending_before.saturating_sub(self.pending_workflow_receipts.len());
+
+        let mut inflight_dropped = 0usize;
+        for state in self.workflow_instances.values_mut() {
+            let before = state.inflight_intents.len();
+            state
+                .inflight_intents
+                .retain(|intent_hash, _| valid_intents.contains(intent_hash));
+            inflight_dropped = inflight_dropped
+                .saturating_add(before.saturating_sub(state.inflight_intents.len()));
+            refresh_workflow_status(state);
+        }
+        (pending_dropped, inflight_dropped)
+    }
+
     pub fn dump_journal(&self) -> Result<Vec<OwnedJournalEntry>, KernelError> {
         Ok(self.journal.load_from(0)?)
+    }
+
+    pub fn dump_journal_from(&self, from: u64) -> Result<Vec<OwnedJournalEntry>, KernelError> {
+        Ok(self.journal.load_from(from)?)
     }
 
     pub fn governance(&self) -> &GovernanceManager {
         &self.governance
     }
 
-    fn sample_ingress(&mut self, journal_height: u64) -> Result<IngressStamp, KernelError> {
+    pub fn sample_ingress(&mut self, journal_height: u64) -> Result<IngressStamp, KernelError> {
         let now_ns = self.clock.now_wall_ns();
         let sampled_logical = self.clock.logical_now_ns();
         self.effect_manager.update_logical_now_ns(sampled_logical);
@@ -1078,20 +1620,7 @@ impl<S: Store + 'static> Kernel<S> {
         if self.suppress_journal {
             return Ok(());
         }
-        let event_hash = Hash::of_cbor(event)
-            .map_err(|err| KernelError::Journal(err.to_string()))?
-            .to_hex();
-        let record = JournalRecord::DomainEvent(DomainEventRecord {
-            schema: event.schema.clone(),
-            value: event.value.clone(),
-            key: event.key.clone(),
-            now_ns: stamp.now_ns,
-            logical_now_ns: stamp.logical_now_ns,
-            journal_height: stamp.journal_height,
-            entropy: stamp.entropy.clone(),
-            event_hash,
-            manifest_hash: stamp.manifest_hash.clone(),
-        });
+        let record = JournalRecord::DomainEvent(self.build_domain_event_record(event, stamp)?);
         self.append_record(record)
     }
 
@@ -1127,6 +1656,37 @@ impl<S: Store + 'static> Kernel<S> {
         if self.suppress_journal {
             return Ok(());
         }
+        let record =
+            JournalRecord::EffectReceipt(self.build_effect_receipt_record(receipt, stamp)?);
+        self.append_record(record)
+    }
+
+    pub fn build_domain_event_record(
+        &self,
+        event: &DomainEvent,
+        stamp: &IngressStamp,
+    ) -> Result<DomainEventRecord, KernelError> {
+        let event_hash = Hash::of_cbor(event)
+            .map_err(|err| KernelError::Journal(err.to_string()))?
+            .to_hex();
+        Ok(DomainEventRecord {
+            schema: event.schema.clone(),
+            value: event.value.clone(),
+            key: event.key.clone(),
+            now_ns: stamp.now_ns,
+            logical_now_ns: stamp.logical_now_ns,
+            journal_height: stamp.journal_height,
+            entropy: stamp.entropy.clone(),
+            event_hash,
+            manifest_hash: stamp.manifest_hash.clone(),
+        })
+    }
+
+    pub fn build_effect_receipt_record(
+        &self,
+        receipt: &EffectReceipt,
+        stamp: &IngressStamp,
+    ) -> Result<EffectReceiptRecord, KernelError> {
         let externalize_payload = self
             .pending_workflow_receipts
             .get(&receipt.intent_hash)
@@ -1136,7 +1696,7 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             JournalCborStorage::inline(receipt.payload_cbor.clone())
         };
-        let record = JournalRecord::EffectReceipt(EffectReceiptRecord {
+        Ok(EffectReceiptRecord {
             intent_hash: receipt.intent_hash,
             adapter_id: receipt.adapter_id.clone(),
             status: receipt.status.clone(),
@@ -1151,8 +1711,7 @@ impl<S: Store + 'static> Kernel<S> {
             journal_height: stamp.journal_height,
             entropy: stamp.entropy.clone(),
             manifest_hash: stamp.manifest_hash.clone(),
-        });
-        self.append_record(record)
+        })
     }
 
     fn record_stream_frame(
@@ -1445,6 +2004,7 @@ fn refresh_workflow_status(state: &mut WorkflowInstanceState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::test_support::minimal_kernel_non_keyed;
 
     #[test]
     fn ensure_secret_resolver_keeps_provided_when_manifest_has_no_secrets() {
@@ -1453,5 +2013,42 @@ mod tests {
         let selected =
             ensure_secret_resolver(false, Some(provided), false).expect("resolver selection");
         assert!(selected.is_some());
+    }
+
+    #[test]
+    fn record_workflow_state_transition_completion_clears_pending_receipts_for_instance() {
+        let mut kernel = minimal_kernel_non_keyed();
+        let intent_hash = [0x11u8; 32];
+        let context = WorkflowEffectContext::new(
+            "com.acme/Workflow@1".into(),
+            None,
+            "llm.generate".into(),
+            "cap/llm@1".into(),
+            vec![0xA0],
+            [0x22u8; 32],
+            None,
+            intent_hash,
+            7,
+            None,
+        );
+        kernel
+            .pending_workflow_receipts
+            .insert(intent_hash, context.clone());
+        kernel.record_workflow_inflight_intent(
+            "com.acme/Workflow@1",
+            None,
+            intent_hash,
+            "llm.generate",
+            &[0xA0],
+            7,
+        );
+
+        kernel.record_workflow_state_transition("com.acme/Workflow@1", None, None, 8, None);
+
+        assert!(kernel.pending_workflow_receipts_snapshot().is_empty());
+        let instances = kernel.workflow_instances_snapshot();
+        assert_eq!(instances.len(), 1);
+        assert!(instances[0].inflight_intents.is_empty());
+        assert_eq!(instances[0].status, WorkflowStatusSnapshot::Completed);
     }
 }

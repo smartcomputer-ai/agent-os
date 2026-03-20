@@ -220,6 +220,7 @@ fn on_llm_output_blob(
     receipt: BlobGetReceipt,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
+    state.last_output_ref = Some(receipt.blob_ref.as_str().into());
     let output: LlmOutputEnvelope = match serde_json::from_slice(&receipt.bytes) {
         Ok(value) => value,
         Err(_) => {

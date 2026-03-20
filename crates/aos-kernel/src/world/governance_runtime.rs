@@ -343,10 +343,10 @@ impl<S: Store + 'static> Kernel<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MemStore;
     use crate::receipts::WorkflowEffectContext;
     use crate::world::test_support::{empty_manifest, hash, named_ref};
     use aos_effects::{EffectIntent, EffectKind};
-    use aos_store::MemStore;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -449,7 +449,9 @@ mod tests {
                 "com.acme/Workflow@1".into(),
                 None,
                 "timer.set".into(),
+                "cap/timer@1".into(),
                 vec![],
+                [2u8; 32],
                 None,
                 [2u8; 32],
                 0,

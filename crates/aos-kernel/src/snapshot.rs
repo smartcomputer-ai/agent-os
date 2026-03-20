@@ -95,6 +95,10 @@ impl KernelSnapshot {
         self.manifest_hash.as_deref()
     }
 
+    pub fn set_manifest_hash(&mut self, manifest_hash: Option<[u8; 32]>) {
+        self.manifest_hash = manifest_hash.map(|value| value.to_vec());
+    }
+
     pub fn set_root_completeness(&mut self, roots: SnapshotRootCompleteness) {
         self.root_completeness = roots;
     }
@@ -173,6 +177,8 @@ pub struct WorkflowReceiptSnapshot {
     pub intent_hash: [u8; 32],
     pub origin_module_id: String,
     pub effect_kind: String,
+    #[serde(default)]
+    pub cap_name: String,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -181,6 +187,8 @@ pub struct WorkflowReceiptSnapshot {
     pub origin_instance_key: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
+    #[serde(default, with = "serde_bytes")]
+    pub idempotency_key: [u8; 32],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issuer_ref: Option<String>,
     #[serde(default)]
@@ -234,8 +242,10 @@ impl WorkflowReceiptSnapshot {
             intent_hash,
             origin_module_id: ctx.origin_module_id.clone(),
             effect_kind: ctx.effect_kind.clone(),
+            cap_name: ctx.cap_name.clone(),
             origin_instance_key: ctx.origin_instance_key.clone(),
             params_cbor: ctx.params_cbor.clone(),
+            idempotency_key: ctx.idempotency_key,
             issuer_ref: ctx.issuer_ref.clone(),
             emitted_at_seq: ctx.emitted_at_seq,
             module_version: ctx.module_version.clone(),
@@ -247,7 +257,9 @@ impl WorkflowReceiptSnapshot {
             self.origin_module_id,
             self.origin_instance_key,
             self.effect_kind,
+            self.cap_name,
             self.params_cbor,
+            self.idempotency_key,
             self.issuer_ref,
             self.intent_hash,
             self.emitted_at_seq,

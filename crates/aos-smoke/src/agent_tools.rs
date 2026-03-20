@@ -8,6 +8,7 @@ use aos_agent::{
 };
 use aos_air_types::{HashRef, Manifest};
 use aos_cbor::{Hash, to_canonical_cbor};
+use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_effect_types::HashRef as EffectHashRef;
 use aos_effect_types::introspect::{
     IntrospectCellInfo, IntrospectListCellsParams, IntrospectListCellsReceipt,
@@ -28,12 +29,12 @@ use aos_effects::builtins::{
     LlmToolCallList, TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
-use aos_host::config::HostConfig;
-use aos_store::{FsStore, Store};
+use aos_kernel::Store;
+use aos_runtime::WorldConfig;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::example_host::{ExampleHost, HarnessConfig};
+use crate::example_host::{ExampleHost, ExampleHostConfig, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
@@ -125,9 +126,12 @@ pub fn run(example_root: &Path) -> Result<()> {
             module_crate: "",
         },
         &import_roots,
-        Some(HostConfig {
-            llm: None,
-            ..HostConfig::default()
+        Some(ExampleHostConfig {
+            world: WorldConfig::default(),
+            adapters: EffectAdapterConfig {
+                llm: None,
+                ..EffectAdapterConfig::default()
+            },
         }),
         SDK_WASM_PACKAGE,
         SDK_WASM_BIN,
@@ -312,7 +316,11 @@ struct AgentToolsScript {
 }
 
 impl AgentToolsScript {
-    fn handle_intent(&mut self, store: &FsStore, intent: EffectIntent) -> Result<EffectReceipt> {
+    fn handle_intent<S: Store>(
+        &mut self,
+        store: &S,
+        intent: EffectIntent,
+    ) -> Result<EffectReceipt> {
         match intent.kind.as_str() {
             EffectKind::BLOB_PUT => self.handle_blob_put(store, intent),
             EffectKind::BLOB_GET => self.handle_blob_get(store, intent),
@@ -338,7 +346,11 @@ impl AgentToolsScript {
         }
     }
 
-    fn handle_blob_put(&mut self, store: &FsStore, intent: EffectIntent) -> Result<EffectReceipt> {
+    fn handle_blob_put<S: Store>(
+        &mut self,
+        store: &S,
+        intent: EffectIntent,
+    ) -> Result<EffectReceipt> {
         let params: BlobPutParams =
             serde_cbor::from_slice(&intent.params_cbor).context("decode blob.put params")?;
         let blob_hash = store
@@ -364,7 +376,11 @@ impl AgentToolsScript {
         )
     }
 
-    fn handle_blob_get(&mut self, store: &FsStore, intent: EffectIntent) -> Result<EffectReceipt> {
+    fn handle_blob_get<S: Store>(
+        &mut self,
+        store: &S,
+        intent: EffectIntent,
+    ) -> Result<EffectReceipt> {
         let params: BlobGetParams =
             serde_cbor::from_slice(&intent.params_cbor).context("decode blob.get params")?;
         let hash = hash_from_ref(params.blob_ref.as_str())?;
@@ -383,7 +399,7 @@ impl AgentToolsScript {
 
     fn handle_llm_generate(
         &mut self,
-        store: &FsStore,
+        store: &impl Store,
         intent: EffectIntent,
     ) -> Result<EffectReceipt> {
         let params: LlmGenerateParams =
@@ -1061,7 +1077,7 @@ fn drive_scripted_effects(host: &mut ExampleHost, script: &mut AgentToolsScript)
     bail!("agent-tools safety trip: effects did not drain")
 }
 
-fn build_first_llm_output_ref(store: &FsStore) -> Result<HashRef> {
+fn build_first_llm_output_ref(store: &impl Store) -> Result<HashRef> {
     let tool_calls = build_scripted_tool_calls(store)?;
     let tool_calls_ref = store_json_blob(store, &serde_json::to_value(tool_calls)?)?;
 
@@ -1073,7 +1089,7 @@ fn build_first_llm_output_ref(store: &FsStore) -> Result<HashRef> {
     store_json_blob(store, &serde_json::to_value(envelope)?)
 }
 
-fn build_second_llm_output_ref(store: &FsStore) -> Result<HashRef> {
+fn build_second_llm_output_ref(store: &impl Store) -> Result<HashRef> {
     let envelope = LlmOutputEnvelope {
         assistant_text: Some(
             "Tools complete: wrote file, verified existence, read content, listed directory, and executed command."
@@ -1085,7 +1101,7 @@ fn build_second_llm_output_ref(store: &FsStore) -> Result<HashRef> {
     store_json_blob(store, &serde_json::to_value(envelope)?)
 }
 
-fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
+fn build_scripted_tool_calls(store: &impl Store) -> Result<LlmToolCallList> {
     let write_args = store_json_blob(
         store,
         &json!({
@@ -1284,7 +1300,7 @@ fn build_scripted_tool_calls(store: &FsStore) -> Result<LlmToolCallList> {
     ])
 }
 
-fn store_json_blob(store: &FsStore, value: &Value) -> Result<HashRef> {
+fn store_json_blob(store: &impl Store, value: &Value) -> Result<HashRef> {
     let bytes = serde_json::to_vec(value).context("encode json blob")?;
     let hash = store.put_blob(&bytes).context("store json blob")?;
     HashRef::new(hash.to_hex()).context("json blob hash_ref")

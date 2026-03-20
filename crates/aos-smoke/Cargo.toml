@@ -7,16 +7,19 @@ edition = "2024"
 anyhow = "1"
 aos-air-types = { path = "../aos-air-types" }
 aos-agent = { path = "../aos-agent" }
+aos-authoring = { path = "../aos-authoring" }
 aos-cbor = { path = "../aos-cbor" }
 aos-effect-types = { path = "../aos-effect-types" }
 aos-kernel = { path = "../aos-kernel" }
+aos-node = { path = "../aos-node" }
+aos-sqlite = { path = "../aos-sqlite" }
 aos-sys = { path = "../aos-sys" }
-aos-store = { path = "../aos-store" }
 aos-air-exec = { path = "../aos-air-exec" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 aos-wasm-sdk = { path = "../aos-wasm-sdk" }
 aos-effects = { path = "../aos-effects" }
-aos-host = { path = "../aos-host", features = ["e2e-tests"] }
+aos-effect-adapters = { path = "../aos-effect-adapters", features = ["e2e-tests"] }
+aos-runtime = { path = "../aos-runtime" }
 aos-wasm-build = { path = "../aos-wasm-build" }
 clap = { version = "4", features = ["derive"] }
 indexmap = "2"
@@ -32,6 +35,7 @@ log = "0.4"
 env_logger = "0.11"
 walkdir = "2"
 tokio = { version = "1", features = ["rt", "time"] }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"

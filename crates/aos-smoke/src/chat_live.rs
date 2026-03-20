@@ -5,8 +5,8 @@ use anyhow::{Context, Result, anyhow, ensure};
 use aos_cbor::Hash;
 use aos_effects::ReceiptStatus;
 use aos_effects::builtins::{LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCallList};
+use aos_kernel::Store;
 use aos_kernel::journal::JournalRecord;
-use aos_store::Store;
 use clap::ValueEnum;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -371,7 +371,7 @@ fn as_i64(value: Option<&Value>) -> i64 {
     }
 }
 
-fn load_json_blob(store: &aos_store::FsStore, reference: &str) -> Result<Value> {
+fn load_json_blob<S: aos_kernel::Store>(store: &S, reference: &str) -> Result<Value> {
     let hash =
         Hash::from_hex_str(reference).with_context(|| format!("invalid blob ref {reference}"))?;
     let bytes = store
@@ -380,7 +380,7 @@ fn load_json_blob(store: &aos_store::FsStore, reference: &str) -> Result<Value> 
     serde_json::from_slice(&bytes).with_context(|| format!("decode blob json {reference}"))
 }
 
-fn load_text_blob(store: &aos_store::FsStore, reference: &str) -> Result<String> {
+fn load_text_blob<S: aos_kernel::Store>(store: &S, reference: &str) -> Result<String> {
     let hash =
         Hash::from_hex_str(reference).with_context(|| format!("invalid blob ref {reference}"))?;
     let bytes = store

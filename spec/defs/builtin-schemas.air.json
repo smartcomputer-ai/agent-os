@@ -21,6 +21,42 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/PortalSendParams@1",
+    "type": {
+      "record": {
+        "dest_universe": { "option": { "uuid": {} } },
+        "dest_world": { "uuid": {} },
+        "mode": { "text": {} },
+        "schema": { "option": { "text": {} } },
+        "value_cbor": { "option": { "bytes": {} } },
+        "inbox": { "option": { "text": {} } },
+        "payload_cbor": { "option": { "bytes": {} } },
+        "headers": {
+          "option": {
+            "map": {
+              "key": { "text": {} },
+              "value": { "text": {} }
+            }
+          }
+        },
+        "correlation_id": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/PortalSendReceipt@1",
+    "type": {
+      "record": {
+        "status": { "text": {} },
+        "message_id": { "hash": {} },
+        "dest_world": { "uuid": {} },
+        "enqueued_seq": { "option": { "bytes": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/TimerFired@1",
     "type": {
       "record": {

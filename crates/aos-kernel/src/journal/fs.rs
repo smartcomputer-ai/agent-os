@@ -93,15 +93,38 @@ impl Journal for FsJournal {
         Ok(entries)
     }
 
+    fn load_batch_from(
+        &self,
+        from: JournalSeq,
+        limit: usize,
+    ) -> Result<Vec<OwnedJournalEntry>, JournalError> {
+        read_records_from(&self.path, from, Some(limit))
+    }
+
     fn next_seq(&self) -> JournalSeq {
         self.next_seq
+    }
+
+    fn set_next_seq(&mut self, next_seq: JournalSeq) {
+        self.next_seq = next_seq;
     }
 }
 
 fn read_all_records(path: &Path) -> Result<Vec<OwnedJournalEntry>, JournalError> {
+    read_records_from(path, 0, None)
+}
+
+fn read_records_from(
+    path: &Path,
+    from: JournalSeq,
+    limit: Option<usize>,
+) -> Result<Vec<OwnedJournalEntry>, JournalError> {
     let mut file = File::open(path)?;
     let mut entries = Vec::new();
     loop {
+        if limit.is_some_and(|max| entries.len() >= max) {
+            break;
+        }
         let mut len_buf = [0u8; 4];
         let read = file.read(&mut len_buf)?;
         if read == 0 {
@@ -121,7 +144,9 @@ fn read_all_records(path: &Path) -> Result<Vec<OwnedJournalEntry>, JournalError>
             return Err(err.into());
         }
         let entry: OwnedJournalEntry = serde_cbor::from_slice(&buf)?;
-        entries.push(entry);
+        if entry.seq >= from {
+            entries.push(entry);
+        }
     }
     Ok(entries)
 }
