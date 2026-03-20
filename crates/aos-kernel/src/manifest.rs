@@ -6,9 +6,10 @@ use aos_air_types::{
 };
 use aos_cbor::Hash;
 use aos_cbor::to_canonical_cbor;
-use aos_store::{Catalog, Store, load_manifest_from_bytes, load_manifest_from_path};
 
+use crate::Store;
 use crate::error::KernelError;
+use crate::manifest_catalog::{Catalog, load_manifest_from_bytes, load_manifest_from_path};
 
 pub struct LoadedManifest {
     pub manifest: Manifest,
@@ -24,6 +25,24 @@ pub struct LoadedManifest {
 pub struct ManifestLoader;
 
 impl ManifestLoader {
+    pub fn load_from_bytes<S: Store>(
+        store: &S,
+        bytes: &[u8],
+    ) -> Result<LoadedManifest, KernelError> {
+        let catalog = load_manifest_from_bytes(store, bytes)
+            .map_err(|err| KernelError::Manifest(format!("load manifest: {err}")))?;
+        Self::from_catalog(catalog)
+    }
+
+    pub fn load_from_manifest<S: Store>(
+        store: &S,
+        manifest: &Manifest,
+    ) -> Result<LoadedManifest, KernelError> {
+        let bytes = to_canonical_cbor(manifest)
+            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
+        Self::load_from_bytes(store, &bytes)
+    }
+
     pub fn load_from_path<S: Store>(
         store: &S,
         path: impl AsRef<std::path::Path>,
@@ -34,11 +53,7 @@ impl ManifestLoader {
 
     pub fn load_from_hash<S: Store>(store: &S, hash: Hash) -> Result<LoadedManifest, KernelError> {
         let manifest: Manifest = store.get_node(hash)?;
-        let bytes = to_canonical_cbor(&manifest)
-            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
-        let catalog = load_manifest_from_bytes(store, &bytes)
-            .map_err(|err| KernelError::Manifest(format!("load manifest: {err}")))?;
-        Self::from_catalog(catalog)
+        Self::load_from_manifest(store, &manifest)
     }
 
     fn from_catalog(catalog: Catalog) -> Result<LoadedManifest, KernelError> {

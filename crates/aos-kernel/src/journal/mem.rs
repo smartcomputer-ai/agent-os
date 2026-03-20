@@ -46,9 +46,24 @@ impl Journal for MemJournal {
             .collect())
     }
 
+    fn load_batch_from(
+        &self,
+        from: JournalSeq,
+        limit: usize,
+    ) -> Result<Vec<OwnedJournalEntry>, JournalError> {
+        Ok(self
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.seq >= from)
+            .take(limit)
+            .collect())
+    }
+
     fn next_seq(&self) -> JournalSeq {
         self.entries.lock().unwrap().len() as JournalSeq
     }
+
+    fn set_next_seq(&mut self, _next_seq: JournalSeq) {}
 }
 
 #[cfg(test)]

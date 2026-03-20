@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use crate::Store;
 use aos_air_types::{AirNode, HashRef, NamedRef, TypeExpr, builtins, schema_index::SchemaIndex};
 use aos_cbor::Hash;
-use aos_store::Store;
 
 use crate::error::KernelError;
 use crate::governance::ManifestPatch;

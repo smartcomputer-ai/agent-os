@@ -7,8 +7,8 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_agent::{
-    EffectReceiptRejected, RunId, SessionConfig, SessionId, SessionLifecycle,
-    SessionLifecycleChanged, default_tool_registry,
+    EffectReceiptRejected, RunId, SessionConfig, SessionId, SessionIngress,
+    SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, default_tool_registry,
     helpers::{
         LocalSessionSpawnRequest, SessionHandoffRequest, SpawnOrHandoffSessionPlan,
         SpawnOrHandoffSessionRequest, emit_session_ingresses, spawn_or_handoff_session,
@@ -80,6 +80,7 @@ pub struct TaskFailure {
 pub enum PendingStage {
     AwaitBlobPut,
     AwaitHostSessionOpen,
+    AwaitRunCompletion,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -89,6 +90,7 @@ pub struct TaskFinished {
     pub status: TaskStatus,
     pub failure: Option<TaskFailure>,
     pub run_id: Option<RunId>,
+    pub output_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -99,6 +101,7 @@ pub struct DemiurgeState {
     pub task: Option<String>,
     pub config: Option<TaskConfig>,
     pub input_ref: Option<String>,
+    pub output_ref: Option<String>,
     pub host_session_id: Option<String>,
     pub pending_stage: Option<PendingStage>,
     pub next_observed_at_ns: u64,
@@ -186,6 +189,7 @@ fn on_task_submitted(
     ctx.state.task = Some(task.task.clone());
     ctx.state.config = Some(config);
     ctx.state.next_observed_at_ns = task.observed_at_ns.saturating_add(1);
+    ctx.state.output_ref = None;
 
     let message_blob = UserMessageBlob {
         role: "user".into(),
@@ -313,6 +317,7 @@ fn on_receipt(
             emit_session_bootstrap(ctx, payload.session_id.as_str())?;
             Ok(())
         }
+        PendingStage::AwaitRunCompletion => Ok(()),
     }
 }
 
@@ -331,6 +336,7 @@ fn on_receipt_rejected(
     let expected = match stage {
         PendingStage::AwaitBlobPut => EFFECT_BLOB_PUT,
         PendingStage::AwaitHostSessionOpen => EFFECT_HOST_SESSION_OPEN,
+        PendingStage::AwaitRunCompletion => return Ok(()),
     };
     if rejected.effect_kind != expected {
         return Ok(());
@@ -420,8 +426,16 @@ fn on_session_lifecycle_changed(
             ctx.state.status = TaskStatus::Running;
             Ok(())
         }
-        SessionLifecycle::WaitingInput | SessionLifecycle::Completed => {
-            finish_task(ctx, changed.observed_at_ns, TaskStatus::Succeeded, None, changed.run_id)
+        SessionLifecycle::WaitingInput => request_run_completion(ctx, changed),
+        SessionLifecycle::Completed => {
+            finish_task(
+                ctx,
+                changed.observed_at_ns,
+                TaskStatus::Succeeded,
+                None,
+                changed.run_id,
+                changed.output_ref,
+            )
         }
         SessionLifecycle::Failed => {
             finish_task(
@@ -433,13 +447,43 @@ fn on_session_lifecycle_changed(
                     detail: "aos.agent session entered Failed lifecycle".into(),
                 }),
                 changed.run_id,
+                changed.output_ref,
             )
         }
         SessionLifecycle::Cancelled => {
-            finish_task(ctx, changed.observed_at_ns, TaskStatus::Cancelled, None, changed.run_id)
+            finish_task(
+                ctx,
+                changed.observed_at_ns,
+                TaskStatus::Cancelled,
+                None,
+                changed.run_id,
+                changed.output_ref,
+            )
         }
         SessionLifecycle::Idle | SessionLifecycle::Paused | SessionLifecycle::Cancelling => Ok(()),
     }
+}
+
+fn request_run_completion(
+    ctx: &mut WorkflowCtx<DemiurgeState, Value>,
+    changed: SessionLifecycleChanged,
+) -> Result<(), ReduceError> {
+    if matches!(ctx.state.pending_stage, Some(PendingStage::AwaitRunCompletion)) {
+        return Ok(());
+    }
+
+    ctx.state.output_ref = changed.output_ref.clone();
+    ctx.state.pending_stage = Some(PendingStage::AwaitRunCompletion);
+    let observed_at_ns = next_observed_at_ns(&mut ctx.state);
+    emit_session_ingresses(
+        ctx,
+        &[SessionIngress {
+            session_id: changed.session_id,
+            observed_at_ns,
+            ingress: SessionIngressKind::RunCompleted,
+        }],
+    );
+    Ok(())
 }
 
 fn finish_task(
@@ -448,6 +492,7 @@ fn finish_task(
     status: TaskStatus,
     failure: Option<TaskFailure>,
     run_id: Option<RunId>,
+    output_ref: Option<String>,
 ) -> Result<(), ReduceError> {
     if ctx.state.finished {
         return Ok(());
@@ -457,6 +502,7 @@ fn finish_task(
     ctx.state.failure = failure.clone();
     ctx.state.pending_stage = None;
     ctx.state.finished = true;
+    ctx.state.output_ref = output_ref.clone();
     let task_id = ctx.state.task_id.clone();
 
     ctx.intent("demiurge/TaskFinished@1")
@@ -466,6 +512,7 @@ fn finish_task(
             status,
             failure,
             run_id,
+            output_ref,
         })
         .send();
 
@@ -488,6 +535,7 @@ fn fail_task(
             detail: detail.into(),
         }),
         run_id,
+        None,
     )
 }
 

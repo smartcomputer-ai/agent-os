@@ -165,10 +165,10 @@ impl<S: Store + 'static> Kernel<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MemStore;
     use crate::journal::Journal;
     use crate::journal::mem::MemJournal;
     use aos_air_types::{AirNode, CURRENT_AIR_VERSION};
-    use aos_store::MemStore;
     use indexmap::IndexMap;
     use std::collections::HashMap;
     use std::sync::Arc;

@@ -75,7 +75,8 @@
         "observed_at_ns": { "time": {} },
         "status": { "ref": "demiurge/TaskStatus@1" },
         "failure": { "option": { "ref": "demiurge/TaskFailure@1" } },
-        "run_id": { "option": { "ref": "aos.agent/RunId@1" } }
+        "run_id": { "option": { "ref": "aos.agent/RunId@1" } },
+        "output_ref": { "option": { "hash": {} } }
       }
     }
   },
@@ -90,6 +91,7 @@
         "task": { "option": { "text": {} } },
         "config": { "option": { "ref": "demiurge/TaskConfig@1" } },
         "input_ref": { "option": { "hash": {} } },
+        "output_ref": { "option": { "hash": {} } },
         "host_session_id": { "option": { "text": {} } },
         "pending_stage": { "option": { "ref": "demiurge/PendingStage@1" } },
         "next_observed_at_ns": { "nat": {} },

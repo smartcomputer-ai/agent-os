@@ -4,11 +4,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_air_types::HashRef;
-use aos_host::manifest_loader;
-use aos_host::testhost::TestHost;
-use aos_host::util::patch_modules;
-use aos_kernel::cell_index::CellIndex;
-use aos_store::{FsStore, MemStore, Store};
+use aos_kernel::{MemStore, Store};
+use aos_runtime::TestHost;
+use aos_runtime::manifest_loader;
+use aos_runtime::util::patch_modules;
+use aos_sqlite::FsCas;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{EventDispatchTiming, ExampleHost, HarnessConfig};
@@ -76,7 +76,8 @@ impl MemPerfHost {
             .context("store workflow wasm blob in memory")?;
         let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash workflow wasm")?;
 
-        let fs_store = Arc::new(FsStore::open(example_root).context("open fixture fs store")?);
+        let paths = crate::util::local_state_paths(example_root);
+        let fs_store = Arc::new(FsCas::open_with_paths(&paths).context("open fixture CAS")?);
         let mut loaded = manifest_loader::load_from_assets_with_imports(fs_store, assets_root, &[])
             .context("load manifest from assets")?
             .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
@@ -129,19 +130,11 @@ impl MemPerfHost {
             .context("read workflow state")
     }
 
-    fn workflow_index_root(&self) -> Option<aos_cbor::Hash> {
-        self.host.kernel().workflow_index_root(&self.workflow_name)
-    }
-
     fn workflow_state_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         self.host
             .kernel()
             .workflow_state_bytes(&self.workflow_name, Some(key))
             .context("read keyed workflow state bytes")
-    }
-
-    fn store(&self) -> Arc<MemStore> {
-        self.store.clone()
     }
 }
 
@@ -285,19 +278,11 @@ fn run_keyed_fs(example_root: &Path, messages: u64, cells: u64) -> Result<PerfMe
     let elapsed = begin.elapsed();
 
     let validate_begin = Instant::now();
-    let root = host
-        .kernel_mut()
-        .workflow_index_root(WORKFLOW_NAME)
-        .ok_or_else(|| anyhow!("missing keyed index root for '{WORKFLOW_NAME}'"))?;
-    let store = host.store();
-    let index = CellIndex::new(store.as_ref());
-
     let mut observed_cells = vec![false; cells as usize];
     let mut observed_key_samples = Vec::new();
     let mut total_count = 0_u64;
 
-    for meta in index.iter(root) {
-        let meta = meta.context("iterate keyed cell metadata")?;
+    for meta in host.kernel_mut().list_cells(WORKFLOW_NAME)? {
         observed_key_samples.push(meta.key_bytes.clone());
 
         let key_text: String =
@@ -452,18 +437,10 @@ fn run_keyed_in_memory(example_root: &Path, messages: u64, cells: u64) -> Result
     let elapsed = begin.elapsed();
 
     let validate_begin = Instant::now();
-    let root = host
-        .workflow_index_root()
-        .ok_or_else(|| anyhow!("missing keyed index root for '{WORKFLOW_NAME}'"))?;
-    let store = host.store();
-    let index = CellIndex::new(store.as_ref());
-
     let mut observed_cells = vec![false; cells as usize];
     let mut total_count = 0_u64;
 
-    for meta in index.iter(root) {
-        let meta = meta.context("iterate keyed cell metadata")?;
-
+    for meta in host.host.kernel().list_cells(WORKFLOW_NAME)? {
         let key_text: String =
             serde_cbor::from_slice(&meta.key_bytes).context("decode keyed cell key")?;
         let idx = parse_cell_index(&key_text, cells)? as usize;

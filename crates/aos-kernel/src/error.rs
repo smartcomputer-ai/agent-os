@@ -5,7 +5,7 @@ use crate::journal::CapDenyReason;
 #[derive(Debug, Error)]
 pub enum KernelError {
     #[error("store error: {0}")]
-    Store(#[from] aos_store::StoreError),
+    Store(#[from] crate::StoreError),
     #[error("wasm runtime error: {0}")]
     Wasm(#[from] anyhow::Error),
     #[error("manifest loader error: {0}")]

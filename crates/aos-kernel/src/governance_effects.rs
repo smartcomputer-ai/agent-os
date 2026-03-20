@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::Store;
 use aos_air_types::{HashRef, Manifest, NamedRef, Routing, SecretEntry};
 use aos_cbor::{Hash, to_canonical_cbor};
-use aos_store::Store;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 

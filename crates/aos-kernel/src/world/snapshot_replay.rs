@@ -1,4 +1,7 @@
 use super::*;
+use std::time::Instant;
+
+const REPLAY_BATCH_SIZE: usize = 8192;
 
 impl<S: Store + 'static> Kernel<S> {
     pub fn create_snapshot(&mut self) -> Result<(), KernelError> {
@@ -8,6 +11,7 @@ impl<S: Store + 'static> Kernel<S> {
                 "workflow queue must be idle before snapshot".into(),
             ));
         }
+        self.materialize_cell_delta_roots_for_snapshot()?;
         let height = self.journal.next_seq();
         let workflow_state: Vec<WorkflowStateEntry> = Vec::new();
         let recent_receipts: Vec<[u8; 32]> = self.recent_receipts.iter().cloned().collect();
@@ -115,52 +119,161 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     pub(super) fn replay_existing_entries(&mut self) -> Result<(), KernelError> {
-        let entries = self.journal.load_from(0)?;
-        if entries.is_empty() {
+        let head = self.journal.next_seq();
+        if head == 0 {
             return Ok(());
         }
         let mut resume_seq: Option<JournalSeq> = None;
+        let mut latest_replay_snapshot: Option<SnapshotRecord> = None;
         let mut latest_promotable_baseline: Option<SnapshotRecord> = None;
-        for entry in &entries {
-            if matches!(entry.kind, JournalKind::Snapshot) {
-                let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
-                    .map_err(|err| KernelError::Journal(err.to_string()))?;
-                if let JournalRecord::Snapshot(snapshot) = record {
-                    if let Ok(hash) = Hash::from_hex_str(&snapshot.snapshot_ref) {
-                        let manifest_hash = snapshot
-                            .manifest_hash
-                            .as_ref()
-                            .and_then(|s| Hash::from_hex_str(s).ok());
-                        self.snapshot_index
-                            .insert(snapshot.height, (hash, manifest_hash));
-                    }
-                    if self.validate_baseline_promotion(&snapshot).is_ok() {
-                        latest_promotable_baseline = Some(snapshot.clone());
+        let mut scan_cursor = 0;
+        while scan_cursor < head {
+            let entries = self
+                .journal
+                .load_batch_from(scan_cursor, REPLAY_BATCH_SIZE)?;
+            if entries.is_empty() {
+                break;
+            }
+            for entry in &entries {
+                if matches!(entry.kind, JournalKind::Snapshot) {
+                    let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
+                        .map_err(|err| KernelError::Journal(err.to_string()))?;
+                    if let JournalRecord::Snapshot(snapshot) = record {
+                        if let Ok(hash) = Hash::from_hex_str(&snapshot.snapshot_ref) {
+                            let manifest_hash = snapshot
+                                .manifest_hash
+                                .as_ref()
+                                .and_then(|s| Hash::from_hex_str(s).ok());
+                            self.snapshot_index
+                                .insert(snapshot.height, (hash, manifest_hash));
+                        }
+                        latest_replay_snapshot = Some(snapshot.clone());
+                        if self.validate_baseline_promotion(&snapshot).is_ok() {
+                            latest_promotable_baseline = Some(snapshot.clone());
+                        }
                     }
                 }
             }
+            scan_cursor = entries
+                .last()
+                .map(|entry| entry.seq.saturating_add(1))
+                .unwrap_or(head);
         }
         if let Some(snapshot) = latest_promotable_baseline {
+            self.active_baseline = Some(snapshot);
+        }
+        if let Some(snapshot) = latest_replay_snapshot {
             resume_seq = Some(snapshot.height);
-            self.active_baseline = Some(snapshot.clone());
-            self.last_snapshot_height = Some(snapshot.height);
-            self.load_snapshot(&snapshot)?;
+            self.load_snapshot_for_replay(&snapshot)?;
         }
         self.suppress_journal = true;
         self.replay_applying_domain_record = false;
         self.replay_generated_domain_event_hashes.clear();
-        for entry in entries {
-            if resume_seq.is_some_and(|seq| entry.seq < seq) {
-                continue;
+        self.replay_metrics = Some(ReplayMetrics::default());
+        let mut replay_cursor = resume_seq.unwrap_or(0);
+        while replay_cursor < head {
+            let entries = self
+                .journal
+                .load_batch_from(replay_cursor, REPLAY_BATCH_SIZE)?;
+            if entries.is_empty() {
+                break;
             }
-            let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
-                .map_err(|err| KernelError::Journal(err.to_string()))?;
-            self.apply_replay_record(record)?;
+            for entry in entries {
+                if resume_seq.is_some_and(|seq| entry.seq < seq) {
+                    continue;
+                }
+                let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
+                    .map_err(|err| KernelError::Journal(err.to_string()))?;
+                replay_cursor = entry.seq.saturating_add(1);
+                self.apply_replay_record(record)?;
+            }
         }
+        self.flush_replay_cell_projection_deltas()?;
         self.tick_until_idle()?;
         self.suppress_journal = false;
         self.replay_applying_domain_record = false;
         self.replay_generated_domain_event_hashes.clear();
+        if let Some(metrics) = self.replay_metrics.take() {
+            log::info!(
+                "kernel replay_existing_entries completed: domain_events={} workflow_invocations={} workflow_invoke_ms={} state_cache_hits={} state_cache_misses={} state_load_ms={}",
+                metrics.domain_events,
+                metrics.workflow_invocations,
+                metrics.workflow_invoke_ns / 1_000_000,
+                metrics.state_cache_hits,
+                metrics.state_cache_misses,
+                metrics.state_load_ns / 1_000_000
+            );
+        }
+        Ok(())
+    }
+
+    pub fn restore_snapshot_record(&mut self, record: &SnapshotRecord) -> Result<(), KernelError> {
+        self.load_snapshot(record)
+    }
+
+    pub fn promote_active_baseline_record(
+        &mut self,
+        record: &SnapshotRecord,
+    ) -> Result<(), KernelError> {
+        self.validate_baseline_promotion(record)?;
+        self.validate_snapshot_record_manifest_lineage(record, None)?;
+        self.active_baseline = Some(record.clone());
+        Ok(())
+    }
+
+    pub fn restore_snapshot_record_for_replay(
+        &mut self,
+        record: &SnapshotRecord,
+    ) -> Result<(), KernelError> {
+        self.load_snapshot_for_replay(record)
+    }
+
+    pub fn replay_entries_from(&mut self, from: JournalSeq) -> Result<(), KernelError> {
+        let apply_started = Instant::now();
+        let mut load_ms = 0u128;
+        self.suppress_journal = true;
+        self.replay_applying_domain_record = false;
+        self.replay_generated_domain_event_hashes.clear();
+        self.replay_metrics = Some(ReplayMetrics::default());
+        let mut cursor = from;
+        let head = self.journal.next_seq();
+        while cursor < head {
+            let load_started = Instant::now();
+            let entries = self.journal.load_batch_from(cursor, REPLAY_BATCH_SIZE)?;
+            load_ms += load_started.elapsed().as_millis();
+            if entries.is_empty() {
+                break;
+            }
+            for entry in entries {
+                let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
+                    .map_err(|err| KernelError::Journal(err.to_string()))?;
+                cursor = entry.seq.saturating_add(1);
+                self.apply_replay_record(record)?;
+            }
+        }
+        self.flush_replay_cell_projection_deltas()?;
+        self.tick_until_idle()?;
+        self.suppress_journal = false;
+        self.replay_applying_domain_record = false;
+        self.replay_generated_domain_event_hashes.clear();
+        let replay_metrics = self.replay_metrics.take();
+        log::info!(
+            "kernel replay_entries_from completed: replay_from={} load_ms={} apply_ms={}",
+            from,
+            load_ms,
+            apply_started.elapsed().as_millis()
+        );
+        if let Some(metrics) = replay_metrics {
+            log::info!(
+                "kernel replay_entries_from metrics: domain_events={} workflow_invocations={} workflow_invoke_ms={} state_cache_hits={} state_cache_misses={} state_load_ms={}",
+                metrics.domain_events,
+                metrics.workflow_invocations,
+                metrics.workflow_invoke_ns / 1_000_000,
+                metrics.state_cache_hits,
+                metrics.state_cache_misses,
+                metrics.state_load_ns / 1_000_000
+            );
+        }
         Ok(())
     }
 
@@ -304,8 +417,7 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(record)
     }
 
-    fn load_snapshot(&mut self, record: &SnapshotRecord) -> Result<(), KernelError> {
-        self.validate_baseline_promotion(record)?;
+    fn load_snapshot_for_replay(&mut self, record: &SnapshotRecord) -> Result<(), KernelError> {
         if record.manifest_hash.is_none() {
             return Err(KernelError::SnapshotUnavailable(
                 "snapshot record missing manifest_hash".into(),
@@ -317,9 +429,9 @@ impl<S: Store + 'static> Kernel<S> {
         let snapshot: KernelSnapshot = serde_cbor::from_slice(&bytes)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
         self.validate_snapshot_root_completeness(&snapshot)?;
+        self.validate_snapshot_record_manifest_lineage(record, Some(&snapshot))?;
         self.last_snapshot_height = Some(record.height);
         self.last_snapshot_hash = Some(hash);
-        self.active_baseline = Some(record.clone());
         if let Some(manifest_hex) = record.manifest_hash.as_ref()
             && let Ok(h) = Hash::from_hex_str(manifest_hex)
             && h != self.manifest_hash
@@ -340,6 +452,12 @@ impl<S: Store + 'static> Kernel<S> {
         self.apply_snapshot(snapshot)
     }
 
+    fn load_snapshot(&mut self, record: &SnapshotRecord) -> Result<(), KernelError> {
+        self.validate_baseline_promotion(record)?;
+        self.active_baseline = Some(record.clone());
+        self.load_snapshot_for_replay(record)
+    }
+
     pub(super) fn ensure_active_baseline(&mut self) -> Result<(), KernelError> {
         if self.active_baseline.is_some() {
             return Ok(());
@@ -354,15 +472,7 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn receipt_horizon_height_for_baseline(&self, height: JournalSeq) -> Option<JournalSeq> {
-        let has_inflight_workflow_intents = self
-            .workflow_instances
-            .values()
-            .any(|instance| !instance.inflight_intents.is_empty());
-        if self.pending_workflow_receipts.is_empty() && !has_inflight_workflow_intents {
-            Some(height)
-        } else {
-            None
-        }
+        Some(height)
     }
 
     fn validate_baseline_promotion(&self, record: &SnapshotRecord) -> Result<(), KernelError> {
@@ -421,6 +531,99 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
+    fn journal_manifest_hash_at_height(&self, height: JournalSeq) -> Result<Hash, KernelError> {
+        let mut cursor = 0;
+        let mut current_manifest: Option<Hash> = None;
+        while cursor < height {
+            let remaining = height.saturating_sub(cursor) as usize;
+            let limit = REPLAY_BATCH_SIZE.min(remaining.max(1));
+            let entries = self.journal.load_batch_from(cursor, limit)?;
+            if entries.is_empty() {
+                break;
+            }
+            let mut next_cursor = cursor;
+            for entry in entries {
+                if entry.seq >= height {
+                    break;
+                }
+                next_cursor = entry.seq.saturating_add(1);
+                if !matches!(entry.kind, JournalKind::Manifest) {
+                    continue;
+                }
+                let record = decode_manifest_record(&entry.payload)?;
+                let hash = Hash::from_hex_str(&record.manifest_hash).map_err(|err| {
+                    KernelError::Manifest(format!(
+                        "invalid journal manifest hash at height {}: {err}",
+                        entry.seq
+                    ))
+                })?;
+                current_manifest = Some(hash);
+            }
+            cursor = next_cursor.max(cursor.saturating_add(1));
+        }
+        current_manifest.ok_or_else(|| {
+            KernelError::SnapshotUnavailable(format!(
+                "no journal manifest lineage found before snapshot height {height}"
+            ))
+        })
+    }
+
+    fn validate_snapshot_record_manifest_lineage(
+        &self,
+        record: &SnapshotRecord,
+        snapshot: Option<&KernelSnapshot>,
+    ) -> Result<(), KernelError> {
+        let record_manifest = record
+            .manifest_hash
+            .as_deref()
+            .ok_or_else(|| {
+                KernelError::SnapshotUnavailable("snapshot record missing manifest_hash".into())
+            })
+            .and_then(|value| {
+                Hash::from_hex_str(value).map_err(|err| {
+                    KernelError::SnapshotUnavailable(format!(
+                        "snapshot record manifest_hash is invalid: {err}"
+                    ))
+                })
+            })?;
+        let journal_manifest = match self.journal_manifest_hash_at_height(record.height) {
+            Ok(hash) => hash,
+            Err(KernelError::Journal(message))
+                if message.contains("journal entry missing at height 0") =>
+            {
+                record_manifest
+            }
+            Err(KernelError::SnapshotUnavailable(message))
+                if message.contains("no journal manifest lineage found before snapshot height") =>
+            {
+                record_manifest
+            }
+            Err(err) => return Err(err),
+        };
+        if record_manifest != journal_manifest {
+            return Err(KernelError::SnapshotUnavailable(format!(
+                "snapshot manifest hash {} does not match journal manifest lineage {} at height {}",
+                record_manifest, journal_manifest, record.height
+            )));
+        }
+        if let Some(snapshot) = snapshot
+            && let Some(bytes) = snapshot.manifest_hash()
+        {
+            let snapshot_manifest = Hash::from_bytes(bytes).map_err(|err| {
+                KernelError::SnapshotUnavailable(format!(
+                    "snapshot payload manifest_hash is invalid: {err}"
+                ))
+            })?;
+            if snapshot_manifest != journal_manifest {
+                return Err(KernelError::SnapshotUnavailable(format!(
+                    "snapshot payload manifest hash {} does not match journal manifest lineage {} at height {}",
+                    snapshot_manifest, journal_manifest, record.height
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn apply_snapshot(&mut self, snapshot: KernelSnapshot) -> Result<(), KernelError> {
         self.workflow_index_roots = snapshot
             .workflow_index_roots()
@@ -438,17 +641,20 @@ impl<S: Store + 'static> Kernel<S> {
         for entry in snapshot.workflow_state_entries().iter().cloned() {
             // Ensure blobs are present in store for deterministic reloads.
             self.store.put_blob(&entry.state)?;
-            let state_entry = restored.entry(entry.workflow.clone()).or_default();
+            let state_entry = restored
+                .entry(entry.workflow.clone())
+                .or_insert_with(|| WorkflowState::new(self.cell_cache_size));
             let state_hash = Hash::from_bytes(&entry.state_hash)
                 .unwrap_or_else(|_| Hash::of_bytes(&entry.state));
             let key_bytes = entry.key.unwrap_or_else(|| MONO_KEY.to_vec());
             let key_hash = Hash::of_bytes(&key_bytes);
             let root = self.ensure_cell_index_root(&entry.workflow)?;
+            let state_size = entry.state.len() as u64;
             let meta = CellMeta {
                 key_hash: *key_hash.as_bytes(),
                 key_bytes: key_bytes.clone(),
                 state_hash: *state_hash.as_bytes(),
-                size: entry.state.len() as u64,
+                size: state_size,
                 last_active_ns: entry.last_active_ns,
             };
             let index = CellIndex::new(self.store.as_ref());
@@ -456,13 +662,24 @@ impl<S: Store + 'static> Kernel<S> {
             self.workflow_index_roots
                 .insert(entry.workflow.clone(), new_root);
             state_entry.cell_cache.insert(
-                key_bytes,
+                key_bytes.clone(),
                 CellEntry {
                     state: entry.state.clone(),
                     state_hash,
                     last_active_ns: entry.last_active_ns,
                 },
             );
+            self.record_cell_projection_delta(CellProjectionDelta {
+                workflow: entry.workflow,
+                key_hash: key_hash.as_bytes().to_vec(),
+                key_bytes,
+                state: Some(CellProjectionDeltaState {
+                    state_bytes: entry.state,
+                    state_hash,
+                    size: state_size,
+                    last_active_ns: entry.last_active_ns,
+                }),
+            });
         }
         self.workflow_state = restored;
         let (deque, set) = receipts_to_vecdeque(snapshot.recent_receipts(), RECENT_RECEIPT_CACHE);
@@ -473,6 +690,7 @@ impl<S: Store + 'static> Kernel<S> {
             .pending_workflow_receipts()
             .iter()
             .cloned()
+            .filter(|snap| !self.recent_receipt_index.contains(&snap.intent_hash))
             .map(|snap| (snap.intent_hash, snap.into_context()))
             .collect();
         self.workflow_instances = snapshot
@@ -483,6 +701,7 @@ impl<S: Store + 'static> Kernel<S> {
                 let inflight_intents = snap
                     .inflight_intents
                     .into_iter()
+                    .filter(|intent| !self.recent_receipt_index.contains(&intent.intent_id))
                     .map(|intent| {
                         (
                             intent.intent_id,
@@ -503,16 +722,15 @@ impl<S: Store + 'static> Kernel<S> {
                     WorkflowStatusSnapshot::Completed => WorkflowRuntimeStatus::Completed,
                     WorkflowStatusSnapshot::Failed => WorkflowRuntimeStatus::Failed,
                 };
-                (
-                    snap.instance_id,
-                    WorkflowInstanceState {
-                        state_bytes: snap.state_bytes,
-                        inflight_intents,
-                        status,
-                        last_processed_event_seq: snap.last_processed_event_seq,
-                        module_version: snap.module_version,
-                    },
-                )
+                let mut state = WorkflowInstanceState {
+                    state_bytes: snap.state_bytes,
+                    inflight_intents,
+                    status,
+                    last_processed_event_seq: snap.last_processed_event_seq,
+                    module_version: snap.module_version,
+                };
+                refresh_workflow_status(&mut state);
+                (snap.instance_id, state)
             })
             .collect();
 
@@ -647,18 +865,27 @@ fn decode_tail_record(kind: JournalKind, payload: &[u8]) -> Result<JournalRecord
     }
 }
 
+fn decode_manifest_record(payload: &[u8]) -> Result<ManifestRecord, KernelError> {
+    if let Ok(JournalRecord::Manifest(record)) = serde_cbor::from_slice::<JournalRecord>(payload) {
+        return Ok(record);
+    }
+    serde_cbor::from_slice(payload).map_err(|err| KernelError::Journal(err.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MemStore;
     use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
     use crate::receipts::WorkflowEffectContext;
     use crate::world::test_support::{
         append_record, empty_manifest, event_record, kernel_with_store_and_journal,
         loaded_manifest_with_schema, minimal_kernel_non_keyed, write_manifest,
     };
-    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
+    use aos_air_types::{
+        HashRef, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi, catalog::EffectCatalog,
+    };
     use aos_effects::EffectStreamFrame;
-    use aos_store::MemStore;
     use serde_json::json;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -794,6 +1021,68 @@ mod tests {
     }
 
     #[test]
+    fn replay_fails_closed_when_snapshot_manifest_disagrees_with_journal_lineage() {
+        let store = Arc::new(MemStore::default());
+        let (loaded_a, hash_a) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventA@1");
+        let (_loaded_b, hash_b) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventB@1");
+
+        let mut journal = MemJournal::default();
+        append_record(
+            &mut journal,
+            JournalRecord::Manifest(ManifestRecord {
+                manifest_hash: hash_a.to_hex(),
+            }),
+        );
+        append_record(
+            &mut journal,
+            JournalRecord::DomainEvent(event_record("com.acme/EventA@1", 1)),
+        );
+
+        let snapshot_height = 2;
+        let mut snapshot = KernelSnapshot::new(
+            snapshot_height,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            0,
+            Some(*hash_b.as_bytes()),
+        );
+        snapshot.set_root_completeness(SnapshotRootCompleteness {
+            manifest_hash: Some(hash_b.as_bytes().to_vec()),
+            ..SnapshotRootCompleteness::default()
+        });
+        let snap_bytes = serde_cbor::to_vec(&snapshot).expect("encode snapshot");
+        let snap_hash = store.put_blob(&snap_bytes).expect("store snapshot");
+        append_record(
+            &mut journal,
+            JournalRecord::Snapshot(SnapshotRecord {
+                snapshot_ref: snap_hash.to_hex(),
+                height: snapshot_height,
+                logical_time_ns: 0,
+                receipt_horizon_height: Some(snapshot_height),
+                manifest_hash: Some(hash_b.to_hex()),
+            }),
+        );
+
+        let err = match Kernel::from_loaded_manifest_with_config(
+            store,
+            loaded_a,
+            Box::new(journal),
+            KernelConfig::default(),
+        ) {
+            Ok(_) => panic!("mismatched snapshot manifest should fail closed"),
+            Err(err) => err,
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("journal manifest lineage"),
+            "unexpected error: {rendered}"
+        );
+    }
+
+    #[test]
     fn world_initialization_persists_active_baseline() {
         let kernel = minimal_kernel_non_keyed();
         let heights = kernel.heights();
@@ -818,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn unsafe_baseline_promotion_fails_receipt_horizon_precondition() {
+    fn snapshot_with_pending_workflow_receipts_still_promotes_active_baseline() {
         let mut kernel = minimal_kernel_non_keyed();
         let initial_baseline_height = kernel
             .active_baseline
@@ -832,7 +1121,9 @@ mod tests {
                 "com.acme/Workflow@1".into(),
                 None,
                 "http.request".into(),
+                "cap/http@1".into(),
                 vec![],
+                [9u8; 32],
                 None,
                 [9u8; 32],
                 0,
@@ -844,11 +1135,87 @@ mod tests {
         let active_height = kernel
             .active_baseline
             .as_ref()
-            .expect("active baseline retained")
+            .expect("active baseline promoted")
             .height;
+        assert!(
+            active_height > initial_baseline_height,
+            "snapshot with persisted continuation state should promote active baseline"
+        );
+    }
+
+    #[test]
+    fn replay_prefers_latest_snapshot_and_promotes_it_when_restorable() {
+        let mut kernel = minimal_kernel_non_keyed();
+        let initial_baseline_height = kernel
+            .active_baseline
+            .as_ref()
+            .expect("initial baseline")
+            .height;
+
+        kernel.pending_workflow_receipts.insert(
+            [7u8; 32],
+            WorkflowEffectContext::new(
+                "com.acme/Workflow@1".into(),
+                None,
+                "http.request".into(),
+                "cap/http@1".into(),
+                vec![],
+                [7u8; 32],
+                None,
+                [7u8; 32],
+                0,
+                None,
+            ),
+        );
+        kernel.create_snapshot().expect("snapshot still written");
+        let unsafe_snapshot_height = kernel.last_snapshot_height.expect("latest snapshot height");
+        assert!(
+            unsafe_snapshot_height > initial_baseline_height,
+            "new snapshot should advance last_snapshot_height"
+        );
         assert_eq!(
-            active_height, initial_baseline_height,
-            "unsafe snapshot must not promote active baseline"
+            kernel
+                .active_baseline
+                .as_ref()
+                .expect("active baseline")
+                .height,
+            unsafe_snapshot_height,
+            "latest snapshot should now promote active baseline"
+        );
+
+        let store = kernel.store.clone();
+        let loaded = LoadedManifest {
+            manifest: kernel.manifest.clone(),
+            secrets: kernel.secrets.clone(),
+            modules: kernel.module_defs.clone(),
+            effects: kernel.effect_defs.clone(),
+            caps: kernel.cap_defs.clone(),
+            policies: kernel.policy_defs.clone(),
+            schemas: kernel.schema_defs.clone(),
+            effect_catalog: EffectCatalog::from_defs(kernel.effect_defs.values().cloned()),
+        };
+        let entries = kernel.dump_journal().expect("journal entries");
+        let reopened = Kernel::from_loaded_manifest_with_config(
+            store,
+            loaded,
+            Box::new(MemJournal::from_entries(&entries)),
+            KernelConfig::default(),
+        )
+        .expect("replay from latest snapshot");
+
+        assert_eq!(
+            reopened.last_snapshot_height,
+            Some(unsafe_snapshot_height),
+            "startup replay should restore from the newest snapshot"
+        );
+        assert_eq!(
+            reopened
+                .active_baseline
+                .as_ref()
+                .expect("active baseline")
+                .height,
+            unsafe_snapshot_height,
+            "startup replay should restore the promoted active baseline"
         );
     }
 
@@ -952,7 +1319,9 @@ mod tests {
             "com.acme/Workflow@1".into(),
             None,
             "http.request".into(),
+            "cap/http@1".into(),
             vec![1, 2, 3],
+            [4u8; 32],
             None,
             intent_hash,
             5,
@@ -1026,6 +1395,67 @@ mod tests {
         assert_eq!(kernel.workflow_queue.len(), 1);
         let instances = kernel.workflow_instances_snapshot();
         assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 3);
+    }
+
+    #[test]
+    fn snapshot_restore_scrubs_receipts_already_marked_recent() {
+        let mut kernel = minimal_kernel_non_keyed();
+        let intent_hash = [0x44u8; 32];
+        let context = WorkflowEffectContext::new(
+            "com.acme/Workflow@1".into(),
+            None,
+            "http.request".into(),
+            "cap/http@1".into(),
+            vec![1, 2, 3],
+            [0x44u8; 32],
+            None,
+            intent_hash,
+            5,
+            None,
+        );
+        let mut snapshot = KernelSnapshot::new(
+            1,
+            vec![],
+            vec![intent_hash],
+            vec![],
+            vec![WorkflowReceiptSnapshot::from_context(intent_hash, &context)],
+            vec![WorkflowInstanceSnapshot {
+                instance_id: "com.acme/Workflow@1::".into(),
+                state_bytes: vec![0xAA],
+                inflight_intents: vec![WorkflowInflightIntentSnapshot {
+                    intent_id: intent_hash,
+                    origin_module_id: "com.acme/Workflow@1".into(),
+                    origin_instance_key: None,
+                    effect_kind: "http.request".into(),
+                    params_hash: Some(Hash::of_bytes(&context.params_cbor).to_hex()),
+                    emitted_at_seq: 5,
+                    last_stream_seq: 0,
+                }],
+                status: WorkflowStatusSnapshot::Waiting,
+                last_processed_event_seq: 5,
+                module_version: None,
+            }],
+            0,
+            Some(*kernel.manifest_hash().as_bytes()),
+        );
+        snapshot.set_root_completeness(SnapshotRootCompleteness {
+            manifest_hash: Some(kernel.manifest_hash().as_bytes().to_vec()),
+            ..SnapshotRootCompleteness::default()
+        });
+
+        kernel.apply_snapshot(snapshot).expect("apply snapshot");
+
+        assert!(
+            kernel.pending_workflow_receipts_snapshot().is_empty(),
+            "stale pending receipt context should be scrubbed on restore"
+        );
+        assert_eq!(
+            kernel.workflow_instances_snapshot()[0]
+                .inflight_intents
+                .len(),
+            0,
+            "stale inflight intent should be scrubbed on restore"
+        );
     }
 
     #[test]
@@ -1119,9 +1549,19 @@ mod tests {
                 },
             )
             .unwrap();
-        let root_before = *kernel.workflow_index_roots.get(&workflow).unwrap();
+        let root_before_snapshot = *kernel
+            .workflow_index_roots
+            .get(&workflow)
+            .expect("pre-snapshot root");
+        let head_state = kernel
+            .workflow_state_bytes(&workflow, Some(&key))
+            .unwrap()
+            .expect("pre-snapshot head state");
+        assert_eq!(head_state, state_bytes);
 
         kernel.create_snapshot().unwrap();
+        let root_after_snapshot = *kernel.workflow_index_roots.get(&workflow).unwrap();
+        assert_ne!(root_before_snapshot, root_after_snapshot);
         let entries = kernel.journal.load_from(0).expect("load journal entries");
 
         let mut kernel2 = {
@@ -1131,7 +1571,7 @@ mod tests {
         kernel2.tick_until_idle().unwrap();
 
         let root_after = *kernel2.workflow_index_roots.get(&workflow).unwrap();
-        assert_eq!(root_before, root_after);
+        assert_eq!(root_after_snapshot, root_after);
 
         let index = CellIndex::new(store.as_ref());
         let meta = index

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use crate::Store;
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use aos_store::Store;
 
 use crate::journal::mem::MemJournal;
 use crate::world::{Kernel, KernelConfig};
@@ -162,12 +162,12 @@ fn params_to_json(params_cbor: &[u8]) -> Option<JsonValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MemStore;
     use crate::governance::ManifestPatch;
     use aos_air_types::{
         AirNode, CapEnforcer, CapType, DefCap, HashRef, Manifest, NamedRef, SecretDecl,
         SecretEntry, TypeExpr, TypeRecord,
     };
-    use aos_store::MemStore;
 
     fn empty_manifest() -> Manifest {
         Manifest {

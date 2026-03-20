@@ -65,15 +65,21 @@ Receipts include the intent_hash and a logical height fence; late receipts that 
 
 The journal consists of segment files with monotonic sequence numbers. Events are length‑prefixed, canonical CBOR. Segments are validated on load; corrupt segments are quarantined with clear diagnostics.
 
+In hosted mode, the same logical journal contract is presented through the runtime/storage boundary rather than a filesystem world root. `WorldHost` can open a hosted world by `(universe_id, world_id)`, loading journal entries from the hosted persistence plane while preserving the same ordered `JournalEntry` semantics expected by the kernel.
+
 Manifest updates are also recorded as `Manifest` journal entries. These are appended on first boot (empty journal) and whenever the active manifest changes (governance apply or `aos push`). Replay applies manifest records in-order, swapping the active manifest without emitting new entries.
 
 ### Snapshots
 
 Snapshots persist control‑plane AIR state (manifest hash + content), reducer state bytes (canonical CBOR by declared schema), keyed reducer `cell_index_root` values, optional workspace roots, and optional pinned roots. Worlds maintain an **active baseline** snapshot record; restore loads that baseline and replays journal tail entries with `height >= baseline.height`. Baseline promotion is gated by receipt-horizon preconditions (`receipt_horizon_height`), and snapshots missing required root-completeness metadata are rejected.
 
+For hosted worlds, snapshot blobs and manifests live in shared CAS, while baseline metadata, journal tail, inbox state, and segment indexes live in the hosted persistence plane. Hosted restore is keyed by persistence identity, not filesystem location: load the active baseline, then replay the hosted journal view backed by cold segments plus the hot tail.
+
 ### Content‑Addressed Store (CAS)
 
 Nodes (AIR terms, receipts) and blobs (WASM modules, large payloads) are addressed by SHA‑256 of their canonical encoding. Deduplication across worlds is possible via shared backing stores; world manifests pin required roots.
+
+Hosted mode reuses the same CAS contract through a store adapter over the persistence plane, so manifest loading and snapshot blob reads do not require a local world-root filesystem store.
 
 ## Control Plane Interfaces
 
@@ -201,11 +207,12 @@ Modules have no ambient access to time or randomness; all nondeterminism is isol
 
 - world/
   - manifest.air.json (text) and manifest.air.cbor (canonical)
-  - .aos/store/{nodes, blobs}/sha256/<hash>
-  - journal/{00001.log, 00002.log, …}
-  - snapshots/snap-<ts>-<height>.cbor
-  - modules/<name>@<ver>-<hash>.wasm
-  - receipts/<height>-<intent-hash>.cbor
+  - .aos/local-node.sqlite3
+  - .aos/cas/<shard>/<digest>
+  - .aos/cache/modules/
+  - .aos/cache/wasmtime/
+  - .aos/run/
+  - .aos/logs/
 
 ## Tooling and Dev Experience
 

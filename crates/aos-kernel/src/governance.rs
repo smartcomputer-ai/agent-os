@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::Store;
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
@@ -7,7 +8,6 @@ use aos_air_types::{
     SecretEntry, SecretPolicy, builtins, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
-use aos_store::Store;
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{

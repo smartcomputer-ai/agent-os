@@ -393,13 +393,13 @@ Why: it’s external I/O from a world’s perspective. The architecture is very 
 
 So introduce a **Fabric adapter** inside a universe, with effect kind like:
 
-* `fabric.send` (plan-only, typically)
+* `portal.send` (plan-only, typically)
 * params: `{ dest_world, schema, value_cbor (or blob_ref), key? }`
 * receipt: `{ status, message_id, dest_world, enqueued_seq }`
 
 Then the adapter:
 
-1. validates authorization (cap/policy; you can model a new cap type like `fabric.msg`)
+1. validates authorization (cap/policy; you can model a new cap type like `portal.msg`)
 2. enqueues an inbox item into destination world inbox
 3. returns a receipt to the sender (receipt goes to sender’s inbox; sender host appends to journal)
 
@@ -530,7 +530,7 @@ If you want, next I can write out:
 
 * a concrete **FDB subspace layout** (tuple keys) for all of the above
 * a precise **transaction protocol** for `drain_inbox -> append_journal_batch -> enqueue_effects -> maybe_snapshot`
-* or a spec-level proposal for the **fabric.send** effect kind + schemas (so it plugs neatly into AIR’s typed effect model). 
+* or a spec-level proposal for the **portal.send** effect kind + schemas (so it plugs neatly into AIR’s typed effect model). 
 
 
 ---

@@ -13,15 +13,18 @@ use aos_agent::{
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
+use aos_effect_adapters::adapters::llm::LlmAdapter;
+use aos_effect_adapters::config::{
+    EffectAdapterConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig,
+};
+use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::builtins::{
     HostLocalTarget, HostSessionOpenParams, HostSessionOpenReceipt, HostTarget, LlmGenerateParams,
     LlmGenerateReceipt,
 };
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
-use aos_host::adapters::llm::LlmAdapter;
-use aos_host::adapters::traits::AsyncEffectAdapter;
-use aos_host::config::{HostConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig};
-use aos_store::{FsStore, Store};
+use aos_kernel::Store;
+use aos_runtime::WorldConfig;
 use casefile::{EvalCase, FileExpectation, load_cases};
 use clap::{Parser, Subcommand, ValueEnum};
 use eval_host::{EvalHost, EvalHostConfig, EvalModuleBuild, EvalModulePatch};
@@ -157,9 +160,10 @@ impl EvalInvocation {
             workspace_root: workspace_root().as_path(),
             workflow_name: WORKFLOW_NAME,
             event_schema: DIRECT_EVENT_SCHEMA,
-            host_config: HostConfig {
+            world_config: WorldConfig::default(),
+            adapter_config: EffectAdapterConfig {
                 llm: None,
-                ..HostConfig::default()
+                ..EffectAdapterConfig::default()
             },
             module_patches: &module_patches,
         })?;
@@ -675,9 +679,9 @@ fn bootstrap_host_session(host: &EvalHost, workdir: &Path) -> Result<String> {
     Ok(payload.session_id)
 }
 
-fn drive_live_effects(
+fn drive_live_effects<S: Store + 'static>(
     host: &mut EvalHost,
-    llm_adapter: &LlmAdapter<FsStore>,
+    llm_adapter: &LlmAdapter<S>,
     api_key: &str,
     max_steps: u32,
 ) -> Result<DriveStats> {
@@ -734,9 +738,9 @@ fn drive_live_effects(
     bail!("eval safety trip: exceeded max dispatch rounds ({max_steps}) without quiescence")
 }
 
-fn execute_live_llm_intent(
+fn execute_live_llm_intent<S: Store + 'static>(
     host: &EvalHost,
-    llm_adapter: &LlmAdapter<FsStore>,
+    llm_adapter: &LlmAdapter<S>,
     intent: EffectIntent,
     api_key: &str,
 ) -> Result<EffectReceipt> {
@@ -785,7 +789,7 @@ fn execute_live_llm_intent(
 }
 
 fn collect_conversation_observations(
-    store: &FsStore,
+    store: &impl Store,
     state: &SessionState,
 ) -> ConversationObservations {
     let mut assistant_fragments = Vec::new();
@@ -926,7 +930,7 @@ fn value_compact_text(value: &Value) -> String {
     }
 }
 
-fn load_json_blob(store: &FsStore, blob_ref: &str) -> Result<Value> {
+fn load_json_blob(store: &impl Store, blob_ref: &str) -> Result<Value> {
     let hash =
         Hash::from_hex_str(blob_ref).with_context(|| format!("invalid hash ref '{blob_ref}'"))?;
     let bytes = store
@@ -935,7 +939,7 @@ fn load_json_blob(store: &FsStore, blob_ref: &str) -> Result<Value> {
     serde_json::from_slice(&bytes).with_context(|| format!("decode json blob {blob_ref}"))
 }
 
-fn load_text_blob(store: &FsStore, blob_ref: &str) -> Result<String> {
+fn load_text_blob(store: &impl Store, blob_ref: &str) -> Result<String> {
     let hash =
         Hash::from_hex_str(blob_ref).with_context(|| format!("invalid hash ref '{blob_ref}'"))?;
     let bytes = store
@@ -944,13 +948,16 @@ fn load_text_blob(store: &FsStore, blob_ref: &str) -> Result<String> {
     String::from_utf8(bytes).with_context(|| format!("decode utf8 blob {blob_ref}"))
 }
 
-fn store_json_blob(store: &FsStore, value: &Value) -> Result<HashRef> {
+fn store_json_blob(store: &impl Store, value: &Value) -> Result<HashRef> {
     let bytes = serde_json::to_vec(value).context("encode json blob")?;
     let hash = store.put_blob(&bytes).context("store json blob")?;
     HashRef::new(hash.to_hex()).context("json blob hash_ref")
 }
 
-fn make_adapter(store: std::sync::Arc<FsStore>, provider: &ProviderRuntime) -> LlmAdapter<FsStore> {
+fn make_adapter<S: Store + 'static>(
+    store: std::sync::Arc<S>,
+    provider: &ProviderRuntime,
+) -> LlmAdapter<S> {
     let mut providers = HashMap::new();
     providers.insert(
         provider.provider_id.clone(),

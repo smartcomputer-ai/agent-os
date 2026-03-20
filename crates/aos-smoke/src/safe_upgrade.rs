@@ -2,18 +2,18 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
+use aos_kernel::Store;
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::shadow::ShadowHarness;
 use aos_kernel::snapshot::WorkflowStatusSnapshot;
-use aos_store::Store;
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 use crate::util;
-use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
-use aos_host::manifest_loader;
+use aos_effect_adapters::adapters::mock::{MockHttpHarness, MockHttpResponse};
+use aos_runtime::manifest_loader;
 
 const WORKFLOW_NAME_V1: &str = "demo/SafeUpgrade@1";
 const WORKFLOW_NAME_V2: &str = "demo/SafeUpgrade@2";
@@ -253,7 +253,7 @@ fn load_upgrade_patch(example_root: &Path, host: &ExampleHost) -> Result<Manifes
         .put_blob(&wasm_bytes)
         .context("store v2 workflow wasm blob")?;
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash v2 workflow wasm")?;
-    let patched = aos_host::util::patch_modules(&mut loaded, &wasm_hash_ref, |name, _| {
+    let patched = aos_runtime::util::patch_modules(&mut loaded, &wasm_hash_ref, |name, _| {
         name == WORKFLOW_NAME_V2
     });
     if patched == 0 {

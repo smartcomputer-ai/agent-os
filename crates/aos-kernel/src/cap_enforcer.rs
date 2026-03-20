@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::Store;
 use aos_air_types::{DefModule, Name};
 use aos_cbor::to_canonical_cbor;
-use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, PureContext, PureInput, PureOutput};
 use serde::{Deserialize, Serialize};
 use serde_bytes;

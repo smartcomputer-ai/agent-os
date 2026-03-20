@@ -7,17 +7,21 @@ edition = "2024"
 anyhow = "1"
 aos-agent = { path = "../aos-agent" }
 aos-air-types = { path = "../aos-air-types" }
+aos-authoring = { path = "../aos-authoring" }
 aos-cbor = { path = "../aos-cbor" }
 aos-effects = { path = "../aos-effects" }
-aos-host = { path = "../aos-host", features = ["e2e-tests"] }
+aos-effect-adapters = { path = "../aos-effect-adapters", features = ["e2e-tests"] }
 aos-kernel = { path = "../aos-kernel" }
-aos-store = { path = "../aos-store" }
+aos-node = { path = "../aos-node" }
+aos-sqlite = { path = "../aos-sqlite" }
+aos-runtime = { path = "../aos-runtime" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
 serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "time"] }
+uuid = { version = "1", features = ["v4"] }
 
 [lints.rust]
 unused_imports = "allow"

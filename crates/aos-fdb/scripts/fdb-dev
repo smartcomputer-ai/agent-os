@@ -1,0 +1,355 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${AOS_FDB_DEV_ROOT:-/tmp/aos-fdb-dev}"
+HOST="${AOS_FDB_DEV_HOST:-127.0.0.1}"
+PORT="${AOS_FDB_DEV_PORT:-4500}"
+ENGINE="${AOS_FDB_DEV_ENGINE:-memory}"
+MACHINE_ID="${AOS_FDB_DEV_MACHINE_ID:-aos-fdb-dev}"
+ZONE_ID="${AOS_FDB_DEV_ZONE_ID:-aos-fdb-dev-zone}"
+FDBSERVER_BIN="${AOS_FDBSERVER_BIN:-}"
+FDBCLI_BIN="${AOS_FDBCLI_BIN:-}"
+
+CLUSTER_FILE="$ROOT/fdb.cluster"
+DATA_DIR="$ROOT/data"
+LOG_DIR="$ROOT/logs"
+PID_FILE="$ROOT/fdbserver.pid"
+SERVER_LOG="$LOG_DIR/fdbserver.log"
+
+write_cluster_file() {
+  mkdir -p "$ROOT"
+  printf "dev:dev@%s:%s\n" "$HOST" "$PORT" >"$CLUSTER_FILE"
+}
+
+ensure_cluster_file() {
+  if [[ ! -f "$CLUSTER_FILE" ]] && is_running; then
+    write_cluster_file
+  fi
+}
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") <command>
+
+Commands:
+  start     Start a fresh single-node dev cluster under $ROOT
+  stop      Stop the dev cluster if it is running
+  restart   Stop, wipe, and start the dev cluster
+  reset     Stop the dev cluster and remove $ROOT
+  status    Show cluster status through fdbcli
+  cli       Open fdbcli against the dev cluster
+  env       Print the FDB_CLUSTER_FILE export command
+  paths     Print the cluster file, pid file, and logs path
+
+Environment:
+  AOS_FDB_DEV_ROOT    Root directory for the dev cluster (default: $ROOT)
+  AOS_FDB_DEV_HOST    Listen/public host (default: $HOST)
+  AOS_FDB_DEV_PORT    Listen/public port (default: $PORT)
+  AOS_FDB_DEV_ENGINE  fdbcli configure engine (default: $ENGINE)
+  AOS_FDB_DEV_MACHINE_ID  fdbserver locality machine id (default: $MACHINE_ID)
+  AOS_FDB_DEV_ZONE_ID     fdbserver locality zone id (default: $ZONE_ID)
+  AOS_FDBSERVER_BIN   Path to fdbserver binary (default: $FDBSERVER_BIN)
+  AOS_FDBCLI_BIN      Path to fdbcli binary (default: $FDBCLI_BIN)
+
+Examples:
+  $(basename "$0") start
+  export FDB_CLUSTER_FILE="$CLUSTER_FILE"
+  $(basename "$0") cli
+EOF
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+resolve_binary() {
+  local configured="${1:-}"
+  shift
+
+  if [[ -n "$configured" ]]; then
+    if [[ -x "$configured" ]]; then
+      printf '%s\n' "$configured"
+      return 0
+    fi
+    if command -v "$configured" >/dev/null 2>&1; then
+      command -v "$configured"
+      return 0
+    fi
+    echo "configured binary not found or not executable: $configured" >&2
+    exit 1
+  fi
+
+  local candidate
+  for candidate in "$@"; do
+    [[ -z "$candidate" ]] && continue
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+is_running() {
+  if [[ -f "$PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$PID_FILE")"
+    if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  local pid
+  pid="$(pgrep -f "fdbserver .*--cluster-file $CLUSTER_FILE" | head -n 1 || true)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    printf '%s\n' "$pid" >"$PID_FILE"
+    return 0
+  fi
+  return 1
+}
+
+port_ready() {
+  (echo >"/dev/tcp/$HOST/$PORT") >/dev/null 2>&1
+}
+
+wait_for_port() {
+  local attempts=100
+  local sleep_s=0.1
+  while (( attempts > 0 )); do
+    if port_ready; then
+      return 0
+    fi
+    attempts=$((attempts - 1))
+    sleep "$sleep_s"
+  done
+  return 1
+}
+
+wait_for_configure() {
+  local attempts=100
+  local sleep_s=0.2
+  while (( attempts > 0 )); do
+    if "$FDBCLI_BIN" -C "$CLUSTER_FILE" --exec "configure new single $ENGINE" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts - 1))
+    sleep "$sleep_s"
+  done
+  return 1
+}
+
+wait_for_status() {
+  local attempts=100
+  local sleep_s=0.2
+  while (( attempts > 0 )); do
+    if "$FDBCLI_BIN" -C "$CLUSTER_FILE" --exec "status minimal" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts - 1))
+    sleep "$sleep_s"
+  done
+  return 1
+}
+
+stop_cluster() {
+  local pid=""
+  if [[ -f "$PID_FILE" ]]; then
+    pid="$(cat "$PID_FILE")"
+  fi
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    kill "$pid" >/dev/null 2>&1 || true
+    local attempts=50
+    while (( attempts > 0 )); do
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        break
+      fi
+      attempts=$((attempts - 1))
+      sleep 0.1
+    done
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  pid="$(pgrep -f "fdbserver .*--cluster-file $CLUSTER_FILE" | head -n 1 || true)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    kill "$pid" >/dev/null 2>&1 || true
+    local attempts=50
+    while (( attempts > 0 )); do
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        break
+      fi
+      attempts=$((attempts - 1))
+      sleep 0.1
+    done
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  rm -f "$PID_FILE"
+}
+
+start_cluster() {
+  FDBSERVER_BIN="$(
+    resolve_binary \
+      "$FDBSERVER_BIN" \
+      /usr/local/libexec/fdbserver \
+      /opt/homebrew/libexec/fdbserver \
+      /usr/local/bin/fdbserver \
+      /opt/homebrew/bin/fdbserver \
+      fdbserver
+  )" || {
+    echo "missing required command: fdbserver" >&2
+    exit 1
+  }
+
+  FDBCLI_BIN="$(
+    resolve_binary \
+      "$FDBCLI_BIN" \
+      /usr/local/bin/fdbcli \
+      /opt/homebrew/bin/fdbcli \
+      fdbcli
+  )" || {
+    echo "missing required command: fdbcli" >&2
+    exit 1
+  }
+
+  if is_running; then
+    ensure_cluster_file
+    echo "FoundationDB dev cluster already running at $HOST:$PORT" >&2
+    echo "cluster file: $CLUSTER_FILE" >&2
+    exit 1
+  fi
+
+  rm -rf "$ROOT"
+  mkdir -p "$DATA_DIR" "$LOG_DIR"
+  write_cluster_file
+
+  nohup "$FDBSERVER_BIN" \
+    --cluster-file "$CLUSTER_FILE" \
+    --datadir "$DATA_DIR" \
+    --logdir "$LOG_DIR" \
+    --listen-address "$HOST:$PORT" \
+    --public-address "$HOST:$PORT" \
+    --locality-machineid "$MACHINE_ID" \
+    --locality-zoneid "$ZONE_ID" \
+    >>"$SERVER_LOG" 2>&1 </dev/null &
+  echo "$!" >"$PID_FILE"
+
+  if ! wait_for_port; then
+    echo "fdbserver did not open $HOST:$PORT" >&2
+    echo "server log: $SERVER_LOG" >&2
+    exit 1
+  fi
+
+  if ! wait_for_configure; then
+    echo "failed to configure dev cluster" >&2
+    echo "server log: $SERVER_LOG" >&2
+    exit 1
+  fi
+
+  if ! wait_for_status; then
+    echo "cluster did not become ready after configure" >&2
+    echo "server log: $SERVER_LOG" >&2
+    exit 1
+  fi
+
+  echo "FoundationDB dev cluster started"
+  echo "cluster file: $CLUSTER_FILE"
+  echo "server log:   $SERVER_LOG"
+  echo "export FDB_CLUSTER_FILE=\"$CLUSTER_FILE\""
+}
+
+status_cluster() {
+  ensure_cluster_file
+  FDBCLI_BIN="$(
+    resolve_binary \
+      "$FDBCLI_BIN" \
+      /usr/local/bin/fdbcli \
+      /opt/homebrew/bin/fdbcli \
+      fdbcli
+  )" || {
+    echo "missing required command: fdbcli" >&2
+    exit 1
+  }
+  exec "$FDBCLI_BIN" -C "$CLUSTER_FILE" --exec "status"
+}
+
+open_cli() {
+  ensure_cluster_file
+  FDBCLI_BIN="$(
+    resolve_binary \
+      "$FDBCLI_BIN" \
+      /usr/local/bin/fdbcli \
+      /opt/homebrew/bin/fdbcli \
+      fdbcli
+  )" || {
+    echo "missing required command: fdbcli" >&2
+    exit 1
+  }
+  exec "$FDBCLI_BIN" -C "$CLUSTER_FILE"
+}
+
+print_env() {
+  echo "export FDB_CLUSTER_FILE=\"$CLUSTER_FILE\""
+}
+
+print_paths() {
+  cat <<EOF
+root:         $ROOT
+cluster_file: $CLUSTER_FILE
+pid_file:     $PID_FILE
+server_log:   $SERVER_LOG
+EOF
+}
+
+main() {
+  local cmd="${1:-}"
+  if [[ "$cmd" == "-h" || "$cmd" == "--help" || "$cmd" == "help" || -z "$cmd" ]]; then
+    usage
+    return 0
+  fi
+  case "$cmd" in
+    start)
+      start_cluster
+      ;;
+    stop)
+      stop_cluster
+      ;;
+    restart)
+      stop_cluster
+      start_cluster
+      ;;
+    reset)
+      stop_cluster
+      rm -rf "$ROOT"
+      ;;
+    status)
+      status_cluster
+      ;;
+    cli)
+      open_cli
+      ;;
+    env)
+      print_env
+      ;;
+    paths)
+      print_paths
+      ;;
+    *)
+      echo "unknown command: $cmd" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

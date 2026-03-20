@@ -8,7 +8,7 @@ use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
-use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
+use aos_effect_adapters::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
 const WORKFLOW_NAME: &str = "demo/LlmSummarizer@1";
 const EVENT_SCHEMA: &str = "demo/LlmSummarizerEvent@1";

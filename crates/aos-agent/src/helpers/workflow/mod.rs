@@ -295,6 +295,7 @@ fn on_run_requested(
     state.pending_follow_up_turn = None;
     state.queued_llm_message_refs = None;
     state.conversation_message_refs.clear();
+    state.last_output_ref = None;
 
     refresh_effective_tools(state, Some(&requested))?;
     state.conversation_message_refs.push(input_ref.into());
@@ -484,6 +485,8 @@ fn handle_llm_generate_receipt(
         fail_run(state)?;
         return Ok(());
     };
+
+    state.last_output_ref = Some(receipt.output_ref.as_str().into());
 
     if enqueue_blob_get(
         state,
@@ -1426,6 +1429,10 @@ mod tests {
             ),
         )
         .expect("llm receipt");
+        assert_eq!(
+            state.last_output_ref.as_deref(),
+            Some(hash_ref('e').as_str())
+        );
         let output_blob_get_hash = match out3.effects.first() {
             Some(effect) if matches!(effect, SessionEffectCommand::BlobGet { .. }) => {
                 effect.params_hash().to_string()
@@ -1572,6 +1579,143 @@ mod tests {
                     .any(|effect| matches!(effect, SessionEffectCommand::LlmGenerate { .. }));
         }
         assert!(emitted_llm, "expected queued follow-up llm.generate");
+    }
+
+    #[test]
+    fn llm_no_tools_completion_keeps_last_output_ref_for_lifecycle_event() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                0,
+                SessionIngressKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )
+        .expect("host session ready");
+
+        let out1 = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let tool_def_put_hashes = out1
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. }))
+            .map(|effect| effect.params_hash().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            !tool_def_put_hashes.is_empty(),
+            "expected initial blob.put effects"
+        );
+
+        let mut out2 = SessionReduceOutput::default();
+        for (idx, hash) in tool_def_put_hashes.iter().enumerate() {
+            out2 = apply_session_workflow_event(
+                &mut state,
+                &receipt_event(
+                    2 + idx as u64,
+                    "blob.put",
+                    Some(hash.clone()),
+                    "ok",
+                    &BlobPutReceipt {
+                        blob_ref: hash_ref_for_index(idx),
+                        edge_ref: hash_ref_for_index(idx + 1),
+                        size: 111,
+                    },
+                ),
+            )
+            .expect("tool def put receipt");
+        }
+
+        let llm_params_hash = out2
+            .effects
+            .iter()
+            .find(|effect| matches!(effect, SessionEffectCommand::LlmGenerate { .. }))
+            .map(|effect| effect.params_hash().to_string())
+            .expect("expected llm.generate");
+
+        let out3 = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                3,
+                "llm.generate",
+                Some(llm_params_hash),
+                "ok",
+                &LlmGenerateReceipt {
+                    output_ref: hash_ref('e'),
+                    raw_output_ref: None,
+                    provider_response_id: None,
+                    finish_reason: LlmFinishReason {
+                        reason: "stop".into(),
+                        raw: None,
+                    },
+                    token_usage: TokenUsage {
+                        prompt: 0,
+                        completion: 0,
+                        total: Some(0),
+                    },
+                    usage_details: None,
+                    warnings_ref: None,
+                    rate_limit_ref: None,
+                    cost_cents: None,
+                    provider_id: "openai-responses".into(),
+                },
+            ),
+        )
+        .expect("llm receipt");
+        assert_eq!(
+            state.last_output_ref.as_deref(),
+            Some(hash_ref('e').as_str())
+        );
+
+        let output_blob_get_hash = match out3.effects.first() {
+            Some(effect) if matches!(effect, SessionEffectCommand::BlobGet { .. }) => {
+                effect.params_hash().to_string()
+            }
+            _ => panic!("expected blob.get for llm output"),
+        };
+
+        let output_bytes = serde_json::to_vec(&LlmOutputEnvelope {
+            assistant_text: Some("done".into()),
+            tool_calls_ref: None,
+            reasoning_ref: None,
+        })
+        .expect("encode output envelope");
+
+        let prev_lifecycle = state.lifecycle;
+        let prev_run_id = state.active_run_id.clone();
+        state.last_output_ref = None;
+        apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                4,
+                "blob.get",
+                Some(output_blob_get_hash),
+                "ok",
+                &BlobGetReceipt {
+                    blob_ref: hash_ref('e'),
+                    size: output_bytes.len() as u64,
+                    bytes: output_bytes,
+                },
+            ),
+        )
+        .expect("output blob.get receipt");
+
+        assert_eq!(state.lifecycle, SessionLifecycle::WaitingInput);
+        assert_eq!(
+            state.last_output_ref.as_deref(),
+            Some(hash_ref('e').as_str())
+        );
+
+        let changed = crate::helpers::primitives::session_lifecycle_changed_payload(
+            &state,
+            prev_lifecycle,
+            prev_run_id,
+            state.updated_at,
+        )
+        .expect("lifecycle payload");
+        assert_eq!(changed.output_ref.as_deref(), Some(hash_ref('e').as_str()));
     }
 
     #[test]
@@ -1833,7 +1977,11 @@ mod tests {
                 vec![String::from("workspace-diff")]
             ]
         );
-        assert_eq!(out.domain_events.len(), 1, "expected workspace commit event");
+        assert_eq!(
+            out.domain_events.len(),
+            1,
+            "expected workspace commit event"
+        );
         assert!(
             out.effects
                 .iter()

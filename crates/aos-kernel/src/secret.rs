@@ -18,6 +18,7 @@ pub trait SecretResolver: Send + Sync {
     fn resolve(
         &self,
         binding_id: &str,
+        version: u64,
         expected_digest: Option<&HashRef>,
     ) -> Result<ResolvedSecret, SecretResolverError>;
 }
@@ -52,17 +53,21 @@ pub fn validate_secrets_in_params(
     catalog: &SecretCatalog,
     resolver: &dyn SecretResolver,
 ) -> Result<(), SecretResolverError> {
-    let value: serde_cbor::Value =
-        serde_cbor::from_slice(params_cbor).map_err(|err| SecretResolverError::InvalidParams {
-            reason: err.to_string(),
-        })?;
+    let value: serde_cbor::Value = match serde_cbor::from_slice(params_cbor) {
+        Ok(value) => value,
+        Err(_) => return Ok(()),
+    };
     let mut refs = Vec::new();
     collect_secret_refs_value(&value, &mut refs);
     for (alias, version) in refs {
         let decl = catalog
             .lookup(&alias, version)
             .ok_or_else(|| SecretResolverError::NotFound(format!("{alias}@{version}")))?;
-        resolver.resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
+        resolver.resolve(
+            &decl.binding_id,
+            decl.version,
+            decl.expected_digest.as_ref(),
+        )?;
     }
     Ok(())
 }
@@ -131,10 +136,10 @@ pub fn inject_secrets_in_params(
     catalog: &SecretCatalog,
     resolver: &dyn SecretResolver,
 ) -> Result<Vec<u8>, SecretResolverError> {
-    let mut value: serde_cbor::Value =
-        serde_cbor::from_slice(params_cbor).map_err(|err| SecretResolverError::InvalidParams {
-            reason: err.to_string(),
-        })?;
+    let mut value: serde_cbor::Value = match serde_cbor::from_slice(params_cbor) {
+        Ok(value) => value,
+        Err(_) => return Ok(params_cbor.to_vec()),
+    };
     inject_in_value(&mut value, catalog, resolver)?;
     aos_cbor::to_canonical_cbor(&value).map_err(|err| SecretResolverError::InvalidParams {
         reason: err.to_string(),
@@ -172,8 +177,11 @@ fn inject_in_value(
                             let decl = catalog.lookup(alias, version).ok_or_else(|| {
                                 SecretResolverError::NotFound(format!("{alias}@{version}"))
                             })?;
-                            let resolved = resolver
-                                .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
+                            let resolved = resolver.resolve(
+                                &decl.binding_id,
+                                decl.version,
+                                decl.expected_digest.as_ref(),
+                            )?;
                             if let Ok(text) = std::str::from_utf8(&resolved.value) {
                                 *value = serde_cbor::Value::Text(text.to_string());
                             } else {
@@ -202,8 +210,11 @@ fn inject_in_value(
                                     let decl = catalog.lookup(alias, version).ok_or_else(|| {
                                         SecretResolverError::NotFound(format!("{alias}@{version}"))
                                     })?;
-                                    let resolved = resolver
-                                        .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
+                                    let resolved = resolver.resolve(
+                                        &decl.binding_id,
+                                        decl.version,
+                                        decl.expected_digest.as_ref(),
+                                    )?;
                                     *value = injected_literal_variant(resolved.value);
                                     return Ok(());
                                 }
@@ -262,10 +273,10 @@ pub fn enforce_secret_policy(
 
 /// Normalizes secret variant sugar to the canonical `$tag/$value` form so hashing/policy see one shape.
 pub fn normalize_secret_variants(params_cbor: &[u8]) -> Result<Vec<u8>, SecretResolverError> {
-    let mut value: serde_cbor::Value =
-        serde_cbor::from_slice(params_cbor).map_err(|err| SecretResolverError::InvalidParams {
-            reason: err.to_string(),
-        })?;
+    let mut value: serde_cbor::Value = match serde_cbor::from_slice(params_cbor) {
+        Ok(value) => value,
+        Err(_) => return Ok(params_cbor.to_vec()),
+    };
     normalize_secret_variants_in_value(&mut value);
     aos_cbor::to_canonical_cbor(&value).map_err(|err| SecretResolverError::InvalidParams {
         reason: err.to_string(),
@@ -324,6 +335,8 @@ pub enum SecretResolverError {
     InvalidExpectedDigest { binding_id: String, reason: String },
     #[error("failed to parse effect params for secrets: {reason}")]
     InvalidParams { reason: String },
+    #[error("secret backend error: {0}")]
+    Backend(String),
 }
 
 pub struct MapSecretResolver {
@@ -340,6 +353,7 @@ impl SecretResolver for MapSecretResolver {
     fn resolve(
         &self,
         binding_id: &str,
+        _version: u64,
         expected_digest: Option<&HashRef>,
     ) -> Result<ResolvedSecret, SecretResolverError> {
         let value = self
@@ -379,6 +393,7 @@ impl SecretResolver for PlaceholderSecretResolver {
     fn resolve(
         &self,
         binding_id: &str,
+        _version: u64,
         expected_digest: Option<&HashRef>,
     ) -> Result<ResolvedSecret, SecretResolverError> {
         let digest = if let Some(expected) = expected_digest {
@@ -412,7 +427,7 @@ mod tests {
         )]));
 
         let resolved = resolver
-            .resolve("stripe:prod", None)
+            .resolve("stripe:prod", 1, None)
             .expect("resolve secret");
 
         assert_eq!(resolved.value, b"secret".to_vec());
@@ -423,7 +438,7 @@ mod tests {
     fn map_resolver_rejects_missing_binding() {
         let resolver = MapSecretResolver::new(HashMap::new());
         let err = resolver
-            .resolve("missing", None)
+            .resolve("missing", 1, None)
             .expect_err("missing binding should error");
 
         assert!(matches!(err, SecretResolverError::NotFound(binding) if binding == "missing"));
@@ -438,7 +453,7 @@ mod tests {
         let expected = HashRef::new(Hash::of_bytes(b"other").to_hex()).unwrap();
 
         let err = resolver
-            .resolve("stripe:prod", Some(&expected))
+            .resolve("stripe:prod", 1, Some(&expected))
             .expect_err("digest mismatch should error");
 
         assert!(matches!(err, SecretResolverError::DigestMismatch { .. }));
@@ -450,7 +465,7 @@ mod tests {
         let resolver = PlaceholderSecretResolver;
 
         let resolved = resolver
-            .resolve("binding", Some(&expected))
+            .resolve("binding", 1, Some(&expected))
             .expect("resolve placeholder");
 
         assert_eq!(
@@ -577,6 +592,22 @@ mod tests {
         } else {
             panic!("expected map root after injection");
         }
+    }
+
+    #[test]
+    fn opaque_params_skip_secret_normalization_and_injection() {
+        let opaque = br#"{"provider":"openai","api_key":"$ENV"}"#.to_vec();
+        let normalized = normalize_secret_variants(&opaque).expect("opaque normalize");
+        assert_eq!(normalized, opaque);
+
+        let catalog = SecretCatalog::default();
+        let resolver = MapSecretResolver::new(HashMap::new());
+        let validated = validate_secrets_in_params(&opaque, &catalog, &resolver);
+        assert!(validated.is_ok());
+
+        let injected =
+            inject_secrets_in_params(&opaque, &catalog, &resolver).expect("opaque inject");
+        assert_eq!(injected, opaque);
     }
 
     fn contains_secret(value: &serde_cbor::Value) -> bool {

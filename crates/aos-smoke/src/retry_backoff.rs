@@ -8,7 +8,7 @@ use aos_effects::builtins::{
 };
 use aos_effects::{EffectKind as EffectsEffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
-use aos_store::FsStore;
+use aos_kernel::Store;
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
@@ -116,7 +116,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn drive_retry_flow(kernel: &mut Kernel<FsStore>) -> Result<()> {
+fn drive_retry_flow<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
     let mut safety = 0;
     let mut http_attempts = 0;
     let mut scheduled_timers = Vec::new();

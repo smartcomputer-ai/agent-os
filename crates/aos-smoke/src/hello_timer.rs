@@ -8,7 +8,7 @@ use std::path::Path;
 use anyhow::{Result, ensure};
 use aos_effects::{EffectKind as EffectsEffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
-use aos_store::FsStore;
+use aos_kernel::Store;
 use aos_wasm_sdk::{aos_event_union, aos_variant};
 use serde::{Deserialize, Serialize};
 use serde_cbor;
@@ -106,7 +106,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn synthesize_timer_receipts(kernel: &mut Kernel<FsStore>) -> Result<()> {
+fn synthesize_timer_receipts<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
     loop {
         let intents = kernel.drain_effects()?;
         if intents.is_empty() {

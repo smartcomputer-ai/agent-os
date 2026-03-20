@@ -2,12 +2,12 @@ use std::path::Path;
 
 use anyhow::{Result, anyhow};
 use aos_cbor::Hash;
-use aos_store::Store;
+use aos_kernel::Store;
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
-use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
+use aos_effect_adapters::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
 const WORKFLOW_NAME: &str = "demo/FetchNotify@1";
 const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";

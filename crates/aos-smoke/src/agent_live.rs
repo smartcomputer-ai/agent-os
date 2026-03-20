@@ -10,19 +10,22 @@ use aos_agent::{
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
+use aos_effect_adapters::adapters::llm::LlmAdapter;
+use aos_effect_adapters::config::{
+    EffectAdapterConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig,
+};
+use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::builtins::{
     LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolChoice,
 };
 use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
-use aos_host::adapters::llm::LlmAdapter;
-use aos_host::adapters::traits::AsyncEffectAdapter;
-use aos_host::config::{HostConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig};
-use aos_store::Store;
+use aos_kernel::Store;
+use aos_runtime::WorldConfig;
 use clap::ValueEnum;
 use serde_json::{Value, json};
 use tokio::runtime::Builder;
 
-use crate::example_host::{ExampleHost, HarnessConfig};
+use crate::example_host::{ExampleHost, ExampleHostConfig, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
@@ -137,9 +140,12 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             module_crate: "",
         },
         &import_roots,
-        Some(HostConfig {
-            llm: None,
-            ..HostConfig::default()
+        Some(ExampleHostConfig {
+            world: WorldConfig::default(),
+            adapters: EffectAdapterConfig {
+                llm: None,
+                ..EffectAdapterConfig::default()
+            },
         }),
         SDK_WASM_PACKAGE,
         SDK_WASM_BIN,
@@ -240,7 +246,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             &step_ctx,
         )?;
 
-        let envelope = execute_llm(&runtime, &adapter, &host, &params)?;
+        let envelope = execute_llm(host.store().as_ref(), &runtime, &adapter, &params)?;
 
         if let Some(tool_calls_ref) = envelope.tool_calls_ref.as_ref() {
             let calls = load_tool_calls(&host, tool_calls_ref.as_str())?;
@@ -521,10 +527,10 @@ fn reasoning_effort_text(value: aos_agent::ReasoningEffort) -> String {
     }
 }
 
-fn execute_llm(
+fn execute_llm<S: aos_kernel::Store + 'static>(
+    store: &S,
     runtime: &tokio::runtime::Runtime,
-    adapter: &LlmAdapter<aos_store::FsStore>,
-    host: &ExampleHost,
+    adapter: &LlmAdapter<S>,
     params: &LlmGenerateParams,
 ) -> Result<LlmOutputEnvelope> {
     let intent = build_llm_intent(params)?;
@@ -535,7 +541,7 @@ fn execute_llm(
     let payload: LlmGenerateReceipt =
         serde_cbor::from_slice(&receipt.payload_cbor).context("decode llm receipt")?;
     if receipt.status != ReceiptStatus::Ok {
-        let error_text = load_text_blob(host.store().as_ref(), payload.output_ref.as_str())
+        let error_text = load_text_blob(store, payload.output_ref.as_str())
             .unwrap_or_else(|_| "<unable to decode provider error>".into());
         return Err(anyhow!(
             "llm receipt failed status={:?} adapter={} error={}",
@@ -545,7 +551,7 @@ fn execute_llm(
         ));
     }
 
-    let value = load_json_blob(host.store().as_ref(), payload.output_ref.as_str())?;
+    let value = load_json_blob(store, payload.output_ref.as_str())?;
     serde_json::from_value(value).context("decode llm output envelope")
 }
 
@@ -555,10 +561,10 @@ fn build_llm_intent(params: &LlmGenerateParams) -> Result<EffectIntent> {
         .context("build llm intent")
 }
 
-fn make_adapter(
-    store: std::sync::Arc<aos_store::FsStore>,
+fn make_adapter<S: aos_kernel::Store + 'static>(
+    store: std::sync::Arc<S>,
     provider: &ProviderRuntime,
-) -> LlmAdapter<aos_store::FsStore> {
+) -> LlmAdapter<S> {
     let mut providers = HashMap::new();
     providers.insert(
         provider.provider_id.clone(),
@@ -755,7 +761,7 @@ fn fake_hash(ch: char) -> String {
     out
 }
 
-fn load_json_blob(store: &aos_store::FsStore, reference: &str) -> Result<Value> {
+fn load_json_blob<S: aos_kernel::Store>(store: &S, reference: &str) -> Result<Value> {
     let hash =
         Hash::from_hex_str(reference).with_context(|| format!("invalid blob ref {reference}"))?;
     let bytes = store
@@ -764,7 +770,7 @@ fn load_json_blob(store: &aos_store::FsStore, reference: &str) -> Result<Value> 
     serde_json::from_slice(&bytes).with_context(|| format!("decode blob json {reference}"))
 }
 
-fn load_text_blob(store: &aos_store::FsStore, reference: &str) -> Result<String> {
+fn load_text_blob<S: aos_kernel::Store>(store: &S, reference: &str) -> Result<String> {
     let hash =
         Hash::from_hex_str(reference).with_context(|| format!("invalid blob ref {reference}"))?;
     let bytes = store

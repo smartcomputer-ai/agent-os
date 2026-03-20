@@ -5,14 +5,14 @@ use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
+use aos_authoring::{local_state_paths as authoring_local_state_paths, reset_local_runtime_state};
 use aos_kernel::KernelConfig;
 use aos_kernel::secret::{MapSecretResolver, SecretResolver};
+use aos_sqlite::LocalStatePaths;
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use log::debug;
 use once_cell::sync::OnceCell;
-
-pub use aos_host::util::reset_journal;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(crate::workspace_root())
@@ -28,6 +28,14 @@ fn force_build() -> bool {
     FORCE_BUILD.get().copied().unwrap_or(false)
 }
 
+pub fn local_state_paths(world_root: &Path) -> LocalStatePaths {
+    authoring_local_state_paths(world_root)
+}
+
+pub fn reset_runtime_state(world_root: &Path) -> Result<()> {
+    reset_local_runtime_state(world_root).map(|_| ())
+}
+
 pub fn compile_workflow(crate_rel: &str) -> Result<Vec<u8>> {
     let source_path = workspace_root().join(crate_rel);
     let utf_path = Utf8PathBuf::from_path_buf(source_path.clone())
@@ -35,7 +43,7 @@ pub fn compile_workflow(crate_rel: &str) -> Result<Vec<u8>> {
     let example_root = source_path
         .parent()
         .ok_or_else(|| anyhow!("workflow path missing parent: {}", source_path.display()))?;
-    let cache_dir = example_root.join(".aos").join("cache").join("modules");
+    let cache_dir = local_state_paths(example_root).module_cache_dir();
     fs::create_dir_all(&cache_dir)
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
     let mut request = BuildRequest::new(utf_path);
@@ -55,7 +63,7 @@ pub fn compile_workflow(crate_rel: &str) -> Result<Vec<u8>> {
 }
 
 pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
-    let cache_dir = example_root.join(".aos").join("cache").join("wasmtime");
+    let cache_dir = local_state_paths(example_root).wasmtime_cache_dir();
     fs::create_dir_all(&cache_dir)
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
     let secret_resolver = load_secret_resolver();
@@ -64,6 +72,7 @@ pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
         eager_module_load: true,
         secret_resolver: secret_resolver.clone(),
         allow_placeholder_secrets: false,
+        cell_cache_size: aos_kernel::world::DEFAULT_CELL_CACHE_SIZE,
     })
 }
 

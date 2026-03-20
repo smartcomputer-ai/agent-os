@@ -15,7 +15,7 @@ use aos_effects::builtins::{
 };
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
-use aos_store::FsStore;
+use aos_kernel::Store;
 use aos_wasm_sdk::{aos_event_union, aos_variant};
 use serde::{Deserialize, Serialize};
 use serde_cbor;
@@ -75,8 +75,8 @@ fn drive_blob_echo(host: &mut ExampleHost, input: BlobEchoInput) -> Result<()> {
     synthesize_blob_effects(host.kernel_mut(), &mut harness)
 }
 
-fn synthesize_blob_effects(
-    kernel: &mut Kernel<FsStore>,
+fn synthesize_blob_effects<S: Store + 'static>(
+    kernel: &mut Kernel<S>,
     harness: &mut BlobHarnessStore,
 ) -> Result<()> {
     loop {
@@ -95,8 +95,8 @@ fn synthesize_blob_effects(
     Ok(())
 }
 
-fn handle_blob_put(
-    kernel: &mut Kernel<FsStore>,
+fn handle_blob_put<S: Store + 'static>(
+    kernel: &mut Kernel<S>,
     harness: &mut BlobHarnessStore,
     intent: EffectIntent,
 ) -> Result<()> {
@@ -139,8 +139,8 @@ fn handle_blob_put(
     Ok(())
 }
 
-fn handle_blob_get(
-    kernel: &mut Kernel<FsStore>,
+fn handle_blob_get<S: Store + 'static>(
+    kernel: &mut Kernel<S>,
     harness: &mut BlobHarnessStore,
     intent: EffectIntent,
 ) -> Result<()> {

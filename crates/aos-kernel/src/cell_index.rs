@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::{Store, StoreResult};
 use aos_cbor::Hash;
-use aos_store::{Store, StoreResult};
 use serde::{Deserialize, Serialize};
 
 /// Metadata tracked for a single cell.
@@ -248,7 +248,7 @@ impl<'a, S: Store> Iterator for CellIndexIter<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_store::MemStore;
+    use crate::MemStore;
 
     fn meta(key: &[u8], state: &[u8], last_active_ns: u64) -> CellMeta {
         CellMeta {

@@ -445,6 +445,7 @@
         "from": { "ref": "aos.agent/SessionLifecycle@1" },
         "to": { "ref": "aos.agent/SessionLifecycle@1" },
         "run_id": { "option": { "ref": "aos.agent/RunId@1" } },
+        "output_ref": { "option": { "hash": {} } },
         "in_flight_effects": { "nat": {} }
       }
     }
@@ -583,6 +584,7 @@
         },
         "queued_llm_message_refs": { "option": { "list": { "hash": {} } } },
         "conversation_message_refs": { "list": { "hash": {} } },
+        "last_output_ref": { "option": { "hash": {} } },
         "tool_refs_materialized": { "bool": {} },
         "in_flight_effects": { "nat": {} },
         "tool_registry": {

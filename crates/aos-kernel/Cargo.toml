@@ -11,7 +11,6 @@ aos-effects = { path = "../aos-effects" }
 aos-wasm = { path = "../aos-wasm" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 aos-cbor = { path = "../aos-cbor" }
-aos-store = { path = "../aos-store" }
 anyhow = "1"
 indexmap = "2"
 thiserror = "1"

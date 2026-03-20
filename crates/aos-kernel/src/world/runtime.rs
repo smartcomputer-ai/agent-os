@@ -2,6 +2,89 @@ use super::*;
 use serde::Serialize;
 
 impl<S: Store + 'static> Kernel<S> {
+    pub fn rehydrate_effect_queue_from_runtime_state(&mut self) -> Result<(), KernelError> {
+        let heights = self.heights();
+        let tail = self.tail_scan_after(heights.snapshot.unwrap_or(0))?;
+        let pending_receipts = self.pending_workflow_receipts_snapshot();
+        let receipts_seen: std::collections::HashSet<[u8; 32]> = tail
+            .receipts
+            .iter()
+            .map(|receipt| receipt.record.intent_hash)
+            .collect();
+        let active_intents: std::collections::HashSet<[u8; 32]> = pending_receipts
+            .iter()
+            .map(|receipt| receipt.intent_hash)
+            .chain(
+                self.workflow_instances_snapshot()
+                    .into_iter()
+                    .flat_map(|instance| {
+                        instance
+                            .inflight_intents
+                            .into_iter()
+                            .map(|intent| intent.intent_id)
+                    }),
+            )
+            .collect();
+
+        let mut to_dispatch: Vec<aos_effects::EffectIntent> = self
+            .queued_effects_snapshot()
+            .into_iter()
+            .map(|snapshot| snapshot.into_intent())
+            .collect();
+        let mut seen_intents: std::collections::HashSet<[u8; 32]> = to_dispatch
+            .iter()
+            .map(|intent| intent.intent_hash)
+            .collect();
+
+        for receipt in pending_receipts {
+            if receipts_seen.contains(&receipt.intent_hash)
+                || seen_intents.contains(&receipt.intent_hash)
+            {
+                continue;
+            }
+            let Some(intent) = aos_effects::EffectIntent::from_raw_params(
+                receipt.effect_kind.into(),
+                receipt.cap_name,
+                receipt.params_cbor,
+                receipt.idempotency_key,
+            )
+            .ok() else {
+                continue;
+            };
+            seen_intents.insert(intent.intent_hash);
+            to_dispatch.push(intent);
+        }
+
+        for tail_intent in tail.intents {
+            let record = tail_intent.record;
+            if receipts_seen.contains(&record.intent_hash) {
+                continue;
+            }
+            if !active_intents.is_empty() && !active_intents.contains(&record.intent_hash) {
+                continue;
+            }
+            if seen_intents.contains(&record.intent_hash) {
+                continue;
+            }
+            let Some(intent) = aos_effects::EffectIntent::from_raw_params(
+                record.kind.into(),
+                record.cap_name,
+                record.params_cbor,
+                record.idempotency_key,
+            )
+            .ok() else {
+                continue;
+            };
+            seen_intents.insert(intent.intent_hash);
+            to_dispatch.push(intent);
+        }
+
+        if !to_dispatch.is_empty() {
+            self.restore_effect_queue(to_dispatch);
+        }
+        Ok(())
+    }
+
     pub fn tick(&mut self) -> Result<(), KernelError> {
         if let Some(event) = self.workflow_queue.pop_front() {
             self.handle_workflow_event(event)?;
@@ -54,7 +137,14 @@ impl<S: Store + 'static> Kernel<S> {
         Self::validate_entropy(&stamp.entropy)?;
 
         if self.recent_receipt_index.contains(&receipt.intent_hash) {
-            log::warn!(
+            if let Some(context) = self
+                .pending_workflow_receipts
+                .get(&receipt.intent_hash)
+                .cloned()
+            {
+                self.settle_workflow_receipt_intent(&context, receipt.intent_hash);
+            }
+            log::trace!(
                 "late receipt {} ignored (already applied)",
                 format_intent_hash(&receipt.intent_hash)
             );
@@ -66,6 +156,11 @@ impl<S: Store + 'static> Kernel<S> {
             .get(&receipt.intent_hash)
             .cloned()
         {
+            if self.suppress_journal {
+                self.deliver_receipt_to_workflow_instance(&context, &receipt, &stamp)?;
+                self.settle_workflow_receipt_intent(&context, receipt.intent_hash);
+                return Ok(());
+            }
             enum ReceiptFaultKind {
                 InvalidPayload,
                 DeliveryFailed,
@@ -110,7 +205,7 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         if self.suppress_journal {
-            log::warn!(
+            log::trace!(
                 "receipt {} ignored during replay (no pending context)",
                 format_intent_hash(&receipt.intent_hash)
             );
@@ -152,6 +247,24 @@ impl<S: Store + 'static> Kernel<S> {
                 "stream.identity_mismatch",
                 "frame identity does not match recorded in-flight intent",
             )?;
+            return Ok(());
+        }
+
+        if self.suppress_journal {
+            self.deliver_stream_frame_to_workflow_instance(&context, &frame, &stamp)?;
+            let advanced = self.advance_workflow_stream_cursor(
+                &context.origin_module_id,
+                context.origin_instance_key.as_deref(),
+                frame.intent_hash,
+                frame.seq,
+            );
+            if !advanced {
+                self.record_workflow_stream_drop(
+                    &frame,
+                    "stream.cursor_unavailable",
+                    "stream cursor missing for in-flight intent",
+                )?;
+            }
             return Ok(());
         }
 
@@ -347,7 +460,7 @@ impl<S: Store + 'static> Kernel<S> {
         Ok((workflow_event_schema_name, workflow_event_schema))
     }
 
-    fn settle_workflow_receipt_intent(
+    pub(crate) fn settle_workflow_receipt_intent(
         &mut self,
         context: &WorkflowEffectContext,
         intent_hash: [u8; 32],
@@ -387,29 +500,6 @@ impl<S: Store + 'static> Kernel<S> {
         if entry.module_version.is_none() {
             entry.module_version = context.module_version.clone();
         }
-    }
-
-    fn clear_pending_receipts_for_workflow_instance(
-        &mut self,
-        context: &WorkflowEffectContext,
-    ) -> usize {
-        let pending_hashes: Vec<[u8; 32]> = self
-            .pending_workflow_receipts
-            .iter()
-            .filter_map(|(hash, pending_ctx)| {
-                if pending_ctx.origin_module_id == context.origin_module_id
-                    && pending_ctx.origin_instance_key == context.origin_instance_key
-                {
-                    Some(*hash)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        for hash in &pending_hashes {
-            self.settle_workflow_receipt_intent(context, *hash);
-        }
-        pending_hashes.len()
     }
 
     fn try_deliver_workflow_rejected_receipt_event(
@@ -481,7 +571,10 @@ impl<S: Store + 'static> Kernel<S> {
         let (workflow_failed, dropped_pending_receipts) = if delivered_rejected {
             (false, 0usize)
         } else {
-            let dropped = self.clear_pending_receipts_for_workflow_instance(context);
+            let dropped = self.clear_pending_receipts_for_workflow_instance(
+                &context.origin_module_id,
+                context.origin_instance_key.as_deref(),
+            );
             self.fail_workflow_instance(context, stamp.journal_height);
             (true, dropped)
         };
@@ -710,11 +803,11 @@ mod serde_bytes_opt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MemStore;
     use crate::journal::JournalKind;
     use crate::journal::mem::MemJournal;
     use aos_air_types::{HashRef, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
-    use aos_effects::EffectStreamFrame;
-    use aos_store::MemStore;
+    use aos_effects::{EffectStreamFrame, ReceiptStatus};
     use std::sync::Arc;
 
     fn install_stream_module(kernel: &mut Kernel<MemStore>, module_name: &str) {
@@ -751,7 +844,9 @@ mod tests {
             module_name.into(),
             None,
             "http.request".into(),
+            "cap/http@1".into(),
             vec![1, 2, 3],
+            [0x33u8; 32],
             None,
             intent_hash,
             emitted_at_seq,
@@ -852,5 +947,38 @@ mod tests {
         assert!(has_gap, "expected gap diagnostic record");
         let instances = kernel.workflow_instances_snapshot();
         assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 3);
+    }
+
+    #[test]
+    fn duplicate_receipt_settles_stale_pending_context() {
+        let intent_hash = [0x55u8; 32];
+        let mut kernel = kernel_with_stream_context("com.acme/Workflow@1", intent_hash, 11);
+        kernel.recent_receipts.push_back(intent_hash);
+        kernel.recent_receipt_index.insert(intent_hash);
+
+        let receipt = EffectReceipt {
+            intent_hash,
+            adapter_id: "adapter.stream".into(),
+            status: ReceiptStatus::Ok,
+            payload_cbor: vec![],
+            cost_cents: None,
+            signature: vec![],
+        };
+
+        kernel
+            .handle_receipt(receipt)
+            .expect("duplicate receipt should be ignored and settle stale context");
+
+        assert!(
+            kernel.pending_workflow_receipts_snapshot().is_empty(),
+            "duplicate receipt should clear stale pending receipt state"
+        );
+        assert_eq!(
+            kernel.workflow_instances_snapshot()[0]
+                .inflight_intents
+                .len(),
+            0,
+            "duplicate receipt should clear stale inflight intent"
+        );
     }
 }
