@@ -27,6 +27,50 @@ Optional `config` fields:
 - `tool_profile`, `allowed_tools`, `tool_enable`, `tool_disable`, `tool_force`
 - `session_ttl_ns`
 
+## Give It A Spin
+
+From the repo root, build the local debug binaries and workflow artifacts once:
+
+```bash
+rustup target add wasm32-unknown-unknown
+
+cargo build -p aos-cli -p aos-node-local
+cargo build -p aos-sys --target wasm32-unknown-unknown
+cargo build -p aos-agent --bin session_workflow --target wasm32-unknown-unknown
+```
+
+If you want live LLM calls, make sure `worlds/demiurge/.env` contains the provider key you want
+to sync, for example `OPENAI_API_KEY=...`.
+
+In terminal 1, start the local node against the Demiurge world root:
+
+```bash
+target/debug/aos local up --root worlds/demiurge --select
+```
+
+In terminal 2, create and select the world, sync secrets from `aos.sync.json`, and emit verbose
+progress while building/uploading:
+
+```bash
+target/debug/aos world create \
+  --local-root worlds/demiurge \
+  --handle demiurge \
+  --force-build \
+  --select \
+  --sync-secrets \
+  --verbose
+```
+
+Then submit a task:
+
+```bash
+worlds/demiurge/scripts/demiurge_task.sh \
+  --task "Echo howdee."
+```
+
+That script submits `demiurge/TaskSubmitted@1`, waits for completion, and prints the final task
+status plus the extracted assistant response.
+
 ## Local Smoke
 
 Run:

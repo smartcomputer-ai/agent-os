@@ -1,14 +1,16 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
-use aos_air_types::{AirNode, Manifest, ModuleKind};
+use aos_air_types::{AirNode, DefSecret, Manifest, ModuleKind, SecretEntry};
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effect_types::{
     GovApplyReceipt, GovApproveParams, GovApproveReceipt, GovDecision, GovPatchInput,
     GovProposeParams, GovProposeReceipt, GovShadowReceipt, HashRef,
 };
+use aos_node::{SecretBindingRecord, SecretBindingStatus};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use clap::{Args, Subcommand};
@@ -760,8 +762,12 @@ async fn handle_create(
                 dirs.workflow_dir.display()
             ),
         );
-        let (store, bundle, warnings) =
+        let (store, bundle, mut warnings) =
             build_bundle_from_world(args.local_root.as_deref(), args.force_build)?;
+        warnings.extend(
+            secret_binding_readiness_warnings(client, &universe, &bundle.manifest, &bundle.secrets)
+                .await,
+        );
         print_verbose(output, "uploading bundle to hosted CAS");
         let uploaded =
             upload_bundle(client, &universe, &store, &bundle, warnings, Some(&dirs)).await?;
@@ -1291,8 +1297,12 @@ async fn handle_patch(
             dirs.workflow_dir.display()
         ),
     );
-    let (store, bundle, warnings) =
+    let (store, bundle, mut warnings) =
         build_bundle_from_world(args.local_root.as_deref(), args.force_build)?;
+    warnings.extend(
+        secret_binding_readiness_warnings(client, &universe, &bundle.manifest, &bundle.secrets)
+            .await,
+    );
     print_verbose(
         output,
         format!("fetching current manifest for world {world}"),
@@ -1437,6 +1447,101 @@ fn default_handle_from_dir(path: &Path) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+async fn secret_binding_readiness_warnings(
+    client: &ApiClient,
+    universe: &str,
+    manifest: &Manifest,
+    secret_defs: &[DefSecret],
+) -> Vec<String> {
+    let declared = declared_secret_binding_ids(manifest, secret_defs);
+    if declared.is_empty() {
+        return Vec::new();
+    }
+
+    let bound = match fetch_active_secret_binding_ids(client, universe).await {
+        Ok(bound) => bound,
+        Err(err) => {
+            return vec![format!(
+                "could not evaluate secret binding readiness: {err}"
+            )];
+        }
+    };
+
+    let missing: Vec<String> = declared
+        .iter()
+        .filter(|binding| !bound.contains(binding.as_str()))
+        .cloned()
+        .collect();
+    if missing.is_empty() {
+        return Vec::new();
+    }
+
+    vec![
+        format!(
+            "world declares secret bindings [{}] but the selected universe is missing [{}]; runtime paths that require them may fail",
+            declared.join(", "),
+            missing.join(", "),
+        ),
+        "sync them with `aos world patch --sync-secrets` or bind them manually with `aos universe secret binding set ...`".into(),
+    ]
+}
+
+async fn fetch_active_secret_binding_ids(
+    client: &ApiClient,
+    universe: &str,
+) -> Result<BTreeSet<String>> {
+    let data = client
+        .get_json(&format!("/v1/universes/{universe}/secrets/bindings"), &[])
+        .await?;
+    let records = parse_secret_binding_records(&data)?;
+    Ok(records
+        .into_iter()
+        .filter(|record| matches!(record.status, SecretBindingStatus::Active))
+        .map(|record| record.binding_id)
+        .collect())
+}
+
+fn parse_secret_binding_records(data: &Value) -> Result<Vec<SecretBindingRecord>> {
+    serde_json::from_value::<Vec<SecretBindingRecord>>(data.clone())
+        .or_else(|_| {
+            data.get("items")
+                .cloned()
+                .ok_or_else(|| anyhow!("secret binding list response missing items"))
+                .and_then(|value| {
+                    serde_json::from_value::<Vec<SecretBindingRecord>>(value)
+                        .context("decode secret binding list response items")
+                })
+        })
+        .context("decode secret binding list response")
+}
+
+fn declared_secret_binding_ids(manifest: &Manifest, secret_defs: &[DefSecret]) -> Vec<String> {
+    let defs_by_name: BTreeMap<&str, &str> = secret_defs
+        .iter()
+        .map(|secret| (secret.name.as_str(), secret.binding_id.as_str()))
+        .collect();
+    let mut binding_ids = BTreeSet::new();
+    for secret in &manifest.secrets {
+        match secret {
+            SecretEntry::Decl(secret) => {
+                let binding_id = secret.binding_id.trim();
+                if !binding_id.is_empty() {
+                    binding_ids.insert(binding_id.to_string());
+                }
+            }
+            SecretEntry::Ref(secret) => {
+                if let Some(binding_id) = defs_by_name.get(secret.name.as_str()) {
+                    let binding_id = binding_id.trim();
+                    if !binding_id.is_empty() {
+                        binding_ids.insert(binding_id.to_string());
+                    }
+                }
+            }
+        }
+    }
+    binding_ids.into_iter().collect()
 }
 
 fn merge_actor(actor: Option<String>, body: Value) -> Value {
@@ -1730,10 +1835,14 @@ struct DefEnvelope {
 #[cfg(test)]
 mod tests {
     use super::{
-        WorldCreateArgs, WorldStateGetArgs, encode_state_key_query, should_default_local_root,
+        WorldCreateArgs, WorldStateGetArgs, declared_secret_binding_ids, encode_state_key_query,
+        parse_secret_binding_records, should_default_local_root,
     };
+    use aos_air_types::{DefSecret, HashRef, Manifest, NamedRef, SecretEntry};
+    use aos_node::{SecretBindingSourceKind, SecretBindingStatus};
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use serde_json::json;
     use tempfile::TempDir;
 
     fn local_target() -> crate::client::ApiTarget {
@@ -1830,5 +1939,99 @@ mod tests {
             .expect("decide default local root");
         std::env::set_current_dir(previous).expect("restore current dir");
         assert!(!result);
+    }
+
+    #[test]
+    fn declared_secret_binding_ids_resolves_refs_and_deduplicates() {
+        let manifest = Manifest {
+            air_version: "v1".into(),
+            schemas: Vec::new(),
+            modules: Vec::new(),
+            effects: Vec::new(),
+            effect_bindings: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            secrets: vec![
+                SecretEntry::Ref(NamedRef {
+                    name: "llm/openai_api@1".into(),
+                    hash: HashRef::new(
+                        "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                    )
+                    .expect("hash"),
+                }),
+                SecretEntry::Decl(aos_air_types::SecretDecl {
+                    alias: "anthropic".into(),
+                    version: 1,
+                    binding_id: "llm/anthropic_api".into(),
+                    expected_digest: None,
+                    policy: None,
+                }),
+                SecretEntry::Ref(NamedRef {
+                    name: "llm/openai_api@1".into(),
+                    hash: HashRef::new(
+                        "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+                    )
+                    .expect("hash"),
+                }),
+            ],
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: None,
+        };
+        let defs = vec![
+            DefSecret {
+                name: "llm/openai_api@1".into(),
+                binding_id: "llm/openai_api".into(),
+                expected_digest: None,
+                allowed_caps: Vec::new(),
+            },
+            DefSecret {
+                name: "llm/anthropic_api@1".into(),
+                binding_id: "llm/anthropic_api".into(),
+                expected_digest: None,
+                allowed_caps: Vec::new(),
+            },
+        ];
+
+        let binding_ids = declared_secret_binding_ids(&manifest, &defs);
+        assert_eq!(
+            binding_ids,
+            vec![
+                "llm/anthropic_api".to_string(),
+                "llm/openai_api".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_secret_binding_records_accepts_array_payload() {
+        let records = parse_secret_binding_records(&json!([
+            {
+                "binding_id": "llm/openai_api",
+                "source_kind": "node_secret_store",
+                "latest_version": 1,
+                "created_at_ns": 0,
+                "updated_at_ns": 0,
+                "status": "active"
+            },
+            {
+                "binding_id": "llm/anthropic_api",
+                "source_kind": "worker_env",
+                "env_var": "ANTHROPIC_API_KEY",
+                "created_at_ns": 0,
+                "updated_at_ns": 0,
+                "status": "disabled"
+            }
+        ]))
+        .expect("parse records");
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].binding_id, "llm/openai_api");
+        assert!(matches!(
+            records[0].source_kind,
+            SecretBindingSourceKind::NodeSecretStore
+        ));
+        assert!(matches!(records[0].status, SecretBindingStatus::Active));
+        assert!(matches!(records[1].status, SecretBindingStatus::Disabled));
     }
 }
