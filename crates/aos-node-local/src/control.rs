@@ -82,6 +82,7 @@ pub struct LocalControl {
     store: Arc<SqliteNodeStore>,
     supervisor: Arc<LocalSupervisor>,
     secret_config: LocalSecretConfig,
+    paths: LocalStatePaths,
 }
 
 impl LocalControl {
@@ -106,6 +107,7 @@ impl LocalControl {
             Arc::clone(&store),
             LocalSupervisorConfig::default(),
             secret_config.clone(),
+            state_root,
         );
         if start_supervisor {
             supervisor.start();
@@ -114,6 +116,7 @@ impl LocalControl {
             store,
             supervisor,
             secret_config,
+            paths,
         }))
     }
 
@@ -200,12 +203,16 @@ impl LocalControl {
         )?;
 
         let persistence: Arc<dyn aos_node::WorldStore> = self.store.clone();
+        let mut world_config = WorldConfig::from_env_with_fallback_module_cache_dir(Some(
+            self.paths.wasmtime_cache_dir(),
+        ));
+        world_config.eager_module_load = true;
         let mut host = match open_hosted_from_manifest_hash(
             Arc::clone(&persistence),
             universe,
             world_id,
             manifest_hash,
-            WorldConfig::default(),
+            world_config,
             aos_effect_adapters::config::EffectAdapterConfig::default(),
             aos_kernel::KernelConfig {
                 secret_resolver: Some(Arc::new(LocalSecretResolver::new(

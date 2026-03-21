@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 use aos_air_types::AirNode;
 use aos_effect_adapters::config::EffectAdapterConfig;
@@ -21,6 +21,8 @@ use crate::error::HostError;
 use crate::timer::TimerScheduler;
 use aos_kernel::StateReader;
 use serde::Serialize;
+
+const SLOW_WORLD_OPEN_LOG_THRESHOLD_MS: u128 = 1_000;
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
@@ -194,12 +196,26 @@ impl<S: Store + 'static> WorldHost<S> {
         }
         builder = builder.allow_placeholder_secrets(world_config.allow_placeholder_secrets);
 
+        let open_started = Instant::now();
         let mut kernel = if let Some(replay) = replay.as_ref() {
+            let baseline_height = replay.active_baseline.height;
+            let replay_from = replay
+                .replay_seed
+                .as_ref()
+                .filter(|seed| seed.height > baseline_height)
+                .map(|seed| seed.height.saturating_add(1))
+                .unwrap_or_else(|| baseline_height.saturating_add(1));
             let mut kernel = builder.from_loaded_manifest_without_replay(loaded)?;
+            let baseline_restore_started = Instant::now();
             kernel.restore_snapshot_record(&replay.active_baseline)?;
+            let baseline_restore_ms = baseline_restore_started.elapsed().as_millis();
+            let mut seed_restore_ms = 0u128;
+            let replay_started = Instant::now();
             if let Some(seed) = replay.replay_seed.as_ref() {
                 if seed.height > replay.active_baseline.height {
+                    let seed_restore_started = Instant::now();
                     kernel.restore_snapshot_record_for_replay(seed)?;
+                    seed_restore_ms = seed_restore_started.elapsed().as_millis();
                     kernel.replay_entries_from(seed.height.saturating_add(1))?;
                 } else {
                     kernel.replay_entries_from(replay.active_baseline.height.saturating_add(1))?;
@@ -207,11 +223,51 @@ impl<S: Store + 'static> WorldHost<S> {
             } else {
                 kernel.replay_entries_from(replay.active_baseline.height.saturating_add(1))?;
             }
+            let replay_ms = replay_started.elapsed().as_millis();
+            if replay_ms >= SLOW_WORLD_OPEN_LOG_THRESHOLD_MS {
+                log::info!(
+                    "world host open with replay: baseline_height={} replay_from={} baseline_restore_ms={} seed_restore_ms={} replay_ms={}",
+                    baseline_height,
+                    replay_from,
+                    baseline_restore_ms,
+                    seed_restore_ms,
+                    replay_ms
+                );
+            } else {
+                log::debug!(
+                    "world host open with replay: baseline_height={} replay_from={} baseline_restore_ms={} seed_restore_ms={} replay_ms={}",
+                    baseline_height,
+                    replay_from,
+                    baseline_restore_ms,
+                    seed_restore_ms,
+                    replay_ms
+                );
+            }
             kernel
         } else {
             builder.from_loaded_manifest(loaded)?
         };
+        let rehydrate_started = Instant::now();
         Self::rehydrate_effect_queue(&mut kernel)?;
+        let rehydrate_effect_queue_ms = rehydrate_started.elapsed().as_millis();
+        let total_open_ms = open_started.elapsed().as_millis();
+        if total_open_ms >= SLOW_WORLD_OPEN_LOG_THRESHOLD_MS {
+            log::info!(
+                "world host open completed: replay_enabled={} eager_module_load={} rehydrate_effect_queue_ms={} total_open_ms={}",
+                replay.is_some(),
+                world_config.eager_module_load,
+                rehydrate_effect_queue_ms,
+                total_open_ms
+            );
+        } else {
+            log::debug!(
+                "world host open completed: replay_enabled={} eager_module_load={} rehydrate_effect_queue_ms={} total_open_ms={}",
+                replay.is_some(),
+                world_config.eager_module_load,
+                rehydrate_effect_queue_ms,
+                total_open_ms
+            );
+        }
 
         Ok(Self {
             kernel,

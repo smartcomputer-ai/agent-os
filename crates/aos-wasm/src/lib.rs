@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use aos_wasm_abi::{PureInput, PureOutput, WorkflowInput, WorkflowOutput};
-use log::debug;
+use log::{debug, trace, warn};
 use sha2::{Digest, Sha256};
 use wasmtime::{Config, Engine, InstancePre, Linker, Module, Store};
 
@@ -48,11 +48,17 @@ impl WorkflowRuntime {
             let engine_dir = dir.join(&fingerprint);
             fs::create_dir_all(&engine_dir)
                 .with_context(|| format!("create cache dir {}", engine_dir.display()))?;
+            debug!(
+                "aos-wasm: workflow runtime disk cache enabled root={} engine_dir={}",
+                dir.display(),
+                engine_dir.display()
+            );
             Some(DiskCache {
                 root: dir,
                 engine_fingerprint: fingerprint,
             })
         } else {
+            debug!("aos-wasm: workflow runtime disk cache disabled");
             None
         };
         Ok(Self {
@@ -160,19 +166,35 @@ impl WorkflowRuntime {
         let key = ModuleKey::from_bytes(wasm_bytes);
         let key_hex = key.hex();
         if let Some(existing) = self.get_cached_module(&key) {
-            debug!("aos-wasm: memory cache hit for workflow {key_hex}");
+            trace!("aos-wasm: workflow module {key_hex} loaded from memory cache");
             return Ok(existing);
         }
 
         if let Some(serialized) = self.load_serialized(&key, &key_hex)? {
-            debug!("aos-wasm: disk cache hit for workflow {key_hex}");
+            if let Some(cache) = &self.disk_cache {
+                trace!(
+                    "aos-wasm: workflow module {key_hex} loaded from disk cache path={}",
+                    cache.module_path(&key).display()
+                );
+            } else {
+                trace!("aos-wasm: workflow module {key_hex} loaded from disk cache");
+            }
             self.insert_cached_module(key, serialized.clone());
             return Ok(serialized);
         }
 
-        debug!("aos-wasm: cache miss for workflow {key_hex}; compiling module");
+        if let Some(cache) = &self.disk_cache {
+            debug!(
+                "aos-wasm: workflow module {key_hex} cache miss; compiling and writing path={}",
+                cache.module_path(&key).display()
+            );
+        } else {
+            debug!("aos-wasm: workflow module {key_hex} cache miss; compiling");
+        }
         let compiled = Arc::new(self.compile(wasm_bytes)?);
-        self.store_serialized(&key, &key_hex, &compiled).ok();
+        if let Err(err) = self.store_serialized(&key, &key_hex, &compiled) {
+            warn!("aos-wasm: failed to persist workflow module {key_hex} to disk cache: {err}");
+        }
         self.insert_cached_module(key, compiled.clone());
         Ok(compiled)
     }
@@ -272,11 +294,17 @@ impl PureRuntime {
             let engine_dir = dir.join(&fingerprint);
             fs::create_dir_all(&engine_dir)
                 .with_context(|| format!("create cache dir {}", engine_dir.display()))?;
+            debug!(
+                "aos-wasm: pure runtime disk cache enabled root={} engine_dir={}",
+                dir.display(),
+                engine_dir.display()
+            );
             Some(DiskCache {
                 root: dir,
                 engine_fingerprint: fingerprint,
             })
         } else {
+            debug!("aos-wasm: pure runtime disk cache disabled");
             None
         };
         Ok(Self {
@@ -382,19 +410,35 @@ impl PureRuntime {
         let key = ModuleKey::from_bytes(wasm_bytes);
         let key_hex = key.hex();
         if let Some(existing) = self.get_cached_module(&key) {
-            debug!("aos-wasm: memory cache hit for pure module {key_hex}");
+            trace!("aos-wasm: pure module {key_hex} loaded from memory cache");
             return Ok(existing);
         }
 
         if let Some(serialized) = self.load_serialized(&key, &key_hex)? {
-            debug!("aos-wasm: disk cache hit for pure module {key_hex}");
+            if let Some(cache) = &self.disk_cache {
+                trace!(
+                    "aos-wasm: pure module {key_hex} loaded from disk cache path={}",
+                    cache.module_path(&key).display()
+                );
+            } else {
+                trace!("aos-wasm: pure module {key_hex} loaded from disk cache");
+            }
             self.insert_cached_module(key, serialized.clone());
             return Ok(serialized);
         }
 
-        debug!("aos-wasm: cache miss for pure module {key_hex}; compiling module");
+        if let Some(cache) = &self.disk_cache {
+            debug!(
+                "aos-wasm: pure module {key_hex} cache miss; compiling and writing path={}",
+                cache.module_path(&key).display()
+            );
+        } else {
+            debug!("aos-wasm: pure module {key_hex} cache miss; compiling");
+        }
         let compiled = Arc::new(self.compile(wasm_bytes)?);
-        self.store_serialized(&key, &key_hex, &compiled).ok();
+        if let Err(err) = self.store_serialized(&key, &key_hex, &compiled) {
+            warn!("aos-wasm: failed to persist pure module {key_hex} to disk cache: {err}");
+        }
         self.insert_cached_module(key, compiled.clone());
         Ok(compiled)
     }
@@ -447,9 +491,17 @@ impl PureRuntime {
             None => return Ok(()),
         };
         let path = cache.module_path(key);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("create cache dir {}", parent.display()))?;
+        }
         let bytes = module.serialize()?;
         fs::write(&path, bytes)
             .with_context(|| format!("write wasm cache for pure module {key_hex}"))?;
+        debug!(
+            "aos-wasm: serialized pure module {key_hex} to {}",
+            path.display()
+        );
         Ok(())
     }
 }

@@ -44,6 +44,7 @@ const CMD_GOV_APPLY: &str = "gov-apply";
 const CMD_WORLD_PAUSE: &str = "world-pause";
 const CMD_WORLD_ARCHIVE: &str = "world-archive";
 const CMD_WORLD_DELETE: &str = "world-delete";
+const LOCAL_BASELINE_REFRESH_AFTER_JOURNAL_ENTRIES: u64 = 128;
 
 #[derive(Debug, Clone)]
 pub struct LocalSupervisorConfig {
@@ -132,11 +133,16 @@ impl LocalSupervisor {
         store: Arc<SqliteNodeStore>,
         config: LocalSupervisorConfig,
         secret_config: LocalSecretConfig,
+        state_root: &std::path::Path,
     ) -> Arc<Self> {
+        let paths = aos_sqlite::LocalStatePaths::new(state_root.to_path_buf());
+        let mut world_config =
+            WorldConfig::from_env_with_fallback_module_cache_dir(Some(paths.wasmtime_cache_dir()));
+        world_config.eager_module_load = true;
         Arc::new(Self {
             store,
             config,
-            world_config: WorldConfig::default(),
+            world_config,
             adapter_config: EffectAdapterConfig::default(),
             secret_config,
             shared_cache: SharedBlobCache::new(4096, 64 * 1024 * 1024, 8 * 1024 * 1024),
@@ -364,6 +370,9 @@ impl LocalSupervisor {
                 if matches!(runtime.meta.admin.status, WorldAdminStatus::Deleted) {
                     continue;
                 }
+                if runtime.meta.active_baseline_height.is_none() {
+                    continue;
+                }
                 let key = (universe.universe_id, runtime.world_id);
                 live.insert(key);
                 self.ensure_loaded(key.0, key.1)?;
@@ -414,13 +423,15 @@ impl LocalSupervisor {
             .get_mut(&(universe, world))
             .ok_or_else(|| aos_node::PersistError::not_found(format!("world {world}")))?;
 
-        let _ingress = self.drain_ingress_batch(universe, world, hot)?;
-        let _drain = runtime.block_on(hot.run_daemon_until_quiescent())?;
+        let ingress = self.drain_ingress_batch(universe, world, hot)?;
+        let drain = runtime.block_on(hot.run_daemon_until_quiescent())?;
 
         let runtime_info = self
             .store
             .world_runtime_info(universe, world, now_wallclock_ns())?;
-        if runtime_info.has_pending_maintenance {
+        if runtime_info.has_pending_maintenance
+            || self.local_baseline_refresh_due(universe, world, &runtime_info, ingress, drain)?
+        {
             let persistence: Arc<dyn WorldStore> = self.store.clone();
             hot.snapshot(persistence, universe, world)?;
         }
@@ -429,6 +440,26 @@ impl LocalSupervisor {
                 .set_world_admin_lifecycle(universe, world, next_admin)?;
         }
         Ok(())
+    }
+
+    fn local_baseline_refresh_due(
+        &self,
+        universe: UniverseId,
+        world: WorldId,
+        runtime_info: &aos_node::WorldRuntimeInfo,
+        ingress: u32,
+        drain: aos_node::HotWorldDrainOutcome,
+    ) -> Result<bool, LocalNodeError> {
+        if ingress == 0 && !drain.progressed() {
+            return Ok(false);
+        }
+        let Some(active_baseline_height) = runtime_info.meta.active_baseline_height else {
+            return Ok(false);
+        };
+        let journal_head = self.store.journal_head(universe, world)?;
+        let tail_entries_after_baseline =
+            journal_head.saturating_sub(active_baseline_height.saturating_add(1));
+        Ok(tail_entries_after_baseline >= LOCAL_BASELINE_REFRESH_AFTER_JOURNAL_ENTRIES)
     }
 
     fn drain_ingress_batch(

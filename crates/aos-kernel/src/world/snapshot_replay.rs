@@ -2,6 +2,7 @@ use super::*;
 use std::time::Instant;
 
 const REPLAY_BATCH_SIZE: usize = 8192;
+const SLOW_REPLAY_LOG_THRESHOLD_MS: u128 = 1_000;
 
 impl<S: Store + 'static> Kernel<S> {
     pub fn create_snapshot(&mut self) -> Result<(), KernelError> {
@@ -245,34 +246,83 @@ impl<S: Store + 'static> Kernel<S> {
                 break;
             }
             for entry in entries {
+                let decode_started = Instant::now();
                 let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
                     .map_err(|err| KernelError::Journal(err.to_string()))?;
+                if let Some(metrics) = self.replay_metrics.as_mut() {
+                    metrics.journal_records = metrics.journal_records.saturating_add(1);
+                    metrics.journal_decode_ns += decode_started.elapsed().as_nanos();
+                }
                 cursor = entry.seq.saturating_add(1);
                 self.apply_replay_record(record)?;
             }
         }
+        let flush_started = Instant::now();
         self.flush_replay_cell_projection_deltas()?;
+        if let Some(metrics) = self.replay_metrics.as_mut() {
+            metrics.flush_projection_ns += flush_started.elapsed().as_nanos();
+        }
+        let tick_started = Instant::now();
         self.tick_until_idle()?;
+        if let Some(metrics) = self.replay_metrics.as_mut() {
+            metrics.tick_ns += tick_started.elapsed().as_nanos();
+        }
         self.suppress_journal = false;
         self.replay_applying_domain_record = false;
         self.replay_generated_domain_event_hashes.clear();
         let replay_metrics = self.replay_metrics.take();
-        log::info!(
-            "kernel replay_entries_from completed: replay_from={} load_ms={} apply_ms={}",
-            from,
-            load_ms,
-            apply_started.elapsed().as_millis()
-        );
-        if let Some(metrics) = replay_metrics {
+        let apply_ms = apply_started.elapsed().as_millis();
+        if apply_ms >= SLOW_REPLAY_LOG_THRESHOLD_MS {
             log::info!(
-                "kernel replay_entries_from metrics: domain_events={} workflow_invocations={} workflow_invoke_ms={} state_cache_hits={} state_cache_misses={} state_load_ms={}",
-                metrics.domain_events,
-                metrics.workflow_invocations,
-                metrics.workflow_invoke_ns / 1_000_000,
-                metrics.state_cache_hits,
-                metrics.state_cache_misses,
-                metrics.state_load_ns / 1_000_000
+                "kernel replay_entries_from completed: replay_from={} load_ms={} apply_ms={}",
+                from,
+                load_ms,
+                apply_ms
             );
+        } else {
+            log::debug!(
+                "kernel replay_entries_from completed: replay_from={} load_ms={} apply_ms={}",
+                from,
+                load_ms,
+                apply_ms
+            );
+        }
+        if let Some(metrics) = replay_metrics {
+            if apply_ms >= SLOW_REPLAY_LOG_THRESHOLD_MS {
+                log::debug!(
+                    "kernel replay_entries_from metrics: journal_records={} domain_events={} workflow_invocations={} workflow_invoke_ms={} journal_decode_ms={} hydrate_blob_count={} hydrate_blob_bytes={} hydrate_blob_ms={} tick_ms={} flush_projection_ms={} state_cache_hits={} state_cache_misses={} state_load_ms={}",
+                    metrics.journal_records,
+                    metrics.domain_events,
+                    metrics.workflow_invocations,
+                    metrics.workflow_invoke_ns / 1_000_000,
+                    metrics.journal_decode_ns / 1_000_000,
+                    metrics.hydrate_blob_count,
+                    metrics.hydrate_blob_bytes,
+                    metrics.hydrate_blob_ns / 1_000_000,
+                    metrics.tick_ns / 1_000_000,
+                    metrics.flush_projection_ns / 1_000_000,
+                    metrics.state_cache_hits,
+                    metrics.state_cache_misses,
+                    metrics.state_load_ns / 1_000_000
+                );
+            } else {
+                log::trace!(
+                    "kernel replay_entries_from metrics: journal_records={} domain_events={} workflow_invocations={} workflow_invoke_ms={} journal_decode_ms={} hydrate_blob_count={} hydrate_blob_bytes={} hydrate_blob_ms={} tick_ms={} flush_projection_ms={} state_cache_hits={} state_cache_misses={} state_load_ms={}",
+                    metrics.journal_records,
+                    metrics.domain_events,
+                    metrics.workflow_invocations,
+                    metrics.workflow_invoke_ns / 1_000_000,
+                    metrics.journal_decode_ns / 1_000_000,
+                    metrics.hydrate_blob_count,
+                    metrics.hydrate_blob_bytes,
+                    metrics.hydrate_blob_ns / 1_000_000,
+                    metrics.tick_ns / 1_000_000,
+                    metrics.flush_projection_ns / 1_000_000,
+                    metrics.state_cache_hits,
+                    metrics.state_cache_misses,
+                    metrics.state_load_ns / 1_000_000
+                );
+            }
         }
         Ok(())
     }
@@ -304,10 +354,15 @@ impl<S: Store + 'static> Kernel<S> {
                 let result = self.process_domain_event_with_ingress(event, stamp);
                 self.replay_applying_domain_record = false;
                 result?;
+                let tick_started = Instant::now();
                 self.tick_until_idle()?;
+                if let Some(metrics) = self.replay_metrics.as_mut() {
+                    metrics.tick_ns += tick_started.elapsed().as_nanos();
+                }
             }
             JournalRecord::EffectIntent(record) => {
-                self.restore_effect_intent(self.hydrate_effect_intent_record(record)?)?;
+                let record = self.hydrate_effect_intent_record(record)?;
+                self.restore_effect_intent(record)?;
             }
             JournalRecord::EffectReceipt(record) => {
                 self.sync_logical_from_record(record.logical_now_ns);
@@ -332,7 +387,11 @@ impl<S: Store + 'static> Kernel<S> {
                     signature: record.signature,
                 };
                 self.handle_receipt_with_ingress(receipt, stamp)?;
+                let tick_started = Instant::now();
                 self.tick_until_idle()?;
+                if let Some(metrics) = self.replay_metrics.as_mut() {
+                    metrics.tick_ns += tick_started.elapsed().as_nanos();
+                }
             }
             JournalRecord::StreamFrame(record) => {
                 self.sync_logical_from_record(record.logical_now_ns);
@@ -361,7 +420,11 @@ impl<S: Store + 'static> Kernel<S> {
                     signature: record.signature,
                 };
                 self.handle_stream_frame_with_ingress(frame, stamp)?;
+                let tick_started = Instant::now();
                 self.tick_until_idle()?;
+                if let Some(metrics) = self.replay_metrics.as_mut() {
+                    metrics.tick_ns += tick_started.elapsed().as_nanos();
+                }
             }
             JournalRecord::CapDecision(_) => {
                 // Cap decisions are audit-only; runtime state is rebuilt via replay.
@@ -390,7 +453,7 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn hydrate_effect_intent_record(
-        &self,
+        &mut self,
         mut record: EffectIntentRecord,
     ) -> Result<EffectIntentRecord, KernelError> {
         record.params_cbor = self.hydrate_externalized_cbor(
@@ -404,7 +467,7 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn hydrate_effect_receipt_record(
-        &self,
+        &mut self,
         mut record: EffectReceiptRecord,
     ) -> Result<EffectReceiptRecord, KernelError> {
         record.payload_cbor = self.hydrate_externalized_cbor(

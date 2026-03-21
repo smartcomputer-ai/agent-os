@@ -286,12 +286,19 @@ pub struct CellProjectionDelta {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ReplayMetrics {
+    pub journal_records: u64,
     pub domain_events: u64,
     pub workflow_invocations: u64,
     pub workflow_invoke_ns: u128,
+    pub journal_decode_ns: u128,
     pub state_cache_hits: u64,
     pub state_cache_misses: u64,
     pub state_load_ns: u128,
+    pub hydrate_blob_count: u64,
+    pub hydrate_blob_bytes: u64,
+    pub hydrate_blob_ns: u128,
+    pub tick_ns: u128,
+    pub flush_projection_ns: u128,
 }
 
 fn def_kind_allowed(kind: &str, filter: Option<&std::collections::HashSet<&str>>) -> bool {
@@ -1774,7 +1781,7 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     pub(crate) fn hydrate_externalized_cbor(
-        &self,
+        &mut self,
         inline: Vec<u8>,
         cbor_ref: Option<&aos_air_types::HashRef>,
         size: Option<u64>,
@@ -1786,6 +1793,7 @@ impl<S: Store + 'static> Kernel<S> {
         };
         let hash = Hash::from_hex_str(cbor_ref.as_str())
             .map_err(|err| KernelError::Journal(format!("invalid {field}_ref: {err}")))?;
+        let started = std::time::Instant::now();
         let bytes = self.store.get_blob(hash).map_err(|err| {
             KernelError::Journal(format!(
                 "missing_cas_dependency: {} ({} ref={})",
@@ -1812,6 +1820,13 @@ impl<S: Store + 'static> Kernel<S> {
                     field, expected_hash, actual_ref
                 )));
             }
+        }
+        if let Some(metrics) = self.replay_metrics.as_mut() {
+            metrics.hydrate_blob_count = metrics.hydrate_blob_count.saturating_add(1);
+            metrics.hydrate_blob_bytes = metrics
+                .hydrate_blob_bytes
+                .saturating_add(bytes.len() as u64);
+            metrics.hydrate_blob_ns += started.elapsed().as_nanos();
         }
         Ok(bytes)
     }

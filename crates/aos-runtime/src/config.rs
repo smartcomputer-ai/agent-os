@@ -25,14 +25,23 @@ impl Default for WorldConfig {
 
 impl WorldConfig {
     pub fn from_env() -> Self {
+        let fallback = std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join(".aos").join("cache").join("wasmtime"));
+        Self::from_env_with_fallback_module_cache_dir(fallback)
+    }
+
+    pub fn from_env_with_fallback_module_cache_dir(
+        fallback_module_cache_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         let mut cfg = Self::default();
         if let Ok(raw) = std::env::var("AOS_MODULE_CACHE_DIR") {
             let trimmed = raw.trim();
             if !trimmed.is_empty() {
                 cfg.module_cache_dir = Some(std::path::PathBuf::from(trimmed));
             }
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cfg.module_cache_dir = Some(cwd.join(".aos").join("cache").join("wasmtime"));
+        } else {
+            cfg.module_cache_dir = fallback_module_cache_dir;
         }
         if matches!(
             std::env::var("AOS_STRICT_EFFECT_BINDINGS")
@@ -114,6 +123,28 @@ mod tests {
         assert_eq!(
             cfg.module_cache_dir,
             Some(std::path::PathBuf::from("/tmp/aos-test-cache"))
+        );
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("AOS_MODULE_CACHE_DIR", value),
+                None => std::env::remove_var("AOS_MODULE_CACHE_DIR"),
+            }
+        }
+    }
+
+    #[test]
+    fn world_config_from_env_uses_fallback_module_cache_dir_when_env_missing() {
+        let _lock = env_lock().lock().unwrap();
+        let previous = std::env::var("AOS_MODULE_CACHE_DIR").ok();
+        unsafe {
+            std::env::remove_var("AOS_MODULE_CACHE_DIR");
+        }
+        let cfg = WorldConfig::from_env_with_fallback_module_cache_dir(Some(
+            std::path::PathBuf::from("/tmp/aos-fallback-cache"),
+        ));
+        assert_eq!(
+            cfg.module_cache_dir,
+            Some(std::path::PathBuf::from("/tmp/aos-fallback-cache"))
         );
         unsafe {
             match previous {
