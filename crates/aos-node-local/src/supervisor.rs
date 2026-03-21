@@ -375,18 +375,16 @@ impl LocalSupervisor {
     }
 
     fn ensure_loaded(&self, universe: UniverseId, world: WorldId) -> Result<(), LocalNodeError> {
-        {
-            let state = self.state.lock().expect("local supervisor mutex poisoned");
-            if state.worlds.contains_key(&(universe, world)) {
-                return Ok(());
-            }
-        }
         let persistence: Arc<dyn WorldStore> = self.store.clone();
         let resolver = Arc::new(LocalSecretResolver::new(
             Arc::clone(&self.store),
             universe,
             self.secret_config.clone(),
         ));
+        let mut state = self.state.lock().expect("local supervisor mutex poisoned");
+        if state.worlds.contains_key(&(universe, world)) {
+            return Ok(());
+        }
         let hot = HotWorld::open(
             Arc::clone(&persistence),
             universe,
@@ -399,7 +397,6 @@ impl LocalSupervisor {
             },
             Some(self.shared_cache.clone()),
         )?;
-        let mut state = self.state.lock().expect("local supervisor mutex poisoned");
         state.worlds.insert((universe, world), hot);
         Ok(())
     }
