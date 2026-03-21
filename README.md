@@ -1,8 +1,8 @@
 # AgentOS
 
-**🌞 A runtime for self-evolving agents.**
+**🌞 An agent harness for self-evolving agents.**
 
-AgentOS is a runtime where agents can safely propose, simulate, and apply changes to their own code, policies, and workflows, all under governance, with full audit trails. Every external action produces a signed receipt. Every state change is replayable from an event log.
+AgentOS is an agent harness designed for autonomous self-modification of both the agent and the harness around it. Agents can safely propose, simulate, and apply changes to their own code, policies, workflows, and runtime configuration under governance, with full audit trails. Every external action produces a signed receipt. Every state change is replayable from an event log.
 
 ## Why AgentOS
 
@@ -39,7 +39,63 @@ Start here:
 
 For implementation guidance, project structure, and coding conventions, see **[AGENTS.md](AGENTS.md)**.
 
-## Running the Examples
+## Try AOS
+
+AOS is not quite ready for daily use yet, but it is close. The main proof of concept today is the `Demiurge` agent. The repository also includes the `aos-smoke` crate, which exercises and demonstrates core AOS capabilities.
+
+Before you get started, make sure you have the Rust toolchain installed.
+
+### Try Demiurge Locally
+
+`worlds/demiurge` is the task-driven local agent workflow in this repo. A simple happy path is:
+
+If you want live LLM calls, set a provider API key first. You can either export it in your shell or
+put it in `worlds/demiurge/.env` so `--sync-secrets` can import it. For example:
+
+```bash
+export OPENAI_API_KEY=...
+# or
+export ANTHROPIC_API_KEY=...
+```
+
+1. Build the local debug binaries and workflow artifacts:
+
+```bash
+rustup target add wasm32-unknown-unknown
+
+cargo build -p aos-cli -p aos-node-local
+cargo build -p aos-sys --target wasm32-unknown-unknown
+cargo build -p aos-agent --bin session_workflow --target wasm32-unknown-unknown
+```
+
+2. In terminal 1, start the local node on the Demiurge world root:
+
+```bash
+target/debug/aos local up --root worlds/demiurge --select
+```
+
+3. In terminal 2, create and select the world, build from the local root, and sync secrets from `worlds/demiurge/aos.sync.json`:
+
+```bash
+target/debug/aos world create \
+  --local-root worlds/demiurge \
+  --handle demiurge \
+  --force-build \
+  --select \
+  --sync-secrets \
+  --verbose
+```
+
+4. Submit a task:
+
+```bash
+worlds/demiurge/scripts/demiurge_task.sh \
+  --task "Summarize what this project is about, start with the README."
+```
+
+For more details, see [`worlds/demiurge/README.md`](worlds/demiurge/README.md).
+
+### Running the Examples
 
 All ladder demos live under `crates/aos-smoke/fixtures/` and share the `aos-smoke` CLI.
 
@@ -49,21 +105,11 @@ All ladder demos live under `crates/aos-smoke/fixtures/` and share the `aos-smok
 - Force a rebuild of workflow WASM/artifacts: add `--force-build`, e.g. `cargo run -p aos-smoke -- --force-build counter`
 - Increase logging by exporting `RUST_LOG=debug` before invoking the CLI if you need cache/build insight
 
-## Workspaces and Sync
-
-AgentOS stores code and artifacts in **workspaces**: versioned trees managed by the built-in `sys/Workspace@1` workflow. Use `aos ws` for inspection/editing and `aos push`/`aos pull` to sync local directories via `aos.sync.json`.
-
-Examples:
-- `aos ws ls`
-- `aos ws cat alpha/README.txt`
-- `aos push`
-- `aos pull`
-
 ## Current Status
 
 AgentOS is in active development. We're building the architecture in the open and invite feedback and collaboration.
 
-This version of AgentOS replaces our first attempt, which can be [found here](https://github.com/smartcomputer-ai/agent-os/tree/pre-next), and which was quite different in nature but same in philosphy.
+This version of AgentOS replaces our first attempt, which can be [found here](https://github.com/smartcomputer-ai/agent-os/tree/pre-next). That version was quite different in form, but similar in philosophy.
 
 ## Contributing
 

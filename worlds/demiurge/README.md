@@ -29,6 +29,15 @@ Optional `config` fields:
 
 ## Give It A Spin
 
+If you want live LLM calls, set a provider API key first. You can either export it in your shell or
+put it in `worlds/demiurge/.env` so `--sync-secrets` can import it. For example:
+
+```bash
+export OPENAI_API_KEY=...
+# or
+export ANTHROPIC_API_KEY=...
+```
+
 From the repo root, build the local debug binaries and workflow artifacts once:
 
 ```bash
@@ -38,9 +47,6 @@ cargo build -p aos-cli -p aos-node-local
 cargo build -p aos-sys --target wasm32-unknown-unknown
 cargo build -p aos-agent --bin session_workflow --target wasm32-unknown-unknown
 ```
-
-If you want live LLM calls, make sure `worlds/demiurge/.env` contains the provider key you want
-to sync, for example `OPENAI_API_KEY=...`.
 
 In terminal 1, start the local node against the Demiurge world root:
 
