@@ -21,7 +21,7 @@ const DEFAULT_LOCAL_UNIVERSE: &str = "local";
 const DEFAULT_LOCAL_BIND: &str = "127.0.0.1:9080";
 
 #[derive(Args, Debug)]
-#[command(about = "Manage the daemonized local AgentOS node")]
+#[command(about = "Manage the local AgentOS node")]
 pub(crate) struct LocalArgs {
     #[command(subcommand)]
     cmd: LocalCommand,
@@ -59,9 +59,9 @@ struct LocalUpArgs {
     /// Make the local profile current after ensuring it exists.
     #[arg(long)]
     select: bool,
-    /// Run the local node in the foreground with inherited stdio.
+    /// Run the local node in the background and return after startup.
     #[arg(long)]
-    foreground: bool,
+    background: bool,
     /// Milliseconds to wait for health before considering startup failed.
     #[arg(long, default_value_t = 10_000)]
     wait_ms: u64,
@@ -191,7 +191,7 @@ async fn handle_up(global: &GlobalOpts, output: OutputOpts, args: LocalUpArgs) -
     )?;
 
     let binary = resolve_local_binary()?;
-    if args.foreground {
+    if !args.background {
         let mut child = ProcessCommand::new(&binary)
             .arg("serve")
             .arg("--state-root")

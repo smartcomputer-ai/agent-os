@@ -64,6 +64,16 @@ fn local_help_lists_lifecycle_commands() {
 }
 
 #[test]
+fn local_up_help_lists_background_flag_only() {
+    let mut cmd = cargo_bin_cmd!("aos");
+    cmd.args(["local", "up", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--background"))
+        .stdout(predicate::str::contains("--foreground").not());
+}
+
+#[test]
 fn local_status_reports_stopped_without_runtime_state() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let mut cmd = cargo_bin_cmd!("aos");
