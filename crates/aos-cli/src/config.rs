@@ -140,7 +140,7 @@ mod tests {
     fn legacy_profile_without_kind_defaults_to_remote() {
         let profile: ProfileConfig = serde_json::from_str(
             r#"{
-                "api": "http://127.0.0.1:9080",
+                "api": "http://127.0.0.1:9010",
                 "universe": "local"
             }"#,
         )
@@ -152,7 +152,7 @@ mod tests {
     fn profile_kind_serializes_as_snake_case() {
         let profile = ProfileConfig {
             kind: ProfileKind::Local,
-            api: "http://127.0.0.1:9080".into(),
+            api: "http://127.0.0.1:9010".into(),
             token: None,
             token_env: None,
             headers: Default::default(),

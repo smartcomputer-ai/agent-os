@@ -804,8 +804,8 @@ mod serde_bytes_opt {
 mod tests {
     use super::*;
     use crate::MemStore;
+    use crate::journal::Journal;
     use crate::journal::JournalKind;
-    use crate::journal::mem::MemJournal;
     use aos_air_types::{HashRef, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
     use aos_effects::{EffectStreamFrame, ReceiptStatus};
     use std::sync::Arc;
@@ -837,7 +837,7 @@ mod tests {
         emitted_at_seq: u64,
     ) -> Kernel<MemStore> {
         let store = Arc::new(MemStore::default());
-        let journal = Box::new(MemJournal::new());
+        let journal = Journal::new();
         let mut kernel = crate::world::test_support::kernel_with_store_and_journal(store, journal);
         install_stream_module(&mut kernel, module_name);
         let context = WorkflowEffectContext::new(

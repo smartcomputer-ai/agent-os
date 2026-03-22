@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 
-use aos_node_local::{BatchArgs, LocalControl, LocalHttpConfig, run_batch, serve};
-use aos_sqlite::LocalStatePaths;
+use aos_node_local::{BatchArgs, LocalControl, LocalHttpConfig, LocalStatePaths, run_batch, serve};
 
 const ABOUT: &str = "Run the local AgentOS node or execute local persisted-world batch commands.";
 
@@ -28,7 +27,7 @@ struct ServeArgs {
     #[arg(long, env = "AOS_LOCAL_STATE_ROOT", default_value = ".aos")]
     state_root: PathBuf,
 
-    #[arg(long, env = "AOS_LOCAL_BIND", default_value = "127.0.0.1:9080")]
+    #[arg(long, env = "AOS_LOCAL_BIND", default_value = "127.0.0.1:9010")]
     bind: std::net::SocketAddr,
 }
 

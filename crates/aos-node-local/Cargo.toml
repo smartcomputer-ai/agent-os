@@ -13,7 +13,6 @@ aos-effects = { path = "../aos-effects" }
 aos-kernel = { path = "../aos-kernel" }
 aos-node = { path = "../aos-node" }
 aos-runtime = { path = "../aos-runtime" }
-aos-sqlite = { path = "../aos-sqlite" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 
 anyhow = "1"
@@ -21,6 +20,7 @@ axum = { version = "0.8.8", features = ["json"] }
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 hex = "0.4"
+rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 serde_cbor = "0.11"

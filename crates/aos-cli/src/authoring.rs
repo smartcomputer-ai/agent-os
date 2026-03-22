@@ -5,13 +5,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::{AirNode, Manifest};
+use aos_authoring::bundle::import_genesis;
 use aos_authoring::{
-    SyncConfig, WorldBundle, build_bundle_from_local_world, build_patch_document,
+    SyncConfig, WorldBundle, build_bundle_from_local_world_ephemeral, build_patch_document,
     load_all_sync_secret_values, load_sync_config,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::Store;
-use aos_sqlite::FsCas;
 use aos_sys::{WorkspaceCommit, WorkspaceCommitMeta};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -20,7 +20,7 @@ use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::client::ApiClient;
-use crate::commands::common::encode_path_segment;
+use crate::commands::common::{encode_path_segment, universe_id_for_world};
 use crate::workspace::{
     WorkspaceRef, decode_relative_path, encode_relative_path, join_workspace_path,
 };
@@ -29,6 +29,10 @@ const LIST_LIMIT: u64 = 1_000;
 const MODE_FILE_DEFAULT: u64 = 0o100644;
 const MODE_FILE_EXEC: u64 = 0o100755;
 const WORKSPACE_EVENT: &str = "sys/WorkspaceCommit@1";
+
+fn with_universe(path: &str, universe_id: &str) -> String {
+    format!("{path}?universe_id={universe_id}")
+}
 
 #[derive(Debug, Clone)]
 pub struct LocalWorldDirs {
@@ -125,28 +129,28 @@ pub fn load_sync_entries(
 pub fn build_bundle_from_world(
     local_root: Option<&Path>,
     force_build: bool,
-) -> Result<(FsCas, WorldBundle, Vec<String>)> {
+) -> Result<(aos_kernel::MemStore, WorldBundle, Vec<String>)> {
     let dirs = resolve_local_dirs(local_root)?;
-    build_bundle_from_local_world(&dirs.root, force_build)
+    build_bundle_from_local_world_ephemeral(&dirs.root, force_build)
 }
 
 pub async fn upload_bundle(
     client: &ApiClient,
-    universe_id: &str,
     store: &impl Store,
     bundle: &WorldBundle,
     mut warnings: Vec<String>,
     source_dirs: Option<&LocalWorldDirs>,
 ) -> Result<UploadedBundle> {
+    let genesis = import_genesis(store, bundle).context("prepare genesis manifest for upload")?;
     for schema in &bundle.schemas {
         client.log(format!("uploading schema {}", schema.name));
-        upload_node(client, universe_id, &AirNode::Defschema(schema.clone()))
+        upload_node(client, &AirNode::Defschema(schema.clone()))
             .await
             .with_context(|| format!("upload schema {} to CAS", schema.name))?;
     }
     for module in &bundle.modules {
         client.log(format!("uploading module definition {}", module.name));
-        upload_node(client, universe_id, &AirNode::Defmodule(module.clone()))
+        upload_node(client, &AirNode::Defmodule(module.clone()))
             .await
             .with_context(|| format!("upload module definition {} to CAS", module.name))?;
         let wasm_hash = Hash::from_hex_str(module.wasm_hash.as_str())
@@ -163,14 +167,11 @@ pub async fn upload_bundle(
             wasm_hash.to_hex()
         ));
         client
-            .put_bytes(
-                &format!("/v1/universes/{universe_id}/cas/blobs/{}", wasm_hash.to_hex()),
-                bytes,
-            )
+            .put_bytes(&format!("/v1/cas/blobs/{}", wasm_hash.to_hex()), bytes)
             .await
             .with_context(|| {
                 format!(
-                    "upload wasm blob for module {} from {} to /v1/universes/{universe_id}/cas/blobs/{}",
+                    "upload wasm blob for module {} from {} to /v1/cas/blobs/{}",
                     module.name,
                     source_hint,
                     wasm_hash.to_hex()
@@ -179,33 +180,33 @@ pub async fn upload_bundle(
     }
     for cap in &bundle.caps {
         client.log(format!("uploading capability {}", cap.name));
-        upload_node(client, universe_id, &AirNode::Defcap(cap.clone()))
+        upload_node(client, &AirNode::Defcap(cap.clone()))
             .await
             .with_context(|| format!("upload capability {} to CAS", cap.name))?;
     }
     for policy in &bundle.policies {
         client.log(format!("uploading policy {}", policy.name));
-        upload_node(client, universe_id, &AirNode::Defpolicy(policy.clone()))
+        upload_node(client, &AirNode::Defpolicy(policy.clone()))
             .await
             .with_context(|| format!("upload policy {} to CAS", policy.name))?;
     }
     for effect in &bundle.effects {
         client.log(format!("uploading effect {}", effect.name));
-        upload_node(client, universe_id, &AirNode::Defeffect(effect.clone()))
+        upload_node(client, &AirNode::Defeffect(effect.clone()))
             .await
             .with_context(|| format!("upload effect {} to CAS", effect.name))?;
     }
     for secret in &bundle.secrets {
         client.log(format!("uploading secret {}", secret.name));
-        upload_node(client, universe_id, &AirNode::Defsecret(secret.clone()))
+        upload_node(client, &AirNode::Defsecret(secret.clone()))
             .await
             .with_context(|| format!("upload secret {} to CAS", secret.name))?;
     }
     client.log("uploading manifest");
-    upload_node(client, universe_id, &bundle.manifest)
+    let _ = upload_blob(client, &genesis.manifest_bytes)
         .await
-        .context("upload manifest to CAS")?;
-    let manifest_hash = manifest_hash(&bundle.manifest)?;
+        .context("upload genesis manifest to CAS")?;
+    let manifest_hash = genesis.manifest_hash;
     if bundle.modules.is_empty() {
         warnings.push("manifest contains no modules".into());
     }
@@ -217,7 +218,7 @@ pub async fn upload_bundle(
 
 pub async fn sync_hosted_secrets(
     client: &ApiClient,
-    universe_id: &str,
+    universe_id: Option<&str>,
     local_root: Option<&Path>,
     map: Option<&Path>,
     actor: Option<&str>,
@@ -235,9 +236,12 @@ pub async fn sync_hosted_secrets(
         ));
         let binding = client
             .put_json(
-                &format!(
-                    "/v1/universes/{universe_id}/secrets/bindings/{}",
-                    encode_path_segment(&value.binding)
+                &with_optional_universe(
+                    &format!(
+                        "/v1/secrets/bindings/{}",
+                        encode_path_segment(&value.binding)
+                    ),
+                    universe_id,
                 ),
                 &hosted_secret_binding_body(actor),
             )
@@ -247,10 +251,13 @@ pub async fn sync_hosted_secrets(
         if let Some(version) = latest_version {
             let existing = client
                 .get_json(
-                    &format!(
-                        "/v1/universes/{universe_id}/secrets/bindings/{}/versions/{}",
-                        encode_path_segment(&value.binding),
-                        version
+                    &with_optional_universe(
+                        &format!(
+                            "/v1/secrets/bindings/{}/versions/{}",
+                            encode_path_segment(&value.binding),
+                            version
+                        ),
+                        universe_id,
                     ),
                     &[],
                 )
@@ -275,9 +282,12 @@ pub async fn sync_hosted_secrets(
 
         let put = client
             .post_json(
-                &format!(
-                    "/v1/universes/{universe_id}/secrets/bindings/{}/versions",
-                    encode_path_segment(&value.binding)
+                &with_optional_universe(
+                    &format!(
+                        "/v1/secrets/bindings/{}/versions",
+                        encode_path_segment(&value.binding)
+                    ),
+                    universe_id,
                 ),
                 &serde_json::json!({
                     "plaintext_b64": BASE64_STANDARD.encode(&value.plaintext),
@@ -310,16 +320,16 @@ fn hosted_secret_binding_body(actor: Option<&str>) -> Value {
     })
 }
 
-pub async fn fetch_remote_manifest(
-    client: &ApiClient,
-    universe_id: &str,
-    world_id: &str,
-) -> Result<RemoteManifest> {
+fn with_optional_universe(path: &str, universe_id: Option<&str>) -> String {
+    match universe_id {
+        Some(universe_id) => format!("{path}?universe_id={universe_id}"),
+        None => path.to_string(),
+    }
+}
+
+pub async fn fetch_remote_manifest(client: &ApiClient, world_id: &str) -> Result<RemoteManifest> {
     let response = client
-        .get_json(
-            &format!("/v1/universes/{universe_id}/worlds/{world_id}/manifest"),
-            &[],
-        )
+        .get_json(&format!("/v1/worlds/{world_id}/manifest"), &[])
         .await?;
     let manifest: Manifest = serde_json::from_value(
         response
@@ -349,24 +359,23 @@ pub fn build_patch(remote: &RemoteManifest, bundle: &WorldBundle) -> Result<Valu
 
 pub async fn upload_patch_json(
     client: &ApiClient,
-    universe_id: &str,
+    world_id: &str,
     patch: &Value,
 ) -> Result<String> {
     let bytes = serde_json::to_vec(patch).context("encode patch document json")?;
-    upload_blob(client, universe_id, &bytes).await
+    upload_blob_for_world(client, world_id, &bytes).await
 }
 
 pub async fn upload_patch_bytes(
     client: &ApiClient,
-    universe_id: &str,
+    world_id: &str,
     bytes: &[u8],
 ) -> Result<String> {
-    upload_blob(client, universe_id, bytes).await
+    upload_blob_for_world(client, world_id, bytes).await
 }
 
 pub async fn sync_workspace_push(
     client: &ApiClient,
-    universe_id: &str,
     world_id: &str,
     entry: &SyncEntry,
     prune: bool,
@@ -380,13 +389,14 @@ pub async fn sync_workspace_push(
         ));
     }
     let local = collect_local_files(&entry.dir, &entry.ignore, parsed.path.as_deref())?;
-    let resolved = resolve_workspace(client, universe_id, world_id, &parsed).await?;
+    let resolved = resolve_workspace(client, world_id, &parsed).await?;
+    let universe_id = universe_id_for_world(client, world_id).await?;
     let base_root = if let Some(root) = resolved.root_hash.clone() {
         root
     } else {
         client
             .post_json(
-                &format!("/v1/universes/{universe_id}/workspace/roots"),
+                &with_universe("/v1/workspace/roots", &universe_id),
                 &Value::Null,
             )
             .await?
@@ -395,7 +405,7 @@ pub async fn sync_workspace_push(
             .ok_or_else(|| anyhow!("empty root response missing root_hash"))?
             .to_string()
     };
-    let remote = list_remote_files(client, universe_id, &base_root, parsed.path.as_deref()).await?;
+    let remote = list_remote_files(client, world_id, &base_root, parsed.path.as_deref()).await?;
     let mut operations = Vec::new();
 
     for (path, file) in &local {
@@ -424,13 +434,9 @@ pub async fn sync_workspace_push(
         }
     }
 
-    let annotation_targets = build_annotation_targets(
-        client,
-        universe_id,
-        &entry.annotations,
-        parsed.path.as_deref(),
-    )
-    .await?;
+    let annotation_targets =
+        build_annotation_targets(client, world_id, &entry.annotations, parsed.path.as_deref())
+            .await?;
     for target in annotation_targets {
         operations.push(serde_json::json!({
             "op": "set_annotations",
@@ -439,7 +445,7 @@ pub async fn sync_workspace_push(
         }));
     }
     if let Some(message) = message {
-        let hash = upload_blob(client, universe_id, message.as_bytes()).await?;
+        let hash = upload_blob_for_world(client, world_id, message.as_bytes()).await?;
         operations.push(serde_json::json!({
             "op": "set_annotations",
             "path": parsed.path,
@@ -454,7 +460,10 @@ pub async fn sync_workspace_push(
     } else {
         client
             .post_json(
-                &format!("/v1/universes/{universe_id}/workspace/roots/{base_root}/apply"),
+                &with_universe(
+                    &format!("/v1/workspace/roots/{base_root}/apply"),
+                    &universe_id,
+                ),
                 &serde_json::json!({ "operations": operations }),
             )
             .await?
@@ -476,7 +485,7 @@ pub async fn sync_workspace_push(
     let payload = serde_cbor::to_vec(&event).context("encode workspace commit event")?;
     let response = client
         .post_json(
-            &format!("/v1/universes/{universe_id}/worlds/{world_id}/events"),
+            &format!("/v1/worlds/{world_id}/events"),
             &serde_json::json!({
                 "schema": WORKSPACE_EVENT,
                 "value_b64": BASE64_STANDARD.encode(payload),
@@ -493,17 +502,17 @@ pub async fn sync_workspace_push(
 
 pub async fn sync_workspace_pull(
     client: &ApiClient,
-    universe_id: &str,
     world_id: &str,
     entry: &SyncEntry,
     prune: bool,
 ) -> Result<Value> {
     let parsed = crate::workspace::parse_workspace_ref(&entry.reference)?;
-    let resolved = resolve_workspace(client, universe_id, world_id, &parsed).await?;
+    let resolved = resolve_workspace(client, world_id, &parsed).await?;
     let root_hash = resolved
         .root_hash
         .ok_or_else(|| anyhow!("workspace '{}' does not exist", entry.reference))?;
-    let remote = list_remote_files(client, universe_id, &root_hash, parsed.path.as_deref()).await?;
+    let remote = list_remote_files(client, world_id, &root_hash, parsed.path.as_deref()).await?;
+    let universe_id = universe_id_for_world(client, world_id).await?;
     fs::create_dir_all(&entry.dir)
         .with_context(|| format!("create pull directory {}", entry.dir.display()))?;
 
@@ -516,10 +525,13 @@ pub async fn sync_workspace_pull(
                 .with_context(|| format!("create pull directory {}", parent.display()))?;
         }
         let bytes = client
-            .get_bytes(
-                &format!("/v1/universes/{universe_id}/workspace/roots/{root_hash}/bytes"),
-                &[("path", Some(path.clone()))],
-            )
+            .get_bytes(&format!("/v1/workspace/roots/{root_hash}/bytes"), &{
+                let query = vec![
+                    ("universe_id", Some(universe_id.clone())),
+                    ("path", Some(path.clone())),
+                ];
+                query
+            })
             .await?;
         fs::write(&dest, bytes).with_context(|| format!("write {}", dest.display()))?;
         pulled.push(dest.display().to_string());
@@ -550,13 +562,12 @@ struct WorkspaceResolution {
 
 async fn resolve_workspace(
     client: &ApiClient,
-    universe_id: &str,
     world_id: &str,
     reference: &WorkspaceRef,
 ) -> Result<WorkspaceResolution> {
     let response = client
         .get_json(
-            &format!("/v1/universes/{universe_id}/worlds/{world_id}/workspace/resolve"),
+            &format!("/v1/worlds/{world_id}/workspace/resolve"),
             &[
                 ("workspace", Some(reference.workspace.clone())),
                 ("version", reference.version.map(|value| value.to_string())),
@@ -574,17 +585,19 @@ async fn resolve_workspace(
 
 async fn list_remote_files(
     client: &ApiClient,
-    universe_id: &str,
+    world_id: &str,
     root_hash: &str,
     base_path: Option<&str>,
 ) -> Result<HashMap<String, RemoteFile>> {
+    let universe_id = universe_id_for_world(client, world_id).await?;
     let mut cursor = None;
     let mut out = HashMap::new();
     loop {
         let response = client
             .get_json(
-                &format!("/v1/universes/{universe_id}/workspace/roots/{root_hash}/entries"),
+                &format!("/v1/workspace/roots/{root_hash}/entries"),
                 &[
+                    ("universe_id", Some(universe_id.clone())),
                     ("path", base_path.map(ToString::to_string)),
                     ("scope", Some("subtree".into())),
                     ("cursor", cursor.clone()),
@@ -685,7 +698,7 @@ fn collect_local_files(
 
 async fn build_annotation_targets(
     client: &ApiClient,
-    universe_id: &str,
+    world_id: &str,
     annotations: &BTreeMap<String, BTreeMap<String, Value>>,
     base_path: Option<&str>,
 ) -> Result<Vec<AnnotationTarget>> {
@@ -703,7 +716,7 @@ async fn build_annotation_targets(
                 Value::String(text) => text.as_bytes().to_vec(),
                 other => to_canonical_cbor(other).context("encode annotation value")?,
             };
-            let hash = upload_blob(client, universe_id, &bytes).await?;
+            let hash = upload_blob_for_world(client, world_id, &bytes).await?;
             patch.insert(key.clone(), Some(hash));
         }
         if !patch.is_empty() {
@@ -716,35 +729,29 @@ async fn build_annotation_targets(
     Ok(out)
 }
 
-async fn upload_blob(client: &ApiClient, universe_id: &str, bytes: &[u8]) -> Result<String> {
+async fn upload_blob(client: &ApiClient, bytes: &[u8]) -> Result<String> {
     let hash = Hash::of_bytes(bytes).to_hex();
     client
-        .put_bytes(
-            &format!("/v1/universes/{universe_id}/cas/blobs/{hash}"),
-            bytes.to_vec(),
-        )
+        .put_bytes(&format!("/v1/cas/blobs/{hash}"), bytes.to_vec())
         .await?;
     Ok(hash)
 }
 
-async fn upload_node<T: serde::Serialize>(
-    client: &ApiClient,
-    universe_id: &str,
-    value: &T,
-) -> Result<()> {
-    let bytes = to_canonical_cbor(value).context("encode node to canonical cbor")?;
-    let hash = Hash::of_bytes(&bytes).to_hex();
-    client
-        .put_bytes(
-            &format!("/v1/universes/{universe_id}/cas/blobs/{hash}"),
-            bytes,
-        )
-        .await?;
-    Ok(())
+async fn upload_blob_for_world(client: &ApiClient, world_id: &str, bytes: &[u8]) -> Result<String> {
+    let hash = Hash::of_bytes(bytes).to_hex();
+    let universe_id = universe_id_for_world(client, world_id).await?;
+    let path = with_universe(&format!("/v1/cas/blobs/{hash}"), &universe_id);
+    if client.head_exists(&path).await? {
+        return Ok(hash);
+    }
+    client.put_bytes(&path, bytes.to_vec()).await?;
+    Ok(hash)
 }
 
-fn manifest_hash(manifest: &Manifest) -> Result<String> {
-    Ok(Hash::of_bytes(&to_canonical_cbor(manifest)?).to_hex())
+async fn upload_node<T: serde::Serialize>(client: &ApiClient, value: &T) -> Result<()> {
+    let bytes = to_canonical_cbor(value).context("encode node to canonical cbor")?;
+    let _ = upload_blob(client, &bytes).await?;
+    Ok(())
 }
 
 fn module_source_hint(module_name: &str, source_dirs: Option<&LocalWorldDirs>) -> String {

@@ -102,6 +102,8 @@ Crates keep deterministic core small and effectful code at the edges:
 ## Other Notes
 - When asked how many lines of code, use `cloc $(git ls-files)`
 - If the user complains that the computer goes to sleep tell him to use `caffeinate -i` 
+- Python work in this monorepo should use the shared repo env at `.venv`, not per-project virtualenvs.
+- Bootstrap/update that env with `./setup-python.sh`; it installs the local `aos-harness-py` package via `maturin develop`.
 
 
 ## Examples Ladder

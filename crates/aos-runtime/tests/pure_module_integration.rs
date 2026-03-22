@@ -4,7 +4,7 @@ mod helpers;
 use std::sync::Arc;
 
 use aos_kernel::Kernel;
-use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::journal::Journal;
 use aos_wasm_abi::{ABI_VERSION, PureContext, PureInput, PureOutput};
 use helpers::fixtures::{self, TestStore};
 
@@ -40,8 +40,7 @@ async fn pure_module_integration_flow() {
         ],
     );
 
-    let mut kernel =
-        Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
+    let mut kernel = Kernel::from_loaded_manifest(store.clone(), manifest, Journal::new()).unwrap();
 
     let input_payload = serde_cbor::to_vec(&serde_json::json!({ "value": "hi" })).unwrap();
     let ctx = PureContext {

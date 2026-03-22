@@ -14,7 +14,7 @@ use crate::workspace::parse_workspace_ref;
 
 use super::common::{
     list_workspace_names, print_workspace_cat, resolve_selected_world, resolve_target,
-    resolve_workspace_ref,
+    resolve_workspace_ref, universe_query_for_world,
 };
 
 #[derive(Args, Debug)]
@@ -141,39 +141,40 @@ pub(crate) async fn handle(
 ) -> Result<()> {
     let target = resolve_target(global)?;
     let client = ApiClient::new(&target)?;
-    let (universe, world) = resolve_selected_world(&client, &target).await?;
+    let world = resolve_selected_world(&target)?;
     match args.cmd {
         WorkspaceCommand::Resolve(args) => {
             let parsed = parse_workspace_ref(&args.reference)?;
-            let data = resolve_workspace_ref(&client, &universe, &world, &parsed).await?;
+            let data = resolve_workspace_ref(&client, &world, &parsed).await?;
             print_success(output, data, None, vec![])
         }
         WorkspaceCommand::Ls(args) => {
             let Some(reference) = args.reference.as_deref() else {
-                let data = list_workspace_names(&client, &universe, &world, args.limit).await?;
+                let data = list_workspace_names(&client, &world, args.limit).await?;
                 return print_success(output, data, None, vec![]);
             };
             let parsed = parse_workspace_ref(reference)?;
-            let resolution = resolve_workspace_ref(&client, &universe, &world, &parsed).await?;
+            let resolution = resolve_workspace_ref(&client, &world, &parsed).await?;
             let root_hash = resolution
                 .get("root_hash")
                 .and_then(Value::as_str)
                 .ok_or_else(|| anyhow!("workspace '{}' does not exist", reference))?;
             let data = client
-                .get_json(
-                    &format!("/v1/universes/{universe}/workspace/roots/{root_hash}/entries"),
-                    &[
+                .get_json(&format!("/v1/workspace/roots/{root_hash}/entries"), &{
+                    let mut query = universe_query_for_world(&client, &world).await?;
+                    query.extend([
                         ("path", parsed.path),
                         ("scope", args.scope),
                         ("limit", args.limit.map(|value| value.to_string())),
-                    ],
-                )
+                    ]);
+                    query
+                })
                 .await?;
             print_success(output, data, Some(resolution), vec![])
         }
         WorkspaceCommand::Stat(args) => {
             let parsed = parse_workspace_ref(&args.reference)?;
-            let resolution = resolve_workspace_ref(&client, &universe, &world, &parsed).await?;
+            let resolution = resolve_workspace_ref(&client, &world, &parsed).await?;
             let root_hash = resolution
                 .get("root_hash")
                 .and_then(Value::as_str)
@@ -182,16 +183,17 @@ pub(crate) async fn handle(
                 .path
                 .ok_or_else(|| anyhow!("workspace stat requires a path"))?;
             let data = client
-                .get_json(
-                    &format!("/v1/universes/{universe}/workspace/roots/{root_hash}/entry"),
-                    &[("path", Some(path))],
-                )
+                .get_json(&format!("/v1/workspace/roots/{root_hash}/entry"), &{
+                    let mut query = universe_query_for_world(&client, &world).await?;
+                    query.push(("path", Some(path)));
+                    query
+                })
                 .await?;
             print_success(output, data, Some(resolution), vec![])
         }
         WorkspaceCommand::Cat(args) => {
             let parsed = parse_workspace_ref(&args.reference)?;
-            let resolution = resolve_workspace_ref(&client, &universe, &world, &parsed).await?;
+            let resolution = resolve_workspace_ref(&client, &world, &parsed).await?;
             let root_hash = resolution
                 .get("root_hash")
                 .and_then(Value::as_str)
@@ -200,10 +202,11 @@ pub(crate) async fn handle(
                 .path
                 .ok_or_else(|| anyhow!("workspace cat requires a path"))?;
             let bytes = client
-                .get_bytes(
-                    &format!("/v1/universes/{universe}/workspace/roots/{root_hash}/bytes"),
-                    &[("path", Some(path))],
-                )
+                .get_bytes(&format!("/v1/workspace/roots/{root_hash}/bytes"), &{
+                    let mut query = universe_query_for_world(&client, &world).await?;
+                    query.push(("path", Some(path)));
+                    query
+                })
                 .await?;
             print_workspace_cat(
                 output,
@@ -216,24 +219,25 @@ pub(crate) async fn handle(
         }
         WorkspaceCommand::Ann(args) => {
             let parsed = parse_workspace_ref(&args.reference)?;
-            let resolution = resolve_workspace_ref(&client, &universe, &world, &parsed).await?;
+            let resolution = resolve_workspace_ref(&client, &world, &parsed).await?;
             let root_hash = resolution
                 .get("root_hash")
                 .and_then(Value::as_str)
                 .ok_or_else(|| anyhow!("workspace '{}' does not exist", args.reference))?;
             let data = client
-                .get_json(
-                    &format!("/v1/universes/{universe}/workspace/roots/{root_hash}/annotations"),
-                    &[("path", parsed.path)],
-                )
+                .get_json(&format!("/v1/workspace/roots/{root_hash}/annotations"), &{
+                    let mut query = universe_query_for_world(&client, &world).await?;
+                    query.push(("path", parsed.path));
+                    query
+                })
                 .await?;
             print_success(output, data, Some(resolution), vec![])
         }
         WorkspaceCommand::Diff(args) => {
             let a = parse_workspace_ref(&args.ref_a)?;
             let b = parse_workspace_ref(&args.ref_b)?;
-            let a_resolution = resolve_workspace_ref(&client, &universe, &world, &a).await?;
-            let b_resolution = resolve_workspace_ref(&client, &universe, &world, &b).await?;
+            let a_resolution = resolve_workspace_ref(&client, &world, &a).await?;
+            let b_resolution = resolve_workspace_ref(&client, &world, &b).await?;
             let root_a = a_resolution
                 .get("root_hash")
                 .and_then(Value::as_str)
@@ -244,7 +248,15 @@ pub(crate) async fn handle(
                 .ok_or_else(|| anyhow!("workspace '{}' does not exist", args.ref_b))?;
             let data = client
                 .post_json(
-                    &format!("/v1/universes/{universe}/workspace/diffs"),
+                    &format!(
+                        "/v1/workspace/diffs?universe_id={}",
+                        universe_query_for_world(&client, &world)
+                            .await?
+                            .into_iter()
+                            .next()
+                            .and_then(|(_, value)| value)
+                            .ok_or_else(|| anyhow!("world universe missing"))?
+                    ),
                     &json!({
                         "root_a": root_a,
                         "root_b": root_b,
@@ -272,7 +284,6 @@ pub(crate) async fn handle(
                 results.push(
                     sync_workspace_push(
                         &client,
-                        &universe,
                         &world,
                         entry,
                         args.prune,
@@ -293,9 +304,7 @@ pub(crate) async fn handle(
             )?;
             let mut results = Vec::new();
             for entry in &entries {
-                results.push(
-                    sync_workspace_pull(&client, &universe, &world, entry, args.prune).await?,
-                );
+                results.push(sync_workspace_pull(&client, &world, entry, args.prune).await?);
             }
             print_success(output, Value::Array(results), None, vec![])
         }

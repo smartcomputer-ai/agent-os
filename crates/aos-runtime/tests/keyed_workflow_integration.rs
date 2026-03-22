@@ -7,7 +7,7 @@ use aos_cbor::Hash;
 use aos_kernel::Kernel;
 use aos_kernel::Store;
 use aos_kernel::cell_index::CellIndex;
-use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::journal::Journal;
 use aos_kernel::journal::{JournalKind, OwnedJournalEntry};
 use aos_kernel::snapshot::KernelSnapshot;
 use aos_wasm_abi::WorkflowOutput;
@@ -69,8 +69,7 @@ async fn keyed_workflow_integration_flow() {
     };
 
     let manifest = build_manifest();
-    let mut kernel =
-        Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
+    let mut kernel = Kernel::from_loaded_manifest(store.clone(), manifest, Journal::new()).unwrap();
 
     // Two keyed events.
     let evt_payload = |id: &str| serde_cbor::to_vec(&serde_json::json!({ "id": id })).unwrap();
@@ -110,7 +109,7 @@ async fn keyed_workflow_integration_flow() {
         .rev()
         .find(|e| matches!(e.kind, JournalKind::Snapshot))
         .expect("snapshot record");
-    let journal = Box::new(MemJournal::from_entries(&entries));
+    let journal = Journal::from_entries(&entries).unwrap();
 
     // Rehydrate a fresh kernel from snapshot + shared store.
     let manifest_replay = build_manifest();

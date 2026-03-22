@@ -6,13 +6,12 @@ use anyhow::{Context, Result, anyhow, ensure};
 use aos_air_types::HashRef;
 use aos_effect_adapters::adapters::mock::{MockHttpHarness, MockHttpResponse};
 use aos_kernel::Store;
-use aos_kernel::journal::mem::MemJournal;
-use aos_kernel::journal::{CapDecisionOutcome, JournalRecord, PolicyDecisionOutcome};
+use aos_kernel::journal::{CapDecisionOutcome, Journal, JournalRecord, PolicyDecisionOutcome};
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
+use aos_node::FsCas;
 use aos_runtime::manifest_loader;
 use aos_runtime::trace::workflow_trace_summary;
 use aos_runtime::util::{is_placeholder_hash, patch_modules};
-use aos_sqlite::FsCas;
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -66,7 +65,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         example_root,
         &wasm_hash_ref,
         kernel_config.clone(),
-        Box::new(MemJournal::new()),
+        Journal::new(),
     )?;
 
     submit_event(
@@ -118,13 +117,14 @@ pub fn run(example_root: &Path) -> Result<()> {
     );
     println!("   cross-talk gate: OK (only request_id=2 released)");
 
-    let pre_restart_entries = kernel.dump_journal()?;
+    let checkpoint_entries = kernel.dump_journal()?;
+    drop(kernel);
     let mut kernel = boot_kernel(
         store.clone(),
         example_root,
         &wasm_hash_ref,
         kernel_config.clone(),
-        Box::new(MemJournal::from_entries(&pre_restart_entries)),
+        Journal::from_entries(&checkpoint_entries).context("seed replay journal")?,
     )?;
 
     let mut replay_requests = http.collect_requests(&mut kernel)?;
@@ -213,13 +213,14 @@ pub fn run(example_root: &Path) -> Result<()> {
     fs::write(&artifact_path, serde_json::to_vec_pretty(&summary)?)
         .with_context(|| format!("write {}", artifact_path.display()))?;
 
-    let final_entries = kernel.dump_journal()?;
+    let replay_entries = kernel.dump_journal()?;
+    drop(kernel);
     let replay_kernel = boot_kernel(
         store,
         example_root,
         &wasm_hash_ref,
         kernel_config,
-        Box::new(MemJournal::from_entries(&final_entries)),
+        Journal::from_entries(&replay_entries).context("seed final replay journal")?,
     )?;
     let replay_state_bytes = replay_kernel
         .workflow_state(MODULE_NAME)
@@ -258,7 +259,7 @@ fn boot_kernel<S: Store + 'static>(
     assets_root: &Path,
     wasm_hash: &HashRef,
     kernel_config: KernelConfig,
-    journal: Box<dyn aos_kernel::journal::Journal>,
+    journal: Journal,
 ) -> Result<Kernel<S>> {
     let loaded = load_manifest_for_runtime(store.clone(), assets_root, wasm_hash)?;
     Kernel::from_loaded_manifest_with_config(store, loaded, journal, kernel_config)

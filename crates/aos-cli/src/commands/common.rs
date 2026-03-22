@@ -19,7 +19,6 @@ use crate::output::{OutputOpts, print_success};
 use crate::render::decode_workspace_key_bytes;
 
 const WORKSPACE_WORKFLOW: &str = "sys/Workspace@1";
-const DEFAULT_LOCAL_UNIVERSE_SELECTOR: &str = "local";
 
 pub(crate) fn resolve_target(global: &GlobalOpts) -> Result<ApiTarget> {
     let paths = ConfigPaths::resolve(global.config.as_deref())?;
@@ -68,18 +67,6 @@ pub(crate) fn resolve_target(global: &GlobalOpts) -> Result<ApiTarget> {
         headers,
         token,
         verbose: global.verbose,
-        universe: global
-            .universe
-            .clone()
-            .or_else(|| std::env::var("AOS_FDB_UNIVERSE").ok())
-            .or_else(|| profile.as_ref().and_then(|p| p.universe.clone()))
-            .or_else(|| {
-                if kind == ProfileKind::Local {
-                    Some(DEFAULT_LOCAL_UNIVERSE_SELECTOR.to_string())
-                } else {
-                    None
-                }
-            }),
         world: global
             .world
             .clone()
@@ -99,18 +86,6 @@ fn parse_headers(values: &[String]) -> Result<BTreeMap<String, String>> {
     Ok(headers)
 }
 
-fn require_universe_selector(target: &ApiTarget) -> Result<&str> {
-    target.universe.as_deref().ok_or_else(|| {
-        if target.kind == ProfileKind::Local {
-            anyhow!(
-                "no local universe selected; run `aos local up` or `aos local use`, or pass --universe explicitly"
-            )
-        } else {
-            anyhow!("no universe selected; use --universe or `aos profile set --universe ...`")
-        }
-    })
-}
-
 fn require_world_selector(target: &ApiTarget) -> Result<&str> {
     target
         .world
@@ -118,111 +93,39 @@ fn require_world_selector(target: &ApiTarget) -> Result<&str> {
         .ok_or_else(|| anyhow!("no world selected; use --world or `aos profile set --world ...`"))
 }
 
-pub(crate) async fn resolve_selected_universe(
-    client: &ApiClient,
-    target: &ApiTarget,
-) -> Result<String> {
-    resolve_universe_selector(client, require_universe_selector(target)?).await
+pub(crate) fn resolve_selected_world(target: &ApiTarget) -> Result<String> {
+    resolve_world_selector(require_world_selector(target)?)
 }
 
-pub(crate) async fn resolve_universe_arg_or_selected(
-    client: &ApiClient,
+pub(crate) fn resolve_world_arg_or_selected(
     target: &ApiTarget,
     selector: Option<&str>,
 ) -> Result<String> {
     match selector {
-        Some(selector) => resolve_universe_selector(client, selector).await,
-        None => resolve_selected_universe(client, target).await,
+        Some(selector) => resolve_world_selector(selector),
+        None => resolve_world_selector(require_world_selector(target)?),
     }
 }
 
-pub(crate) async fn resolve_selected_world(
-    client: &ApiClient,
-    target: &ApiTarget,
-) -> Result<(String, String)> {
-    let universe = resolve_selected_universe(client, target).await?;
-    let world = resolve_world_selector(client, &universe, require_world_selector(target)?).await?;
-    Ok((universe, world))
-}
-
-pub(crate) async fn resolve_world_arg_or_selected(
-    client: &ApiClient,
-    target: &ApiTarget,
-    selector: Option<&str>,
-) -> Result<(String, String)> {
-    let universe = resolve_selected_universe(client, target).await?;
-    let world = match selector {
-        Some(selector) => resolve_world_selector(client, &universe, selector).await?,
-        None => resolve_world_selector(client, &universe, require_world_selector(target)?).await?,
-    };
-    Ok((universe, world))
-}
-
-pub(crate) async fn resolve_universe_selector(
-    client: &ApiClient,
-    selector: &str,
-) -> Result<String> {
-    if Uuid::parse_str(selector).is_ok() {
-        return Ok(selector.to_string());
-    }
-    let encoded = encode_path_segment(selector);
-    let data = client
-        .get_json(&format!("/v1/universes/by-handle/{encoded}"), &[])
-        .await
-        .context("resolve universe handle")?;
-    data.get("universe_id")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            data.get("record")
-                .and_then(|value| value.get("universe_id"))
-                .and_then(Value::as_str)
-        })
-        .map(ToString::to_string)
-        .ok_or_else(|| anyhow!("universe lookup for '{selector}' did not return universe_id"))
-}
-
-pub(crate) async fn resolve_world_selector(
-    client: &ApiClient,
-    universe_id: &str,
-    selector: &str,
-) -> Result<String> {
-    if Uuid::parse_str(selector).is_ok() {
-        return Ok(selector.to_string());
-    }
-    let encoded = encode_path_segment(selector);
-    let data = client
-        .get_json(
-            &format!("/v1/universes/{universe_id}/worlds/by-handle/{encoded}"),
-            &[],
-        )
-        .await
-        .with_context(|| format!("resolve world handle in universe '{universe_id}'"))?;
-    data.get("runtime")
-        .and_then(|value| value.get("world_id"))
-        .or_else(|| data.get("world_id"))
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-        .ok_or_else(|| anyhow!("world lookup for '{selector}' did not return world_id"))
+pub(crate) fn resolve_world_selector(selector: &str) -> Result<String> {
+    Uuid::parse_str(selector)
+        .map(|_| selector.to_string())
+        .with_context(|| format!("world selector '{selector}' must be a world UUID"))
 }
 
 pub(crate) async fn fetch_command(
     client: &ApiClient,
-    universe: &str,
     world: &str,
     command_id: &str,
 ) -> Result<Value> {
     let command_id = encode_path_segment(command_id);
     client
-        .get_json(
-            &format!("/v1/universes/{universe}/worlds/{world}/commands/{command_id}"),
-            &[],
-        )
+        .get_json(&format!("/v1/worlds/{world}/commands/{command_id}"), &[])
         .await
 }
 
 pub(crate) async fn wait_for_command(
     client: &ApiClient,
-    universe: &str,
     world: &str,
     command_id: &str,
     interval_ms: u64,
@@ -230,7 +133,7 @@ pub(crate) async fn wait_for_command(
 ) -> Result<Value> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     loop {
-        let data = fetch_command(client, universe, world, command_id).await?;
+        let data = fetch_command(client, world, command_id).await?;
         let status = data
             .get("status")
             .and_then(Value::as_str)
@@ -247,7 +150,7 @@ pub(crate) async fn wait_for_command(
 
 pub(crate) async fn decode_command_payload<T: serde::de::DeserializeOwned>(
     client: &ApiClient,
-    universe: &str,
+    world: &str,
     record: &Value,
 ) -> Result<T> {
     let record: CommandRecord =
@@ -262,13 +165,13 @@ pub(crate) async fn decode_command_payload<T: serde::de::DeserializeOwned>(
     let payload = record
         .result_payload
         .ok_or_else(|| anyhow!("command '{}' has no result payload", record.command_id))?;
-    let bytes = load_cbor_payload(client, universe, &payload).await?;
+    let bytes = load_cbor_payload(client, world, &payload).await?;
     serde_cbor::from_slice(&bytes).context("decode command result payload")
 }
 
 async fn load_cbor_payload(
     client: &ApiClient,
-    universe: &str,
+    world: &str,
     payload: &CborPayload,
 ) -> Result<Vec<u8>> {
     if let Some(bytes) = &payload.inline_cbor {
@@ -280,21 +183,20 @@ async fn load_cbor_payload(
         .ok_or_else(|| anyhow!("CBOR payload is missing both inline_cbor and cbor_ref"))?;
     client
         .get_bytes(
-            &format!("/v1/universes/{universe}/cas/blobs/{blob_ref}"),
-            &[],
+            &format!("/v1/cas/blobs/{blob_ref}"),
+            &universe_query_for_world(client, world).await?,
         )
         .await
 }
 
 pub(crate) async fn resolve_workspace_ref(
     client: &ApiClient,
-    universe: &str,
     world: &str,
     reference: &crate::workspace::WorkspaceRef,
 ) -> Result<Value> {
     client
         .get_json(
-            &format!("/v1/universes/{universe}/worlds/{world}/workspace/resolve"),
+            &format!("/v1/worlds/{world}/workspace/resolve"),
             &[
                 ("workspace", Some(reference.workspace.clone())),
                 ("version", reference.version.map(|value| value.to_string())),
@@ -305,14 +207,13 @@ pub(crate) async fn resolve_workspace_ref(
 
 pub(crate) async fn list_workspace_names(
     client: &ApiClient,
-    universe: &str,
     world: &str,
     limit: Option<u64>,
 ) -> Result<Value> {
     let data = client
         .get_json(
             &format!(
-                "/v1/universes/{universe}/worlds/{world}/state/{}/cells",
+                "/v1/worlds/{world}/state/{}/cells",
                 encode_path_segment(WORKSPACE_WORKFLOW)
             ),
             &[],
@@ -403,6 +304,27 @@ pub(crate) fn print_workspace_cat(
 
 fn decode_workspace_key(bytes: &[u8]) -> Option<String> {
     serde_cbor::from_slice::<String>(bytes).ok()
+}
+
+pub(crate) async fn universe_query_for_world(
+    client: &ApiClient,
+    world: &str,
+) -> Result<Vec<(&'static str, Option<String>)>> {
+    Ok(vec![(
+        "universe_id",
+        Some(universe_id_for_world(client, world).await?),
+    )])
+}
+
+pub(crate) async fn universe_id_for_world(client: &ApiClient, world: &str) -> Result<String> {
+    let data = client
+        .get_json(&format!("/v1/worlds/{world}/runtime"), &[])
+        .await?;
+    Ok(data
+        .get("universe_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("world runtime response missing universe_id"))?
+        .to_string())
 }
 
 pub(crate) fn encode_path_segment(value: &str) -> String {
@@ -509,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_target_defaults_local_universe_for_local_profile() {
+    fn resolve_target_does_not_invent_local_world() {
         let (_temp, paths) = temp_config();
         save_config(
             &paths,
@@ -519,7 +441,7 @@ mod tests {
                     "local".into(),
                     ProfileConfig {
                         kind: ProfileKind::Local,
-                        api: "http://127.0.0.1:9080".into(),
+                        api: "http://127.0.0.1:9010".into(),
                         token: None,
                         token_env: None,
                         headers: Default::default(),
@@ -550,54 +472,6 @@ mod tests {
 
         let target = resolve_target(&global).expect("resolve target");
         assert_eq!(target.kind, ProfileKind::Local);
-        assert_eq!(
-            target.universe.as_deref(),
-            Some(DEFAULT_LOCAL_UNIVERSE_SELECTOR)
-        );
-    }
-
-    #[test]
-    fn resolve_target_does_not_default_universe_for_remote_profile() {
-        let (_temp, paths) = temp_config();
-        save_config(
-            &paths,
-            &CliConfig {
-                current_profile: Some("remote".into()),
-                profiles: [(
-                    "remote".into(),
-                    ProfileConfig {
-                        kind: ProfileKind::Remote,
-                        api: "https://example.test".into(),
-                        token: None,
-                        token_env: None,
-                        headers: Default::default(),
-                        universe: None,
-                        world: None,
-                    },
-                )]
-                .into_iter()
-                .collect(),
-            },
-        )
-        .expect("save config");
-
-        let global = crate::GlobalOpts {
-            profile: None,
-            api: None,
-            token: None,
-            header: Vec::new(),
-            universe: None,
-            world: None,
-            config: Some(paths.path.clone()),
-            json: false,
-            pretty: false,
-            quiet: false,
-            no_meta: false,
-            verbose: false,
-        };
-
-        let target = resolve_target(&global).expect("resolve target");
-        assert_eq!(target.kind, ProfileKind::Remote);
-        assert_eq!(target.universe, None);
+        assert_eq!(target.world, None);
     }
 }

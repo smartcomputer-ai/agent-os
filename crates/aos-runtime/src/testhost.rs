@@ -11,10 +11,11 @@ use serde_json::Value as JsonValue;
 
 use crate::WorldConfig;
 use crate::error::HostError;
-use crate::host::{CycleOutcome, ExternalEvent, RunMode, WorldHost};
+use crate::host::{CycleOutcome, ExternalEvent, QuiescenceStatus, RunMode, WorldHost};
 use crate::timer::TimerScheduler;
 use aos_effect_adapters::registry::AdapterRegistry;
 use aos_effect_adapters::traits::AsyncEffectAdapter;
+use aos_kernel::KernelQuiescence;
 
 /// Thin test-only wrapper over WorldHost with convenience helpers.
 ///
@@ -77,6 +78,25 @@ impl<S: Store + 'static> TestHost<S> {
         world_config: WorldConfig,
         adapter_config: EffectAdapterConfig,
     ) -> Result<Self, HostError> {
+        Self::from_loaded_manifest_with_kernel_config_and_journal(
+            store,
+            loaded,
+            world_config,
+            adapter_config,
+            KernelConfig::default(),
+            aos_kernel::journal::Journal::new(),
+        )
+    }
+
+    /// Create a TestHost from a pre-loaded manifest with explicit kernel config and journal.
+    pub fn from_loaded_manifest_with_kernel_config_and_journal(
+        store: Arc<S>,
+        loaded: LoadedManifest,
+        world_config: WorldConfig,
+        adapter_config: EffectAdapterConfig,
+        kernel_config: KernelConfig,
+        journal: aos_kernel::journal::Journal,
+    ) -> Result<Self, HostError> {
         let effect_routes = loaded
             .manifest
             .effect_bindings
@@ -88,10 +108,11 @@ impl<S: Store + 'static> TestHost<S> {
                 )
             })
             .collect();
-        let kernel = Kernel::from_loaded_manifest(
+        let kernel = Kernel::from_loaded_manifest_with_config(
             store.clone(),
             loaded,
-            Box::new(aos_kernel::journal::mem::MemJournal::new()),
+            journal,
+            kernel_config,
         )?;
         let host = WorldHost::from_kernel_with_effect_routes(
             kernel,
@@ -214,20 +235,43 @@ impl<S: Store + 'static> TestHost<S> {
         self.host.state(workflow, None)
     }
 
+    /// Get workflow state as raw bytes for a keyed or unkeyed workflow.
+    pub fn state_bytes_for_key(&self, workflow: &str, key: Option<&[u8]>) -> Option<Vec<u8>> {
+        self.host.state(workflow, key)
+    }
+
     /// Get workflow state deserialized to type T.
     pub fn state<T: DeserializeOwned>(&self, workflow: &str) -> Result<T, HostError> {
+        self.state_for_key(workflow, None)
+    }
+
+    /// Get workflow state deserialized to type T for a keyed or unkeyed workflow.
+    pub fn state_for_key<T: DeserializeOwned>(
+        &self,
+        workflow: &str,
+        key: Option<&[u8]>,
+    ) -> Result<T, HostError> {
         let bytes = self
             .host
-            .state(workflow, None)
+            .state(workflow, key)
             .ok_or_else(|| HostError::External(format!("workflow '{workflow}' has no state")))?;
         serde_cbor::from_slice(&bytes).map_err(|e| HostError::External(e.to_string()))
     }
 
     /// Get workflow state decoded to JSON for quick assertions/logging.
     pub fn state_json(&self, workflow: &str) -> Result<JsonValue, HostError> {
+        self.state_json_for_key(workflow, None)
+    }
+
+    /// Get workflow state decoded to JSON for a keyed or unkeyed workflow.
+    pub fn state_json_for_key(
+        &self,
+        workflow: &str,
+        key: Option<&[u8]>,
+    ) -> Result<JsonValue, HostError> {
         let bytes = self
             .host
-            .state(workflow, None)
+            .state(workflow, key)
             .ok_or_else(|| HostError::External(format!("workflow '{workflow}' has no state")))?;
         let cbor_value: serde_cbor::Value =
             serde_cbor::from_slice(&bytes).map_err(|e| HostError::External(e.to_string()))?;
@@ -285,5 +329,35 @@ impl<S: Store + 'static> TestHost<S> {
     /// Get kernel heights (journal position).
     pub fn heights(&self) -> aos_kernel::KernelHeights {
         self.host.heights()
+    }
+
+    /// Get the current logical execution time in nanoseconds.
+    pub fn logical_time_now_ns(&self) -> u64 {
+        self.host.logical_time_now_ns()
+    }
+
+    /// Set the current logical execution time exactly.
+    pub fn set_logical_time_ns(&mut self, now_ns: u64) -> u64 {
+        self.host.set_logical_time_ns(now_ns)
+    }
+
+    /// Advance the current logical execution time by the given delta.
+    pub fn advance_logical_time_ns(&mut self, delta_ns: u64) -> u64 {
+        self.host.advance_logical_time_ns(delta_ns)
+    }
+
+    /// Return kernel-side quiescence details without timer scheduler state.
+    pub fn kernel_quiescence(&self) -> KernelQuiescence {
+        self.host.kernel_quiescence()
+    }
+
+    /// Return host quiescence details without any external timer scheduler attached.
+    pub fn quiescence_status(&self) -> QuiescenceStatus {
+        self.host.quiescence_status(None)
+    }
+
+    /// Return a journal-derived trace summary with effect route diagnostics.
+    pub fn trace_summary(&self) -> Result<JsonValue, HostError> {
+        self.host.trace_summary()
     }
 }

@@ -6,25 +6,24 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
-use aos_authoring::{WorldBundle, open_local_runtime};
+use aos_authoring::{
+    WorldBundle, build_world_harness_from_bundle, local_state_paths, resolve_placeholder_modules,
+};
 use aos_effect_adapters::config::EffectAdapterConfig;
-use aos_effect_adapters::registry::AdapterRegistry;
 use aos_kernel::Store;
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
-use aos_node::HostedStore;
+use aos_node::FsCas;
+use aos_node::{EmbeddedWorldHarness, LocalKernelGuard};
 use aos_runtime::manifest_loader;
-use aos_runtime::util::{is_placeholder_hash, patch_modules};
-use aos_runtime::{TestHost, WorldConfig};
+use aos_runtime::util::patch_modules;
+use aos_runtime::{EffectMode, WorldConfig};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tokio::runtime::{Builder, Runtime};
 
 pub struct EvalHost {
-    host: TestHost<HostedStore>,
+    host: EmbeddedWorldHarness,
     workflow_name: String,
     event_schema: String,
-    store: Arc<HostedStore>,
-    runtime: Runtime,
 }
 
 pub enum EvalModuleBuild<'a> {
@@ -57,13 +56,15 @@ pub struct EvalHostConfig<'a> {
 
 impl EvalHost {
     pub fn prepare(cfg: EvalHostConfig<'_>) -> Result<Self> {
-        let runtime_ctx = open_local_runtime(cfg.world_root, true)?;
-
-        let module_cache = runtime_ctx.paths().module_cache_dir();
+        let paths = local_state_paths(cfg.world_root);
+        paths
+            .reset_runtime_state()
+            .context("reset local runtime state")?;
+        let module_cache = paths.module_cache_dir();
         fs::create_dir_all(&module_cache)
             .with_context(|| format!("create cache dir {}", module_cache.display()))?;
 
-        let store = runtime_ctx.hosted_store();
+        let store = Arc::new(FsCas::open_with_paths(&paths).context("open local CAS")?);
         let mut assets = load_manifest_assets(store.clone(), cfg.assets_root, cfg.import_roots)?;
 
         if cfg.module_patches.is_empty() {
@@ -112,32 +113,32 @@ impl EvalHost {
             patch_module_hash(&mut assets.loaded, patch.module_name, &wasm_hash_ref)?;
         }
 
-        let mut sys_module_cache = HashMap::new();
-        maybe_patch_sys_enforcers(
-            cfg.workspace_root,
-            store.clone(),
+        let paths = local_state_paths(cfg.world_root);
+        resolve_placeholder_modules(
             &mut assets.loaded,
-            &mut sys_module_cache,
+            store.as_ref(),
+            cfg.world_root,
+            &paths,
+            None,
+            None,
         )?;
 
         let kernel_config = kernel_config(cfg.world_root)?;
         let bundle = WorldBundle::from_loaded_assets(assets.loaded, assets.secrets);
-        let boot = runtime_ctx.bootstrap_world_bundle(
+        let host = build_world_harness_from_bundle(
+            Arc::clone(&store),
             bundle,
+            Some(&paths),
             cfg.world_config,
             cfg.adapter_config,
             kernel_config,
+            EffectMode::Scripted,
         )?;
-        let host = TestHost::from_world_host(boot.host);
-        let store = boot.store;
-        let runtime = Builder::new_current_thread().enable_all().build()?;
 
         Ok(Self {
             host,
             workflow_name: cfg.workflow_name.to_string(),
             event_schema: cfg.event_schema.to_string(),
-            store,
-            runtime,
         })
     }
 
@@ -150,12 +151,13 @@ impl EvalHost {
     }
 
     pub fn run_to_idle(&mut self) -> Result<()> {
-        self.host.run_to_idle().context("drain kernel")
+        self.host.run_until_kernel_idle().context("drain kernel")?;
+        Ok(())
     }
 
     pub fn read_state_for_session<T: DeserializeOwned>(&self, session_id: &str) -> Result<T> {
         let mut matched: Option<Vec<u8>> = None;
-        for entry in self.host.kernel().list_cells(&self.workflow_name)? {
+        for entry in self.host.list_cells(&self.workflow_name)? {
             let Ok(candidate) = serde_cbor::from_slice::<String>(&entry.key_bytes) else {
                 continue;
             };
@@ -179,26 +181,43 @@ impl EvalHost {
         })?;
         let bytes = self
             .host
-            .kernel()
-            .workflow_state_bytes(&self.workflow_name, Some(&key_bytes))?
+            .state_bytes(&self.workflow_name, Some(&key_bytes))
             .ok_or_else(|| anyhow!("missing keyed workflow state bytes"))?;
         serde_cbor::from_slice(&bytes).context("decode keyed workflow state")
     }
 
-    pub fn kernel_mut(&mut self) -> &mut Kernel<HostedStore> {
-        self.host.kernel_mut()
+    pub fn kernel_mut(&mut self) -> LocalKernelGuard<'_> {
+        self.host
+            .kernel_mut()
+            .expect("embedded eval harness kernel_mut")
     }
 
-    pub fn store(&self) -> Arc<HostedStore> {
-        self.store.clone()
+    pub fn store(&self) -> Arc<FsCas> {
+        self.host.store()
     }
 
-    pub fn adapter_registry(&self) -> &AdapterRegistry {
-        self.host.adapter_registry()
+    pub fn with_kernel_mut<R>(
+        &mut self,
+        f: impl FnOnce(&mut Kernel<FsCas>) -> Result<R, aos_kernel::KernelError>,
+    ) -> Result<R> {
+        self.host.with_kernel_mut(f).map_err(Into::into)
     }
 
-    pub fn runtime(&self) -> &Runtime {
-        &self.runtime
+    pub fn execute_batch_routed(
+        &mut self,
+        intents: Vec<(aos_effects::EffectIntent, String)>,
+    ) -> Result<Vec<aos_effects::EffectReceipt>> {
+        self.host.execute_batch_routed(intents).map_err(Into::into)
+    }
+
+    pub fn execute_single_routed(
+        &mut self,
+        intent: aos_effects::EffectIntent,
+        route_id: String,
+    ) -> Result<aos_effects::EffectReceipt> {
+        self.host
+            .execute_single_routed(intent, route_id)
+            .map_err(Into::into)
     }
 }
 
@@ -222,6 +241,7 @@ fn kernel_config(world_root: &Path) -> Result<KernelConfig> {
         secret_resolver: None,
         allow_placeholder_secrets: false,
         cell_cache_size: aos_kernel::world::DEFAULT_CELL_CACHE_SIZE,
+        universe_id: uuid::Uuid::nil(),
     })
 }
 
@@ -318,71 +338,4 @@ fn load_manifest_assets<S: Store + 'static>(
     manifest_loader::load_from_assets_with_imports_and_defs(store, assets_root, import_roots)
         .context("load manifest from eval assets")?
         .ok_or_else(|| anyhow!("eval manifest missing at {}", assets_root.display()))
-}
-
-fn maybe_patch_sys_enforcers<S: Store + 'static>(
-    workspace_root: &Path,
-    store: Arc<S>,
-    loaded: &mut LoadedManifest,
-    cache: &mut HashMap<&'static str, HashRef>,
-) -> Result<()> {
-    for (module_name, bin_name) in [
-        ("sys/Workspace@1", "workspace"),
-        ("sys/HttpPublish@1", "http_publish"),
-        ("sys/CapEnforceHttpOut@1", "cap_enforce_http_out"),
-        ("sys/CapEnforceLlmBasic@1", "cap_enforce_llm_basic"),
-        ("sys/CapEnforceWorkspace@1", "cap_enforce_workspace"),
-    ] {
-        maybe_patch_sys_module(
-            workspace_root,
-            store.clone(),
-            loaded,
-            cache,
-            module_name,
-            bin_name,
-        )?;
-    }
-    Ok(())
-}
-
-fn maybe_patch_sys_module<S: Store + 'static>(
-    workspace_root: &Path,
-    store: Arc<S>,
-    loaded: &mut LoadedManifest,
-    cache: &mut HashMap<&'static str, HashRef>,
-    module_name: &'static str,
-    bin_name: &'static str,
-) -> Result<()> {
-    let needs_patch = loaded
-        .modules
-        .get(module_name)
-        .map(is_placeholder_hash)
-        .unwrap_or(false);
-    if !needs_patch {
-        return Ok(());
-    }
-
-    let wasm_hash_ref = if let Some(existing) = cache.get(module_name) {
-        existing.clone()
-    } else {
-        let cache_dir = workspace_root
-            .join("target")
-            .join("aos-agent-eval")
-            .join("cache")
-            .join("modules");
-        let wasm_bytes = compile_wasm_bin(workspace_root, "aos-sys", bin_name, &cache_dir)?;
-        let wasm_hash = store
-            .put_blob(&wasm_bytes)
-            .with_context(|| format!("store {module_name} wasm blob"))?;
-        let wasm_hash_ref =
-            HashRef::new(wasm_hash.to_hex()).with_context(|| format!("hash {module_name}"))?;
-        cache.insert(module_name, wasm_hash_ref.clone());
-        wasm_hash_ref
-    };
-
-    let patched = patch_modules(loaded, &wasm_hash_ref, |name, _| name == module_name);
-    if patched == 0 {
-        anyhow::bail!("module '{module_name}' missing in manifest");
-    }
-    Ok(())
 }

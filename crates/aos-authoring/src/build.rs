@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::{AirNode, HashRef};
 use aos_cbor::Hash;
-use aos_kernel::LoadedManifest;
 use aos_kernel::Store;
+use aos_kernel::{LoadedManifest, MemStore};
+use aos_node::{FsCas, LocalStatePaths};
 use aos_runtime::manifest_loader;
 use aos_runtime::util::is_placeholder_hash;
-use aos_sqlite::{FsCas, LocalStatePaths};
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use walkdir::WalkDir;
@@ -25,23 +25,36 @@ pub struct CompiledWorkflow {
     pub cache_hit: bool,
 }
 
-/// Compile a workflow crate to WASM and store the blob.
-pub fn compile_workflow(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkflowBuildProfile {
+    Debug,
+    Release,
+}
+
+impl WorkflowBuildProfile {
+    fn is_release(self) -> bool {
+        matches!(self, Self::Release)
+    }
+}
+
+fn compile_workflow_with_cache_override(
     workflow_dir: &Path,
-    paths: &LocalStatePaths,
+    cache_dir: Option<&Path>,
     store: &impl Store,
     force_build: bool,
+    build_profile: WorkflowBuildProfile,
 ) -> Result<CompiledWorkflow> {
-    let cache_dir = paths.module_cache_dir();
-    fs::create_dir_all(&cache_dir).context("create module cache directory")?;
+    if let Some(cache_dir) = cache_dir {
+        fs::create_dir_all(cache_dir).context("create module cache directory")?;
+    }
 
     let utf_path = Utf8PathBuf::from_path_buf(workflow_dir.to_path_buf())
         .map_err(|p| anyhow!("workflow path is not UTF-8: {}", p.display()))?;
 
     let mut request = BuildRequest::new(utf_path);
-    request.cache_dir = Some(cache_dir);
+    request.cache_dir = cache_dir.map(Path::to_path_buf);
     request.use_cache = !force_build;
-    request.config.release = false;
+    request.config.release = build_profile.is_release();
 
     let artifact = Builder::compile(request).context("compile workflow")?;
     let hash = store
@@ -55,10 +68,29 @@ pub fn compile_workflow(
     })
 }
 
+/// Compile a workflow crate to WASM and store the blob.
+pub fn compile_workflow(
+    workflow_dir: &Path,
+    paths: &LocalStatePaths,
+    store: &impl Store,
+    force_build: bool,
+) -> Result<CompiledWorkflow> {
+    let cache_dir = paths.module_cache_dir();
+    compile_workflow_with_cache_override(
+        workflow_dir,
+        Some(&cache_dir),
+        store,
+        force_build,
+        WorkflowBuildProfile::Debug,
+    )
+}
+
 pub fn materialize_imported_cargo_modules(
     imports: &[ResolvedAirImport],
     world_root: &Path,
+    cache_root: &Path,
     store: &impl Store,
+    build_profile: WorkflowBuildProfile,
 ) -> Result<usize> {
     let mut refreshed = 0usize;
     for import in imports {
@@ -73,6 +105,8 @@ pub fn materialize_imported_cargo_modules(
                 manifest_path,
                 import.cargo_package.as_deref(),
                 bin_name.as_str(),
+                cache_root,
+                build_profile,
             )?;
             let hash = Hash::of_bytes(&bytes).to_hex();
             let stored = store
@@ -110,11 +144,68 @@ pub fn build_bundle_from_local_world(
     world_root: &Path,
     force_build: bool,
 ) -> Result<(FsCas, WorldBundle, Vec<String>)> {
-    let air_dir = world_root.join("air");
-    let workflow_dir = world_root.join("workflow");
+    build_bundle_from_local_world_with_profile(
+        world_root,
+        force_build,
+        WorkflowBuildProfile::Release,
+    )
+}
+
+pub fn build_bundle_from_local_world_with_profile(
+    world_root: &Path,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(FsCas, WorldBundle, Vec<String>)> {
     let paths = local_state_paths(world_root);
     paths.ensure_root().context("create local state root")?;
     let store = FsCas::open_with_paths(&paths).context("open local CAS")?;
+    let (bundle, warnings) = build_bundle_from_local_world_with_store(
+        world_root,
+        &paths,
+        &store,
+        force_build,
+        build_profile,
+    )?;
+    Ok((store, bundle, warnings))
+}
+
+pub fn build_bundle_from_local_world_ephemeral(
+    world_root: &Path,
+    force_build: bool,
+) -> Result<(MemStore, WorldBundle, Vec<String>)> {
+    build_bundle_from_local_world_ephemeral_with_profile(
+        world_root,
+        force_build,
+        WorkflowBuildProfile::Release,
+    )
+}
+
+pub fn build_bundle_from_local_world_ephemeral_with_profile(
+    world_root: &Path,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(MemStore, WorldBundle, Vec<String>)> {
+    let paths = local_state_paths(world_root);
+    let store = MemStore::new();
+    let (bundle, warnings) = build_bundle_from_local_world_with_store(
+        world_root,
+        &paths,
+        &store,
+        force_build,
+        build_profile,
+    )?;
+    Ok((store, bundle, warnings))
+}
+
+fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
+    world_root: &Path,
+    paths: &LocalStatePaths,
+    store: &S,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(WorldBundle, Vec<String>)> {
+    let air_dir = world_root.join("air");
+    let workflow_dir = world_root.join("workflow");
     let (map_path, config) = load_sync_config(world_root, None)?;
     let map_root = map_path.parent().unwrap_or(world_root);
     let air_sources = resolve_air_sources(world_root, map_root, &config, &air_dir, &workflow_dir)?;
@@ -128,31 +219,83 @@ pub fn build_bundle_from_local_world(
 
     let mut loaded = assets.loaded;
     let secrets = assets.secrets;
-    materialize_imported_cargo_modules(&air_sources.imports, world_root, &store)?;
+    materialize_imported_cargo_modules(
+        &air_sources.imports,
+        world_root,
+        &paths.cache_root(),
+        store,
+        build_profile,
+    )?;
     let compiled = if workflow_dir.exists() {
-        Some(compile_workflow(
+        Some(compile_workflow_with_cache_override(
             &workflow_dir,
-            &paths,
-            &store,
+            Some(&paths.module_cache_dir()),
+            store,
             force_build,
+            build_profile,
         )?)
     } else {
         None
     };
     resolve_placeholder_modules(
         &mut loaded,
-        &store,
+        store,
         world_root,
+        paths,
+        compiled.as_ref().map(|value| &value.hash),
+        None,
+    )?;
+    refresh_module_refs(&mut loaded, store)?;
+    Ok((
+        WorldBundle::from_loaded_assets(loaded, secrets),
+        air_sources.warnings,
+    ))
+}
+
+/// Build a loaded manifest directly from authored AIR plus an optional workflow crate,
+/// without requiring a full local-world root or sync config.
+///
+/// This is the narrow authoring path for workflow-focused harness tests. The caller
+/// provides a scratch root for local build/cache state; the authored inputs remain in place.
+pub fn build_loaded_manifest_from_authored_paths(
+    air_dir: &Path,
+    workflow_dir: Option<&Path>,
+    import_roots: &[PathBuf],
+    scratch_root: &Path,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(MemStore, LoadedManifest)> {
+    let paths = local_state_paths(scratch_root);
+    paths.ensure_root().context("create local state root")?;
+    let store = MemStore::new();
+    let assets = manifest_loader::load_from_assets_with_imports_and_defs(
+        std::sync::Arc::new(store.clone()),
+        air_dir,
+        import_roots,
+    )
+    .with_context(|| format!("load AIR assets from {}", air_dir.display()))?
+    .ok_or_else(|| anyhow!("no manifest found in {}", air_dir.display()))?;
+
+    let mut loaded = assets.loaded;
+    let compiled = workflow_dir
+        .filter(|path| path.exists())
+        .map(|path| {
+            compile_workflow_with_cache_override(path, None, &store, force_build, build_profile)
+        })
+        .transpose()?;
+    let module_root = workflow_dir
+        .map(|path| path.parent().unwrap_or(path))
+        .unwrap_or_else(|| air_dir.parent().unwrap_or(air_dir));
+    resolve_placeholder_modules(
+        &mut loaded,
+        &store,
+        module_root,
         &paths,
         compiled.as_ref().map(|value| &value.hash),
         None,
     )?;
     refresh_module_refs(&mut loaded, &store)?;
-    Ok((
-        store,
-        WorldBundle::from_loaded_assets(loaded, secrets),
-        air_sources.warnings,
-    ))
+    Ok((store, loaded))
 }
 
 /// Resolve placeholder module hashes in a loaded manifest.
@@ -383,6 +526,10 @@ const SYS_MODULES: &[SysModuleSpec] = &[
         bin: "http_publish",
     },
     SysModuleSpec {
+        name: "sys/CapEnforceHttpOut@1",
+        bin: "cap_enforce_http_out",
+    },
+    SysModuleSpec {
         name: "sys/CapEnforceLlmBasic@1",
         bin: "cap_enforce_llm_basic",
     },
@@ -543,8 +690,10 @@ fn build_cargo_wasm_bin(
     manifest_path: &Path,
     package_name: Option<&str>,
     bin_name: &str,
+    cache_root: &Path,
+    build_profile: WorkflowBuildProfile,
 ) -> Result<Vec<u8>> {
-    let target_dir = imported_cargo_target_dir(manifest_path, package_name, bin_name);
+    let target_dir = imported_cargo_target_dir(manifest_path, package_name, bin_name, cache_root);
     fs::create_dir_all(&target_dir)
         .with_context(|| format!("create imported cargo target dir {}", target_dir.display()))?;
     let mut command = std::process::Command::new("cargo");
@@ -554,6 +703,9 @@ fn build_cargo_wasm_bin(
         .arg(manifest_path);
     if let Some(package_name) = package_name.filter(|value| !value.trim().is_empty()) {
         command.arg("-p").arg(package_name);
+    }
+    if build_profile.is_release() {
+        command.arg("--release");
     }
     let status = command
         .arg("--bin")
@@ -573,7 +725,11 @@ fn build_cargo_wasm_bin(
     }
     let path = target_dir
         .join("wasm32-unknown-unknown")
-        .join("debug")
+        .join(if build_profile.is_release() {
+            "release"
+        } else {
+            "debug"
+        })
         .join(format!("{bin_name}.wasm"));
     fs::read(&path).with_context(|| format!("read built wasm {}", path.display()))
 }
@@ -582,6 +738,7 @@ fn imported_cargo_target_dir(
     manifest_path: &Path,
     package_name: Option<&str>,
     bin_name: &str,
+    cache_root: &Path,
 ) -> PathBuf {
     let key = format!(
         "{}::{}::{bin_name}",
@@ -590,11 +747,7 @@ fn imported_cargo_target_dir(
     );
     let digest = Hash::of_bytes(key.as_bytes()).to_hex();
     let digest = digest.strip_prefix("sha256:").unwrap_or(digest.as_str());
-    workspace_root()
-        .join(".aos")
-        .join("cache")
-        .join("imported-cargo")
-        .join(digest)
+    cache_root.join("imported-cargo").join(digest)
 }
 
 fn module_bin_name(module_name: &str) -> Option<String> {
@@ -650,4 +803,107 @@ fn normalize_hash_str(input: &str) -> Option<String> {
         return Some(format!("sha256:{trimmed}"));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use aos_runtime::EffectMode;
+    use aos_runtime::manifest_loader::ZERO_HASH_SENTINEL;
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    use super::*;
+
+    fn fixture_root(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../aos-smoke/fixtures")
+            .join(name)
+    }
+
+    #[test]
+    fn build_loaded_manifest_from_authored_paths_supports_workflow_fixtures_without_world_root()
+    -> Result<()> {
+        let fixture = fixture_root("01-hello-timer");
+        let scratch = tempdir()?;
+        let (_store, loaded) = build_loaded_manifest_from_authored_paths(
+            &fixture.join("air"),
+            Some(&fixture.join("workflow")),
+            &[],
+            scratch.path(),
+            false,
+            WorkflowBuildProfile::Debug,
+        )?;
+
+        assert!(loaded.modules.contains_key("demo/TimerSM@1"));
+        let module = loaded.modules.get("demo/TimerSM@1").unwrap();
+        assert_ne!(module.wasm_hash.as_str(), ZERO_HASH_SENTINEL);
+        assert!(loaded.schemas.contains_key("demo/TimerEvent@1"));
+        Ok(())
+    }
+
+    #[test]
+    fn build_runtime_workflow_harness_from_authored_paths_supports_release_profile() -> Result<()> {
+        let fixture = fixture_root("01-hello-timer");
+        let scratch = tempdir()?;
+        let mut harness = crate::local::build_runtime_workflow_harness_from_authored_paths(
+            "demo/TimerSM@1",
+            &fixture.join("air"),
+            Some(&fixture.join("workflow")),
+            &[],
+            scratch.path(),
+            false,
+            WorkflowBuildProfile::Release,
+            EffectMode::Scripted,
+        )?;
+
+        harness.send_event(
+            "demo/TimerEvent@1",
+            json!({"Start": {"deliver_at_ns": 1_000_000, "key": "retry"}}),
+        )?;
+        let status = harness.run_until_kernel_idle()?;
+        assert!(status.kernel.kernel_idle);
+        assert_eq!(harness.pull_effects()?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn ephemeral_bundle_build_keeps_local_cas_out_of_world_root() -> Result<()> {
+        let fixture = fixture_root("01-hello-timer");
+        let temp = tempdir()?;
+        for entry in WalkDir::new(&fixture) {
+            let entry = entry?;
+            let relative = entry
+                .path()
+                .strip_prefix(&fixture)
+                .expect("fixture-relative path");
+            let target = temp.path().join(relative);
+            if entry.file_type().is_dir() {
+                std::fs::create_dir_all(&target)?;
+            } else {
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::copy(entry.path(), &target)?;
+            }
+        }
+
+        let (_store, bundle, _warnings) = build_bundle_from_local_world_ephemeral_with_profile(
+            temp.path(),
+            false,
+            WorkflowBuildProfile::Debug,
+        )?;
+
+        assert!(
+            bundle
+                .manifest
+                .modules
+                .iter()
+                .any(|module| !module.hash.as_str().is_empty())
+        );
+        assert!(!temp.path().join(".aos/cas").exists());
+        assert!(temp.path().join(".aos/cache/modules").exists());
+        Ok(())
+    }
 }

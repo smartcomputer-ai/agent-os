@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 use crate::Store;
 use aos_air_types::{
@@ -17,7 +18,7 @@ use aos_wasm_abi::{
     ABI_VERSION, DomainEvent, PureInput, PureOutput, WorkflowInput, WorkflowOutput,
 };
 use getrandom::getrandom;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_cbor;
 use serde_cbor::Value as CborValue;
 
@@ -29,13 +30,11 @@ use crate::error::KernelError;
 use crate::event::{IngressStamp, KernelEvent, WorkflowEvent};
 use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
 use crate::governance_effects::GovernanceParamPreprocessor;
-use crate::journal::fs::FsJournal;
-use crate::journal::mem::MemJournal;
 use crate::journal::{
     AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, DomainEventRecord, EffectIntentRecord,
-    EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry, JournalKind,
-    JournalRecord, JournalSeq, ManifestRecord, OwnedJournalEntry, ProposedRecord,
-    ShadowReportRecord, SnapshotRecord, StreamFrameRecord,
+    EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalBounds,
+    JournalEntry, JournalKind, JournalRecord, JournalSeq, ManifestRecord, OwnedJournalEntry,
+    ProposedRecord, ShadowReportRecord, SnapshotRecord, StreamFrameRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::pure::PureRegistry;
@@ -73,18 +72,19 @@ const ENTROPY_LEN: usize = 64;
 const DELTA_RESIDENT_BYTES_LIMIT: usize = 256 * 1024 * 1024;
 const DELTA_RESIDENT_BYTES_TARGET: usize = 192 * 1024 * 1024;
 const DELTA_IMMEDIATE_SPILL_BYTES: usize = 1 * 1024 * 1024;
+const WORKSPACE_PROJECTION_WORKFLOW: &str = "sys/Workspace@1";
 
 #[derive(Debug)]
 struct KernelClock {
-    start: Instant,
-    logical_offset_ns: AtomicU64,
+    start: Mutex<Instant>,
+    logical_base_ns: AtomicU64,
 }
 
 impl KernelClock {
     fn new() -> Self {
         Self {
-            start: Instant::now(),
-            logical_offset_ns: AtomicU64::new(0),
+            start: Mutex::new(Instant::now()),
+            logical_base_ns: AtomicU64::new(0),
         }
     }
 
@@ -96,14 +96,26 @@ impl KernelClock {
     }
 
     fn logical_now_ns(&self) -> u64 {
-        self.logical_offset_ns.load(Ordering::Relaxed) + self.start.elapsed().as_nanos() as u64
+        let start = self.start.lock().expect("kernel clock poisoned");
+        self.logical_base_ns.load(Ordering::Relaxed) + start.elapsed().as_nanos() as u64
+    }
+
+    fn set_logical_now_ns(&self, now_ns: u64) -> u64 {
+        let mut start = self.start.lock().expect("kernel clock poisoned");
+        *start = Instant::now();
+        self.logical_base_ns.store(now_ns, Ordering::Relaxed);
+        now_ns
+    }
+
+    fn advance_logical_by_ns(&self, delta_ns: u64) -> u64 {
+        let now_ns = self.logical_now_ns().saturating_add(delta_ns);
+        self.set_logical_now_ns(now_ns)
     }
 
     fn sync_logical_min(&self, target_ns: u64) {
         let current = self.logical_now_ns();
         if target_ns > current {
-            self.logical_offset_ns
-                .fetch_add(target_ns - current, Ordering::Relaxed);
+            self.set_logical_now_ns(target_ns);
         }
     }
 }
@@ -115,6 +127,7 @@ pub struct KernelConfig {
     pub secret_resolver: Option<SharedSecretResolver>,
     pub allow_placeholder_secrets: bool,
     pub cell_cache_size: usize,
+    pub universe_id: Uuid,
 }
 
 impl Default for KernelConfig {
@@ -125,6 +138,7 @@ impl Default for KernelConfig {
             secret_resolver: None,
             allow_placeholder_secrets: false,
             cell_cache_size: DEFAULT_CELL_CACHE_SIZE,
+            universe_id: Uuid::nil(),
         }
     }
 }
@@ -140,6 +154,7 @@ impl fmt::Debug for KernelConfig {
             )
             .field("allow_placeholder_secrets", &self.allow_placeholder_secrets)
             .field("cell_cache_size", &self.cell_cache_size)
+            .field("universe_id", &self.universe_id)
             .finish()
     }
 }
@@ -170,7 +185,7 @@ pub struct Kernel<S: Store> {
     workflow_instances: HashMap<String, WorkflowInstanceState>,
     workflow_index_roots: HashMap<Name, Hash>,
     snapshot_index: HashMap<JournalSeq, (Hash, Option<Hash>)>,
-    journal: Box<dyn Journal>,
+    journal: Journal,
     suppress_journal: bool,
     replay_applying_domain_record: bool,
     replay_generated_domain_event_hashes: HashMap<String, u64>,
@@ -178,6 +193,7 @@ pub struct Kernel<S: Store> {
     secret_resolver: Option<SharedSecretResolver>,
     allow_placeholder_secrets: bool,
     cell_cache_size: usize,
+    universe_id: Uuid,
     active_baseline: Option<SnapshotRecord>,
     last_snapshot_height: Option<JournalSeq>,
     last_snapshot_hash: Option<Hash>,
@@ -221,6 +237,17 @@ pub(crate) struct WorkflowInstanceState {
 pub struct KernelHeights {
     pub snapshot: Option<JournalSeq>,
     pub head: JournalSeq,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct KernelQuiescence {
+    pub kernel_idle: bool,
+    pub runtime_quiescent: bool,
+    pub workflow_queue_pending: bool,
+    pub queued_effects: usize,
+    pub pending_workflow_receipts: usize,
+    pub inflight_workflow_intents: usize,
+    pub non_terminal_workflow_instances: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -282,6 +309,39 @@ pub struct CellProjectionDelta {
     pub key_hash: Vec<u8>,
     pub key_bytes: Vec<u8>,
     pub state: Option<CellProjectionDeltaState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceProjectionVersion {
+    pub root_hash: String,
+    pub owner: String,
+    pub created_at_ns: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceProjectionDeltaState {
+    pub latest_version: u64,
+    pub versions: BTreeMap<u64, WorkspaceProjectionVersion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceProjectionDelta {
+    pub workspace: String,
+    pub state: Option<WorkspaceProjectionDeltaState>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct WorkspaceHistoryProjectionState {
+    latest: u64,
+    versions: BTreeMap<u64, WorkspaceCommitMetaProjectionState>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkspaceCommitMetaProjectionState {
+    root_hash: String,
+    owner: String,
+    #[serde(alias = "created_at")]
+    created_at_ns: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -459,6 +519,25 @@ impl CellCache {
 }
 
 impl<S: Store + 'static> Kernel<S> {
+    pub fn drain_workspace_projection_deltas(
+        &mut self,
+    ) -> Result<Vec<WorkspaceProjectionDelta>, KernelError> {
+        let keys = self
+            .pending_cell_projection_deltas
+            .keys()
+            .filter(|(workflow, _)| workflow.as_str() == WORKSPACE_PROJECTION_WORKFLOW)
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut deltas = Vec::with_capacity(keys.len());
+        for key in keys {
+            let Some(delta) = self.pending_cell_projection_deltas.remove(&key) else {
+                continue;
+            };
+            deltas.push(workspace_projection_delta_from_cell(delta)?);
+        }
+        Ok(deltas)
+    }
+
     pub fn drain_cell_projection_deltas(&mut self) -> Vec<CellProjectionDelta> {
         std::mem::take(&mut self.pending_cell_projection_deltas)
             .into_values()
@@ -768,9 +847,44 @@ impl<S: Store + 'static> Kernel<S> {
     }
 }
 
+fn workspace_projection_delta_from_cell(
+    delta: CellProjectionDelta,
+) -> Result<WorkspaceProjectionDelta, KernelError> {
+    let workspace = serde_cbor::from_slice::<String>(&delta.key_bytes)
+        .map_err(|err| KernelError::Query(format!("decode workspace projection key: {err}")))?;
+    let state = match delta.state {
+        Some(state) => {
+            let history =
+                serde_cbor::from_slice::<WorkspaceHistoryProjectionState>(&state.state_bytes)
+                    .map_err(|err| {
+                        KernelError::Query(format!("decode workspace projection state: {err}"))
+                    })?;
+            Some(WorkspaceProjectionDeltaState {
+                latest_version: history.latest,
+                versions: history
+                    .versions
+                    .into_iter()
+                    .map(|(version, meta)| {
+                        (
+                            version,
+                            WorkspaceProjectionVersion {
+                                root_hash: meta.root_hash,
+                                owner: meta.owner,
+                                created_at_ns: meta.created_at_ns,
+                            },
+                        )
+                    })
+                    .collect(),
+            })
+        }
+        None => None,
+    };
+    Ok(WorkspaceProjectionDelta { workspace, state })
+}
+
 pub struct KernelBuilder<S: Store> {
     store: Arc<S>,
-    journal: Box<dyn Journal>,
+    journal: Journal,
     config: KernelConfig,
 }
 
@@ -778,23 +892,9 @@ impl<S: Store + 'static> KernelBuilder<S> {
     pub fn new(store: Arc<S>) -> Self {
         Self {
             store,
-            journal: Box::new(MemJournal::new()),
+            journal: Journal::new(),
             config: KernelConfig::default(),
         }
-    }
-
-    pub fn with_journal(mut self, journal: Box<dyn Journal>) -> Self {
-        self.journal = journal;
-        self
-    }
-
-    pub fn with_fs_journal(
-        mut self,
-        root: impl AsRef<std::path::Path>,
-    ) -> Result<Self, KernelError> {
-        let journal = FsJournal::open(root)?;
-        self.journal = Box::new(journal);
-        Ok(self)
     }
 
     pub fn with_module_cache_dir(mut self, dir: impl Into<PathBuf>) -> Self {
@@ -1198,10 +1298,6 @@ impl<S: Store + 'static> Kernel<S> {
         self.manifest_hash
     }
 
-    pub fn set_journal_next_seq(&mut self, next_seq: JournalSeq) {
-        self.journal.set_next_seq(next_seq);
-    }
-
     pub fn with_suppressed_journal<T>(
         &mut self,
         f: impl FnOnce(&mut Self) -> Result<T, KernelError>,
@@ -1436,8 +1532,66 @@ impl<S: Store + 'static> Kernel<S> {
         self.clock.logical_now_ns()
     }
 
+    pub fn set_logical_time_ns(&mut self, now_ns: u64) -> u64 {
+        let now_ns = self.clock.set_logical_now_ns(now_ns);
+        self.effect_manager.update_logical_now_ns(now_ns);
+        now_ns
+    }
+
+    pub fn advance_logical_time_ns(&mut self, delta_ns: u64) -> u64 {
+        let now_ns = self.clock.advance_logical_by_ns(delta_ns);
+        self.effect_manager.update_logical_now_ns(now_ns);
+        now_ns
+    }
+
     pub fn journal_head(&self) -> JournalSeq {
         self.journal.next_seq()
+    }
+
+    pub fn journal_bounds(&self) -> JournalBounds {
+        self.journal.bounds()
+    }
+
+    pub fn compact_journal_through(
+        &mut self,
+        inclusive_seq: JournalSeq,
+    ) -> Result<(), KernelError> {
+        self.journal.compact_through(inclusive_seq)?;
+        Ok(())
+    }
+
+    pub fn quiescence_status(&self) -> KernelQuiescence {
+        let workflow_queue_pending = !self.workflow_queue.is_empty();
+        let queued_effects = self.effect_manager.queued().len();
+        let pending_workflow_receipts = self.pending_workflow_receipts.len();
+        let mut inflight_workflow_intents = 0usize;
+        let mut non_terminal_workflow_instances = 0usize;
+
+        for instance in self.workflow_instances.values() {
+            inflight_workflow_intents += instance.inflight_intents.len();
+            if matches!(
+                instance.status,
+                WorkflowRuntimeStatus::Running | WorkflowRuntimeStatus::Waiting
+            ) {
+                non_terminal_workflow_instances += 1;
+            }
+        }
+
+        let kernel_idle = !workflow_queue_pending;
+        let runtime_quiescent = kernel_idle
+            && queued_effects == 0
+            && pending_workflow_receipts == 0
+            && inflight_workflow_intents == 0;
+
+        KernelQuiescence {
+            kernel_idle,
+            runtime_quiescent,
+            workflow_queue_pending,
+            queued_effects,
+            pending_workflow_receipts,
+            inflight_workflow_intents,
+            non_terminal_workflow_instances,
+        }
     }
 
     pub fn queued_effects_snapshot(&self) -> Vec<EffectIntentSnapshot> {
@@ -2020,6 +2174,7 @@ fn refresh_workflow_status(state: &mut WorkflowInstanceState) {
 mod tests {
     use super::*;
     use crate::world::test_support::minimal_kernel_non_keyed;
+    use aos_cbor::Hash;
 
     #[test]
     fn ensure_secret_resolver_keeps_provided_when_manifest_has_no_secrets() {
@@ -2065,5 +2220,82 @@ mod tests {
         assert_eq!(instances.len(), 1);
         assert!(instances[0].inflight_intents.is_empty());
         assert_eq!(instances[0].status, WorkflowStatusSnapshot::Completed);
+    }
+
+    #[test]
+    fn drain_workspace_projection_deltas_decodes_and_leaves_other_cells() {
+        #[derive(Serialize)]
+        struct CommitMeta {
+            root_hash: String,
+            owner: String,
+            created_at: u64,
+        }
+
+        #[derive(Serialize)]
+        struct History {
+            latest: u64,
+            versions: BTreeMap<u64, CommitMeta>,
+        }
+
+        let mut kernel = minimal_kernel_non_keyed();
+        let workspace_key = serde_cbor::to_vec(&"alpha").expect("workspace key cbor");
+        let workspace_key_hash = Hash::of_bytes(&workspace_key).as_bytes().to_vec();
+        let workspace_state = serde_cbor::to_vec(&History {
+            latest: 2,
+            versions: BTreeMap::from([(
+                2,
+                CommitMeta {
+                    root_hash: "sha256:feed".into(),
+                    owner: "lukas".into(),
+                    created_at: 22,
+                },
+            )]),
+        })
+        .expect("workspace history cbor");
+        kernel.pending_cell_projection_deltas.insert(
+            ("sys/Workspace@1".into(), workspace_key_hash.clone()),
+            CellProjectionDelta {
+                workflow: "sys/Workspace@1".into(),
+                key_hash: workspace_key_hash,
+                key_bytes: workspace_key,
+                state: Some(CellProjectionDeltaState {
+                    state_bytes: workspace_state,
+                    state_hash: Hash::of_bytes(b"workspace"),
+                    size: 9,
+                    last_active_ns: 7,
+                }),
+            },
+        );
+        kernel.pending_cell_projection_deltas.insert(
+            ("com.acme/Workflow@1".into(), b"cell-key".to_vec()),
+            CellProjectionDelta {
+                workflow: "com.acme/Workflow@1".into(),
+                key_hash: b"cell-key".to_vec(),
+                key_bytes: b"cell-key".to_vec(),
+                state: None,
+            },
+        );
+
+        let deltas = kernel
+            .drain_workspace_projection_deltas()
+            .expect("workspace deltas");
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].workspace, "alpha");
+        assert_eq!(
+            deltas[0].state.as_ref().map(|state| state.latest_version),
+            Some(2)
+        );
+        assert_eq!(
+            deltas[0]
+                .state
+                .as_ref()
+                .and_then(|state| state.versions.get(&2))
+                .map(|version| version.root_hash.as_str()),
+            Some("sha256:feed")
+        );
+
+        let remaining = kernel.drain_cell_projection_deltas();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].workflow, "com.acme/Workflow@1");
     }
 }

@@ -104,6 +104,7 @@ impl<S: Store + 'static> Kernel<S> {
         let baseline = SnapshotRecord {
             snapshot_ref: hash.to_hex(),
             height,
+            universe_id: self.universe_id,
             logical_time_ns: logical_now_ns,
             receipt_horizon_height: self.receipt_horizon_height_for_baseline(height),
             manifest_hash: Some(self.manifest_hash.to_hex()),
@@ -161,9 +162,11 @@ impl<S: Store + 'static> Kernel<S> {
                 .unwrap_or(head);
         }
         if let Some(snapshot) = latest_promotable_baseline {
+            self.universe_id = snapshot.universe_id;
             self.active_baseline = Some(snapshot);
         }
         if let Some(snapshot) = latest_replay_snapshot {
+            self.universe_id = snapshot.universe_id;
             resume_seq = Some(snapshot.height);
             self.load_snapshot_for_replay(&snapshot)?;
         }
@@ -218,6 +221,7 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<(), KernelError> {
         self.validate_baseline_promotion(record)?;
         self.validate_snapshot_record_manifest_lineage(record, None)?;
+        self.universe_id = record.universe_id;
         self.active_baseline = Some(record.clone());
         Ok(())
     }
@@ -272,17 +276,30 @@ impl<S: Store + 'static> Kernel<S> {
         self.replay_generated_domain_event_hashes.clear();
         let replay_metrics = self.replay_metrics.take();
         let apply_ms = apply_started.elapsed().as_millis();
+        let replayed_records = replay_metrics
+            .as_ref()
+            .map(|metrics| metrics.journal_records)
+            .unwrap_or_else(|| head.saturating_sub(from));
+        let replay_to = if replayed_records == 0 {
+            None
+        } else {
+            Some(cursor.saturating_sub(1))
+        };
         if apply_ms >= SLOW_REPLAY_LOG_THRESHOLD_MS {
             log::info!(
-                "kernel replay_entries_from completed: replay_from={} load_ms={} apply_ms={}",
+                "kernel replay_entries_from completed: replay_from={} replay_to={:?} replayed_records={} load_ms={} apply_ms={}",
                 from,
+                replay_to,
+                replayed_records,
                 load_ms,
                 apply_ms
             );
         } else {
             log::debug!(
-                "kernel replay_entries_from completed: replay_from={} load_ms={} apply_ms={}",
+                "kernel replay_entries_from completed: replay_from={} replay_to={:?} replayed_records={} load_ms={} apply_ms={}",
                 from,
+                replay_to,
+                replayed_records,
                 load_ms,
                 apply_ms
             );
@@ -517,6 +534,7 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn load_snapshot(&mut self, record: &SnapshotRecord) -> Result<(), KernelError> {
         self.validate_baseline_promotion(record)?;
+        self.universe_id = record.universe_id;
         self.active_baseline = Some(record.clone());
         self.load_snapshot_for_replay(record)
     }
@@ -939,7 +957,7 @@ fn decode_manifest_record(payload: &[u8]) -> Result<ManifestRecord, KernelError>
 mod tests {
     use super::*;
     use crate::MemStore;
-    use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
+    use crate::journal::{Journal, JournalEntry, JournalKind};
     use crate::receipts::WorkflowEffectContext;
     use crate::world::test_support::{
         append_record, empty_manifest, event_record, kernel_with_store_and_journal,
@@ -952,6 +970,7 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
     use tempfile::TempDir;
+    use uuid::Uuid;
 
     fn install_stream_module(kernel: &mut Kernel<MemStore>, module_name: &str) {
         let module = aos_air_types::DefModule {
@@ -980,7 +999,7 @@ mod tests {
         let (loaded_a, hash_a) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventA@1");
         let (_loaded_b, hash_b) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventB@1");
 
-        let mut journal = MemJournal::default();
+        let mut journal = Journal::new();
         append_record(
             &mut journal,
             JournalRecord::Manifest(ManifestRecord {
@@ -1005,7 +1024,7 @@ mod tests {
         let kernel = Kernel::from_loaded_manifest_with_config(
             store,
             loaded_a,
-            Box::new(journal),
+            journal,
             KernelConfig::default(),
         )
         .expect("replay");
@@ -1018,7 +1037,7 @@ mod tests {
         let (loaded_a, hash_a) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventA@1");
         let (_loaded_b, hash_b) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventB@1");
 
-        let mut journal = MemJournal::default();
+        let mut journal = Journal::new();
         append_record(
             &mut journal,
             JournalRecord::Manifest(ManifestRecord {
@@ -1052,6 +1071,7 @@ mod tests {
             JournalRecord::Snapshot(SnapshotRecord {
                 snapshot_ref: snap_hash.to_hex(),
                 height: snapshot_height,
+                universe_id: Uuid::nil(),
                 logical_time_ns: 0,
                 receipt_horizon_height: Some(snapshot_height),
                 manifest_hash: Some(hash_a.to_hex()),
@@ -1076,7 +1096,7 @@ mod tests {
         let kernel = Kernel::from_loaded_manifest_with_config(
             store,
             loaded_a,
-            Box::new(journal),
+            journal,
             KernelConfig::default(),
         )
         .expect("replay");
@@ -1089,7 +1109,7 @@ mod tests {
         let (loaded_a, hash_a) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventA@1");
         let (_loaded_b, hash_b) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventB@1");
 
-        let mut journal = MemJournal::default();
+        let mut journal = Journal::new();
         append_record(
             &mut journal,
             JournalRecord::Manifest(ManifestRecord {
@@ -1123,6 +1143,7 @@ mod tests {
             JournalRecord::Snapshot(SnapshotRecord {
                 snapshot_ref: snap_hash.to_hex(),
                 height: snapshot_height,
+                universe_id: Uuid::nil(),
                 logical_time_ns: 0,
                 receipt_horizon_height: Some(snapshot_height),
                 manifest_hash: Some(hash_b.to_hex()),
@@ -1132,7 +1153,7 @@ mod tests {
         let err = match Kernel::from_loaded_manifest_with_config(
             store,
             loaded_a,
-            Box::new(journal),
+            journal,
             KernelConfig::default(),
         ) {
             Ok(_) => panic!("mismatched snapshot manifest should fail closed"),
@@ -1261,7 +1282,7 @@ mod tests {
         let reopened = Kernel::from_loaded_manifest_with_config(
             store,
             loaded,
-            Box::new(MemJournal::from_entries(&entries)),
+            Journal::from_entries(&entries).unwrap(),
             KernelConfig::default(),
         )
         .expect("replay from latest snapshot");
@@ -1292,7 +1313,7 @@ mod tests {
         let snap_bytes = serde_cbor::to_vec(&snapshot).unwrap();
         let snap_hash = store.put_blob(&snap_bytes).unwrap();
 
-        let mut bad_journal = MemJournal::default();
+        let mut bad_journal = Journal::new();
         append_record(
             &mut bad_journal,
             JournalRecord::Manifest(ManifestRecord {
@@ -1304,13 +1325,14 @@ mod tests {
             JournalRecord::Snapshot(SnapshotRecord {
                 snapshot_ref: snap_hash.to_hex(),
                 height: 1,
+                universe_id: Uuid::nil(),
                 logical_time_ns: 0,
                 receipt_horizon_height: Some(1),
                 manifest_hash: Some(manifest_hash.to_hex()),
             }),
         );
 
-        let err = match Kernel::from_loaded_manifest(store, loaded, Box::new(bad_journal)) {
+        let err = match Kernel::from_loaded_manifest(store, loaded, bad_journal) {
             Ok(_) => panic!("incomplete roots should fail"),
             Err(err) => err,
         };
@@ -1373,7 +1395,7 @@ mod tests {
     #[test]
     fn snapshot_restores_stream_cursor_acceptance_behavior() {
         let store = Arc::new(MemStore::default());
-        let journal = Box::new(MemJournal::new());
+        let journal = Journal::new();
         let mut kernel = kernel_with_store_and_journal(store.clone(), journal);
         install_stream_module(&mut kernel, "com.acme/Workflow@1");
 
@@ -1526,12 +1548,8 @@ mod tests {
         let store_full = Arc::new(MemStore::default());
         let (loaded_full, _) =
             loaded_manifest_with_schema(store_full.as_ref(), "com.acme/EventA@1");
-        let mut kernel_full = Kernel::from_loaded_manifest(
-            store_full.clone(),
-            loaded_full,
-            Box::new(MemJournal::default()),
-        )
-        .unwrap();
+        let mut kernel_full =
+            Kernel::from_loaded_manifest(store_full.clone(), loaded_full, Journal::new()).unwrap();
         kernel_full
             .submit_domain_event_result(
                 "com.acme/EventA@1",
@@ -1555,12 +1573,9 @@ mod tests {
         let store_baseline = Arc::new(MemStore::default());
         let (loaded_baseline, _) =
             loaded_manifest_with_schema(store_baseline.as_ref(), "com.acme/EventA@1");
-        let mut kernel_baseline = Kernel::from_loaded_manifest(
-            store_baseline.clone(),
-            loaded_baseline,
-            Box::new(MemJournal::default()),
-        )
-        .unwrap();
+        let mut kernel_baseline =
+            Kernel::from_loaded_manifest(store_baseline.clone(), loaded_baseline, Journal::new())
+                .unwrap();
         kernel_baseline
             .submit_domain_event_result(
                 "com.acme/EventA@1",
@@ -1595,7 +1610,7 @@ mod tests {
     #[test]
     fn snapshot_restores_cell_index_root_and_cells() {
         let store = Arc::new(MemStore::default());
-        let journal = Box::new(MemJournal::new());
+        let journal = Journal::new();
         let mut kernel = kernel_with_store_and_journal(store.clone(), journal);
         let workflow = "com.acme/Workflow@1".to_string();
         let key = b"k".to_vec();
@@ -1628,7 +1643,7 @@ mod tests {
         let entries = kernel.journal.load_from(0).expect("load journal entries");
 
         let mut kernel2 = {
-            let journal = Box::new(MemJournal::from_entries(&entries));
+            let journal = Journal::from_entries(&entries).unwrap();
             kernel_with_store_and_journal(store.clone(), journal)
         };
         kernel2.tick_until_idle().unwrap();

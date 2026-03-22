@@ -33,7 +33,7 @@ Notes:
 These are based on post-warmup scoped timers plus sampling profiles from a debug run.
 
 1. Journal durability (`fsync`) dominates per-event ingress time.
-   - Hot path: `Kernel::append_record -> FsJournal::append -> File::sync_all`.
+   - Hot path: `Kernel::append_record -> Journal::append`.
    - In sampled runs, `sync_all` was the single largest self-time bucket (~60%).
    - Meaning: throughput is currently bounded by forced durability on each append, not by workflow logic.
 

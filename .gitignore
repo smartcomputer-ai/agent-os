@@ -4,10 +4,12 @@
 .DS_Store
 .store/
 .aos/
+.aos-hosted/
 notes-world/
 .playwright-mcp/
 profile.json.gz
 modules/
+roadmap/v0.17-kafka/kafka-examples/
 
 # ===========================================================================
 # Rust.gitignore
@@ -183,6 +185,7 @@ activemq-data/
 .env
 .envrc
 .venv
+.venv-*/
 env/
 venv/
 ENV/
@@ -246,3 +249,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+*.dSYM/

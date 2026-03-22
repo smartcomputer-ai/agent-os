@@ -6,7 +6,6 @@ AIR (Agent Intermediate Representation) is a small, typed, canonical control‑p
 - spec/schemas/common.schema.json
 - spec/schemas/defschema.schema.json
 - spec/schemas/defmodule.schema.json
-- spec/schemas/defplan.schema.json (legacy compatibility only)
 - spec/schemas/defcap.schema.json
 - spec/schemas/defpolicy.schema.json
 - spec/schemas/defsecret.schema.json
@@ -32,7 +31,7 @@ The policy engine is minimal: ordered allow/deny rules. Hooks are reserved for r
 
 ## 1) Vocabulary and Identity
 
-**Kind**: One of `defschema`, `defmodule`, `defeffect`, `defcap`, `defpolicy`, `defsecret`, or `manifest`. (`defmigration` is reserved for future use.) Legacy `defplan` nodes may still be encountered in historical assets but are not part of active v1 manifest semantics.
+**Kind**: One of `defschema`, `defmodule`, `defeffect`, `defcap`, `defpolicy`, `defsecret`, or `manifest`. (`defmigration` is reserved for future use.)
 
 **Name**: A versioned identifier with the format `namespace/name@version`, where version is a positive integer. Example: `com.acme/rss_fetch@1`.
 
@@ -264,7 +263,7 @@ See: spec/schemas/defmodule.schema.json
 
 `EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical effect parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so workflow modules, reducers, and adapters all hash the same shapes. Workflow SDK/runtime support schemas live under `spec/defs/builtin-schemas-sdk.air.json`. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions by deriving enums from the `defeffect` set.
 
-`origin_scope` on each `defeffect` gates who may emit it. The current schema uses compatibility labels: `"reducer"` means workflow-module reducer ABI emission, `"plan"` means non-reducer orchestration origins (system/governance/tooling), and `"both"` allows either. “Micro-effects” are those whose `origin_scope` allows reducers (currently `blob.put`, `blob.get`, `timer.set` in v1).
+`origin_scope` on each `defeffect` gates who may emit it. In active semantics, effects may be emitted by workflow modules, by system/governance flows, or by both. “Micro-effects” are those whose `origin_scope` allows workflow modules (currently `blob.put`, `blob.get`, `timer.set` in v1).
 
 Built-in kinds in v1:
 
@@ -316,53 +315,53 @@ Example secret ref in `llm.generate` params:
 - params: `{ alias:text, version:nat, binding_id:text, expected_digest:hash }`
 - receipt: `{ alias:text, version:nat, binding_id:text, digest:hash }`
 
-**workspace.resolve** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.resolve** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ workspace:text, version?:nat }`
 - receipt: `{ exists:bool, resolved_version?:nat, head?:nat, root_hash?:hash }`
 
-**workspace.empty_root** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.empty_root** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ workspace:text }`
 - receipt: `{ root_hash:hash }`
 
-**workspace.list** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.list** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ root_hash:hash, path?:text, scope?:text, cursor?:text, limit:nat }`
 - receipt: `{ entries:[{ path, kind, hash?, size?, mode? }], next_cursor?:text }`
 
-**workspace.read_ref** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.read_ref** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ root_hash:hash, path:text }`
 - receipt: `{ kind, hash, size, mode }` or `null` when missing
 
-**workspace.read_bytes** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.read_bytes** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ root_hash:hash, path:text, range?:{ start:nat, end:nat } }`
 - receipt: `bytes`
 
-**workspace.write_bytes** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.write_bytes** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ root_hash:hash, path:text, bytes:bytes, mode?:nat }`
 - receipt: `{ new_root_hash:hash, blob_hash:hash }`
 
-**workspace.write_ref** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.write_ref** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ root_hash:hash, path:text, blob_hash:hash, mode?:nat }`
 - receipt: `{ new_root_hash:hash, blob_hash:hash }`
 
-**workspace.remove** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.remove** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ root_hash:hash, path:text }`
 - receipt: `{ new_root_hash:hash }`
 
-**workspace.diff** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.diff** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ root_a:hash, root_b:hash, prefix?:text }`
 - receipt: `{ changes:[{ path, kind, old_hash?, new_hash? }] }`
 
-**workspace.annotations_get** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.annotations_get** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ root_hash:hash, path?:text }`
 - receipt: `{ annotations?:map<text,hash> }`
 
-**workspace.annotations_set** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `workspace`)
+**workspace.annotations_set** (system/governance tooling in workflow runtime; cap_type `workspace`)
 - params: `{ root_hash:hash, path?:text, annotations_patch:map<text,option<hash>> }`
 - receipt: `{ new_root_hash:hash, annotations_hash:hash }`
 
 Workspace paths are URL-safe relative paths: segments match `[A-Za-z0-9._~-]`, no empty segments, `.` or `..`, and no leading or trailing `/`. Tree nodes are `sys/WorkspaceTree@2`/`sys/WorkspaceEntry@2` (annotations stored via optional `annotations_hash` on directories and entries). Entries are lexicographically sorted, file modes are `0644`/`0755`, and directory mode is `0755`. `workspace.remove` errors on non-empty directories; `workspace.read_bytes.range` uses `[start,end)` and errors if `end` exceeds file size.
 
-**introspect.manifest / introspect.reducer_state / introspect.journal_head / introspect.list_cells** (system/governance tooling in workflow runtime; `origin_scope: "plan"`, cap_type `query`)
+**introspect.manifest / introspect.reducer_state / introspect.journal_head / introspect.list_cells** (system/governance tooling in workflow runtime; cap_type `query`)
 - Read-only effects served by an internal kernel adapter; receipts include consistency metadata used by governance and self-upgrade flows.
 - `introspect.manifest`: params `{ consistency: text }` (`head` | `exact:<h>` | `at_least:<h>`); receipt `{ manifest, journal_height, snapshot_hash?, manifest_hash }`
 - `introspect.reducer_state`: params `{ reducer:text, key_b64?:text, consistency:text }`; receipt `{ state_b64?:text, meta:{ journal_height, snapshot_hash?, manifest_hash } }`
@@ -509,7 +508,7 @@ See: spec/schemas/defcap.schema.json
   "params_schema": "sys/HttpRequestParams@1",
   "receipt_schema": "sys/HttpRequestReceipt@1",
   "cap_type": "http.out",
-  "origin_scope": "plan",
+  "origin_scope": "both",
   "description": "Optional human text"
 }
 ```
@@ -517,11 +516,11 @@ See: spec/schemas/defcap.schema.json
 ### Fields
 
 - `name`: Versioned Name of the effect definition (namespace/name@version)
-- `kind`: EffectKind string referenced by workflow modules or orchestration origins (e.g., `http.request`)
+- `kind`: EffectKind string referenced by workflow modules or system/governance orchestration origins (e.g., `http.request`)
 - `params_schema`: SchemaRef for effect parameters
 - `receipt_schema`: SchemaRef for effect receipts
 - `cap_type`: Capability type that must guard this effect
-- `origin_scope`: `"reducer" | "plan" | "both"`; reducers/workflow modules may emit reducer/both; non-reducer orchestration origins emit plan/both
+- `origin_scope`: schema-defined emitter scope for this effect; semantically this distinguishes workflow-module origins, system/governance origins, or both
 - `description?`: Optional prose
 
 ### Notes
@@ -561,7 +560,7 @@ Policies define ordered rules that allow or deny effects based on their characte
 - `effect_kind?: EffectKind` – namespaced effect kind (http.request, llm.generate, etc.)
 - `cap_name?: text` – which CapGrant name
 - `cap_type?: CapType` – capability type of the resolved grant (http.out, llm.basic, etc.)
-- `origin_kind?: "workflow" | "system" | "governance"` – effect origin category (legacy `"plan"`/`"reducer"` aliases map to `"workflow"`)
+- `origin_kind?: "workflow" | "system" | "governance"` – effect origin category
 - `origin_name?: Name` – the specific workflow/system/governance origin Name
 
 ### Decision (v1)
@@ -589,24 +588,9 @@ Decisions are journaled as `policy_decision { intent_hash, policy_name, rule_ind
 
 See: spec/schemas/defpolicy.schema.json
 
-## 12) Legacy defplan (Compatibility Only)
+For workflow patterns and architecture guidance, use [spec/05-workflows.md](05-workflows.md).
 
-`defplan` is no longer part of active v1 manifest semantics. Current kernels run workflow orchestration through workflow modules (`defmodule` with `module_kind: "workflow"`) plus event routing and receipt delivery.
-
-Notes:
-- Legacy `defplan` assets may still exist in historical worlds; loaders may preserve compatibility behavior (for example, ignore-or-translate paths) but new control-plane authoring should not depend on `defplan`.
-- Manifest-level `triggers` are removed in favor of `routing.subscriptions`.
-- For workflow patterns and architecture guidance, use [spec/05-workflows.md](05-workflows.md).
-
-## 13) Legacy StartPlan API (Removed)
-
-The public `StartPlan` API and trigger-based plan starts are removed from active workflow runtime semantics. Runtime entry is event-driven:
-
-- Domain events are appended and normalized.
-- `routing.subscriptions` delivers events to workflow modules.
-- Workflow modules emit effects and consume normalized receipt events.
-
-## 14) Validation Rules (Semantic)
+## 12) Validation Rules (Semantic)
 
 The kernel validator enforces these semantic checks:
 
@@ -618,7 +602,7 @@ The kernel validator enforces these semantic checks:
 
 **defcap**: `cap_type` in built‑ins; parameter schema compatible.
 
-## 15) Patch Format (AIR Changes)
+## 13) Patch Format (AIR Changes)
 
 Patches describe changes to the control plane (design-time modifications).
 
@@ -666,7 +650,7 @@ Authoring ergonomics:
 - CLI has `--require-hashes` to enforce explicit hashes for stricter flows.
 - PatchDocuments can be submitted over control channel; kernel/daemon compiles them server-side so clients don't need to compute hashes.
 
-## 16) Journal Entries (AIR‑Related)
+## 14) Journal Entries (AIR‑Related)
 
 The journal records both design-time (governance) and runtime (execution) events.
 
@@ -695,7 +679,6 @@ Runtime journal entries are canonical CBOR enums; the important ones for AIR wor
 - **EffectReceipt** `{ intent_hash, adapter_id, status, payload_cbor, cost_cents?, signature, now_ns, logical_now_ns, journal_height, entropy, manifest_hash }` – adapters’ signed receipts; replay reproduces workflow receipt progression.
 - **cap_decision** `{ intent_hash, effect_kind, cap_name, cap_type, grant_hash, enforcer_module, decision, deny?, expiry_ns?, logical_now_ns }` – capability checks recorded at enqueue time for audit/replay explainability.
 - **policy_decision** `{ intent_hash, policy_name, rule_index?, decision }` – policy allow/deny decision recorded at enqueue time.
-- **PlanStarted / PlanResult / PlanEnded** – legacy-named journal records still used for workflow-runtime tracing compatibility.
 - **Snapshot** `{ snapshot_ref, height, logical_time_ns, receipt_horizon_height?, manifest_hash? }` – baseline snapshot record used as a restore root; replay loads the active baseline and replays tail entries with `height >= baseline.height`.
 - **Governance** – proposal/shadow/approve/apply records (design-time control plane).
 
@@ -705,13 +688,13 @@ Ingress-stamped fields (`now_ns`, `logical_now_ns`, `journal_height`, `entropy`,
 
 Budgets are deferred; no budget events are emitted in v1.
 
-## 17) Determinism and Replay
+## 15) Determinism and Replay
 
 Deterministic workflow module execution, reducer invocations, and canonical expression/value evaluation guarantee that same manifest + journal + receipts ⇒ identical state.
 
 Effects occur only at the boundary; receipts bind non‑determinism. Replay reuses recorded receipts; shadow‑runs stub effects and report predicted intents and receipt progression.
 
-## 18) Error Handling (v1)
+## 16) Error Handling (v1)
 
 **Validation**: Reject patch; journal Proposed → Rejected with reasons.
 
@@ -719,7 +702,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 **Budgets**: Deferred to a future milestone; see `roadmap/vX-future/p4-budgets.md`.
 
-## 19) On‑Disk Expectations
+## 17) On‑Disk Expectations
 
 - **Local state root**: `.aos/`
 - **SQLite runtime/admin state**: `.aos/local-node.sqlite3`
@@ -727,7 +710,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 - **Module/engine caches**: `.aos/cache/{modules,wasmtime}/`
 - **Manifest roots**: `manifest.air.cbor` (binary) and `manifest.air.json` (text)
 
-## 20) Security Model
+## 18) Security Model
 
 **Object‑capabilities**: Effects require a CapGrant by name; grants live in kernel state and are referenced via manifest defaults or module/system bindings.
 
@@ -735,7 +718,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 **Policy gate**: All effects pass through a policy gate before dispatch; decisions are journaled; receipts are signed and verified.
 
-## 20) Examples (Abridged)
+## 19) Examples (Abridged)
 
 20.1 defschema (FeedItem)
 
@@ -773,7 +756,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 }
 ```
 
-## 21) Implementation Guidance (Engineering Notes)
+## 20) Implementation Guidance (Engineering Notes)
 
 - Build order: canonical CBOR + hashing → store/loader/validator → Wasmtime workflow/pure ABIs + schema checks → effect manager + adapters (http/fs/timer/llm) + receipts → patcher + governance loop → shadow‑run.
 - Determinism tests: golden “replay or die” snapshots; fuzz Expr evaluator and CBOR canonicalizer.

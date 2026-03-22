@@ -13,7 +13,6 @@ aos-effects = { path = "../aos-effects" }
 aos-effect-adapters = { path = "../aos-effect-adapters", features = ["e2e-tests"] }
 aos-kernel = { path = "../aos-kernel" }
 aos-node = { path = "../aos-node" }
-aos-sqlite = { path = "../aos-sqlite" }
 aos-runtime = { path = "../aos-runtime" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

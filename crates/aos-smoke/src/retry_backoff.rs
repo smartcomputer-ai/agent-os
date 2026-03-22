@@ -84,7 +84,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     );
     host.send_event(&RetryEvent::Start(start))?;
 
-    drive_retry_flow(host.kernel_mut())?;
+    drive_retry_flow(&mut host.kernel_mut())?;
 
     let final_state: RetryState = host.read_state()?;
     println!(

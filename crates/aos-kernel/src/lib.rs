@@ -44,5 +44,6 @@ pub use store::{DynStore, EntryKind, MemStore, Store, StoreError, StoreResult};
 pub use workflow::WorkflowRegistry;
 pub use world::{
     CellProjectionDelta, CellProjectionDeltaState, DefListing, Kernel, KernelBuilder, KernelConfig,
-    KernelHeights, TailEntry, TailIntent, TailReceipt, TailScan,
+    KernelHeights, KernelQuiescence, TailEntry, TailIntent, TailReceipt, TailScan,
+    WorkspaceProjectionDelta, WorkspaceProjectionDeltaState, WorkspaceProjectionVersion,
 };

@@ -4,7 +4,7 @@ mod fixtures;
 use aos_effects::CapabilityGrant;
 use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
-use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::journal::Journal;
 use aos_kernel::policy::AllowAllPolicy;
 use aos_wasm_abi::WorkflowEffect;
 use indexmap::IndexMap;
@@ -336,7 +336,7 @@ fn workflow_params_round_trip_journal_replay() {
             );
             replay_manifest
         },
-        Box::new(MemJournal::from_entries(&journal)),
+        Journal::from_entries(&journal).unwrap(),
     )
     .unwrap();
     let replay_intent = replay_world

@@ -368,7 +368,7 @@ fn run_attempt(
     )?;
 
     if case.run.bootstrap_session.unwrap_or(true) {
-        let host_session_id = bootstrap_host_session(&invocation.host, &workdir)?;
+        let host_session_id = bootstrap_host_session(&mut invocation.host, &workdir)?;
         send_session_event(
             &mut invocation.host,
             &mut invocation.clock,
@@ -634,7 +634,7 @@ fn resolve_tool_ids(state: &SessionState, llm_tool_names: &BTreeSet<String>) -> 
         .collect::<BTreeSet<_>>()
 }
 
-fn bootstrap_host_session(host: &EvalHost, workdir: &Path) -> Result<String> {
+fn bootstrap_host_session(host: &mut EvalHost, workdir: &Path) -> Result<String> {
     let params = HostSessionOpenParams {
         target: HostTarget::local(HostLocalTarget {
             mounts: None,
@@ -654,10 +654,8 @@ fn bootstrap_host_session(host: &EvalHost, workdir: &Path) -> Result<String> {
     )
     .context("build host.session.open intent")?;
 
-    let receipts = host.runtime().block_on(
-        host.adapter_registry()
-            .execute_batch_routed(vec![(intent, EffectKind::HOST_SESSION_OPEN.to_string())]),
-    );
+    let receipts =
+        host.execute_batch_routed(vec![(intent, EffectKind::HOST_SESSION_OPEN.to_string())])?;
     let receipt = receipts
         .into_iter()
         .next()
@@ -689,7 +687,7 @@ fn drive_live_effects<S: Store + 'static>(
 
     for _ in 0..max_steps {
         host.run_to_idle()?;
-        let intents = host.kernel_mut().drain_effects()?;
+        let intents = host.with_kernel_mut(|kernel| kernel.drain_effects())?;
         if intents.is_empty() {
             return Ok(stats);
         }
@@ -700,7 +698,9 @@ fn drive_live_effects<S: Store + 'static>(
         let mut external = Vec::<(EffectIntent, String)>::new();
 
         for intent in intents {
-            if let Some(internal_receipt) = host.kernel_mut().handle_internal_intent(&intent)? {
+            if let Some(internal_receipt) =
+                host.with_kernel_mut(|kernel| kernel.handle_internal_intent(&intent))?
+            {
                 receipts.push(internal_receipt);
                 continue;
             }
@@ -724,14 +724,12 @@ fn drive_live_effects<S: Store + 'static>(
         }
 
         if !external.is_empty() {
-            let external_receipts = host
-                .runtime()
-                .block_on(host.adapter_registry().execute_batch_routed(external));
+            let external_receipts = host.execute_batch_routed(external)?;
             receipts.extend(external_receipts);
         }
 
         for receipt in receipts {
-            host.kernel_mut().handle_receipt(receipt)?;
+            host.with_kernel_mut(|kernel| kernel.handle_receipt(receipt))?;
         }
     }
 
@@ -756,8 +754,11 @@ fn execute_live_llm_intent<S: Store + 'static>(
     )
     .context("build patched llm intent")?;
 
-    let mut receipt = host
-        .runtime()
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build eval llm runtime")?;
+    let mut receipt = runtime
         .block_on(llm_adapter.execute(&patched_intent))
         .context("execute live llm adapter")?;
 

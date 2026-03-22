@@ -4,7 +4,7 @@ use crate::Store;
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 
-use crate::journal::mem::MemJournal;
+use crate::journal::Journal;
 use crate::world::{Kernel, KernelConfig};
 use crate::{
     error::KernelError,
@@ -57,7 +57,7 @@ impl ShadowExecutor {
         let mut kernel = Kernel::from_loaded_manifest_with_config(
             store.clone(),
             loaded,
-            Box::new(MemJournal::new()),
+            Journal::new(),
             KernelConfig {
                 allow_placeholder_secrets: true,
                 ..KernelConfig::default()

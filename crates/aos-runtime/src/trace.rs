@@ -129,6 +129,7 @@ pub fn trace_get<S: Store + 'static>(
     let pending_workflow_receipts = kernel.pending_workflow_receipts_snapshot();
     let queued_effects = kernel.queued_effects_snapshot();
     let journal_head = kernel.journal_head();
+    let journal_bounds = kernel.journal_bounds();
 
     let inflight_workflow_intents = workflow_instances
         .iter()
@@ -185,9 +186,14 @@ pub fn trace_get<S: Store + 'static>(
             "record": root_record_json,
         },
         "journal_window": {
+            "retained_from": journal_bounds.retained_from,
             "from_seq": root_seq,
             "to_seq": window.last().and_then(|e| e.get("seq")).and_then(|v| v.as_u64()).unwrap_or(root_seq),
             "entries": window,
+        },
+        "journal_bounds": {
+            "retained_from": journal_bounds.retained_from,
+            "next_seq": journal_bounds.next_seq,
         },
         "live_wait": {
             "workflow_instances": workflow_instances.into_iter().map(|instance| {
@@ -328,6 +334,7 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
     let workflow_instances = kernel.workflow_instances_snapshot();
     let pending_workflow_receipts = kernel.pending_workflow_receipts_snapshot();
     let queued_effects = kernel.queued_effects_snapshot();
+    let journal_bounds = kernel.journal_bounds();
 
     let mut running = 0u64;
     let mut waiting = 0u64;
@@ -404,6 +411,10 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
         "runtime_wait": {
             "pending_workflow_receipts": pending_workflow_receipts.len(),
             "queued_effects": queued_effects.len(),
+        },
+        "journal_bounds": {
+            "retained_from": journal_bounds.retained_from,
+            "next_seq": journal_bounds.next_seq,
         },
         "strict_quiescence": {
             "non_terminal_workflow_instances": (running + waiting),

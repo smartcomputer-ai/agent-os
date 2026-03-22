@@ -856,7 +856,7 @@ mod tests {
     #[test]
     fn workflow_output_rejects_undeclared_effect_kind_before_cap_resolution() {
         let store = Arc::new(crate::MemStore::default());
-        let journal = Box::new(crate::journal::mem::MemJournal::new());
+        let journal = crate::journal::Journal::new();
         let mut kernel =
             crate::world::test_support::kernel_with_store_and_journal(store.clone(), journal);
         let workflow = "com.acme/Workflow@1".to_string();
@@ -925,7 +925,7 @@ mod tests {
     #[test]
     fn cell_index_root_updates_on_snapshot_commit_not_each_upsert() {
         let store = Arc::new(crate::MemStore::default());
-        let journal = Box::new(crate::journal::mem::MemJournal::new());
+        let journal = crate::journal::Journal::new();
         let mut kernel =
             crate::world::test_support::kernel_with_store_and_journal(store.clone(), journal);
         let workflow = "com.acme/Workflow@1".to_string();
@@ -1144,7 +1144,7 @@ mod tests {
         let mut kernel = Kernel::from_loaded_manifest(
             Arc::new(store),
             loaded,
-            Box::new(crate::journal::mem::MemJournal::default()),
+            crate::journal::Journal::default(),
         )
         .unwrap();
 
@@ -1193,7 +1193,7 @@ mod tests {
     #[test]
     fn large_dirty_keyed_state_spills_immediately_and_remains_readable() {
         let store = Arc::new(crate::MemStore::default());
-        let journal = Box::new(crate::journal::mem::MemJournal::new());
+        let journal = crate::journal::Journal::new();
         let mut kernel = crate::world::test_support::kernel_with_store_and_journal(store, journal);
         let workflow = "com.acme/Workflow@1".to_string();
         let key = b"large".to_vec();

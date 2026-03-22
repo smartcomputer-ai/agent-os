@@ -6,15 +6,13 @@ use aos_air_types::{
 use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::Store;
-use aos_kernel::journal::fs::FsJournal;
-use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::journal::Journal;
 use aos_kernel::journal::{JournalKind, JournalRecord, PolicyDecisionOutcome};
 use aos_kernel::snapshot::WorkflowStatusSnapshot;
 use aos_wasm_abi::{DomainEvent, WorkflowEffect, WorkflowOutput};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tempfile::TempDir;
 use wat::parse_str;
 
 use helpers::fixtures::{self, START_SCHEMA, TestWorld};
@@ -61,7 +59,7 @@ fn workflow_timer_receipt_replays_from_journal() {
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         timer_manifest(&store),
-        Box::new(MemJournal::from_entries(&journal_entries)),
+        Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
 
@@ -151,7 +149,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         no_plan_workflow_manifest(&store),
-        Box::new(MemJournal::from_entries(&journal_entries)),
+        Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
     assert_eq!(
@@ -223,7 +221,7 @@ fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         no_plan_workflow_manifest(&store),
-        Box::new(MemJournal::from_entries(&journal_entries)),
+        Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
     replay_world.kernel.tick_until_idle().unwrap();
@@ -488,32 +486,27 @@ fn workflow_cap_decision_includes_stable_grant_hash() {
 }
 
 #[test]
-fn workflow_fs_journal_persists_waiting_state_across_restarts() {
+fn workflow_replay_restores_waiting_state_across_restarts() {
     let store = fixtures::new_mem_store();
-    let temp = TempDir::new().unwrap();
-
-    {
-        let mut world = TestWorld::with_store_and_journal(
-            store.clone(),
-            no_plan_workflow_manifest(&store),
-            Box::new(FsJournal::open(temp.path()).unwrap()),
-        )
-        .unwrap();
+    let journal_entries = {
+        let mut world =
+            TestWorld::with_store(store.clone(), no_plan_workflow_manifest(&store)).unwrap();
         let start_event = serde_json::json!({
             "$tag": "Start",
-            "$value": fixtures::start_event("wf-fs")
+            "$value": fixtures::start_event("wf-journal")
         });
         world
             .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
             .expect("submit workflow start");
         world.tick_n(1).unwrap();
         assert_eq!(world.kernel.pending_workflow_receipts_snapshot().len(), 2);
-    }
+        world.kernel.dump_journal().unwrap()
+    };
 
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         no_plan_workflow_manifest(&store),
-        Box::new(FsJournal::open(temp.path()).unwrap()),
+        Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
     assert_eq!(

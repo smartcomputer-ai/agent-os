@@ -2,10 +2,13 @@
 
 mod batch;
 mod control;
-mod supervisor;
+#[allow(dead_code)]
 mod workspace;
 
-pub use aos_sqlite::{LocalSecretConfig, LocalSecretResolver, LocalSecretService, SqliteNodeStore};
+pub use aos_node::{
+    FsCas, LocalBlobPlanes, LocalBlobStoreConfig, LocalControl, LocalIngressQueue, LocalLogRuntime,
+    LocalRuntimeError, LocalSqliteConfig, LocalSqlitePlanes, LocalStatePaths, LocalSupervisor,
+    LocalSupervisorConfig, LocalWorker, LocalWorkerOutcome,
+};
 pub use batch::{BatchArgs, BatchCommand, run_batch};
-pub use control::{LocalControl, LocalHttpConfig, serve};
-pub use supervisor::{LocalSupervisor, LocalSupervisorConfig};
+pub use control::{LocalHttpConfig, serve};

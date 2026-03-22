@@ -10,19 +10,18 @@ use aos_effect_adapters::registry::AdapterRegistry;
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, EffectStreamFrame, ReceiptStatus};
 use aos_kernel::Store;
-use aos_kernel::journal::{Journal, SnapshotRecord as KernelSnapshotRecord};
+use aos_kernel::journal::{Journal, JournalBounds, SnapshotRecord as KernelSnapshotRecord};
 use aos_kernel::{
-    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, ManifestLoader,
-    cell_index::CellMeta,
+    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, KernelQuiescence,
+    LoadedManifest, ManifestLoader, cell_index::CellMeta,
 };
+use serde_json::Value as JsonValue;
 
 use crate::config::WorldConfig;
 use crate::error::HostError;
 use crate::timer::TimerScheduler;
 use aos_kernel::StateReader;
 use serde::Serialize;
-
-const SLOW_WORLD_OPEN_LOG_THRESHOLD_MS: u128 = 1_000;
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
@@ -48,18 +47,27 @@ pub enum RunMode<'a> {
     Daemon { scheduler: &'a mut TimerScheduler },
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct DrainOutcome {
     pub ticks: u64,
     pub idle: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct CycleOutcome {
     pub initial_drain: DrainOutcome,
     pub effects_dispatched: usize,
     pub receipts_applied: usize,
     pub final_drain: DrainOutcome,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QuiescenceStatus {
+    pub kernel: KernelQuiescence,
+    pub timers_pending: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_timer_deadline_ns: Option<u64>,
+    pub runtime_quiescent: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,12 +103,11 @@ impl<S: Store + 'static> WorldHost<S> {
         adapter_config: EffectAdapterConfig,
         kernel_config: KernelConfig,
     ) -> Result<Self, HostError> {
-        let root = manifest_path.parent().unwrap_or(Path::new("."));
         let loaded = ManifestLoader::load_from_path(store.as_ref(), manifest_path)?;
         Self::from_loaded_manifest_with_builder(
             store.clone(),
             loaded,
-            KernelBuilder::new(store).with_fs_journal(root)?,
+            KernelBuilder::new(store),
             world_config,
             adapter_config,
             kernel_config,
@@ -160,7 +167,7 @@ impl<S: Store + 'static> WorldHost<S> {
     pub fn from_loaded_manifest_with_journal_replay(
         store: Arc<S>,
         loaded: LoadedManifest,
-        journal: Box<dyn Journal>,
+        journal: Journal,
         world_config: WorldConfig,
         adapter_config: EffectAdapterConfig,
         kernel_config: KernelConfig,
@@ -181,20 +188,16 @@ impl<S: Store + 'static> WorldHost<S> {
             world_config.strict_effect_bindings,
         )?;
 
-        let mut builder = KernelBuilder::new(store.clone()).with_journal(journal);
         if let Some(dir) = world_config
             .module_cache_dir
             .clone()
             .or(kernel_config.module_cache_dir.clone())
         {
-            builder = builder.with_module_cache_dir(dir);
+            kernel_config.module_cache_dir = Some(dir);
         }
-        builder = builder.with_eager_module_load(world_config.eager_module_load);
-        builder = builder.with_cell_cache_size(world_config.cell_cache_size);
-        if let Some(resolver) = kernel_config.secret_resolver.clone() {
-            builder = builder.with_secret_resolver(resolver);
-        }
-        builder = builder.allow_placeholder_secrets(world_config.allow_placeholder_secrets);
+        kernel_config.eager_module_load = world_config.eager_module_load;
+        kernel_config.cell_cache_size = world_config.cell_cache_size;
+        kernel_config.allow_placeholder_secrets = world_config.allow_placeholder_secrets;
 
         let open_started = Instant::now();
         let mut kernel = if let Some(replay) = replay.as_ref() {
@@ -205,7 +208,12 @@ impl<S: Store + 'static> WorldHost<S> {
                 .filter(|seed| seed.height > baseline_height)
                 .map(|seed| seed.height.saturating_add(1))
                 .unwrap_or_else(|| baseline_height.saturating_add(1));
-            let mut kernel = builder.from_loaded_manifest_without_replay(loaded)?;
+            let mut kernel = Kernel::from_loaded_manifest_without_replay_with_config(
+                store.clone(),
+                loaded,
+                journal,
+                kernel_config,
+            )?;
             let baseline_restore_started = Instant::now();
             kernel.restore_snapshot_record(&replay.active_baseline)?;
             let baseline_restore_ms = baseline_restore_started.elapsed().as_millis();
@@ -224,50 +232,38 @@ impl<S: Store + 'static> WorldHost<S> {
                 kernel.replay_entries_from(replay.active_baseline.height.saturating_add(1))?;
             }
             let replay_ms = replay_started.elapsed().as_millis();
-            if replay_ms >= SLOW_WORLD_OPEN_LOG_THRESHOLD_MS {
-                log::info!(
-                    "world host open with replay: baseline_height={} replay_from={} baseline_restore_ms={} seed_restore_ms={} replay_ms={}",
-                    baseline_height,
-                    replay_from,
-                    baseline_restore_ms,
-                    seed_restore_ms,
-                    replay_ms
-                );
+            let replay_head = kernel.heights().head;
+            let replayed_records = replay_head.saturating_sub(replay_from);
+            let replay_to = if replayed_records == 0 {
+                None
             } else {
-                log::debug!(
-                    "world host open with replay: baseline_height={} replay_from={} baseline_restore_ms={} seed_restore_ms={} replay_ms={}",
-                    baseline_height,
-                    replay_from,
-                    baseline_restore_ms,
-                    seed_restore_ms,
-                    replay_ms
-                );
-            }
+                Some(replay_head.saturating_sub(1))
+            };
+            log::info!(
+                "world host open with replay: baseline_height={} replay_from={} replay_to={:?} replayed_records={} baseline_restore_ms={} seed_restore_ms={} replay_ms={}",
+                baseline_height,
+                replay_from,
+                replay_to,
+                replayed_records,
+                baseline_restore_ms,
+                seed_restore_ms,
+                replay_ms
+            );
             kernel
         } else {
-            builder.from_loaded_manifest(loaded)?
+            Kernel::from_loaded_manifest_with_config(store.clone(), loaded, journal, kernel_config)?
         };
         let rehydrate_started = Instant::now();
         Self::rehydrate_effect_queue(&mut kernel)?;
         let rehydrate_effect_queue_ms = rehydrate_started.elapsed().as_millis();
         let total_open_ms = open_started.elapsed().as_millis();
-        if total_open_ms >= SLOW_WORLD_OPEN_LOG_THRESHOLD_MS {
-            log::info!(
-                "world host open completed: replay_enabled={} eager_module_load={} rehydrate_effect_queue_ms={} total_open_ms={}",
-                replay.is_some(),
-                world_config.eager_module_load,
-                rehydrate_effect_queue_ms,
-                total_open_ms
-            );
-        } else {
-            log::debug!(
-                "world host open completed: replay_enabled={} eager_module_load={} rehydrate_effect_queue_ms={} total_open_ms={}",
-                replay.is_some(),
-                world_config.eager_module_load,
-                rehydrate_effect_queue_ms,
-                total_open_ms
-            );
-        }
+        log::info!(
+            "world host open completed: replay_enabled={} eager_module_load={} rehydrate_effect_queue_ms={} total_open_ms={}",
+            replay.is_some(),
+            world_config.eager_module_load,
+            rehydrate_effect_queue_ms,
+            total_open_ms
+        );
 
         Ok(Self {
             kernel,
@@ -292,7 +288,7 @@ impl<S: Store + 'static> WorldHost<S> {
     pub fn from_loaded_manifest(
         store: Arc<S>,
         loaded: LoadedManifest,
-        world_root: &Path,
+        _world_root: &Path,
         world_config: WorldConfig,
         adapter_config: EffectAdapterConfig,
         kernel_config: KernelConfig,
@@ -300,7 +296,7 @@ impl<S: Store + 'static> WorldHost<S> {
         Self::from_loaded_manifest_with_builder(
             store.clone(),
             loaded,
-            KernelBuilder::new(store).with_fs_journal(world_root)?,
+            KernelBuilder::new(store),
             world_config,
             adapter_config,
             kernel_config,
@@ -423,6 +419,14 @@ impl<S: Store + 'static> WorldHost<S> {
         self.kernel.drain_cell_projection_deltas()
     }
 
+    pub fn drain_workspace_projection_deltas(
+        &mut self,
+    ) -> Result<Vec<aos_kernel::WorkspaceProjectionDelta>, HostError> {
+        self.kernel
+            .drain_workspace_projection_deltas()
+            .map_err(HostError::from)
+    }
+
     pub fn list_defs(
         &self,
         kinds: Option<&[String]>,
@@ -439,6 +443,11 @@ impl<S: Store + 'static> WorldHost<S> {
 
     pub fn snapshot(&mut self) -> Result<(), HostError> {
         self.kernel.create_snapshot()?;
+        Ok(())
+    }
+
+    pub fn compact_journal_through(&mut self, inclusive_seq: u64) -> Result<(), HostError> {
+        self.kernel.compact_journal_through(inclusive_seq)?;
         Ok(())
     }
 
@@ -527,16 +536,51 @@ impl<S: Store + 'static> WorldHost<S> {
         self.kernel.heights()
     }
 
+    pub fn journal_bounds(&self) -> JournalBounds {
+        self.kernel.journal_bounds()
+    }
+
+    pub fn logical_time_now_ns(&self) -> u64 {
+        self.kernel.logical_time_now_ns()
+    }
+
+    pub fn set_logical_time_ns(&mut self, now_ns: u64) -> u64 {
+        self.kernel.set_logical_time_ns(now_ns)
+    }
+
+    pub fn advance_logical_time_ns(&mut self, delta_ns: u64) -> u64 {
+        self.kernel.advance_logical_time_ns(delta_ns)
+    }
+
+    pub fn kernel_quiescence(&self) -> KernelQuiescence {
+        self.kernel.quiescence_status()
+    }
+
+    pub fn quiescence_status(&self, scheduler: Option<&TimerScheduler>) -> QuiescenceStatus {
+        let kernel = self.kernel.quiescence_status();
+        let timers_pending = scheduler.map(TimerScheduler::len).unwrap_or(0);
+        let next_timer_deadline_ns = scheduler.and_then(TimerScheduler::next_due_at_ns);
+        QuiescenceStatus {
+            runtime_quiescent: kernel.runtime_quiescent && timers_pending == 0,
+            kernel,
+            timers_pending,
+            next_timer_deadline_ns,
+        }
+    }
+
+    pub fn trace_summary(&self) -> Result<JsonValue, HostError> {
+        crate::trace::workflow_trace_summary_with_routes(
+            &self.kernel,
+            Some(&self.route_diagnostics),
+        )
+    }
+
     pub fn kernel(&self) -> &Kernel<S> {
         &self.kernel
     }
 
     pub fn kernel_mut(&mut self) -> &mut Kernel<S> {
         &mut self.kernel
-    }
-
-    pub fn set_journal_next_seq(&mut self, next_seq: u64) {
-        self.kernel.set_journal_next_seq(next_seq);
     }
 
     /// Create a WorldHost from an existing kernel (for TestHost use).
@@ -809,7 +853,7 @@ mod tests {
     use aos_effect_adapters::config::{AdapterProviderSpec, EffectAdapterConfig};
     use aos_kernel::LoadedManifest;
     use aos_kernel::MemStore;
-    use aos_sqlite::{FsCas, LocalStatePaths};
+    use aos_node::{FsCas, LocalStatePaths};
     use serde_cbor::to_vec;
     use serde_json::json;
     use std::collections::HashMap;

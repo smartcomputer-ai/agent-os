@@ -37,10 +37,10 @@ pub(crate) struct GlobalOpts {
     /// Add a custom HTTP header as `KEY=VALUE`.
     #[arg(long, global = true)]
     header: Vec<String>,
-    /// Select the active universe by ID or handle.
+    /// Select the active hosted secret universe by UUID.
     #[arg(long, global = true, env = "AOS_UNIVERSE")]
     universe: Option<String>,
-    /// Select the active world by ID or handle.
+    /// Select the active world by UUID.
     #[arg(long, global = true, env = "AOS_WORLD")]
     world: Option<String>,
     /// Override the CLI config file path.

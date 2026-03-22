@@ -9,6 +9,7 @@ fn top_level_help_lists_resource_roots() {
         .success()
         .stdout(predicate::str::contains("profile"))
         .stdout(predicate::str::contains("local"))
+        .stdout(predicate::str::contains("hosted"))
         .stdout(predicate::str::contains("universe"))
         .stdout(predicate::str::contains("world"))
         .stdout(predicate::str::contains("workspace"))
@@ -31,14 +32,14 @@ fn governance_help_only_exposes_submit_commands() {
 }
 
 #[test]
-fn world_help_uses_admin_and_create_without_upload() {
+fn world_help_exposes_world_only_commands() {
     let mut cmd = cargo_bin_cmd!("aos");
     cmd.args(["world", "--help"]);
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("create"))
-        .stdout(predicate::str::contains("admin"))
-        .stdout(predicate::str::contains("set").not());
+        .stdout(predicate::str::contains("patch"))
+        .stdout(predicate::str::contains("admin").not());
 
     cargo_bin_cmd!("aos")
         .args(["world", "upload", "--help"])
@@ -91,6 +92,45 @@ fn local_status_reports_stopped_without_runtime_state() {
 }
 
 #[test]
+fn hosted_help_lists_lifecycle_commands() {
+    let mut cmd = cargo_bin_cmd!("aos");
+    cmd.args(["hosted", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("up"))
+        .stdout(predicate::str::contains("status"))
+        .stdout(predicate::str::contains("down"))
+        .stdout(predicate::str::contains("use"));
+}
+
+#[test]
+fn hosted_up_help_lists_background_flag_only() {
+    let mut cmd = cargo_bin_cmd!("aos");
+    cmd.args(["hosted", "up", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--background"))
+        .stdout(predicate::str::contains("--foreground").not());
+}
+
+#[test]
+fn hosted_status_reports_stopped_without_runtime_state() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let mut cmd = cargo_bin_cmd!("aos");
+    cmd.args([
+        "--json",
+        "hosted",
+        "status",
+        "--root",
+        temp.path().to_str().unwrap(),
+    ]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("\"running\":false"))
+        .stdout(predicate::str::contains("\"healthy\":false"));
+}
+
+#[test]
 fn profile_help_lists_select_command() {
     let mut cmd = cargo_bin_cmd!("aos");
     cmd.args(["profile", "--help"]);
@@ -101,10 +141,11 @@ fn profile_help_lists_select_command() {
 }
 
 #[test]
-fn universe_create_help_lists_select_flag() {
+fn universe_help_is_secret_only() {
     let mut cmd = cargo_bin_cmd!("aos");
-    cmd.args(["universe", "create", "--help"]);
+    cmd.args(["universe", "--help"]);
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("--select"));
+        .stdout(predicate::str::contains("secret"))
+        .stdout(predicate::str::contains("create").not());
 }

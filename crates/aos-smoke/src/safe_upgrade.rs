@@ -64,7 +64,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();
-    let mut requests = http.collect_requests(host.kernel_mut())?;
+    let mut requests = http.collect_requests(&mut host.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "expected a single HTTP intent before upgrade, saw {}",
@@ -150,7 +150,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     println!("   delivering late receipt to settle v1 workflow");
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         primary,
         MockHttpResponse::json(200, "{\"demo\":true}"),
     )?;
@@ -180,7 +180,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     println!("   start v2 fetch → url={}", url_for(&start_event));
     host.send_event(&start_event)?;
-    let mut upgraded_requests = http.collect_requests(host.kernel_mut())?;
+    let mut upgraded_requests = http.collect_requests(&mut host.kernel_mut())?;
     if upgraded_requests.len() != 1 {
         return Err(anyhow!(
             "expected primary HTTP intent after upgrade, saw {}",
@@ -193,12 +193,12 @@ pub fn run(example_root: &Path) -> Result<()> {
         primary_v2.params.method, primary_v2.params.url
     );
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         primary_v2,
         MockHttpResponse::json(201, "{\"demo\":true,\"call\":1}"),
     )?;
 
-    let mut followups = http.collect_requests(host.kernel_mut())?;
+    let mut followups = http.collect_requests(&mut host.kernel_mut())?;
     if followups.len() != 1 {
         return Err(anyhow!(
             "expected follow-up HTTP intent after upgrade, saw {}",
@@ -211,7 +211,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         follow.params.method, follow.params.url
     );
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         follow,
         MockHttpResponse::json(202, "{\"demo\":true,\"call\":2}"),
     )?;

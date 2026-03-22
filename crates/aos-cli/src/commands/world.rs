@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
@@ -31,8 +31,8 @@ use crate::render::{
 
 use super::common::{
     decode_command_payload, default_approver, encode_path_segment, ensure_approved, fetch_command,
-    is_terminal_state, resolve_selected_universe, resolve_target, resolve_world_arg_or_selected,
-    resolve_world_selector, wait_for_command,
+    is_terminal_state, resolve_target, resolve_world_arg_or_selected, resolve_world_selector,
+    universe_query_for_world, wait_for_command,
 };
 
 #[derive(Args, Debug)]
@@ -44,14 +44,12 @@ pub(crate) struct WorldArgs {
 
 #[derive(Subcommand, Debug)]
 enum WorldCommand {
-    /// List worlds in the selected universe.
+    /// List visible worlds.
     Ls,
-    /// Show one world by selector or the selected default.
+    /// Show one world by ID or the selected default.
     Get(WorldGetArgs),
     /// Create a hosted world, upload a local bundle, or fork from an existing world.
     Create(WorldCreateArgs),
-    /// Run administrative world operations such as metadata updates and lifecycle changes.
-    Admin(WorldAdminArgs),
     /// Show current runtime and scheduling status for a world.
     Status(WorldGetArgs),
     /// Fetch the current manifest for a world.
@@ -76,7 +74,7 @@ enum WorldCommand {
 
 #[derive(Args, Debug)]
 struct WorldGetArgs {
-    /// World ID or handle. Defaults to the selected world.
+    /// World ID. Defaults to the selected world.
     selector: Option<String>,
 }
 
@@ -91,7 +89,7 @@ struct WorldCreateArgs {
     /// Existing manifest hash to create from when not using `--local-root`.
     #[arg(long)]
     manifest_hash: Option<String>,
-    /// Existing world ID or handle to fork from instead of creating from a manifest.
+    /// Existing world ID to fork from instead of creating from a manifest.
     #[arg(long)]
     from_world: Option<String>,
     /// Upload the local bundle and stop after printing the manifest hash.
@@ -100,73 +98,22 @@ struct WorldCreateArgs {
     /// Make the created world the selected world on the current CLI profile.
     #[arg(long)]
     select: bool,
-    /// Sync configured secrets from `aos.sync.json` into hosted universe secrets before create.
+    /// Sync configured secrets from `aos.sync.json` before create. On local targets this is a
+    /// compatibility no-op; local secrets resolve from env/`.env` at world load.
     #[arg(long)]
     sync_secrets: bool,
     /// Explicit world ID to create.
     #[arg(long)]
     world_id: Option<String>,
-    /// Handle for the new world. Defaults to the local directory name when building locally.
+    /// Universe to assign at world creation time.
     #[arg(long)]
-    handle: Option<String>,
-    /// Optional placement pin for the new world.
-    #[arg(long)]
-    placement_pin: Option<String>,
+    universe_id: Option<String>,
     /// Specific snapshot ref to fork from.
     #[arg(long)]
     snapshot_ref: Option<String>,
     /// Specific snapshot height to fork from.
     #[arg(long)]
     snapshot_height: Option<u64>,
-}
-
-#[derive(Args, Debug)]
-#[command(about = "Run administrative operations on a world")]
-struct WorldAdminArgs {
-    #[command(subcommand)]
-    cmd: WorldAdminCommand,
-}
-
-#[derive(Subcommand, Debug)]
-enum WorldAdminCommand {
-    /// Update mutable world metadata.
-    Update(WorldAdminUpdateArgs),
-    /// Submit a pause lifecycle command.
-    Pause(WorldAdminLifecycleArgs),
-    /// Submit an archive lifecycle command.
-    Archive(WorldAdminLifecycleArgs),
-    /// Submit a delete lifecycle command.
-    Delete(WorldAdminDeleteArgs),
-}
-
-#[derive(Args, Debug)]
-struct WorldAdminUpdateArgs {
-    /// World ID or handle. Defaults to the selected world.
-    selector: Option<String>,
-    /// New world handle.
-    #[arg(long)]
-    handle: Option<String>,
-    /// New placement pin for the world.
-    #[arg(long)]
-    placement_pin: Option<String>,
-}
-
-#[derive(Args, Debug)]
-struct WorldAdminLifecycleArgs {
-    /// World ID or handle. Defaults to the selected world.
-    selector: Option<String>,
-    /// Actor string recorded on the lifecycle command.
-    #[arg(long)]
-    actor: Option<String>,
-    /// Human-readable reason recorded on the lifecycle command.
-    #[arg(long)]
-    reason: Option<String>,
-}
-
-#[derive(Args, Debug)]
-struct WorldAdminDeleteArgs {
-    /// World ID or handle. Defaults to the selected world.
-    selector: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -484,7 +431,8 @@ struct WorldPatchArgs {
     /// Force a fresh workflow build instead of reusing cache.
     #[arg(long)]
     force_build: bool,
-    /// Sync configured secrets from `aos.sync.json` into hosted universe secrets before patch.
+    /// Sync configured secrets from `aos.sync.json` before patch. On local targets this is a
+    /// compatibility no-op; local secrets resolve from env/`.env` at world load.
     #[arg(long)]
     sync_secrets: bool,
     /// Actor string recorded on governance commands.
@@ -512,41 +460,26 @@ pub(crate) async fn handle(global: &GlobalOpts, output: OutputOpts, args: WorldA
     let client = ApiClient::new(&target)?;
     match args.cmd {
         WorldCommand::Ls => {
-            let universe = resolve_selected_universe(&client, &target).await?;
-            let data = client
-                .get_json(&format!("/v1/universes/{universe}/worlds"), &[])
-                .await?;
+            let data = client.get_json("/v1/worlds", &[]).await?;
             print_success(output, data, None, vec![])
         }
         WorldCommand::Get(args) => {
-            let (universe, world) =
-                resolve_world_arg_or_selected(&client, &target, args.selector.as_deref()).await?;
-            let data = client
-                .get_json(&format!("/v1/universes/{universe}/worlds/{world}"), &[])
-                .await?;
+            let world = resolve_world_arg_or_selected(&target, args.selector.as_deref())?;
+            let data = client.get_json(&format!("/v1/worlds/{world}"), &[]).await?;
             print_success(output, data, None, vec![])
         }
         WorldCommand::Create(args) => handle_create(global, output, &client, &target, args).await,
-        WorldCommand::Admin(args) => handle_admin(output, &client, &target, args).await,
         WorldCommand::Status(args) => {
-            let (universe, world) =
-                resolve_world_arg_or_selected(&client, &target, args.selector.as_deref()).await?;
+            let world = resolve_world_arg_or_selected(&target, args.selector.as_deref())?;
             let data = client
-                .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/runtime"),
-                    &[],
-                )
+                .get_json(&format!("/v1/worlds/{world}/runtime"), &[])
                 .await?;
             print_success(output, data, None, vec![])
         }
         WorldCommand::Manifest(args) => {
-            let (universe, world) =
-                resolve_world_arg_or_selected(&client, &target, args.selector.as_deref()).await?;
+            let world = resolve_world_arg_or_selected(&target, args.selector.as_deref())?;
             let data = client
-                .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/manifest"),
-                    &[],
-                )
+                .get_json(&format!("/v1/worlds/{world}/manifest"), &[])
                 .await?;
             print_success(output, data, None, vec![])
         }
@@ -567,11 +500,11 @@ async fn handle_send(
     target: &crate::client::ApiTarget,
     args: WorldSendArgs,
 ) -> Result<()> {
-    let (universe, world) = resolve_world_arg_or_selected(client, target, None).await?;
+    let world = resolve_world_arg_or_selected(target, None)?;
     let value = event_value(&args)?;
     let event = client
         .post_json(
-            &format!("/v1/universes/{universe}/worlds/{world}/events"),
+            &format!("/v1/worlds/{world}/events"),
             &json!({
                 "schema": args.schema,
                 "value_json": value,
@@ -598,7 +531,6 @@ async fn handle_send(
 
     let trace = wait_for_trace_terminal(
         client,
-        &universe,
         &world,
         &args.schema,
         args.correlate_by.as_deref().unwrap(),
@@ -621,7 +553,6 @@ async fn handle_send(
     for workflow in &args.result_workflow {
         let data = fetch_result_state(
             client,
-            &universe,
             &world,
             workflow,
             state_key_b64.as_deref(),
@@ -636,15 +567,7 @@ async fn handle_send(
         let state = if let Some(existing) = states.get(workflow) {
             existing.clone()
         } else {
-            fetch_result_state(
-                client,
-                &universe,
-                &world,
-                workflow,
-                state_key_b64.as_deref(),
-                true,
-            )
-            .await?
+            fetch_result_state(client, &world, workflow, state_key_b64.as_deref(), true).await?
         };
         let field = args
             .blob_ref_field
@@ -662,7 +585,7 @@ async fn handle_send(
     }
 
     let blob_json = if let Some(blob_ref) = &blob_ref {
-        Some(fetch_blob_json(client, &universe, blob_ref).await?)
+        Some(fetch_blob_json(client, &world, blob_ref).await?)
     } else {
         None
     };
@@ -701,7 +624,13 @@ async fn handle_create(
         args.local_root = Some(std::env::current_dir().context("get current directory")?);
     }
 
-    let universe = resolve_selected_universe(client, target).await?;
+    let secret_universe = if target.kind == crate::config::ProfileKind::Local {
+        None
+    } else if let Some(universe_id) = args.universe_id.clone() {
+        Some(universe_id)
+    } else {
+        None
+    };
     let using_local_root = args.local_root.is_some();
     let using_manifest_hash = args.manifest_hash.is_some();
     let using_from_world = args.from_world.is_some();
@@ -726,32 +655,41 @@ async fn handle_create(
     }
 
     if args.local_root.is_some() {
+        let is_local_target = target.kind == crate::config::ProfileKind::Local;
         let dirs = resolve_local_dirs(args.local_root.as_deref())?;
-        let world_handle = args
-            .handle
-            .clone()
-            .or_else(|| default_handle_from_dir(&dirs.root));
         if args.sync_secrets {
-            print_verbose(output, "syncing hosted universe secrets from aos.sync.json");
-            let synced =
-                sync_hosted_secrets(client, &universe, args.local_root.as_deref(), None, None)
-                    .await?;
-            print_verbose(
-                output,
-                format!(
-                    "synced {} secrets, {} unchanged",
-                    synced
-                        .get("synced")
-                        .and_then(Value::as_array)
-                        .map(|values| values.len())
-                        .unwrap_or(0),
-                    synced
-                        .get("unchanged")
-                        .and_then(Value::as_array)
-                        .map(|values| values.len())
-                        .unwrap_or(0)
-                ),
-            );
+            if is_local_target {
+                print_verbose(
+                    output,
+                    "local --sync-secrets is a compatibility no-op; local secrets resolve from env/.env at world load",
+                );
+            } else {
+                print_verbose(output, "syncing hosted secrets from aos.sync.json");
+                let synced = sync_hosted_secrets(
+                    client,
+                    secret_universe.as_deref(),
+                    args.local_root.as_deref(),
+                    None,
+                    None,
+                )
+                .await?;
+                print_verbose(
+                    output,
+                    format!(
+                        "synced {} secrets, {} unchanged",
+                        synced
+                            .get("synced")
+                            .and_then(Value::as_array)
+                            .map(|values| values.len())
+                            .unwrap_or(0),
+                        synced
+                            .get("unchanged")
+                            .and_then(Value::as_array)
+                            .map(|values| values.len())
+                            .unwrap_or(0)
+                    ),
+                );
+            }
         }
         print_verbose(
             output,
@@ -764,13 +702,19 @@ async fn handle_create(
         );
         let (store, bundle, mut warnings) =
             build_bundle_from_world(args.local_root.as_deref(), args.force_build)?;
-        warnings.extend(
-            secret_binding_readiness_warnings(client, &universe, &bundle.manifest, &bundle.secrets)
+        if !is_local_target {
+            warnings.extend(
+                secret_binding_readiness_warnings(
+                    client,
+                    secret_universe.as_deref(),
+                    &bundle.manifest,
+                    &bundle.secrets,
+                )
                 .await,
-        );
-        print_verbose(output, "uploading bundle to hosted CAS");
-        let uploaded =
-            upload_bundle(client, &universe, &store, &bundle, warnings, Some(&dirs)).await?;
+            );
+        }
+        print_verbose(output, "uploading bundle to node CAS");
+        let uploaded = upload_bundle(client, &store, &bundle, warnings, Some(&dirs)).await?;
         if args.upload_only {
             return print_success(
                 output,
@@ -781,26 +725,21 @@ async fn handle_create(
         }
         print_verbose(
             output,
-            format!(
-                "creating hosted world from manifest {} with handle {}",
-                uploaded.manifest_hash,
-                world_handle.as_deref().unwrap_or("<server-default>")
-            ),
+            format!("creating world from manifest {}", uploaded.manifest_hash),
         );
-        let data = client
-            .post_json(
-                &format!("/v1/universes/{universe}/worlds"),
-                &json!({
-                    "world_id": args.world_id,
-                    "handle": world_handle,
-                    "placement_pin": args.placement_pin,
-                    "source": {
-                        "kind": "manifest",
-                        "manifest_hash": uploaded.manifest_hash,
-                    }
-                }),
-            )
-            .await?;
+        let mut body = serde_json::Map::new();
+        body.insert("world_id".into(), serde_json::to_value(args.world_id)?);
+        if let Some(universe_id) = args.universe_id.as_ref() {
+            body.insert("universe_id".into(), Value::String(universe_id.clone()));
+        }
+        body.insert(
+            "source".into(),
+            json!({
+                "kind": "manifest",
+                "manifest_hash": uploaded.manifest_hash,
+            }),
+        );
+        let data = client.post_json("/v1/worlds", &Value::Object(body)).await?;
         if args.select {
             let world_id = created_world_id(&data)?;
             select_created_world(global, &world_id)?;
@@ -816,15 +755,13 @@ async fn handle_create(
         } else {
             json!({ "kind": "active_baseline" })
         };
-        let source_world = resolve_world_selector(client, &universe, source_selector).await?;
+        let source_world = resolve_world_selector(source_selector)?;
         let data = client
             .post_json(
-                &format!("/v1/universes/{universe}/worlds/{source_world}/fork"),
+                &format!("/v1/worlds/{source_world}/fork"),
                 &json!({
                     "src_snapshot": snapshot,
                     "new_world_id": args.world_id,
-                    "handle": args.handle,
-                    "placement_pin": args.placement_pin,
                 }),
             )
             .await?;
@@ -838,20 +775,19 @@ async fn handle_create(
     let manifest_hash = args.manifest_hash.ok_or_else(|| {
         anyhow!("world create requires --manifest-hash when not using --local-root or --from-world")
     })?;
-    let data = client
-        .post_json(
-            &format!("/v1/universes/{universe}/worlds"),
-            &json!({
-                "world_id": args.world_id,
-                "handle": args.handle,
-                "placement_pin": args.placement_pin,
-                "source": {
-                    "kind": "manifest",
-                    "manifest_hash": manifest_hash,
-                }
-            }),
-        )
-        .await?;
+    let mut body = serde_json::Map::new();
+    body.insert("world_id".into(), serde_json::to_value(args.world_id)?);
+    if let Some(universe_id) = args.universe_id.as_ref() {
+        body.insert("universe_id".into(), Value::String(universe_id.clone()));
+    }
+    body.insert(
+        "source".into(),
+        json!({
+            "kind": "manifest",
+            "manifest_hash": manifest_hash,
+        }),
+    );
+    let data = client.post_json("/v1/worlds", &Value::Object(body)).await?;
     if args.select {
         let world_id = created_world_id(&data)?;
         select_created_world(global, &world_id)?;
@@ -860,11 +796,11 @@ async fn handle_create(
 }
 
 fn created_world_id(data: &Value) -> Result<String> {
-    data.get("record")
-        .and_then(|value| value.get("world_id"))
+    data.get("world_id")
+        .or_else(|| data.get("record").and_then(|value| value.get("world_id")))
         .and_then(Value::as_str)
         .map(ToString::to_string)
-        .ok_or_else(|| anyhow!("world create response did not include record.world_id"))
+        .ok_or_else(|| anyhow!("world create response did not include world_id"))
 }
 
 fn select_created_world(global: &GlobalOpts, world_id: &str) -> Result<()> {
@@ -898,72 +834,18 @@ fn should_default_local_root(
     Ok(dirs.air_dir.exists())
 }
 
-async fn handle_admin(
-    output: OutputOpts,
-    client: &ApiClient,
-    target: &crate::client::ApiTarget,
-    args: WorldAdminArgs,
-) -> Result<()> {
-    match args.cmd {
-        WorldAdminCommand::Update(args) => {
-            let (universe, world) =
-                resolve_world_arg_or_selected(client, target, args.selector.as_deref()).await?;
-            let data = client
-                .patch_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}"),
-                    &json!({
-                        "handle": args.handle,
-                        "placement_pin": args.placement_pin,
-                    }),
-                )
-                .await?;
-            print_success(output, data, None, vec![])
-        }
-        WorldAdminCommand::Pause(args) => {
-            let (universe, world) =
-                resolve_world_arg_or_selected(client, target, args.selector.as_deref()).await?;
-            let data = client
-                .post_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/pause"),
-                    &json!({ "actor": args.actor, "reason": args.reason }),
-                )
-                .await?;
-            print_success(output, data, None, vec![])
-        }
-        WorldAdminCommand::Archive(args) => {
-            let (universe, world) =
-                resolve_world_arg_or_selected(client, target, args.selector.as_deref()).await?;
-            let data = client
-                .post_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/archive"),
-                    &json!({ "actor": args.actor, "reason": args.reason }),
-                )
-                .await?;
-            print_success(output, data, None, vec![])
-        }
-        WorldAdminCommand::Delete(args) => {
-            let (universe, world) =
-                resolve_world_arg_or_selected(client, target, args.selector.as_deref()).await?;
-            let data = client
-                .delete_json(&format!("/v1/universes/{universe}/worlds/{world}"), &[])
-                .await?;
-            print_success(output, data, None, vec![])
-        }
-    }
-}
-
 async fn handle_defs(
     output: OutputOpts,
     client: &ApiClient,
     target: &crate::client::ApiTarget,
     args: WorldDefsArgs,
 ) -> Result<()> {
-    let (universe, world) = resolve_world_arg_or_selected(client, target, None).await?;
+    let world = resolve_world_arg_or_selected(target, None)?;
     match args.cmd {
         WorldDefsCommand::Ls(args) => {
             let data = client
                 .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/defs"),
+                    &format!("/v1/worlds/{world}/defs"),
                     &[("kinds", args.kinds), ("prefix", args.prefix)],
                 )
                 .await?;
@@ -973,10 +855,7 @@ async fn handle_defs(
             let kind = encode_path_segment(&args.kind);
             let name = encode_path_segment(&args.name);
             let data = client
-                .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/defs/{kind}/{name}"),
-                    &[],
-                )
+                .get_json(&format!("/v1/worlds/{world}/defs/{kind}/{name}"), &[])
                 .await?;
             print_success(output, data, None, vec![])
         }
@@ -989,15 +868,12 @@ async fn handle_state(
     target: &crate::client::ApiTarget,
     args: WorldStateArgs,
 ) -> Result<()> {
-    let (universe, world) = resolve_world_arg_or_selected(client, target, None).await?;
+    let world = resolve_world_arg_or_selected(target, None)?;
     match args.cmd {
         WorldStateCommand::Ls => {
             let manifest: ManifestEnvelope = serde_json::from_value(
                 client
-                    .get_json(
-                        &format!("/v1/universes/{universe}/worlds/{world}/manifest"),
-                        &[],
-                    )
+                    .get_json(&format!("/v1/worlds/{world}/manifest"), &[])
                     .await?,
             )
             .context("decode manifest response")?;
@@ -1007,10 +883,7 @@ async fn handle_state(
                 let name = encode_path_segment(module.name.as_str());
                 let def: DefEnvelope = serde_json::from_value(
                     client
-                        .get_json(
-                            &format!("/v1/universes/{universe}/worlds/{world}/defs/{kind}/{name}"),
-                            &[],
-                        )
+                        .get_json(&format!("/v1/worlds/{world}/defs/{kind}/{name}"), &[])
                         .await?,
                 )
                 .with_context(|| format!("decode module def {}", module.name.as_str()))?;
@@ -1030,7 +903,7 @@ async fn handle_state(
             let key_b64 = encode_state_key_query(&args)?;
             let data = client
                 .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/state/{workflow}"),
+                    &format!("/v1/worlds/{world}/state/{workflow}"),
                     &[("key_b64", key_b64)],
                 )
                 .await?;
@@ -1039,10 +912,7 @@ async fn handle_state(
         WorldStateCommand::Cells(args) => {
             let workflow = encode_path_segment(&args.workflow);
             let data = client
-                .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/state/{workflow}/cells"),
-                    &[],
-                )
+                .get_json(&format!("/v1/worlds/{world}/state/{workflow}/cells"), &[])
                 .await?;
             print_state_cells(output, data)
         }
@@ -1055,21 +925,18 @@ async fn handle_journal(
     target: &crate::client::ApiTarget,
     args: WorldJournalArgs,
 ) -> Result<()> {
-    let (universe, world) = resolve_world_arg_or_selected(client, target, None).await?;
+    let world = resolve_world_arg_or_selected(target, None)?;
     match args.cmd {
         WorldJournalCommand::Head => {
             let data = client
-                .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/journal/head"),
-                    &[],
-                )
+                .get_json(&format!("/v1/worlds/{world}/journal/head"), &[])
                 .await?;
             print_success(output, data, None, vec![])
         }
         WorldJournalCommand::Tail(args) => {
             let data = client
                 .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/journal"),
+                    &format!("/v1/worlds/{world}/journal"),
                     &[
                         ("from", Some(args.from.to_string())),
                         ("limit", args.limit.map(|v| v.to_string())),
@@ -1095,22 +962,16 @@ async fn handle_cmd(
     target: &crate::client::ApiTarget,
     args: WorldCmdArgs,
 ) -> Result<()> {
-    let (universe, world) = resolve_world_arg_or_selected(client, target, None).await?;
+    let world = resolve_world_arg_or_selected(target, None)?;
     match args.cmd {
         WorldCmdCommand::Get(args) => {
-            let data = fetch_command(client, &universe, &world, &args.id).await?;
+            let data = fetch_command(client, &world, &args.id).await?;
             print_success(output, data, None, vec![])
         }
         WorldCmdCommand::Wait(args) => {
-            let data = wait_for_command(
-                client,
-                &universe,
-                &world,
-                &args.id,
-                args.interval_ms,
-                args.timeout_ms,
-            )
-            .await?;
+            let data =
+                wait_for_command(client, &world, &args.id, args.interval_ms, args.timeout_ms)
+                    .await?;
             print_success(output, data, None, vec![])
         }
     }
@@ -1122,7 +983,7 @@ async fn handle_gov(
     target: &crate::client::ApiTarget,
     args: WorldGovArgs,
 ) -> Result<()> {
-    let (universe, world) = resolve_world_arg_or_selected(client, target, None).await?;
+    let world = resolve_world_arg_or_selected(target, None)?;
     match args.cmd {
         WorldGovCommand::Propose(args) => {
             let bytes = fs::read(&args.patch_file)
@@ -1130,7 +991,7 @@ async fn handle_gov(
             let params = if args.patch_file.extension().and_then(|ext| ext.to_str()) == Some("json")
             {
                 let patch: Value = serde_json::from_slice(&bytes).context("parse patch json")?;
-                let patch_hash = upload_patch_json(client, &universe, &patch).await?;
+                let patch_hash = upload_patch_json(client, &world, &patch).await?;
                 GovProposeParams {
                     patch: GovPatchInput::PatchBlobRef {
                         blob_ref: HashRef::new(patch_hash).context("build patch hash ref")?,
@@ -1141,7 +1002,7 @@ async fn handle_gov(
                     description: args.description,
                 }
             } else {
-                let patch_hash = upload_patch_bytes(client, &universe, &bytes).await?;
+                let patch_hash = upload_patch_bytes(client, &world, &bytes).await?;
                 GovProposeParams {
                     patch: GovPatchInput::PatchBlobRef {
                         blob_ref: HashRef::new(patch_hash).context("build patch hash ref")?,
@@ -1155,7 +1016,7 @@ async fn handle_gov(
             let body = serde_json::to_value(&params).context("encode governance propose body")?;
             let data = client
                 .post_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/governance/propose"),
+                    &format!("/v1/worlds/{world}/governance/propose"),
                     &merge_actor(args.actor, body),
                 )
                 .await?;
@@ -1164,7 +1025,7 @@ async fn handle_gov(
         WorldGovCommand::Shadow(args) => {
             let data = client
                 .post_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/governance/shadow"),
+                    &format!("/v1/worlds/{world}/governance/shadow"),
                     &json!({ "proposal_id": args.proposal_id, "actor": args.actor }),
                 )
                 .await?;
@@ -1181,7 +1042,7 @@ async fn handle_gov(
             .context("encode governance approve body")?;
             let data = client
                 .post_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/governance/approve"),
+                    &format!("/v1/worlds/{world}/governance/approve"),
                     &merge_actor(args.actor, body),
                 )
                 .await?;
@@ -1190,7 +1051,7 @@ async fn handle_gov(
         WorldGovCommand::Apply(args) => {
             let data = client
                 .post_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/governance/apply"),
+                    &format!("/v1/worlds/{world}/governance/apply"),
                     &json!({ "proposal_id": args.proposal_id, "actor": args.actor }),
                 )
                 .await?;
@@ -1205,7 +1066,7 @@ async fn handle_trace(
     target: &crate::client::ApiTarget,
     args: WorldTraceArgs,
 ) -> Result<()> {
-    let (universe, world) = resolve_world_arg_or_selected(client, target, None).await?;
+    let world = resolve_world_arg_or_selected(target, None)?;
     match args.cmd {
         WorldTraceCommand::Get(args) => {
             let query = vec![
@@ -1218,10 +1079,7 @@ async fn handle_trace(
             if args.follow {
                 loop {
                     let data = client
-                        .get_json(
-                            &format!("/v1/universes/{universe}/worlds/{world}/trace"),
-                            &query,
-                        )
+                        .get_json(&format!("/v1/worlds/{world}/trace"), &query)
                         .await?;
                     let terminal = data
                         .get("terminal_state")
@@ -1234,17 +1092,14 @@ async fn handle_trace(
                 }
             }
             let data = client
-                .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/trace"),
-                    &query,
-                )
+                .get_json(&format!("/v1/worlds/{world}/trace"), &query)
                 .await?;
             print_trace(output, data)
         }
         WorldTraceCommand::Summary(args) => {
             let data = client
                 .get_json(
-                    &format!("/v1/universes/{universe}/worlds/{world}/trace-summary"),
+                    &format!("/v1/worlds/{world}/trace-summary"),
                     &[("recent_limit", args.recent_limit.map(|v| v.to_string()))],
                 )
                 .await?;
@@ -1259,33 +1114,42 @@ async fn handle_patch(
     target: &crate::client::ApiTarget,
     args: WorldPatchArgs,
 ) -> Result<()> {
-    let (universe, world) = resolve_world_arg_or_selected(client, target, None).await?;
+    let world = resolve_world_arg_or_selected(target, None)?;
+    let is_local_target = target.kind == crate::config::ProfileKind::Local;
     if args.sync_secrets {
-        print_verbose(output, "syncing hosted universe secrets from aos.sync.json");
-        let synced = sync_hosted_secrets(
-            client,
-            &universe,
-            args.local_root.as_deref(),
-            None,
-            args.actor.as_deref(),
-        )
-        .await?;
-        print_verbose(
-            output,
-            format!(
-                "synced {} secrets, {} unchanged",
-                synced
-                    .get("synced")
-                    .and_then(Value::as_array)
-                    .map(|values| values.len())
-                    .unwrap_or(0),
-                synced
-                    .get("unchanged")
-                    .and_then(Value::as_array)
-                    .map(|values| values.len())
-                    .unwrap_or(0)
-            ),
-        );
+        if is_local_target {
+            print_verbose(
+                output,
+                "local --sync-secrets is a compatibility no-op; local secrets resolve from env/.env at world load",
+            );
+        } else {
+            print_verbose(output, "syncing hosted secrets from aos.sync.json");
+            let universe_id = super::common::universe_id_for_world(client, &world).await?;
+            let synced = sync_hosted_secrets(
+                client,
+                Some(&universe_id),
+                args.local_root.as_deref(),
+                None,
+                args.actor.as_deref(),
+            )
+            .await?;
+            print_verbose(
+                output,
+                format!(
+                    "synced {} secrets, {} unchanged",
+                    synced
+                        .get("synced")
+                        .and_then(Value::as_array)
+                        .map(|values| values.len())
+                        .unwrap_or(0),
+                    synced
+                        .get("unchanged")
+                        .and_then(Value::as_array)
+                        .map(|values| values.len())
+                        .unwrap_or(0)
+                ),
+            );
+        }
     }
     let dirs = resolve_local_dirs(args.local_root.as_deref())?;
     print_verbose(
@@ -1299,15 +1163,23 @@ async fn handle_patch(
     );
     let (store, bundle, mut warnings) =
         build_bundle_from_world(args.local_root.as_deref(), args.force_build)?;
-    warnings.extend(
-        secret_binding_readiness_warnings(client, &universe, &bundle.manifest, &bundle.secrets)
+    if !is_local_target {
+        let universe_id = super::common::universe_id_for_world(client, &world).await?;
+        warnings.extend(
+            secret_binding_readiness_warnings(
+                client,
+                Some(&universe_id),
+                &bundle.manifest,
+                &bundle.secrets,
+            )
             .await,
-    );
+        );
+    }
     print_verbose(
         output,
         format!("fetching current manifest for world {world}"),
     );
-    let remote = fetch_remote_manifest(client, &universe, &world).await?;
+    let remote = fetch_remote_manifest(client, &world).await?;
     let local_manifest_hash = Hash::of_bytes(&to_canonical_cbor(&bundle.manifest)?).to_hex();
     if local_manifest_hash == remote.manifest_hash {
         return print_success(
@@ -1322,10 +1194,10 @@ async fn handle_patch(
         );
     }
     print_verbose(output, "uploading bundle to hosted CAS");
-    let uploaded = upload_bundle(client, &universe, &store, &bundle, warnings, Some(&dirs)).await?;
+    let uploaded = upload_bundle(client, &store, &bundle, warnings, Some(&dirs)).await?;
     print_verbose(output, "building governance patch document");
     let patch = build_patch(&remote, &bundle)?;
-    let patch_hash = upload_patch_json(client, &universe, &patch).await?;
+    let patch_hash = upload_patch_json(client, &world, &patch).await?;
     print_verbose(output, "submitting governance propose command");
     let propose_body = serde_json::to_value(&GovProposeParams {
         patch: GovPatchInput::PatchBlobRef {
@@ -1339,7 +1211,7 @@ async fn handle_patch(
     .context("encode governance propose body")?;
     let propose = client
         .post_json(
-            &format!("/v1/universes/{universe}/worlds/{world}/governance/propose"),
+            &format!("/v1/worlds/{world}/governance/propose"),
             &merge_actor(args.actor.clone(), propose_body),
         )
         .await?;
@@ -1354,19 +1226,19 @@ async fn handle_patch(
             .and_then(Value::as_str)
             .ok_or_else(|| anyhow!("governance propose response missing command_id"))?;
         let propose_record =
-            wait_for_command(client, &universe, &world, propose_command_id, 700, 60_000).await?;
+            wait_for_command(client, &world, propose_command_id, 700, 60_000).await?;
         result["propose_result"] = propose_record.clone();
 
         if should_chain {
             let propose_receipt: GovProposeReceipt =
-                decode_command_payload(client, &universe, &propose_record).await?;
+                decode_command_payload(client, &world, &propose_record).await?;
             let proposal_id = propose_receipt.proposal_id;
             result["proposal_id"] = json!(proposal_id);
 
             if args.shadow || args.approve || args.apply {
                 let shadow = client
                     .post_json(
-                        &format!("/v1/universes/{universe}/worlds/{world}/governance/shadow"),
+                        &format!("/v1/worlds/{world}/governance/shadow"),
                         &json!({
                             "proposal_id": proposal_id,
                             "actor": args.actor,
@@ -1379,11 +1251,10 @@ async fn handle_patch(
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow!("governance shadow response missing command_id"))?;
                 let shadow_record =
-                    wait_for_command(client, &universe, &world, shadow_command_id, 700, 60_000)
-                        .await?;
+                    wait_for_command(client, &world, shadow_command_id, 700, 60_000).await?;
                 result["shadow_result"] = shadow_record.clone();
                 let _: GovShadowReceipt =
-                    decode_command_payload(client, &universe, &shadow_record).await?;
+                    decode_command_payload(client, &world, &shadow_record).await?;
             }
 
             if args.approve || args.apply {
@@ -1396,7 +1267,7 @@ async fn handle_patch(
                 .context("encode governance approve body")?;
                 let approve = client
                     .post_json(
-                        &format!("/v1/universes/{universe}/worlds/{world}/governance/approve"),
+                        &format!("/v1/worlds/{world}/governance/approve"),
                         &merge_actor(args.actor.clone(), approve_body),
                     )
                     .await?;
@@ -1406,18 +1277,17 @@ async fn handle_patch(
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow!("governance approve response missing command_id"))?;
                 let approve_record =
-                    wait_for_command(client, &universe, &world, approve_command_id, 700, 60_000)
-                        .await?;
+                    wait_for_command(client, &world, approve_command_id, 700, 60_000).await?;
                 result["approve_result"] = approve_record.clone();
                 let approve_receipt: GovApproveReceipt =
-                    decode_command_payload(client, &universe, &approve_record).await?;
+                    decode_command_payload(client, &world, &approve_record).await?;
                 ensure_approved(approve_receipt.decision, proposal_id)?;
             }
 
             if args.apply {
                 let apply = client
                     .post_json(
-                        &format!("/v1/universes/{universe}/worlds/{world}/governance/apply"),
+                        &format!("/v1/worlds/{world}/governance/apply"),
                         &json!({
                             "proposal_id": proposal_id,
                             "actor": args.actor,
@@ -1430,28 +1300,19 @@ async fn handle_patch(
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow!("governance apply response missing command_id"))?;
                 let apply_record =
-                    wait_for_command(client, &universe, &world, apply_command_id, 700, 60_000)
-                        .await?;
+                    wait_for_command(client, &world, apply_command_id, 700, 60_000).await?;
                 result["apply_result"] = apply_record.clone();
                 let _: GovApplyReceipt =
-                    decode_command_payload(client, &universe, &apply_record).await?;
+                    decode_command_payload(client, &world, &apply_record).await?;
             }
         }
     }
     print_success(output, result, None, uploaded.warnings)
 }
 
-fn default_handle_from_dir(path: &Path) -> Option<String> {
-    path.file_name()
-        .and_then(|value| value.to_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
 async fn secret_binding_readiness_warnings(
     client: &ApiClient,
-    universe: &str,
+    universe_id: Option<&str>,
     manifest: &Manifest,
     secret_defs: &[DefSecret],
 ) -> Vec<String> {
@@ -1460,7 +1321,7 @@ async fn secret_binding_readiness_warnings(
         return Vec::new();
     }
 
-    let bound = match fetch_active_secret_binding_ids(client, universe).await {
+    let bound = match fetch_active_secret_binding_ids(client, universe_id).await {
         Ok(bound) => bound,
         Err(err) => {
             return vec![format!(
@@ -1484,16 +1345,22 @@ async fn secret_binding_readiness_warnings(
             declared.join(", "),
             missing.join(", "),
         ),
-        "sync them with `aos world patch --sync-secrets` or bind them manually with `aos universe secret binding set ...`".into(),
+        "sync them with `aos world patch --sync-secrets` or bind them manually with `aos universe secret binding set ... --universe-id ...`".into(),
     ]
 }
 
 async fn fetch_active_secret_binding_ids(
     client: &ApiClient,
-    universe: &str,
+    universe_id: Option<&str>,
 ) -> Result<BTreeSet<String>> {
     let data = client
-        .get_json(&format!("/v1/universes/{universe}/secrets/bindings"), &[])
+        .get_json(
+            "/v1/secrets/bindings",
+            &[(
+                "universe_id",
+                universe_id.map(std::string::ToString::to_string),
+            )],
+        )
         .await?;
     let records = parse_secret_binding_records(&data)?;
     Ok(records
@@ -1588,7 +1455,6 @@ fn event_value(args: &WorldSendArgs) -> Result<Option<Value>> {
 
 async fn wait_for_trace_terminal(
     client: &ApiClient,
-    universe: &str,
     world: &str,
     schema: &str,
     correlate_by: &str,
@@ -1606,10 +1472,7 @@ async fn wait_for_trace_terminal(
     ];
     loop {
         let data = match client
-            .get_json(
-                &format!("/v1/universes/{universe}/worlds/{world}/trace"),
-                &query,
-            )
+            .get_json(&format!("/v1/worlds/{world}/trace"), &query)
             .await
         {
             Ok(data) => data,
@@ -1646,7 +1509,6 @@ async fn wait_for_trace_terminal(
 
 async fn fetch_result_state(
     client: &ApiClient,
-    universe: &str,
     world: &str,
     workflow: &str,
     key_b64: Option<&str>,
@@ -1658,10 +1520,7 @@ async fn fetch_result_state(
     }
     let workflow = encode_path_segment(workflow);
     let mut data = client
-        .get_json(
-            &format!("/v1/universes/{universe}/worlds/{world}/state/{workflow}"),
-            &query,
-        )
+        .get_json(&format!("/v1/worlds/{world}/state/{workflow}"), &query)
         .await?;
     if expand {
         data = augment_state_get_json(data)?;
@@ -1669,11 +1528,11 @@ async fn fetch_result_state(
     Ok(data)
 }
 
-async fn fetch_blob_json(client: &ApiClient, universe: &str, blob_ref: &str) -> Result<Value> {
+async fn fetch_blob_json(client: &ApiClient, world: &str, blob_ref: &str) -> Result<Value> {
     let bytes = client
         .get_bytes(
-            &format!("/v1/universes/{universe}/cas/blobs/{blob_ref}"),
-            &[],
+            &format!("/v1/cas/blobs/{blob_ref}"),
+            &universe_query_for_world(client, world).await?,
         )
         .await?;
     serde_json::from_slice(&bytes).context("decode blob json")
@@ -1835,24 +1694,29 @@ struct DefEnvelope {
 #[cfg(test)]
 mod tests {
     use super::{
-        WorldCreateArgs, WorldStateGetArgs, declared_secret_binding_ids, encode_state_key_query,
-        parse_secret_binding_records, should_default_local_root,
+        WorldCreateArgs, WorldStateGetArgs, created_world_id, declared_secret_binding_ids,
+        encode_state_key_query, parse_secret_binding_records, should_default_local_root,
     };
     use aos_air_types::{DefSecret, HashRef, Manifest, NamedRef, SecretEntry};
     use aos_node::{SecretBindingSourceKind, SecretBindingStatus};
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use serde_json::json;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    fn cwd_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn local_target() -> crate::client::ApiTarget {
         crate::client::ApiTarget {
             kind: crate::config::ProfileKind::Local,
-            api: "http://127.0.0.1:9080".into(),
+            api: "http://127.0.0.1:9010".into(),
             headers: Default::default(),
             token: None,
             verbose: false,
-            universe: Some("local".into()),
             world: None,
         }
     }
@@ -1864,7 +1728,6 @@ mod tests {
             headers: Default::default(),
             token: None,
             verbose: false,
-            universe: None,
             world: None,
         }
     }
@@ -1879,11 +1742,35 @@ mod tests {
             select: false,
             sync_secrets: false,
             world_id: None,
-            handle: None,
-            placement_pin: None,
+            universe_id: None,
             snapshot_ref: None,
             snapshot_height: None,
         }
+    }
+
+    #[test]
+    fn created_world_id_accepts_local_response_shape() {
+        let data = json!({
+            "record": {
+                "world_id": "11111111-1111-1111-1111-111111111111"
+            }
+        });
+
+        let world_id = created_world_id(&data).expect("extract local world id");
+        assert_eq!(world_id, "11111111-1111-1111-1111-111111111111");
+    }
+
+    #[test]
+    fn created_world_id_accepts_hosted_response_shape() {
+        let data = json!({
+            "submission_id": "create-123",
+            "submission_offset": 7,
+            "world_id": "22222222-2222-2222-2222-222222222222",
+            "effective_partition": 0
+        });
+
+        let world_id = created_world_id(&data).expect("extract hosted world id");
+        assert_eq!(world_id, "22222222-2222-2222-2222-222222222222");
     }
 
     #[test]
@@ -1919,6 +1806,7 @@ mod tests {
 
     #[test]
     fn local_create_defaults_to_current_dir_when_air_dir_exists() {
+        let _guard = cwd_test_lock().lock().expect("lock cwd test");
         let temp = TempDir::new().expect("temp dir");
         std::fs::create_dir_all(temp.path().join("air")).expect("create air dir");
         let previous = std::env::current_dir().expect("current dir");
@@ -1931,6 +1819,7 @@ mod tests {
 
     #[test]
     fn remote_create_does_not_default_to_current_dir() {
+        let _guard = cwd_test_lock().lock().expect("lock cwd test");
         let temp = TempDir::new().expect("temp dir");
         std::fs::create_dir_all(temp.path().join("air")).expect("create air dir");
         let previous = std::env::current_dir().expect("current dir");

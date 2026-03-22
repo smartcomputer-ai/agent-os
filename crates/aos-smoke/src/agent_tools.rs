@@ -132,6 +132,7 @@ pub fn run(example_root: &Path) -> Result<()> {
                 llm: None,
                 ..EffectAdapterConfig::default()
             },
+            ..ExampleHostConfig::default()
         }),
         SDK_WASM_PACKAGE,
         SDK_WASM_BIN,

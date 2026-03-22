@@ -14,7 +14,6 @@ pub struct ApiTarget {
     pub headers: BTreeMap<String, String>,
     pub token: Option<String>,
     pub verbose: bool,
-    pub universe: Option<String>,
     pub world: Option<String>,
 }
 
@@ -82,11 +81,6 @@ impl ApiClient {
     pub async fn put_json(&self, path: &str, body: &Value) -> Result<Value> {
         let request = self.client.put(self.url(path)).json(body);
         self.send_json("PUT", path, request, None).await
-    }
-
-    pub async fn patch_json(&self, path: &str, body: &Value) -> Result<Value> {
-        let request = self.client.patch(self.url(path)).json(body);
-        self.send_json("PATCH", path, request, None).await
     }
 
     pub async fn put_bytes(&self, path: &str, body: Vec<u8>) -> Result<Value> {

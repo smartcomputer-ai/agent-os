@@ -6,18 +6,13 @@
 use std::path::Path;
 
 use anyhow::{Result, ensure};
-use aos_effects::{EffectKind as EffectsEffectKind, EffectReceipt, ReceiptStatus};
-use aos_kernel::Kernel;
-use aos_kernel::Store;
 use aos_wasm_sdk::{aos_event_union, aos_variant};
 use serde::{Deserialize, Serialize};
-use serde_cbor;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "demo/TimerSM@1";
 const EVENT_SCHEMA: &str = "demo/TimerEvent@1";
-const ADAPTER_ID: &str = "adapter.timer.fake";
 const DELIVER_AT_NS: u64 = 1_000_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -71,13 +66,6 @@ struct TimerSetParams {
     key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TimerSetReceipt {
-    delivered_at_ns: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    key: Option<String>,
-}
-
 pub fn run(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
@@ -89,56 +77,47 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     println!("→ Hello Timer demo");
     println!("     start key=? deliver_ns={DELIVER_AT_NS}");
+    host.time_set(0);
     let start = TimerEvent::Start(StartEvent {
         deliver_at_ns: DELIVER_AT_NS,
         key: None,
     });
     host.send_event(&start)?;
-    synthesize_timer_receipts(host.kernel_mut())?;
+    host.time_set(0);
+    let cycle = host.run_cycle_with_timers()?;
+    ensure!(
+        cycle.effects_dispatched == 1 && cycle.receipts_applied == 0,
+        "expected queued timer to schedule without firing immediately, got {:?}",
+        cycle
+    );
+    let status = host.quiescence_status();
+    ensure!(
+        status.timers_pending == 1 && status.next_timer_deadline_ns == Some(DELIVER_AT_NS),
+        "unexpected timer status {:?}",
+        status
+    );
+    println!("     timer.set scheduled deliver_ns={DELIVER_AT_NS}");
+    let jumped = host.time_jump_next_due()?;
+    ensure!(
+        jumped == Some(DELIVER_AT_NS),
+        "expected next timer due at {DELIVER_AT_NS}, got {:?}",
+        jumped
+    );
+    println!("     timer fired via logical-time jump");
 
     let final_state: TimerState = host.read_state()?;
     println!(
         "   final state: pc={:?}, key={:?}, fired_key={:?}",
         final_state.pc, final_state.key, final_state.fired_key
     );
+    ensure!(
+        final_state.pc == TimerPc::Done
+            && final_state.deadline_ns == Some(DELIVER_AT_NS)
+            && final_state.fired_key.is_none(),
+        "unexpected final timer state {:?}",
+        final_state
+    );
 
     host.finish()?.verify_replay()?;
-    Ok(())
-}
-
-fn synthesize_timer_receipts<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
-    loop {
-        let intents = kernel.drain_effects()?;
-        if intents.is_empty() {
-            break;
-        }
-        for intent in intents {
-            ensure!(
-                intent.kind.as_str() == EffectsEffectKind::TIMER_SET,
-                "unexpected effect {:?}",
-                intent.kind
-            );
-            let params: TimerSetParams = serde_cbor::from_slice(&intent.params_cbor)?;
-            println!(
-                "     timer.set -> key={:?} deliver_ns={}",
-                params.key, params.deliver_at_ns
-            );
-            let receipt_payload = TimerSetReceipt {
-                delivered_at_ns: params.deliver_at_ns,
-                key: params.key.clone(),
-            };
-            let receipt = EffectReceipt {
-                intent_hash: intent.intent_hash,
-                adapter_id: ADAPTER_ID.into(),
-                status: ReceiptStatus::Ok,
-                payload_cbor: serde_cbor::to_vec(&receipt_payload)?,
-                cost_cents: Some(0),
-                signature: vec![0; 64],
-            };
-            kernel.handle_receipt(receipt)?;
-            kernel.tick_until_idle()?;
-            println!("     timer fired (synthetic receipt)");
-        }
-    }
     Ok(())
 }

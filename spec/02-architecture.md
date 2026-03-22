@@ -79,7 +79,12 @@ For hosted worlds, snapshot blobs and manifests live in shared CAS, while baseli
 
 Nodes (AIR terms, receipts) and blobs (WASM modules, large payloads) are addressed by SHA‑256 of their canonical encoding. Deduplication across worlds is possible via shared backing stores; world manifests pin required roots.
 
-Hosted mode reuses the same CAS contract through a store adapter over the persistence plane, so manifest loading and snapshot blob reads do not require a local world-root filesystem store.
+The CAS contract is logical `hash -> bytes`. Physical storage layout is an implementation detail:
+backends may store a logical blob as a direct immutable object or as a range inside an immutable
+pack object, as long as reads remain hash-addressed and verify back to the logical content hash.
+
+Hosted mode reuses the same CAS contract through a store adapter over the persistence plane, so
+manifest loading and snapshot blob reads do not require a local world-root filesystem store.
 
 ## Control Plane Interfaces
 

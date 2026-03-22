@@ -164,7 +164,7 @@ echo "resetting local state root ${WORLD_DIR}/.aos"
 rm -rf "${WORLD_DIR}/.aos"
 
 echo "starting local node on world root ${WORLD_DIR}"
-"${AOS_BIN}" local up --root "${WORLD_DIR}" --select >/dev/null
+"${AOS_BIN}" local up --root "${WORLD_DIR}" --select --background >/dev/null
 for _ in $(seq 1 20); do
   STATUS_JSON="$("${AOS_BIN}" --json --quiet local status --root "${WORLD_DIR}" || true)"
   if python3 - <<'PY' "${STATUS_JSON}"
@@ -192,15 +192,11 @@ elif [[ "${PROVIDER}" == openai* ]]; then
     echo "missing OPENAI_API_KEY for provider ${PROVIDER}" >&2
     exit 1
   fi
-  echo "binding llm/openai_api to worker env OPENAI_API_KEY"
-  "${AOS_BIN}" universe secret binding set "llm/openai_api" worker_env --env-var "OPENAI_API_KEY" >/dev/null
 elif [[ "${PROVIDER}" == anthropic* ]]; then
   if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "missing ANTHROPIC_API_KEY for provider ${PROVIDER}" >&2
     exit 1
   fi
-  echo "binding llm/anthropic_api to worker env ANTHROPIC_API_KEY"
-  "${AOS_BIN}" universe secret binding set "llm/anthropic_api" worker_env --env-var "ANTHROPIC_API_KEY" >/dev/null
 fi
 
 echo "creating local world ${LOCAL_WORLD_HANDLE} from ${WORLD_DIR}"

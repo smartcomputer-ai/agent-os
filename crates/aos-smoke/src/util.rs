@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use aos_authoring::{local_state_paths as authoring_local_state_paths, reset_local_runtime_state};
 use aos_kernel::KernelConfig;
 use aos_kernel::secret::{MapSecretResolver, SecretResolver};
-use aos_sqlite::LocalStatePaths;
+use aos_node::LocalStatePaths;
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use log::debug;
@@ -73,6 +73,7 @@ pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
         secret_resolver: secret_resolver.clone(),
         allow_placeholder_secrets: false,
         cell_cache_size: aos_kernel::world::DEFAULT_CELL_CACHE_SIZE,
+        universe_id: uuid::Uuid::nil(),
     })
 }
 

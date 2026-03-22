@@ -233,7 +233,13 @@ fn dispatch_run(
 fn run_live_cycles_until_idle(host: &mut ExampleHost) -> Result<()> {
     const MAX_CYCLES: usize = 96;
     for _ in 0..MAX_CYCLES {
-        let outcome = host.run_cycle_batch()?;
+        let outcome = match host.run_cycle_batch() {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                let _ = print_live_diagnostics(host);
+                return Err(err);
+            }
+        };
         if outcome.effects_dispatched == 0
             && outcome.receipts_applied == 0
             && outcome.final_drain.idle

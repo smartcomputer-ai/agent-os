@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_air_types::HashRef;
 use aos_kernel::{MemStore, Store};
+use aos_node::FsCas;
 use aos_runtime::TestHost;
 use aos_runtime::manifest_loader;
 use aos_runtime::util::patch_modules;
-use aos_sqlite::FsCas;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{EventDispatchTiming, ExampleHost, HarnessConfig};
@@ -282,7 +282,8 @@ fn run_keyed_fs(example_root: &Path, messages: u64, cells: u64) -> Result<PerfMe
     let mut observed_key_samples = Vec::new();
     let mut total_count = 0_u64;
 
-    for meta in host.kernel_mut().list_cells(WORKFLOW_NAME)? {
+    let cell_meta = host.kernel_mut().list_cells(WORKFLOW_NAME)?;
+    for meta in cell_meta {
         observed_key_samples.push(meta.key_bytes.clone());
 
         let key_text: String =

@@ -12,7 +12,7 @@ use crate::GlobalOpts;
 use crate::client::ApiClient;
 use crate::output::{OutputOpts, print_success};
 
-use super::common::{resolve_selected_universe, resolve_target};
+use super::common::{resolve_target, universe_id_for_world};
 
 #[derive(Args, Debug)]
 #[command(about = "Interact with the content-addressed blob store")]
@@ -38,12 +38,18 @@ struct CasGetArgs {
     /// Write the blob to a local file instead of stdout.
     #[arg(long)]
     out: Option<PathBuf>,
+    /// Optional world whose universe should scope the lookup.
+    #[arg(long)]
+    world: Option<String>,
 }
 
 #[derive(Args, Debug)]
 struct CasHeadArgs {
     /// Blob hash, with or without the `sha256:` prefix.
     sha256: String,
+    /// Optional world whose universe should scope the lookup.
+    #[arg(long)]
+    world: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -54,19 +60,25 @@ struct CasPutArgs {
     /// Upload inline text as the blob body.
     #[arg(long)]
     text: Option<String>,
+    /// Optional world whose universe should scope the upload.
+    #[arg(long)]
+    world: Option<String>,
 }
 
 pub(crate) async fn handle(global: &GlobalOpts, output: OutputOpts, args: CasArgs) -> Result<()> {
     let target = resolve_target(global)?;
     let client = ApiClient::new(&target)?;
-    let universe = resolve_selected_universe(&client, &target).await?;
     match args.cmd {
         CasCommand::Get(args) => {
+            let query = match args.world.as_deref() {
+                Some(world) => vec![(
+                    "universe_id",
+                    Some(universe_id_for_world(&client, world).await?),
+                )],
+                None => Vec::new(),
+            };
             let bytes = client
-                .get_bytes(
-                    &format!("/v1/universes/{universe}/cas/blobs/{}", args.sha256),
-                    &[],
-                )
+                .get_bytes(&format!("/v1/cas/blobs/{}", args.sha256), &query)
                 .await?;
             if let Some(path) = args.out {
                 fs::write(&path, &bytes).with_context(|| format!("write {}", path.display()))?;
@@ -86,12 +98,15 @@ pub(crate) async fn handle(global: &GlobalOpts, output: OutputOpts, args: CasArg
             }
         }
         CasCommand::Head(args) => {
-            let exists = client
-                .head_exists(&format!(
-                    "/v1/universes/{universe}/cas/blobs/{}",
-                    args.sha256
-                ))
-                .await?;
+            let path = match args.world.as_deref() {
+                Some(world) => format!(
+                    "/v1/cas/blobs/{}?universe_id={}",
+                    args.sha256,
+                    universe_id_for_world(&client, world).await?
+                ),
+                None => format!("/v1/cas/blobs/{}", args.sha256),
+            };
+            let exists = client.head_exists(&path).await?;
             print_success(output, json!({ "exists": exists }), None, vec![])
         }
         CasCommand::Put(args) => {
@@ -103,9 +118,14 @@ pub(crate) async fn handle(global: &GlobalOpts, output: OutputOpts, args: CasArg
                 _ => return Err(anyhow!("cas put requires exactly one of --text or --file")),
             };
             let hash = Hash::of_bytes(&bytes).to_hex();
-            let data = client
-                .put_bytes(&format!("/v1/universes/{universe}/cas/blobs/{hash}"), bytes)
-                .await?;
+            let path = match args.world.as_deref() {
+                Some(world) => format!(
+                    "/v1/cas/blobs/{hash}?universe_id={}",
+                    universe_id_for_world(&client, world).await?
+                ),
+                None => format!("/v1/cas/blobs/{hash}"),
+            };
+            let data = client.put_bytes(&path, bytes).await?;
             print_success(output, data, None, vec![])
         }
     }

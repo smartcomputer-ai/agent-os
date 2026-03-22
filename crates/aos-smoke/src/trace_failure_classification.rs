@@ -136,7 +136,7 @@ fn run_adapter_error(example_root: &Path) -> Result<()> {
 fn assert_trace_cause(host: &mut ExampleHost, expected_cause: &str) -> Result<()> {
     let root_event_hash = latest_start_event_hash(host)?;
     let trace = trace_get(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         TraceQuery {
             event_hash: Some(root_event_hash),
             window_limit: Some(256),

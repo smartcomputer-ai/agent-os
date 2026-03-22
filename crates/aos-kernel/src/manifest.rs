@@ -11,6 +11,7 @@ use crate::Store;
 use crate::error::KernelError;
 use crate::manifest_catalog::{Catalog, load_manifest_from_bytes, load_manifest_from_path};
 
+#[derive(Debug, Clone)]
 pub struct LoadedManifest {
     pub manifest: Manifest,
     pub secrets: Vec<SecretDecl>,
