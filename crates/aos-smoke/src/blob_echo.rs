@@ -72,7 +72,7 @@ fn drive_blob_echo(host: &mut ExampleHost, input: BlobEchoInput) -> Result<()> {
     let mut harness = BlobHarnessStore::default();
     let start_event = BlobEchoEvent::Start(StartEvent { data: input.data });
     host.send_event(&start_event)?;
-    synthesize_blob_effects(host.kernel_mut(), &mut harness)
+    synthesize_blob_effects(&mut host.kernel_mut(), &mut harness)
 }
 
 fn synthesize_blob_effects<S: Store + 'static>(

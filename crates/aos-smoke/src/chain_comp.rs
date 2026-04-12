@@ -109,7 +109,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     let mut http = MockHttpHarness::new();
 
-    let mut requests = http.collect_requests(host.kernel_mut())?;
+    let mut requests = http.collect_requests(&mut host.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "expected 1 charge intent, found {}",
@@ -119,12 +119,12 @@ pub fn run(example_root: &Path) -> Result<()> {
     let charge_ctx = requests.remove(0);
     println!("     responding to charge");
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         charge_ctx,
         MockHttpResponse::json(201, "{\"charge\":\"ok\"}"),
     )?;
 
-    let mut requests = http.collect_requests(host.kernel_mut())?;
+    let mut requests = http.collect_requests(&mut host.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "expected 1 reserve intent after charge, found {}",
@@ -134,12 +134,12 @@ pub fn run(example_root: &Path) -> Result<()> {
     let reserve_ctx = requests.remove(0);
     println!("     forcing reserve failure to trigger compensation");
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         reserve_ctx,
         MockHttpResponse::json(503, "{\"reserve\":\"error\"}"),
     )?;
 
-    let mut requests = http.collect_requests(host.kernel_mut())?;
+    let mut requests = http.collect_requests(&mut host.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "expected refund intent after failure, found {}",
@@ -149,7 +149,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let refund_ctx = requests.remove(0);
     println!("     refunding original charge");
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         refund_ctx,
         MockHttpResponse::json(202, "{\"refund\":\"ok\"}"),
     )?;

@@ -91,7 +91,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();
-    let mut requests = http.collect_requests(host.kernel_mut())?;
+    let mut requests = http.collect_requests(&mut host.kernel_mut())?;
     if requests.len() != 3 {
         return Err(anyhow!(
             "aggregator workflow expected 3 http intents, got {}",
@@ -105,17 +105,17 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     println!("     responding out of order (b → c → a)");
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         ctx_b,
         MockHttpResponse::json(200, "{\"source\":\"beta\"}"),
     )?;
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         ctx_c,
         MockHttpResponse::json(201, "{\"source\":\"gamma\"}"),
     )?;
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         ctx_a,
         MockHttpResponse::json(202, "{\"source\":\"alpha\"}"),
     )?;

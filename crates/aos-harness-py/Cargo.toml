@@ -1,0 +1,22 @@
+[package]
+name = "aos-harness-py"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+aos-cbor = { path = "../aos-cbor" }
+aos-authoring = { path = "../aos-authoring" }
+aos-effect-adapters = { path = "../aos-effect-adapters" }
+aos-effects = { path = "../aos-effects" }
+aos-kernel = { path = "../aos-kernel" }
+aos-node = { path = "../aos-node" }
+aos-runtime = { path = "../aos-runtime" }
+pyo3 = { version = "0.23", features = ["abi3-py39", "auto-initialize", "extension-module"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"

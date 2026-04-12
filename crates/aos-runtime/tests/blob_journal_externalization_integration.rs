@@ -4,7 +4,7 @@ use aos_air_types::{TypeExpr, TypeVariant, WorkflowAbi};
 use aos_effects::builtins::{BlobGetReceipt, BlobPutParams};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::Store;
-use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::journal::Journal;
 use aos_kernel::journal::{JournalKind, JournalRecord};
 use aos_wasm_abi::WorkflowEffect;
 use helpers::fixtures::{self, START_SCHEMA, TestWorld};
@@ -132,7 +132,7 @@ fn blob_get_receipt_is_externalized_and_replay_requires_cas_dependency() {
     let replay = TestWorld::with_store_and_journal(
         store_missing.clone(),
         blob_world_manifest(&store_missing, "blob.get"),
-        Box::new(MemJournal::from_entries(&replay_entries)),
+        Journal::from_entries(&replay_entries).unwrap(),
     );
     let err = match replay {
         Ok(_) => panic!("replay should fail without externalized CAS payload"),

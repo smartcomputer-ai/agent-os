@@ -728,8 +728,8 @@ mod tests {
             &[AirNode::Manifest(manifest)],
         );
 
-        let paths = aos_sqlite::LocalStatePaths::from_world_root(example_root);
-        let store = Arc::new(aos_sqlite::FsCas::open_with_paths(&paths).expect("store"));
+        let paths = aos_node::LocalStatePaths::from_world_root(example_root);
+        let store = Arc::new(aos_node::FsCas::open_with_paths(&paths).expect("store"));
         let loaded = load_from_assets(store, example_root).expect("load");
 
         let loaded = loaded.expect("manifest present");
@@ -742,8 +742,8 @@ mod tests {
     #[test]
     fn returns_none_without_manifest() {
         let tmp = TempDir::new().expect("tmp");
-        let paths = aos_sqlite::LocalStatePaths::from_world_root(tmp.path());
-        let store = Arc::new(aos_sqlite::FsCas::open_with_paths(&paths).expect("store"));
+        let paths = aos_node::LocalStatePaths::from_world_root(tmp.path());
+        let store = Arc::new(aos_node::FsCas::open_with_paths(&paths).expect("store"));
         let result = load_from_assets(store, tmp.path()).expect("ok");
         assert!(result.is_none());
     }
@@ -790,8 +790,8 @@ mod tests {
             &[AirNode::Manifest(manifest)],
         );
 
-        let paths = aos_sqlite::LocalStatePaths::from_world_root(tmp.path());
-        let store = Arc::new(aos_sqlite::FsCas::open_with_paths(&paths).expect("store"));
+        let paths = aos_node::LocalStatePaths::from_world_root(tmp.path());
+        let store = Arc::new(aos_node::FsCas::open_with_paths(&paths).expect("store"));
         let loaded =
             load_from_assets_with_imports(store, &world_air, &[import_air]).expect("load assets");
         let loaded = loaded.expect("manifest present");
@@ -847,8 +847,8 @@ mod tests {
             &[AirNode::Manifest(manifest)],
         );
 
-        let paths = aos_sqlite::LocalStatePaths::from_world_root(tmp.path());
-        let store = Arc::new(aos_sqlite::FsCas::open_with_paths(&paths).expect("store"));
+        let paths = aos_node::LocalStatePaths::from_world_root(tmp.path());
+        let store = Arc::new(aos_node::FsCas::open_with_paths(&paths).expect("store"));
         let err = match load_from_assets_with_imports(store, &world_air, &[import_air]) {
             Ok(_) => panic!("expected conflicting def error"),
             Err(err) => err,
@@ -891,8 +891,8 @@ mod tests {
             &[AirNode::Manifest(manifest)],
         );
 
-        let paths = aos_sqlite::LocalStatePaths::from_world_root(tmp.path());
-        let store = Arc::new(aos_sqlite::FsCas::open_with_paths(&paths).expect("store"));
+        let paths = aos_node::LocalStatePaths::from_world_root(tmp.path());
+        let store = Arc::new(aos_node::FsCas::open_with_paths(&paths).expect("store"));
         load_from_assets_with_imports(store, &world_air, &[import_air])
             .expect("load should ignore import manifest nodes");
     }
@@ -927,8 +927,8 @@ mod tests {
         )
         .expect("write legacy plan");
 
-        let paths = aos_sqlite::LocalStatePaths::from_world_root(tmp.path());
-        let store = Arc::new(aos_sqlite::FsCas::open_with_paths(&paths).expect("store"));
+        let paths = aos_node::LocalStatePaths::from_world_root(tmp.path());
+        let store = Arc::new(aos_node::FsCas::open_with_paths(&paths).expect("store"));
         load_from_assets(store, &world_air).expect("load should ignore legacy plans");
     }
 

@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use aos_node::{FsCas, LocalStatePaths};
 use aos_runtime::manifest_loader::load_from_assets;
-use aos_sqlite::{FsCas, LocalStatePaths};
 
 #[test]
 fn aggregator_manifest_loads_from_assets() {

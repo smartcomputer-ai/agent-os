@@ -7,10 +7,9 @@ use aos_effects::builtins::{BlobPutParams, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_kernel::Store;
+use aos_kernel::journal::Journal;
 use aos_kernel::journal::JournalKind;
-use aos_kernel::journal::fs::FsJournal;
-use aos_kernel::journal::mem::MemJournal;
-use aos_sqlite::FsCas;
+use aos_node::FsCas;
 use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -58,7 +57,7 @@ fn workflow_timer_snapshot_resumes_on_receipt() {
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         timer_manifest(&store),
-        Box::new(MemJournal::from_entries(&entries)),
+        Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
 
@@ -106,7 +105,7 @@ fn workflow_snapshot_preserves_effect_queue() {
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         workflow_resume_manifest(&store),
-        Box::new(MemJournal::from_entries(&entries)),
+        Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
     let intents = replay_world.drain_effects().expect("drain effects");
@@ -143,7 +142,7 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         workflow_resume_manifest(&store),
-        Box::new(MemJournal::from_entries(&entries)),
+        Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
 
@@ -204,7 +203,7 @@ fn workflow_cap_decisions_survive_snapshot_replay() {
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         workflow_resume_manifest(&store),
-        Box::new(MemJournal::from_entries(&entries)),
+        Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
     let intents = replay_world.drain_effects().expect("drain effects");
@@ -230,7 +229,7 @@ fn snapshot_replay_restores_state() {
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         simple_state_manifest(&store),
-        Box::new(MemJournal::from_entries(&entries)),
+        Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
 
@@ -243,14 +242,11 @@ fn snapshot_replay_restores_state() {
 #[test]
 fn fs_cas_and_journal_restore_snapshot() {
     let store_dir = TempDir::new().unwrap();
-    let journal_dir = TempDir::new().unwrap();
-    let paths = aos_sqlite::LocalStatePaths::from_world_root(store_dir.path());
+    let paths = aos_node::LocalStatePaths::from_world_root(store_dir.path());
     let store = Arc::new(FsCas::open_with_paths(&paths).unwrap());
 
     let manifest = fs_persistent_manifest(&store);
-    let journal = FsJournal::open(journal_dir.path()).unwrap();
-    let mut kernel =
-        Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(journal)).unwrap();
+    let mut kernel = Kernel::from_loaded_manifest(store.clone(), manifest, Journal::new()).unwrap();
 
     let event_bytes = serde_cbor::to_vec(&serde_json::json!({ "id": "fs" })).unwrap();
     kernel
@@ -259,13 +255,15 @@ fn fs_cas_and_journal_restore_snapshot() {
     kernel.tick_until_idle().unwrap();
     kernel.create_snapshot().unwrap();
 
-    drop(kernel);
+    let journal_entries = kernel.dump_journal().unwrap();
 
     let manifest_reload = fs_persistent_manifest(&store);
-    let journal_reload = FsJournal::open(journal_dir.path()).unwrap();
-    let kernel_replay =
-        Kernel::from_loaded_manifest(store.clone(), manifest_reload, Box::new(journal_reload))
-            .unwrap();
+    let kernel_replay = Kernel::from_loaded_manifest(
+        store.clone(),
+        manifest_reload,
+        Journal::from_entries(&journal_entries).unwrap(),
+    )
+    .unwrap();
 
     assert_eq!(
         kernel_replay.workflow_state("com.acme/SimpleFs@1"),
@@ -288,7 +286,7 @@ fn snapshot_creation_quiesces_runtime() {
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         simple_state_manifest(&store),
-        Box::new(MemJournal::from_entries(&entries)),
+        Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
 
@@ -322,7 +320,7 @@ fn workflow_manifest_records_override_supplied_policy() {
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         denying_manifest,
-        Box::new(MemJournal::from_entries(&entries)),
+        Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
 

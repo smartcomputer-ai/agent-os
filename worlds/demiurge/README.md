@@ -30,7 +30,8 @@ Optional `config` fields:
 ## Give It A Spin
 
 If you want live LLM calls, set a provider API key first. You can either export it in your shell or
-put it in `worlds/demiurge/.env` so `--sync-secrets` can import it. For example:
+put it in `worlds/demiurge/.env`. Local Demiurge reads local secrets from env/`.env`; nothing is
+stored in the world or local backend. For example:
 
 ```bash
 export OPENAI_API_KEY=...
@@ -54,8 +55,7 @@ In terminal 1, start the local node against the Demiurge world root:
 target/debug/aos local up --root worlds/demiurge --select
 ```
 
-In terminal 2, create and select the world, sync secrets from `aos.sync.json`, and emit verbose
-progress while building/uploading:
+In terminal 2, create and select the world, and emit verbose progress while building/uploading:
 
 ```bash
 target/debug/aos world create \
@@ -63,7 +63,6 @@ target/debug/aos world create \
   --handle demiurge \
   --force-build \
   --select \
-  --sync-secrets \
   --verbose
 ```
 

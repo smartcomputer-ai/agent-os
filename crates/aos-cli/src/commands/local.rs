@@ -7,7 +7,7 @@ use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
-use aos_sqlite::LocalStatePaths;
+use aos_node::LocalStatePaths;
 use clap::{Args, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -17,8 +17,7 @@ use crate::config::{ConfigPaths, ProfileConfig, ProfileKind, load_config, save_c
 use crate::output::{OutputOpts, print_success};
 
 const DEFAULT_LOCAL_PROFILE: &str = "local";
-const DEFAULT_LOCAL_UNIVERSE: &str = "local";
-const DEFAULT_LOCAL_BIND: &str = "127.0.0.1:9080";
+const DEFAULT_LOCAL_BIND: &str = "127.0.0.1:9010";
 
 #[derive(Args, Debug)]
 #[command(about = "Manage the local AgentOS node")]
@@ -170,25 +169,13 @@ async fn handle_up(global: &GlobalOpts, output: OutputOpts, args: LocalUpArgs) -
     if let Some(existing) = load_local_state(&paths)? {
         let status = status_from_state(&paths, Some(&existing), 500).await?;
         if status.running && status.healthy {
-            ensure_local_profile(
-                global,
-                &args.profile,
-                &api,
-                DEFAULT_LOCAL_UNIVERSE,
-                args.select,
-            )?;
+            ensure_local_profile(global, &args.profile, &api, args.select)?;
             return print_success(output, serde_json::to_value(status)?, None, vec![]);
         }
         cleanup_stale_state(&paths)?;
     }
 
-    ensure_local_profile(
-        global,
-        &args.profile,
-        &api,
-        DEFAULT_LOCAL_UNIVERSE,
-        args.select,
-    )?;
+    ensure_local_profile(global, &args.profile, &api, args.select)?;
 
     let binary = resolve_local_binary()?;
     if !args.background {
@@ -212,7 +199,14 @@ async fn handle_up(global: &GlobalOpts, output: OutputOpts, args: LocalUpArgs) -
             log: paths.log.clone(),
         };
         save_local_state(&paths, &state)?;
-        let status = status_from_state(&paths, Some(&state), args.wait_ms).await?;
+        let status = match wait_for_healthy_status(&paths, &state, args.wait_ms).await {
+            Ok(status) => status,
+            Err(err) => {
+                let _ = terminate_process(state.pid, true);
+                let _ = cleanup_stale_state(&paths);
+                return Err(err);
+            }
+        };
         print_success(output, serde_json::to_value(status)?, None, vec![])?;
         let exit = child.wait().context("wait for foreground local node")?;
         std::process::exit(exit.code().unwrap_or(1));
@@ -253,7 +247,7 @@ async fn handle_up(global: &GlobalOpts, output: OutputOpts, args: LocalUpArgs) -
     };
     save_local_state(&paths, &state)?;
 
-    let status = match status_from_state(&paths, Some(&state), args.wait_ms).await {
+    let status = match wait_for_healthy_status(&paths, &state, args.wait_ms).await {
         Ok(status) => status,
         Err(err) => {
             let _ = terminate_process(state.pid, true);
@@ -330,15 +324,7 @@ fn default_local_runtime_root() -> Result<PathBuf> {
     if let Ok(root) = std::env::var("AOS_LOCAL_ROOT") {
         return Ok(PathBuf::from(root));
     }
-    if let Ok(root) = std::env::var("XDG_STATE_HOME") {
-        return Ok(PathBuf::from(root).join("aos/local"));
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        return Ok(PathBuf::from(home).join(".local/state/aos/local"));
-    }
-    Ok(std::env::current_dir()
-        .context("resolve current directory for local runtime home")?
-        .join(".aos/local"))
+    std::env::current_dir().context("resolve current directory for local runtime home")
 }
 
 fn resolve_local_binary() -> Result<PathBuf> {
@@ -439,11 +425,37 @@ async fn fetch_health(api: &str, timeout_ms: u64) -> Result<serde_json::Value> {
         .context("decode local node health response")
 }
 
+async fn wait_for_healthy_status(
+    paths: &LocalPaths,
+    state: &LocalRuntimeState,
+    wait_ms: u64,
+) -> Result<LocalStatusView> {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(wait_ms.max(1));
+    loop {
+        let status = status_from_state(paths, Some(state), 500).await?;
+        if status.healthy {
+            return Ok(status);
+        }
+        if !status.running {
+            return Err(anyhow!(
+                "local node process {} exited before becoming healthy",
+                state.pid
+            ));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(anyhow!(
+                "local node did not become healthy within {} ms",
+                wait_ms.max(1)
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 fn ensure_local_profile(
     global: &GlobalOpts,
     profile_name: &str,
     api: &str,
-    universe: &str,
     select: bool,
 ) -> Result<()> {
     let paths = ConfigPaths::resolve(global.config.as_deref())?;
@@ -457,14 +469,14 @@ fn ensure_local_profile(
             token: None,
             token_env: None,
             headers: Default::default(),
-            universe: Some(universe.to_string()),
+            universe: None,
             world: None,
         });
     profile.kind = ProfileKind::Local;
     profile.api = api.to_string();
     profile.token = None;
     profile.token_env = None;
-    profile.universe = Some(universe.to_string());
+    profile.universe = None;
     if select || config.current_profile.is_none() {
         config.current_profile = Some(profile_name.to_string());
     }
@@ -486,6 +498,9 @@ fn process_is_running(pid: u32) -> Result<bool> {
     {
         let status = ProcessCommand::new("kill")
             .args(["-0", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status()
             .with_context(|| format!("check process {pid}"))?;
         Ok(status.success())

@@ -146,6 +146,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 llm: None,
                 ..EffectAdapterConfig::default()
             },
+            ..ExampleHostConfig::default()
         }),
         SDK_WASM_PACKAGE,
         SDK_WASM_BIN,

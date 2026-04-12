@@ -1,18 +1,24 @@
 # Workflows
 
-This is the canonical workflow model for AgentOS after v0.11 plan removal.
-It consolidates the old reducer + workflow-pattern guidance and captures the key decisions from `roadmap/v0.11-workflows/`.
+Workflows are the orchestration unit in AgentOS. A workflow module is a deterministic state machine that consumes canonical events, updates its state, emits domain events, and requests external effects through the kernel's capability and policy gates.
+
+This document describes the active workflow runtime contract: what a workflow owns, how it is invoked, how effects and receipts move through the system, and which invariants make replay, audit, and governance reliable.
 
 ## 1) Scope
 
 Workflow orchestration is code-defined and event-driven:
 - `defmodule` with `module_kind: "workflow"` is the orchestration/state-machine unit.
 - `pure` modules are deterministic compute helpers and do not emit effects.
-- Manifest startup wiring is `routing.subscriptions` (no active trigger-to-plan model).
+- Manifest startup and domain ingress wiring use `routing.subscriptions`.
 
-v0.11 is a hard break:
-- no backward compatibility with plan-era runtime behavior is required
-- old `defplan`/`triggers` semantics are not part of the active model
+In practice, a workflow owns the end-to-end progression of a business process:
+- it receives a domain event or receipt continuation
+- it decides the next state transition
+- it emits follow-up domain events for other workflows or observers
+- it requests side effects when external work is required
+- it resumes when receipts arrive for previously emitted intents
+
+Workflow instances may be unkeyed or keyed. Keyed workflows partition state by instance key and are specified in detail in [spec/06-cells.md](06-cells.md).
 
 ## 2) Responsibility Split
 
@@ -32,7 +38,12 @@ Adapters own:
 - side-effect execution
 - signed receipt production
 
-## 3) v0.11 Key Decisions (Normative)
+This split keeps orchestration logic in workflow code while preserving a small deterministic runtime:
+- workflow code decides what should happen
+- the kernel decides whether and when it is allowed to happen
+- adapters perform the effect and return an auditable result
+
+## 3) Normative Runtime Contract
 
 ### 3.1 Authority and effect emission
 
@@ -72,8 +83,6 @@ Settled effects produce a generic workflow receipt envelope (schema family inclu
 - receipt status
 - emitted sequence metadata
 
-Legacy typed timer/blob receipt shapes may still appear as compatibility helpers, but generic envelope semantics are primary.
-
 ### 3.5 Receipt fault handling
 
 If receipt payload decoding/normalization fails:
@@ -112,27 +121,6 @@ Shadow/governance reporting is bounded to observed execution horizon:
 
 No guarantee of complete static future-effect prediction for unexecuted branches.
 
-### 3.9 Vocabulary cutover
-
-Active authority and policy origin vocabulary is:
-- `workflow`
-- `system`
-- `governance`
-
-Legacy plan-era naming may remain only as compatibility labels in some journals/traces.
-
-### 3.10 Observability/control cutover
-
-1. Active governance/shadow summaries do not rely on plan-runtime fields (`plan_results`, `pending_plan_receipts`).
-2. Active control/trace surfaces are workflow-first (`trace-summary`, workflow waiting/continuation diagnostics).
-3. If legacy plan records appear in historical journals, they are treated as legacy compatibility artifacts only.
-
-### 3.11 Runtime cutover
-
-1. No active plan scheduling/ticking path is part of workflow execution.
-2. Manifest apply/quiescence decisions are based on workflow instances, inflight intents, and queue/scheduler pending work.
-3. Continuation correctness must remain deterministic under concurrent keyed workflow instances.
-
 ## 4) Runtime Flow
 
 1. Domain event is appended and canonicalized.
@@ -160,7 +148,6 @@ Manifest binds slots via `module_bindings`.
 - required fields are `event`, `module`; `key_field` is used for keyed module delivery
 - deterministic evaluation order is manifest order
 - matching subscriptions fan out in order
-- legacy `routing.events` / `reducer` aliases may be accepted by loaders during migration, but canonical manifests use `subscriptions` + `module`
 
 Continuation delivery from receipts does not use this routing table.
 
@@ -234,10 +221,3 @@ match (state.pc, event) {
 3. Replay-or-die snapshot equivalence tests.
 4. Concurrency tests: no cross-delivery between keyed instances.
 5. Apply-safety tests: strict-quiescence block/unblock behavior.
-
-## 11) Migration Notes (Plan-Era -> Workflow Runtime)
-
-1. Plan runtime execution surfaces are removed from the active model; `defplan` and `triggers` are legacy-only concepts.
-2. Orchestration logic moves into workflow module typestate + receipt handling.
-3. Governance/cap/policy boundaries remain mandatory.
-4. Transitional loader aliases can be tolerated at ingest, but canonical serialized manifests and active docs use workflow-era names.

@@ -1,0 +1,302 @@
+from typing import Any, Optional
+
+from .types import BackendName, BuildProfileName, EffectModeName, JsonValue, ReceiptObject
+
+
+def canonical_cbor(value: JsonValue) -> bytes: ...
+
+
+class WorldHarness:
+    @staticmethod
+    def from_world_dir(
+        world_root: str,
+        reset: bool = False,
+        force_build: bool = False,
+        sync_secrets: bool = False,
+        backend: BackendName = "embedded",
+        effect_mode: EffectModeName = "scripted",
+    ) -> "WorldHarness": ...
+
+    @staticmethod
+    def from_persisted_world_dir(
+        world_root: str,
+        reset: bool = False,
+        force_build: bool = False,
+        sync_secrets: bool = False,
+        effect_mode: EffectModeName = "scripted",
+    ) -> "WorldHarness": ...
+
+    @staticmethod
+    def from_ephemeral_world_dir(
+        world_root: str,
+        reset: bool = False,
+        force_build: bool = False,
+        sync_secrets: bool = False,
+        effect_mode: EffectModeName = "scripted",
+    ) -> "WorldHarness": ...
+
+    @staticmethod
+    def seeded_local(
+        world_root: str,
+        reset: bool = False,
+        force_build: bool = False,
+        sync_secrets: bool = False,
+        backend: BackendName = "embedded",
+        effect_mode: EffectModeName = "scripted",
+    ) -> "WorldHarness": ...
+
+    @staticmethod
+    def seeded_persisted_local(
+        world_root: str,
+        reset: bool = False,
+        force_build: bool = False,
+        sync_secrets: bool = False,
+        effect_mode: EffectModeName = "scripted",
+    ) -> "WorldHarness": ...
+
+    @staticmethod
+    def seeded_ephemeral_local(
+        world_root: str,
+        reset: bool = False,
+        force_build: bool = False,
+        sync_secrets: bool = False,
+        effect_mode: EffectModeName = "scripted",
+    ) -> "WorldHarness": ...
+
+    @property
+    def world_id(self) -> str: ...
+
+    @property
+    def warnings(self) -> list[str]: ...
+
+    def send_event(self, schema: str, value: JsonValue) -> None: ...
+    def send_command(self, schema: str, value: JsonValue) -> None: ...
+    def run_cycle_batch(self) -> dict[str, Any]: ...
+    def run_to_idle(self) -> dict[str, Any]: ...
+    def run_until_runtime_quiescent(self) -> dict[str, Any]: ...
+    def quiescence_status(self) -> dict[str, Any]: ...
+    def pull_effects(self) -> list[dict[str, Any]]: ...
+    def apply_receipt_object(self, receipt: ReceiptObject) -> None: ...
+    def apply_receipt(
+        self,
+        intent_hash: bytes,
+        adapter_id: str,
+        status: str,
+        payload_cbor: bytes,
+        cost_cents: Optional[int] = None,
+        signature: Optional[bytes] = None,
+    ) -> None: ...
+    def receipt_ok(
+        self,
+        intent_hash: bytes,
+        adapter_id: str,
+        payload: JsonValue,
+    ) -> ReceiptObject: ...
+    def receipt_error(
+        self,
+        intent_hash: bytes,
+        adapter_id: str,
+        payload: JsonValue,
+    ) -> ReceiptObject: ...
+    def receipt_timeout(
+        self,
+        intent_hash: bytes,
+        adapter_id: str,
+        payload: JsonValue,
+    ) -> ReceiptObject: ...
+    def receipt_timer_set_ok(
+        self,
+        intent_hash: bytes,
+        delivered_at_ns: int,
+        key: Optional[str] = None,
+    ) -> ReceiptObject: ...
+    def receipt_blob_put_ok(
+        self,
+        intent_hash: bytes,
+        blob_ref: str,
+        edge_ref: str,
+        size: int,
+    ) -> ReceiptObject: ...
+    def receipt_blob_get_ok(
+        self,
+        intent_hash: bytes,
+        blob_ref: str,
+        bytes: bytes,
+        size: Optional[int] = None,
+    ) -> ReceiptObject: ...
+    def receipt_http_request_ok(
+        self,
+        intent_hash: bytes,
+        status: int,
+        adapter_id: str = "adapter.http.harness",
+        headers: Optional[JsonValue] = None,
+        body_ref: Optional[str] = None,
+        start_ns: Optional[int] = None,
+        end_ns: Optional[int] = None,
+    ) -> ReceiptObject: ...
+    def receipt_llm_generate_ok(
+        self,
+        intent_hash: bytes,
+        output_ref: str,
+        provider_id: str,
+        finish_reason: str = "stop",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: Optional[int] = None,
+        raw_output_ref: Optional[str] = None,
+        provider_response_id: Optional[str] = None,
+        cost_cents: Optional[int] = None,
+        warnings_ref: Optional[str] = None,
+        rate_limit_ref: Optional[str] = None,
+    ) -> ReceiptObject: ...
+    def state_get(
+        self,
+        workflow: str,
+        key: Optional[bytes] = None,
+    ) -> Any: ...
+    def state_bytes(
+        self,
+        workflow: str,
+        key: Optional[bytes] = None,
+    ) -> Optional[bytes]: ...
+    def list_cells(self, workflow: str) -> list[dict[str, Any]]: ...
+    def blob_get_bytes(self, blob_ref: str) -> bytes: ...
+    def blob_get_text(self, blob_ref: str) -> str: ...
+    def blob_get_json(self, blob_ref: str) -> Any: ...
+    def trace_summary(self) -> dict[str, Any]: ...
+    def snapshot_create(self) -> None: ...
+    def reopen(self) -> "WorldHarness": ...
+    def time_get(self) -> int: ...
+    def time_set(self, now_ns: int) -> int: ...
+    def time_advance(self, delta_ns: int) -> int: ...
+    def time_jump_next_due(self) -> Optional[int]: ...
+    def artifact_export(self) -> dict[str, Any]: ...
+
+
+class WorkflowHarness:
+    @staticmethod
+    def from_air_dir(
+        workflow: str,
+        air_dir: str,
+        workflow_dir: Optional[str] = None,
+        import_roots: Optional[list[str]] = None,
+        force_build: bool = False,
+        sync_secrets: bool = False,
+        secret_bindings: Optional[dict[str, bytes | str]] = None,
+        build_profile: BuildProfileName = "debug",
+        effect_mode: EffectModeName = "scripted",
+    ) -> "WorkflowHarness": ...
+
+    @staticmethod
+    def from_workflow_dir(
+        workflow: str,
+        workflow_dir: str,
+        air_dir: Optional[str] = None,
+        import_roots: Optional[list[str]] = None,
+        force_build: bool = False,
+        sync_secrets: bool = False,
+        secret_bindings: Optional[dict[str, bytes | str]] = None,
+        build_profile: BuildProfileName = "debug",
+        effect_mode: EffectModeName = "scripted",
+    ) -> "WorkflowHarness": ...
+
+    @property
+    def workflow(self) -> str: ...
+
+    @property
+    def warnings(self) -> list[str]: ...
+
+    def send_event(self, schema: str, value: JsonValue) -> None: ...
+    def send_command(self, schema: str, value: JsonValue) -> None: ...
+    def run_cycle_batch(self) -> dict[str, Any]: ...
+    def run_to_idle(self) -> dict[str, Any]: ...
+    def run_until_runtime_quiescent(self) -> dict[str, Any]: ...
+    def quiescence_status(self) -> dict[str, Any]: ...
+    def pull_effects(self) -> list[dict[str, Any]]: ...
+    def apply_receipt_object(self, receipt: ReceiptObject) -> None: ...
+    def apply_receipt(
+        self,
+        intent_hash: bytes,
+        adapter_id: str,
+        status: str,
+        payload_cbor: bytes,
+        cost_cents: Optional[int] = None,
+        signature: Optional[bytes] = None,
+    ) -> None: ...
+    def receipt_ok(
+        self,
+        intent_hash: bytes,
+        adapter_id: str,
+        payload: JsonValue,
+    ) -> ReceiptObject: ...
+    def receipt_error(
+        self,
+        intent_hash: bytes,
+        adapter_id: str,
+        payload: JsonValue,
+    ) -> ReceiptObject: ...
+    def receipt_timeout(
+        self,
+        intent_hash: bytes,
+        adapter_id: str,
+        payload: JsonValue,
+    ) -> ReceiptObject: ...
+    def receipt_timer_set_ok(
+        self,
+        intent_hash: bytes,
+        delivered_at_ns: int,
+        key: Optional[str] = None,
+    ) -> ReceiptObject: ...
+    def receipt_blob_put_ok(
+        self,
+        intent_hash: bytes,
+        blob_ref: str,
+        edge_ref: str,
+        size: int,
+    ) -> ReceiptObject: ...
+    def receipt_blob_get_ok(
+        self,
+        intent_hash: bytes,
+        blob_ref: str,
+        bytes: bytes,
+        size: Optional[int] = None,
+    ) -> ReceiptObject: ...
+    def receipt_http_request_ok(
+        self,
+        intent_hash: bytes,
+        status: int,
+        adapter_id: str = "adapter.http.harness",
+        headers: Optional[JsonValue] = None,
+        body_ref: Optional[str] = None,
+        start_ns: Optional[int] = None,
+        end_ns: Optional[int] = None,
+    ) -> ReceiptObject: ...
+    def receipt_llm_generate_ok(
+        self,
+        intent_hash: bytes,
+        output_ref: str,
+        provider_id: str,
+        finish_reason: str = "stop",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: Optional[int] = None,
+        raw_output_ref: Optional[str] = None,
+        provider_response_id: Optional[str] = None,
+        cost_cents: Optional[int] = None,
+        warnings_ref: Optional[str] = None,
+        rate_limit_ref: Optional[str] = None,
+    ) -> ReceiptObject: ...
+    def state_get(self, key: Optional[bytes] = None) -> Any: ...
+    def state_bytes(self, key: Optional[bytes] = None) -> Optional[bytes]: ...
+    def list_cells(self) -> list[dict[str, Any]]: ...
+    def blob_get_bytes(self, blob_ref: str) -> bytes: ...
+    def blob_get_text(self, blob_ref: str) -> str: ...
+    def blob_get_json(self, blob_ref: str) -> Any: ...
+    def trace_summary(self) -> dict[str, Any]: ...
+    def snapshot_create(self) -> None: ...
+    def reopen(self) -> "WorkflowHarness": ...
+    def time_get(self) -> int: ...
+    def time_set(self, now_ns: int) -> int: ...
+    def time_advance(self, delta_ns: int) -> int: ...
+    def time_jump_next_due(self) -> Optional[int]: ...
+    def artifact_export(self) -> dict[str, Any]: ...

@@ -4,15 +4,13 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
 use aos_cbor::to_canonical_cbor;
-use aos_node::control::NodeControl;
 use aos_node::{DomainEventIngress, WorldId};
-use aos_sqlite::LocalStatePaths;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use crate::LocalControl;
+use crate::{LocalControl, LocalStatePaths};
 
 #[derive(Args, Debug, Clone)]
 pub struct BatchArgs {
@@ -43,7 +41,7 @@ pub enum BatchCommand {
 
 #[derive(Args, Debug, Clone)]
 pub struct WorldTargetArgs {
-    /// World UUID or handle.
+    /// World UUID.
     #[arg(long)]
     pub world: String,
 }
@@ -135,7 +133,7 @@ pub struct BatchCommandGetArgs {
 #[derive(Debug, Serialize)]
 struct BatchEventResponse {
     seq: String,
-    world: aos_node::control::WorldSummaryResponse,
+    world: aos_node::api::WorldSummaryResponse,
 }
 
 pub fn run_batch(args: BatchArgs) -> Result<()> {
@@ -145,24 +143,22 @@ pub fn run_batch(args: BatchArgs) -> Result<()> {
         .with_context(|| format!("create local state root {}", paths.root().display()))?;
     let control = LocalControl::open_batch(paths.root()).context("open local batch control")?;
     match args.command {
-        BatchCommand::Worlds => {
-            print_json(&control.list_worlds(control.local_universe_id(), None, u32::MAX)?)
-        }
+        BatchCommand::Worlds => print_json(&control.list_worlds(None, u32::MAX)?),
         BatchCommand::Status(target) => {
             let world = resolve_world_id(&control, &target.world)?;
-            print_json(&control.get_world(control.local_universe_id(), world)?)
+            print_json(&control.get_world(world)?)
         }
         BatchCommand::Step(target) => {
             let world = resolve_world_id(&control, &target.world)?;
-            print_json(&control.step_world(control.local_universe_id(), world)?)
+            print_json(&control.step_world(world)?)
         }
         BatchCommand::Manifest(target) => {
             let world = resolve_world_id(&control, &target.world)?;
-            print_json(&control.manifest(control.local_universe_id(), world)?)
+            print_json(&control.manifest(world)?)
         }
         BatchCommand::TraceSummary(target) => {
             let world = resolve_world_id(&control, &target.world)?;
-            print_json(&control.trace_summary(control.local_universe_id(), world, 64)?)
+            print_json(&control.trace_summary(world, 64)?)
         }
         BatchCommand::Send(args) => run_send(&control, args),
         BatchCommand::Command(args) => run_command(&control, args),
@@ -170,7 +166,6 @@ pub fn run_batch(args: BatchArgs) -> Result<()> {
 }
 
 fn run_send(control: &Arc<LocalControl>, args: BatchSendArgs) -> Result<()> {
-    let universe = control.local_universe_id();
     let world = resolve_world_id(control, &args.target.world)?;
     let value = load_cbor_payload(
         args.value_json.as_deref(),
@@ -185,7 +180,6 @@ fn run_send(control: &Arc<LocalControl>, args: BatchSendArgs) -> Result<()> {
         .transpose()
         .context("decode event key")?;
     let seq = control.enqueue_event(
-        universe,
         world,
         DomainEventIngress {
             schema: args.schema,
@@ -194,7 +188,7 @@ fn run_send(control: &Arc<LocalControl>, args: BatchSendArgs) -> Result<()> {
             correlation_id: args.correlation_id,
         },
     )?;
-    let world = control.get_world(universe, world)?;
+    let world = control.get_world(world)?;
     print_json(&BatchEventResponse {
         seq: seq.to_string(),
         world,
@@ -202,7 +196,6 @@ fn run_send(control: &Arc<LocalControl>, args: BatchSendArgs) -> Result<()> {
 }
 
 fn run_command(control: &Arc<LocalControl>, args: BatchCommandArgs) -> Result<()> {
-    let universe = control.local_universe_id();
     match args.command {
         BatchCommandSubcommand::Submit(args) => {
             let world = resolve_world_id(control, &args.target.world)?;
@@ -215,36 +208,30 @@ fn run_command(control: &Arc<LocalControl>, args: BatchCommandArgs) -> Result<()
             let payload: serde_cbor::Value =
                 serde_cbor::from_slice(&payload).context("decode command CBOR payload")?;
             let response = control.submit_command(
-                universe,
                 world,
                 &args.command,
                 args.command_id.clone(),
                 args.actor.clone(),
                 &payload,
             )?;
-            let record = control.get_command(universe, world, &response.command_id)?;
+            let record = control.get_command(world, &response.command_id)?;
             print_json(&record)
         }
         BatchCommandSubcommand::Get(args) => {
             let world = resolve_world_id(control, &args.target.world)?;
-            print_json(&control.get_command(universe, world, &args.command_id)?)
+            print_json(&control.get_command(world, &args.command_id)?)
         }
     }
 }
 
 fn resolve_world_id(control: &Arc<LocalControl>, selector: &str) -> Result<WorldId> {
-    let universe = control.local_universe_id();
-    if let Ok(world_id) = selector.parse::<WorldId>() {
-        let _ = control
-            .get_world(universe, world_id)
-            .with_context(|| format!("resolve local world '{selector}'"))?;
-        return Ok(world_id);
-    }
-    Ok(control
-        .get_world_by_handle(universe, selector)
-        .with_context(|| format!("resolve local world handle '{selector}'"))?
-        .runtime
-        .world_id)
+    let world_id = selector
+        .parse::<WorldId>()
+        .with_context(|| format!("parse local world id '{selector}'"))?;
+    let _ = control
+        .get_world(world_id)
+        .with_context(|| format!("resolve local world '{selector}'"))?;
+    Ok(world_id)
 }
 
 fn load_cbor_payload(

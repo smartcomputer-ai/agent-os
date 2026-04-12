@@ -193,36 +193,24 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn ensure_manifest_apply_quiescent(&self) -> Result<(), KernelError> {
+        let quiescence = self.quiescence_status();
         let workflows_with_inflight = self
             .workflow_instances
             .values()
             .filter(|instance| !instance.inflight_intents.is_empty())
             .count();
-        let inflight_workflow_intents = self
-            .workflow_instances
-            .values()
-            .map(|instance| instance.inflight_intents.len())
-            .sum::<usize>();
-        let pending_workflow_receipts = self.pending_workflow_receipts.len();
-        let queued_effects = self.effect_manager.queued().len();
-        let workflow_queue_pending = !self.workflow_queue.is_empty();
 
-        if workflows_with_inflight == 0
-            && inflight_workflow_intents == 0
-            && pending_workflow_receipts == 0
-            && queued_effects == 0
-            && !workflow_queue_pending
-        {
+        if quiescence.runtime_quiescent {
             return Ok(());
         }
 
         Err(KernelError::ManifestApplyBlockedInFlight {
             plan_instances: workflows_with_inflight,
-            waiting_events: inflight_workflow_intents,
+            waiting_events: quiescence.inflight_workflow_intents,
             pending_plan_receipts: 0,
-            pending_workflow_receipts,
-            queued_effects,
-            workflow_queue_pending,
+            pending_workflow_receipts: quiescence.pending_workflow_receipts,
+            queued_effects: quiescence.queued_effects,
+            workflow_queue_pending: quiescence.workflow_queue_pending,
         })
     }
 
@@ -413,7 +401,7 @@ mod tests {
         Kernel::from_loaded_manifest(
             Arc::new(MemStore::new()),
             loaded,
-            Box::new(crate::journal::mem::MemJournal::new()),
+            crate::journal::Journal::new(),
         )
         .expect("kernel")
     }

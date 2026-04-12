@@ -666,3 +666,86 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
     let state_bytes = host.state_bytes("test/TimerWorkflow@1").unwrap();
     assert_eq!(state_bytes, vec![0xCC]);
 }
+
+#[tokio::test]
+async fn testhost_logical_time_can_be_set_and_advanced() {
+    let store = fixtures::new_mem_store();
+    let final_state = CounterState {
+        pc: CounterPc::Idle,
+        remaining: 0,
+    };
+    let loaded = build_counter_manifest(&store, &final_state);
+    let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
+
+    let baseline = host.set_logical_time_ns(1_000_000);
+    assert!(baseline >= 1_000_000);
+    assert!(baseline < 2_000_000);
+
+    let advanced = host.advance_logical_time_ns(500_000);
+    assert!(advanced >= 1_500_000);
+    assert!(advanced >= host.logical_time_now_ns().saturating_sub(1_000_000));
+}
+
+#[tokio::test]
+async fn testhost_quiescence_reports_pending_runtime_state() {
+    let store = fixtures::new_mem_store();
+    let timer_params = TimerSetParams {
+        deliver_at_ns: 1_000_000_000,
+        key: Some("pending".into()),
+    };
+    let effect = WorkflowEffect::with_cap_slot(
+        aos_effects::EffectKind::TIMER_SET,
+        serde_cbor::to_vec(&timer_params).unwrap(),
+        "default",
+    );
+
+    let output = WorkflowOutput {
+        state: Some(vec![0x01]),
+        domain_events: vec![],
+        effects: vec![effect],
+        ann: None,
+    };
+
+    let mut module = fixtures::stub_workflow_module(&store, "test/PendingTimer@1", &output);
+    module.abi.workflow = Some(WorkflowAbi {
+        state: fixtures::schema("test/TimerState@1"),
+        event: fixtures::schema("test/TimerEvent@1"),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        cap_slots: Default::default(),
+    });
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![module],
+        vec![fixtures::routing_event(
+            "test/TimerEvent@1",
+            "test/PendingTimer@1",
+        )],
+    );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![timer_event_schema(), timer_state_schema()],
+    );
+
+    let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
+    host.send_event("test/TimerEvent@1", timer_start_event())
+        .unwrap();
+    host.run_to_idle().unwrap();
+
+    let quiescence = host.quiescence_status();
+    assert!(quiescence.kernel.kernel_idle);
+    assert_eq!(quiescence.kernel.queued_effects, 1);
+    assert_eq!(quiescence.kernel.pending_workflow_receipts, 1);
+    assert!(!quiescence.kernel.runtime_quiescent);
+    assert_eq!(quiescence.timers_pending, 0);
+
+    let summary = host.trace_summary().unwrap();
+    assert_eq!(summary["runtime_wait"]["queued_effects"], 1);
+    assert_eq!(summary["journal_bounds"]["retained_from"], 0);
+    assert!(
+        summary["journal_bounds"]["next_seq"]
+            .as_u64()
+            .expect("next_seq in trace summary")
+            > 0
+    );
+}

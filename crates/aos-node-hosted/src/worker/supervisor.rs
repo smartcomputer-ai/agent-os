@@ -1,676 +1,516 @@
-use super::*;
+use std::collections::{BTreeMap, BTreeSet};
+use std::thread;
+use std::time::{Duration, Instant};
 
-impl<P> WorkerSupervisor<P>
-where
-    P: HostedRuntimeStore + SecretStore + UniverseStore + 'static,
-{
-    fn should_retry_faulted_world(&self, world_ref: ActiveWorldRef, now_ns: u64) -> bool {
-        self.faulted_worlds
-            .get(&world_ref)
-            .is_none_or(|state| now_ns >= state.next_retry_ns)
+use aos_kernel::journal::JournalRecord;
+use aos_node::partition_for_world;
+use aos_runtime::{RunMode, now_wallclock_ns};
+use tokio::runtime::Builder as RuntimeBuilder;
+use tracing::{debug, warn};
+
+use crate::config::HostedWorkerConfig;
+
+use super::runtime::HostedWorkerRuntime;
+use super::timers::PartitionTimerState;
+use super::types::{
+    HostedWorkerRuntimeInner, PartitionRunOutcome, SupervisorOutcome, SupervisorRunProfile,
+    WorkerError,
+};
+use super::util::unix_time_ns;
+
+#[derive(Clone)]
+pub struct HostedWorker {
+    pub config: HostedWorkerConfig,
+}
+
+impl HostedWorker {
+    pub fn new(config: HostedWorkerConfig) -> Self {
+        Self { config }
     }
 
-    fn clear_world_fault(&mut self, world_ref: ActiveWorldRef) {
-        self.faulted_worlds.remove(&world_ref);
+    pub fn with_worker_runtime(&self, runtime: HostedWorkerRuntime) -> WorkerSupervisor {
+        WorkerSupervisor {
+            runtime,
+            workers: BTreeMap::new(),
+            poll_interval: self.config.supervisor_poll_interval,
+            checkpoint_interval: self.config.checkpoint_interval,
+            checkpoint_every_events: self
+                .config
+                .checkpoint_every_events
+                .map(|count| count as usize),
+            checkpoint_on_create: self.config.checkpoint_on_create,
+            last_checkpoint: Instant::now(),
+        }
+    }
+}
+
+struct PartitionWorker {
+    partition: u32,
+    events_since_checkpoint: usize,
+    timers: PartitionTimerState,
+    disabled_worlds: BTreeMap<aos_node::WorldId, String>,
+}
+
+impl PartitionWorker {
+    fn new(partition: u32) -> Self {
+        Self {
+            partition,
+            events_since_checkpoint: 0,
+            timers: PartitionTimerState::default(),
+            disabled_worlds: BTreeMap::new(),
+        }
     }
 
-    fn record_world_fault(&mut self, world_ref: ActiveWorldRef, err: &WorkerError, now_ns: u64) {
-        let attempts = self
-            .faulted_worlds
-            .get(&world_ref)
-            .map(|state| state.attempts.saturating_add(1))
-            .unwrap_or(1);
-        let backoff_secs = 2_u64.saturating_pow(attempts.saturating_sub(1).min(6));
-        let backoff_ns = backoff_secs.saturating_mul(1_000_000_000);
-        self.faulted_worlds.insert(
-            world_ref,
-            FaultedWorldState {
-                attempts,
-                next_retry_ns: now_ns.saturating_add(backoff_ns),
-            },
-        );
-        tracing::error!(
-            worker_id = %self.worker.config.worker_id,
-            universe_id = %world_ref.universe_id,
-            world_id = %world_ref.world_id,
-            attempts,
-            retry_after_seconds = backoff_secs,
-            error = %err,
-            "isolated faulted hosted world; worker will continue supervising other worlds"
-        );
-    }
-
-    fn finalize_faulted_terminal_admin(
+    fn run_once(
         &mut self,
-        world_ref: ActiveWorldRef,
-    ) -> Result<bool, WorkerError> {
-        let now_ns = now_wallclock_ns();
-        let info =
-            self.runtime
-                .world_runtime_info(world_ref.universe_id, world_ref.world_id, now_ns)?;
-        let next_status = match info.meta.admin.status {
-            WorldAdminStatus::Archiving => Some(WorldAdminStatus::Archived),
-            WorldAdminStatus::Deleting => Some(WorldAdminStatus::Deleted),
-            _ => None,
-        };
-        let Some(next_status) = next_status else {
-            return Ok(false);
-        };
-        let mut admin = info.meta.admin;
-        admin.status = next_status;
-        admin.updated_at_ns = now_ns;
-        self.runtime
-            .set_world_admin_lifecycle(world_ref.universe_id, world_ref.world_id, admin)?;
-        self.faulted_worlds.remove(&world_ref);
-        self.warm_worlds.remove(&world_ref);
-        tracing::warn!(
-            worker_id = %self.worker.config.worker_id,
-            universe_id = %world_ref.universe_id,
-            world_id = %world_ref.world_id,
-            status = ?next_status,
-            "finalized terminal world admin state after world-local fault"
-        );
-        Ok(true)
-    }
-
-    fn release_world_lease_after_fault(
-        &self,
-        world_ref: ActiveWorldRef,
-        lease: &WorldLease,
-    ) -> Result<(), WorkerError> {
-        match self
-            .runtime
-            .release_world_lease(world_ref.universe_id, world_ref.world_id, lease)
-        {
-            Ok(()) | Err(PersistError::Conflict(_)) => Ok(()),
-            Err(err) => Err(err.into()),
+        runtime: &mut HostedWorkerRuntimeInner,
+        profile: &mut SupervisorRunProfile,
+        checkpoint_on_create: bool,
+    ) -> Result<PartitionRunOutcome, WorkerError> {
+        let (mut outcome, run_profile) = runtime
+            .run_partition_once_profiled(self.partition, checkpoint_on_create)
+            .inspect_err(|err| {
+                tracing::error!(
+                    partition = self.partition,
+                    error = %err,
+                    "hosted worker failed during partition submission replay"
+                );
+            })?;
+        profile.partition_drain_submissions += run_profile.drain_submissions;
+        profile.partition_process_create += run_profile.process_create;
+        profile.partition_process_existing += run_profile.process_existing;
+        profile.partition_activate_world += run_profile.activate_world;
+        profile.partition_apply_submission += run_profile.apply_submission;
+        profile.partition_build_external_event += run_profile.build_external_event;
+        profile.partition_host_drain += run_profile.host_drain;
+        profile.partition_post_apply += run_profile.post_apply;
+        profile.partition_commit_batch += run_profile.commit_batch;
+        profile.partition_commit_command_records += run_profile.commit_command_records;
+        profile.partition_promote_worlds += run_profile.promote_worlds;
+        profile.partition_inline_checkpoint += run_profile.inline_checkpoint;
+        if outcome.inline_checkpoint_published {
+            self.events_since_checkpoint = 0;
+        } else {
+            self.events_since_checkpoint = self
+                .events_since_checkpoint
+                .saturating_add(outcome.checkpoint_event_frames);
         }
-    }
-
-    pub fn active_worlds(&self) -> Vec<ActiveWorldRef> {
-        let mut worlds: Vec<_> = self.active_worlds.keys().copied().collect();
-        worlds.sort();
-        worlds
-    }
-
-    pub fn active_world_debug_state(
-        &self,
-        world_ref: ActiveWorldRef,
-    ) -> Option<ActiveWorldDebugState> {
-        let runner = self.active_worlds.get(&world_ref)?;
-        let pending_receipts = runner.host.kernel().pending_workflow_receipts_snapshot();
-        let queued_effects = runner.host.kernel().queued_effects_snapshot();
-        let workflow_instances = runner.host.kernel().workflow_instances_snapshot();
-        Some(ActiveWorldDebugState {
-            pending_receipt_intent_hashes: pending_receipts
-                .iter()
-                .map(|receipt| {
-                    Hash::from_bytes(&receipt.intent_hash)
-                        .expect("intent hash is 32 bytes")
-                        .to_hex()
-                })
-                .collect(),
-            pending_receipts: pending_receipts
-                .into_iter()
-                .map(|receipt| {
-                    let origin_module_id = receipt.origin_module_id;
-                    let origin_instance_id = format!(
-                        "{}::{}",
-                        origin_module_id,
-                        receipt
-                            .origin_instance_key
-                            .as_deref()
-                            .map(hex::encode)
-                            .unwrap_or_default()
-                    );
-                    PendingReceiptDebugState {
-                        intent_hash: Hash::from_bytes(&receipt.intent_hash)
-                            .expect("intent hash is 32 bytes")
-                            .to_hex(),
-                        origin_module_id,
-                        origin_instance_id,
-                        effect_kind: receipt.effect_kind,
-                        emitted_at_seq: receipt.emitted_at_seq,
-                    }
-                })
-                .collect(),
-            queued_effect_intent_hashes: queued_effects
-                .iter()
-                .map(|intent| {
-                    Hash::from_bytes(&intent.intent_hash)
-                        .expect("intent hash is 32 bytes")
-                        .to_hex()
-                })
-                .collect(),
-            queued_effects: queued_effects
-                .into_iter()
-                .map(|intent| QueuedEffectDebugState {
-                    intent_hash: Hash::from_bytes(&intent.intent_hash)
-                        .expect("intent hash is 32 bytes")
-                        .to_hex(),
-                    effect_kind: intent.kind,
-                    cap_name: intent.cap_name,
-                })
-                .collect(),
-            workflow_instances: workflow_instances
-                .into_iter()
-                .filter(|instance| !instance.inflight_intents.is_empty())
-                .map(|instance| ActiveWorkflowDebugState {
-                    instance_id: instance.instance_id,
-                    inflight_intent_hashes: instance
-                        .inflight_intents
-                        .into_iter()
-                        .map(|intent| {
-                            Hash::from_bytes(&intent.intent_id)
-                                .expect("intent hash is 32 bytes")
-                                .to_hex()
-                        })
-                        .collect(),
-                })
-                .collect(),
-        })
-    }
-
-    pub async fn run_once(&mut self) -> Result<SupervisorOutcome, WorkerError> {
-        let now_ns = now_wallclock_ns();
-        self.evict_expired_warm_worlds(now_ns);
-        self.maintenance
-            .run_due(&*self.runtime, &self.worker.config, now_ns)?;
-        self.runtime.heartbeat_worker(WorkerHeartbeat {
-            worker_id: self.worker.config.worker_id.clone(),
-            pins: self.worker.config.worker_pins.iter().cloned().collect(),
-            last_seen_ns: now_ns,
-            expires_at_ns: now_ns.saturating_add(duration_ns(self.worker.config.heartbeat_ttl)),
+        let active_worlds = self.activate_partition_worlds(runtime).inspect_err(|err| {
+            tracing::error!(
+                partition = self.partition,
+                error = %err,
+                "hosted worker failed while activating partition worlds"
+            );
         })?;
-
-        let active_workers = self
-            .runtime
-            .list_active_workers(now_ns, self.worker.config.world_scan_limit)?;
-        let worlds = self.supervisor_candidates(now_ns)?;
-
-        let mut outcome = SupervisorOutcome::default();
-
-        for hosted in &worlds {
-            let key = ActiveWorldRef {
-                universe_id: hosted.universe_id,
-                world_id: hosted.info.world_id,
-            };
-            let info = &hosted.info;
-            if info.meta.active_baseline_height.is_none() {
-                continue;
-            }
-            if self.active_worlds.contains_key(&key) && !self.worker_is_eligible_for_world(info) {
-                self.drop_active_world(key, info.world_id)?;
-                self.warm_worlds.remove(&key);
-                outcome.worlds_released += 1;
-                continue;
-            }
-            if !self.should_consider_world(key, info, now_ns) {
-                continue;
-            }
-            if !self.should_retry_faulted_world(key, now_ns) {
-                continue;
-            }
-            if !self.active_worlds.contains_key(&key)
-                && self.should_own_world(key.universe_id, info, &active_workers)
-            {
-                match self.try_start_world(key, info.world_id, now_ns) {
-                    Ok(Some(runner)) => {
-                        self.clear_world_fault(key);
-                        self.active_worlds.insert(key, runner);
-                        outcome.worlds_started += 1;
-                    }
-                    Ok(None) => {}
-                    Err(err) if is_world_isolatable_error(&err) => {
-                        self.warm_worlds.remove(&key);
-                        if !self.finalize_faulted_terminal_admin(key)? {
-                            self.record_world_fault(key, &err, now_ns);
-                            outcome.worlds_fenced += 1;
-                        }
-                    }
-                    Err(err) => return Err(err),
-                }
-            }
-        }
-
-        let active_ids: Vec<_> = self.active_worlds.keys().copied().collect();
-        let mut to_remove = Vec::new();
-        for world_ref in active_ids {
-            let step_result = {
-                let runner = self
-                    .active_worlds
-                    .get_mut(&world_ref)
-                    .expect("runner exists");
-                runner.step().await
-            };
-            match step_result {
-                Ok(RunnerStep::KeepRunning) => {}
-                Ok(RunnerStep::Released(release)) => {
-                    to_remove.push((world_ref, release));
-                    outcome.worlds_released += 1;
-                }
-                Ok(RunnerStep::Fenced) => {
-                    to_remove.push((world_ref, ReleaseDisposition::Drop));
-                    outcome.worlds_fenced += 1;
-                }
-                Err(err) if is_world_isolatable_error(&err) => {
-                    if let Some(runner) = self.active_worlds.remove(&world_ref) {
-                        if let Some(lease) = runner.lease.as_ref() {
-                            self.release_world_lease_after_fault(world_ref, lease)?;
-                        }
-                    }
-                    if !self.finalize_faulted_terminal_admin(world_ref)? {
-                        self.warm_worlds.remove(&world_ref);
-                        self.record_world_fault(world_ref, &err, now_ns);
-                        outcome.worlds_fenced += 1;
-                    }
-                }
-                Err(err) => return Err(err),
-            }
-        }
-        for (world_ref, release) in to_remove {
-            if let Some(mut runner) = self.active_worlds.remove(&world_ref) {
-                match release {
-                    ReleaseDisposition::Warm => {
-                        runner.suspend();
-                        self.warm_worlds.insert(world_ref, runner);
-                    }
-                    ReleaseDisposition::Drop => {}
-                }
-            }
-        }
-        outcome.active_worlds = self.active_worlds.len();
+        self.timers.retain_worlds(
+            &active_worlds
+                .iter()
+                .map(|(_, world_id)| *world_id)
+                .collect::<Vec<_>>(),
+        );
+        outcome.frames_appended = outcome
+            .frames_appended
+            .checked_add(self.process_worlds_once(runtime, &active_worlds)?)
+            .expect("hosted partition frame count overflow");
         Ok(outcome)
     }
 
-    pub fn run_once_blocking(&mut self) -> Result<SupervisorOutcome, WorkerError> {
-        let now_ns = now_wallclock_ns();
-        self.evict_expired_warm_worlds(now_ns);
-        self.maintenance
-            .run_due(&*self.runtime, &self.worker.config, now_ns)?;
-        self.runtime.heartbeat_worker(WorkerHeartbeat {
-            worker_id: self.worker.config.worker_id.clone(),
-            pins: self.worker.config.worker_pins.iter().cloned().collect(),
-            last_seen_ns: now_ns,
-            expires_at_ns: now_ns.saturating_add(duration_ns(self.worker.config.heartbeat_ttl)),
-        })?;
-
-        let active_workers = self
-            .runtime
-            .list_active_workers(now_ns, self.worker.config.world_scan_limit)?;
-        let worlds = self.supervisor_candidates(now_ns)?;
-
-        let mut outcome = SupervisorOutcome::default();
-
-        for hosted in &worlds {
-            let key = ActiveWorldRef {
-                universe_id: hosted.universe_id,
-                world_id: hosted.info.world_id,
-            };
-            let info = &hosted.info;
-            if info.meta.active_baseline_height.is_none() {
-                continue;
-            }
-            if self.active_worlds.contains_key(&key) && !self.worker_is_eligible_for_world(info) {
-                self.drop_active_world(key, info.world_id)?;
-                self.warm_worlds.remove(&key);
-                outcome.worlds_released += 1;
-                continue;
-            }
-            if !self.should_consider_world(key, info, now_ns) {
-                continue;
-            }
-            if !self.should_retry_faulted_world(key, now_ns) {
-                continue;
-            }
-            if !self.active_worlds.contains_key(&key)
-                && self.should_own_world(key.universe_id, info, &active_workers)
-            {
-                match self.try_start_world(key, info.world_id, now_ns) {
-                    Ok(Some(runner)) => {
-                        self.clear_world_fault(key);
-                        self.active_worlds.insert(key, runner);
-                        outcome.worlds_started += 1;
-                    }
-                    Ok(None) => {}
-                    Err(err) if is_world_isolatable_error(&err) => {
-                        self.warm_worlds.remove(&key);
-                        if !self.finalize_faulted_terminal_admin(key)? {
-                            self.record_world_fault(key, &err, now_ns);
-                            outcome.worlds_fenced += 1;
-                        }
-                    }
-                    Err(err) => return Err(err),
-                }
-            }
-        }
-
-        let active_ids: Vec<_> = self.active_worlds.keys().copied().collect();
-        let mut to_remove = Vec::new();
-        for world_ref in active_ids {
-            let step_result = {
-                let runner = self
-                    .active_worlds
-                    .get_mut(&world_ref)
-                    .expect("runner exists");
-                runner.step_blocking()
-            };
-            match step_result {
-                Ok(RunnerStep::KeepRunning) => {}
-                Ok(RunnerStep::Released(release)) => {
-                    to_remove.push((world_ref, release));
-                    outcome.worlds_released += 1;
-                }
-                Ok(RunnerStep::Fenced) => {
-                    to_remove.push((world_ref, ReleaseDisposition::Drop));
-                    outcome.worlds_fenced += 1;
-                }
-                Err(err) if is_world_isolatable_error(&err) => {
-                    if let Some(runner) = self.active_worlds.remove(&world_ref) {
-                        if let Some(lease) = runner.lease.as_ref() {
-                            self.release_world_lease_after_fault(world_ref, lease)?;
-                        }
-                    }
-                    if !self.finalize_faulted_terminal_admin(world_ref)? {
-                        self.warm_worlds.remove(&world_ref);
-                        self.record_world_fault(world_ref, &err, now_ns);
-                        outcome.worlds_fenced += 1;
-                    }
-                }
-                Err(err) => return Err(err),
-            }
-        }
-        for (world_ref, release) in to_remove {
-            if let Some(mut runner) = self.active_worlds.remove(&world_ref) {
-                match release {
-                    ReleaseDisposition::Warm => {
-                        runner.suspend();
-                        self.warm_worlds.insert(world_ref, runner);
-                    }
-                    ReleaseDisposition::Drop => {}
-                }
-            }
-        }
-        outcome.active_worlds = self.active_worlds.len();
-        Ok(outcome)
+    fn publish_checkpoint(
+        &mut self,
+        runtime: &mut HostedWorkerRuntimeInner,
+        created_at_ns: u64,
+        trigger: &'static str,
+    ) -> Result<aos_node::PartitionCheckpoint, WorkerError> {
+        let checkpoint =
+            runtime.create_partition_checkpoint(self.partition, created_at_ns, trigger)?;
+        self.events_since_checkpoint = 0;
+        Ok(checkpoint)
     }
 
-    fn try_start_world(
+    fn checkpoint_due_by_events(&self, threshold: Option<usize>) -> bool {
+        threshold.is_some_and(|threshold| self.events_since_checkpoint >= threshold)
+    }
+
+    fn activate_partition_worlds(
         &mut self,
-        key: ActiveWorldRef,
-        world_id: WorldId,
-        now_ns: u64,
-    ) -> Result<Option<WorldRunner<P>>, WorkerError> {
-        if let Some(mut runner) = self.warm_worlds.remove(&key) {
-            match self.runtime.acquire_world_lease(
-                key.universe_id,
-                world_id,
-                &self.worker.config.worker_id,
-                now_ns,
-                duration_ns(self.worker.config.lease_ttl),
-            ) {
-                Ok(lease) => match runner.resume(lease.clone()) {
-                    Ok(()) => return Ok(Some(runner)),
-                    Err(err) => {
-                        self.release_world_lease_after_fault(key, &lease)?;
-                        return Err(err);
-                    }
-                },
-                Err(PersistError::Conflict(conflict)) => {
-                    self.warm_worlds.insert(key, runner);
-                    tracing::debug!(
-                        worker_id = %self.worker.config.worker_id,
-                        universe_id = %key.universe_id,
+        runtime: &mut HostedWorkerRuntimeInner,
+    ) -> Result<Vec<(aos_node::UniverseId, aos_node::WorldId)>, WorkerError> {
+        let mut worlds = Vec::new();
+        let default_universe_id = runtime.infra.default_universe_id;
+        let world_ids = runtime.infra.kafka.world_ids();
+        for world_id in world_ids {
+            let effective_partition =
+                partition_for_world(world_id, runtime.infra.kafka.partition_count());
+            if effective_partition != self.partition {
+                continue;
+            }
+            let universe_id = runtime
+                .state
+                .registered_worlds
+                .get(&world_id)
+                .map(|world| world.universe_id)
+                .unwrap_or(default_universe_id);
+            if self.disabled_worlds.contains_key(&world_id) {
+                continue;
+            }
+            if let Some(reason) = runtime.world_disabled_reason(world_id) {
+                tracing::warn!(
+                    universe_id = %universe_id,
+                    world_id = %world_id,
+                    reason,
+                    "skipping disabled hosted world"
+                );
+                self.disabled_worlds.insert(world_id, reason.to_owned());
+                continue;
+            }
+            match (|| -> Result<(), WorkerError> {
+                runtime.ensure_registered_world(default_universe_id, world_id)?;
+                let universe_id = runtime
+                    .state
+                    .registered_worlds
+                    .get(&world_id)
+                    .map(|world| world.universe_id)
+                    .unwrap_or(default_universe_id);
+                runtime.activate_world(universe_id, world_id)
+            })() {
+                Ok(()) => worlds.push((universe_id, world_id)),
+                Err(WorkerError::Host(err)) => {
+                    let reason = err.to_string();
+                    tracing::error!(
+                        universe_id = %universe_id,
                         world_id = %world_id,
-                        error = %conflict,
-                        "skipping warm world because lease acquisition conflicted"
+                        error = %reason,
+                        "disabling hosted world after activation host error"
                     );
-                    return Ok(None);
+                    self.disabled_worlds.insert(world_id, reason.clone());
+                    runtime.disable_world(world_id, reason);
+                    self.timers.reset_world(world_id);
+                }
+                Err(WorkerError::Kernel(err)) => {
+                    let reason = err.to_string();
+                    tracing::error!(
+                        universe_id = %universe_id,
+                        world_id = %world_id,
+                        error = %reason,
+                        "disabling hosted world after activation kernel error"
+                    );
+                    self.disabled_worlds.insert(world_id, reason.clone());
+                    runtime.disable_world(world_id, reason);
+                    self.timers.reset_world(world_id);
                 }
                 Err(err) => {
-                    self.warm_worlds.insert(key, runner);
+                    let reason = err.to_string();
                     tracing::error!(
-                        worker_id = %self.worker.config.worker_id,
-                        universe_id = %key.universe_id,
+                        universe_id = %universe_id,
                         world_id = %world_id,
-                        error = %err,
-                        "failed to resume warm world"
+                        error = %reason,
+                        "disabling hosted world after activation error"
                     );
-                    return Err(err.into());
+                    self.disabled_worlds.insert(world_id, reason.clone());
+                    runtime.disable_world(world_id, reason);
+                    self.timers.reset_world(world_id);
                 }
             }
         }
-        match self.runtime.acquire_world_lease(
-            key.universe_id,
-            world_id,
-            &self.worker.config.worker_id,
-            now_ns,
-            duration_ns(self.worker.config.lease_ttl),
-        ) {
-            Ok(lease) => {
-                let runner = WorldRunner::open(
-                    self.worker.clone(),
-                    Arc::clone(&self.runtime),
-                    key.universe_id,
-                    world_id,
-                    lease,
-                );
-                match runner {
-                    Ok(runner) => Ok(Some(runner)),
-                    Err(err) => {
-                        if let Some(lease) = self
-                            .runtime
-                            .current_world_lease(key.universe_id, world_id)?
-                            && lease.holder_worker_id == self.worker.config.worker_id
-                        {
-                            self.release_world_lease_after_fault(key, &lease)?;
-                        }
-                        Err(err)
-                    }
-                }
-            }
-            Err(PersistError::Conflict(PersistConflict::LeaseHeld {
-                holder_worker_id, ..
-            })) if holder_worker_id == self.worker.config.worker_id => {
-                let Some(lease) = self
-                    .runtime
-                    .current_world_lease(key.universe_id, world_id)?
-                else {
-                    return Ok(None);
-                };
-                let runner = WorldRunner::open(
-                    self.worker.clone(),
-                    Arc::clone(&self.runtime),
-                    key.universe_id,
-                    world_id,
-                    lease,
-                );
-                match runner {
-                    Ok(runner) => Ok(Some(runner)),
-                    Err(err) => {
-                        if let Some(lease) = self
-                            .runtime
-                            .current_world_lease(key.universe_id, world_id)?
-                            && lease.holder_worker_id == self.worker.config.worker_id
-                        {
-                            self.release_world_lease_after_fault(key, &lease)?;
-                        }
-                        Err(err)
-                    }
-                }
-            }
-            Err(PersistError::Conflict(conflict)) => {
-                tracing::debug!(
-                    worker_id = %self.worker.config.worker_id,
-                    universe_id = %key.universe_id,
-                    world_id = %world_id,
-                    error = %conflict,
-                    "skipping world because lease acquisition conflicted"
-                );
-                Ok(None)
-            }
-            Err(err) => {
-                tracing::error!(
-                    worker_id = %self.worker.config.worker_id,
-                    universe_id = %key.universe_id,
-                    world_id = %world_id,
-                    error = %err,
-                    "failed to start world"
-                );
-                Err(err.into())
-            }
-        }
-    }
-
-    fn evict_expired_warm_worlds(&mut self, now_ns: u64) {
-        let ttl_ns = duration_ns(self.worker.config.warm_retain_after);
-        if ttl_ns == 0 {
-            self.warm_worlds.clear();
-            return;
-        }
-        self.warm_worlds.retain(|_, runner| {
-            runner
-                .suspended_since_ns
-                .is_none_or(|since| now_ns.saturating_sub(since) < ttl_ns)
-        });
-    }
-
-    fn drop_active_world(
-        &mut self,
-        key: ActiveWorldRef,
-        world_id: WorldId,
-    ) -> Result<(), WorkerError> {
-        if let Some(runner) = self.active_worlds.remove(&key)
-            && let Some(lease) = &runner.lease
-        {
-            match self
-                .runtime
-                .release_world_lease(key.universe_id, world_id, lease)
-            {
-                Ok(()) | Err(PersistError::Conflict(_)) => {}
-                Err(err) => return Err(err.into()),
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) fn should_consider_world(
-        &self,
-        world_ref: ActiveWorldRef,
-        info: &WorldRuntimeInfo,
-        now_ns: u64,
-    ) -> bool {
-        info.has_pending_inbox
-            || info.has_pending_effects
-            || info
-                .next_timer_due_at_ns
-                .is_some_and(|due_at| due_at <= now_ns)
-            || info.has_pending_maintenance
-            || self.active_worlds.contains_key(&world_ref)
-            || info
-                .lease
-                .as_ref()
-                .is_some_and(|lease| lease.holder_worker_id == self.worker.config.worker_id)
-    }
-
-    pub(super) fn should_own_world(
-        &self,
-        universe: UniverseId,
-        info: &WorldRuntimeInfo,
-        workers: &[WorkerHeartbeat],
-    ) -> bool {
-        if !info.meta.admin.status.allows_new_leases() {
-            return false;
-        }
-        let effective_pin = effective_world_pin(info);
-        let eligible_workers: Vec<_> = workers
-            .iter()
-            .filter(|worker| worker_is_eligible_for_pin(worker, &effective_pin))
-            .collect();
-        if eligible_workers.is_empty() {
-            return false;
-        }
-        let mut best_worker = None::<(&str, u64)>;
-        for worker in eligible_workers {
-            let score = rendezvous_score(universe, info.world_id, &worker.worker_id);
-            if best_worker.is_none_or(|(_, best_score)| score > best_score) {
-                best_worker = Some((worker.worker_id.as_str(), score));
-            }
-        }
-        best_worker
-            .map(|(worker_id, _)| worker_id == self.worker.config.worker_id)
-            .unwrap_or(true)
-    }
-
-    fn worker_is_eligible_for_world(&self, info: &WorldRuntimeInfo) -> bool {
-        let effective_pin = effective_world_pin(info);
-        self.worker
-            .config
-            .worker_pins
-            .contains(effective_pin.as_str())
-    }
-
-    fn configured_universe_filter(&self) -> Option<Vec<UniverseId>> {
-        (!self.worker.config.universe_filter.is_empty()).then(|| {
-            self.worker
-                .config
-                .universe_filter
-                .iter()
-                .copied()
-                .collect::<Vec<_>>()
-        })
-    }
-
-    fn supervisor_candidates(&self, now_ns: u64) -> Result<Vec<NodeWorldRuntimeInfo>, WorkerError> {
-        let mut worlds = HashMap::new();
-        let universe_filter = self.configured_universe_filter();
-        let filter = universe_filter.as_deref();
-
-        for info in
-            self.runtime
-                .list_ready_worlds(now_ns, self.worker.config.ready_scan_limit, filter)?
-        {
-            worlds.insert(
-                ActiveWorldRef {
-                    universe_id: info.universe_id,
-                    world_id: info.info.world_id,
-                },
-                info,
-            );
-        }
-
-        for info in self.runtime.list_worker_worlds(
-            &self.worker.config.worker_id,
-            now_ns,
-            self.worker.config.world_scan_limit,
-            filter,
-        )? {
-            worlds.insert(
-                ActiveWorldRef {
-                    universe_id: info.universe_id,
-                    world_id: info.info.world_id,
-                },
-                info,
-            );
-        }
-
-        for world_ref in self.active_worlds.keys().copied() {
-            let info = self.runtime.world_runtime_info(
-                world_ref.universe_id,
-                world_ref.world_id,
-                now_ns,
-            )?;
-            worlds.insert(
-                world_ref,
-                NodeWorldRuntimeInfo {
-                    universe_id: world_ref.universe_id,
-                    info,
-                },
-            );
-        }
-
-        let mut worlds: Vec<_> = worlds.into_values().collect();
-        worlds.sort_by_key(|entry| (entry.universe_id, entry.info.world_id));
         Ok(worlds)
+    }
+
+    fn process_worlds_once(
+        &mut self,
+        runtime: &mut HostedWorkerRuntimeInner,
+        worlds: &[(aos_node::UniverseId, aos_node::WorldId)],
+    ) -> Result<usize, WorkerError> {
+        let mut frames_appended = 0usize;
+        for (universe_id, world_id) in worlds {
+            match self.process_world_until_stable(runtime, *universe_id, *world_id) {
+                Ok(count) => {
+                    frames_appended = frames_appended.saturating_add(count);
+                }
+                Err(WorkerError::Host(err)) => {
+                    let reason = err.to_string();
+                    tracing::error!(
+                        universe_id = %universe_id,
+                        world_id = %world_id,
+                        error = %reason,
+                        "disabling hosted world after daemon cycle host error"
+                    );
+                    runtime.disable_world(*world_id, reason);
+                    self.timers.reset_world(*world_id);
+                }
+                Err(WorkerError::Kernel(err)) => {
+                    let reason = err.to_string();
+                    tracing::error!(
+                        universe_id = %universe_id,
+                        world_id = %world_id,
+                        error = %reason,
+                        "disabling hosted world after daemon cycle kernel error"
+                    );
+                    runtime.disable_world(*world_id, reason);
+                    self.timers.reset_world(*world_id);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(frames_appended)
+    }
+
+    fn process_world_until_stable(
+        &mut self,
+        runtime: &mut HostedWorkerRuntimeInner,
+        universe_id: aos_node::UniverseId,
+        world_id: aos_node::WorldId,
+    ) -> Result<usize, WorkerError> {
+        let timer_state = self.timers.world_mut(world_id);
+        let mut frames_appended = 0usize;
+        for _ in 0..32 {
+            let journal_tail_start = {
+                let world = runtime.state.active_worlds.get_mut(&world_id).ok_or(
+                    WorkerError::UnknownWorld {
+                        universe_id,
+                        world_id,
+                    },
+                )?;
+                if !timer_state.rehydrated {
+                    timer_state
+                        .scheduler
+                        .rehydrate_daemon_state(world.host.kernel_mut());
+                    timer_state.rehydrated = true;
+                }
+                let now_ns = now_wallclock_ns();
+                if world.host.logical_time_now_ns() < now_ns {
+                    let _ = world.host.set_logical_time_ns(now_ns);
+                }
+                world.host.journal_bounds().next_seq
+            };
+
+            let cycle = thread::scope(|scope| -> Result<_, WorkerError> {
+                let world = runtime.state.active_worlds.get_mut(&world_id).ok_or(
+                    WorkerError::UnknownWorld {
+                        universe_id,
+                        world_id,
+                    },
+                )?;
+                let handle = scope.spawn(|| -> Result<_, WorkerError> {
+                    let exec = RuntimeBuilder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("build hosted world cycle runtime");
+                    exec.block_on(world.host.run_cycle(RunMode::Daemon {
+                        scheduler: &mut timer_state.scheduler,
+                    }))
+                    .map_err(WorkerError::from)
+                });
+                handle.join().map_err(|panic| {
+                    let message = if let Some(message) = panic.downcast_ref::<&str>() {
+                        (*message).to_owned()
+                    } else if let Some(message) = panic.downcast_ref::<String>() {
+                        message.clone()
+                    } else {
+                        "hosted world cycle thread panicked".to_owned()
+                    };
+                    WorkerError::Build(anyhow::anyhow!(message))
+                })?
+            })?;
+
+            let fired = {
+                let world = runtime.state.active_worlds.get_mut(&world_id).ok_or(
+                    WorkerError::UnknownWorld {
+                        universe_id,
+                        world_id,
+                    },
+                )?;
+                let fired = world.host.fire_due_timers(&mut timer_state.scheduler)?;
+                if fired > 0 {
+                    let _ = world.host.drain()?;
+                }
+                fired
+            };
+
+            let tail = {
+                let world = runtime.state.active_worlds.get(&world_id).ok_or(
+                    WorkerError::UnknownWorld {
+                        universe_id,
+                        world_id,
+                    },
+                )?;
+                world.host.kernel().dump_journal_from(journal_tail_start)?
+            };
+
+            let progressed = cycle.effects_dispatched > 0
+                || cycle.receipts_applied > 0
+                || cycle.initial_drain.ticks > 0
+                || cycle.final_drain.ticks > 0
+                || fired > 0;
+            if tail.is_empty() {
+                if progressed {
+                    continue;
+                }
+                return Ok(frames_appended);
+            }
+
+            let mut records = Vec::with_capacity(tail.len());
+            for entry in tail {
+                let record: JournalRecord = serde_cbor::from_slice(&entry.payload)?;
+                records.push(record);
+            }
+            let world_epoch = runtime
+                .state
+                .registered_worlds
+                .get(&world_id)
+                .map(|world| world.world_epoch)
+                .ok_or(WorkerError::UnknownWorld {
+                    universe_id,
+                    world_id,
+                })?;
+            let expected_world_seq = runtime.infra.kafka.next_world_seq(world_id);
+            if expected_world_seq > journal_tail_start {
+                warn!(
+                    universe_id = %universe_id,
+                    world_id = %world_id,
+                    expected_world_seq,
+                    journal_tail_start,
+                    "hosted worker daemon world sequence diverged from host journal tail; using host tail"
+                );
+            } else if expected_world_seq < journal_tail_start {
+                debug!(
+                    universe_id = %universe_id,
+                    world_id = %world_id,
+                    expected_world_seq,
+                    journal_tail_start,
+                    "hosted worker daemon world sequence advanced ahead of persisted tail; using host tail"
+                );
+            }
+            let world_seq_start = journal_tail_start;
+            let world_seq_end = world_seq_start + records.len() as u64 - 1;
+            let frame = aos_node::WorldLogFrame {
+                format_version: 1,
+                universe_id,
+                world_id,
+                world_epoch,
+                world_seq_start,
+                world_seq_end,
+                records,
+            };
+            if let Err(err) = runtime.infra.kafka.append_frame(frame) {
+                let accepted_submission_ids = runtime
+                    .state
+                    .active_worlds
+                    .get(&world_id)
+                    .map(|world| world.accepted_submission_ids.clone())
+                    .ok_or(WorkerError::UnknownWorld {
+                        universe_id,
+                        world_id,
+                    })?;
+                runtime.rollback_active_worlds(BTreeMap::from([(
+                    world_id,
+                    accepted_submission_ids,
+                )]))?;
+                self.timers.reset_world(world_id);
+                return Err(WorkerError::LogFirst(err));
+            }
+            runtime.emit_projection_updates_for_worlds(&[world_id])?;
+            frames_appended = frames_appended.saturating_add(1);
+        }
+
+        warn!("hosted worker hit max cycle budget while processing world {world_id}");
+        Ok(frames_appended)
+    }
+}
+
+pub struct WorkerSupervisor {
+    runtime: HostedWorkerRuntime,
+    workers: BTreeMap<u32, PartitionWorker>,
+    poll_interval: Duration,
+    checkpoint_interval: Duration,
+    checkpoint_every_events: Option<usize>,
+    checkpoint_on_create: bool,
+    last_checkpoint: Instant,
+}
+
+impl WorkerSupervisor {
+    pub async fn run_once(&mut self) -> Result<SupervisorOutcome, WorkerError> {
+        Ok(self.run_once_profiled().await?.0)
+    }
+
+    pub async fn run_once_profiled(
+        &mut self,
+    ) -> Result<(SupervisorOutcome, SupervisorRunProfile), WorkerError> {
+        let total_started = Instant::now();
+        let mut frames_appended = 0usize;
+        let mut checkpoints_published = 0usize;
+        let mut profile = SupervisorRunProfile::default();
+        {
+            let mut inner = self.runtime.lock_inner()?;
+            let sync_assignments_started = Instant::now();
+            let (newly_assigned, _): (Vec<u32>, Vec<u32>) =
+                inner.infra.kafka.sync_assignments_and_poll()?;
+            profile.sync_assignments = sync_assignments_started.elapsed();
+            let assigned = inner.infra.kafka.assigned_partitions();
+            profile.assigned_partitions = assigned.len();
+            profile.newly_assigned_partitions = newly_assigned.len();
+            let sync_worlds_started = Instant::now();
+            inner.sync_active_worlds(&assigned, &newly_assigned)?;
+            profile.sync_active_worlds = sync_worlds_started.elapsed();
+            let assigned_set = assigned.iter().copied().collect::<BTreeSet<_>>();
+            self.workers
+                .retain(|partition, _| assigned_set.contains(partition));
+            for partition in assigned {
+                self.workers
+                    .entry(partition)
+                    .or_insert_with(|| PartitionWorker::new(partition));
+            }
+            let run_partitions_started = Instant::now();
+            for worker in self.workers.values_mut() {
+                let outcome =
+                    worker.run_once(&mut inner, &mut profile, self.checkpoint_on_create)?;
+                frames_appended += outcome.frames_appended;
+            }
+            profile.run_partitions = run_partitions_started.elapsed();
+            let checkpoint_due_by_time = self.last_checkpoint.elapsed() >= self.checkpoint_interval;
+            let checkpoint_due_by_events = self
+                .workers
+                .iter()
+                .filter_map(|(partition, worker)| {
+                    worker
+                        .checkpoint_due_by_events(self.checkpoint_every_events)
+                        .then_some(*partition)
+                })
+                .collect::<BTreeSet<_>>();
+            let publish_checkpoints_started = Instant::now();
+            if checkpoint_due_by_time || !checkpoint_due_by_events.is_empty() {
+                for worker in self.workers.values_mut() {
+                    if checkpoint_due_by_time
+                        || checkpoint_due_by_events.contains(&worker.partition)
+                    {
+                        let trigger = if checkpoint_due_by_time {
+                            "interval"
+                        } else {
+                            "events"
+                        };
+                        worker.publish_checkpoint(&mut inner, unix_time_ns(), trigger)?;
+                        checkpoints_published += 1;
+                    }
+                }
+                self.last_checkpoint = Instant::now();
+            }
+            profile.publish_checkpoints = publish_checkpoints_started.elapsed();
+            profile.total = total_started.elapsed();
+            Ok((
+                SupervisorOutcome {
+                    frames_appended,
+                    checkpoints_published,
+                    registered_worlds: inner.state.registered_worlds.len(),
+                    pending_submissions: inner.infra.kafka.pending_submission_count(),
+                },
+                profile,
+            ))
+        }
+    }
+
+    pub async fn serve_forever(&mut self) -> Result<(), WorkerError> {
+        loop {
+            self.run_once().await?;
+            tokio::time::sleep(self.poll_interval).await;
+        }
     }
 }

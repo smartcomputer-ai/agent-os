@@ -12,7 +12,6 @@ aos-cbor = { path = "../aos-cbor" }
 aos-effect-types = { path = "../aos-effect-types" }
 aos-kernel = { path = "../aos-kernel" }
 aos-node = { path = "../aos-node" }
-aos-sqlite = { path = "../aos-sqlite" }
 aos-sys = { path = "../aos-sys" }
 aos-air-exec = { path = "../aos-air-exec" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }

@@ -4,7 +4,7 @@ impl<S: Store + 'static> Kernel<S> {
     fn build_from_loaded_manifest_with_config(
         store: Arc<S>,
         loaded: LoadedManifest,
-        journal: Box<dyn Journal>,
+        journal: Journal,
         config: KernelConfig,
     ) -> Result<Self, KernelError> {
         let mut loaded = loaded;
@@ -80,6 +80,7 @@ impl<S: Store + 'static> Kernel<S> {
             secret_resolver: secret_resolver.clone(),
             allow_placeholder_secrets: config.allow_placeholder_secrets,
             cell_cache_size: config.cell_cache_size.max(1),
+            universe_id: config.universe_id,
             secrets: loaded.secrets,
             active_baseline: None,
             last_snapshot_height: None,
@@ -113,7 +114,7 @@ impl<S: Store + 'static> Kernel<S> {
     pub fn from_loaded_manifest(
         store: Arc<S>,
         loaded: LoadedManifest,
-        journal: Box<dyn Journal>,
+        journal: Journal,
     ) -> Result<Self, KernelError> {
         Self::from_loaded_manifest_with_config(store, loaded, journal, KernelConfig::default())
     }
@@ -121,7 +122,7 @@ impl<S: Store + 'static> Kernel<S> {
     pub fn from_loaded_manifest_with_config(
         store: Arc<S>,
         loaded: LoadedManifest,
-        journal: Box<dyn Journal>,
+        journal: Journal,
         config: KernelConfig,
     ) -> Result<Self, KernelError> {
         let mut kernel =
@@ -139,7 +140,7 @@ impl<S: Store + 'static> Kernel<S> {
     pub fn from_loaded_manifest_without_replay_with_config(
         store: Arc<S>,
         loaded: LoadedManifest,
-        journal: Box<dyn Journal>,
+        journal: Journal,
         config: KernelConfig,
     ) -> Result<Self, KernelError> {
         Self::build_from_loaded_manifest_with_config(store, loaded, journal, config)
@@ -150,7 +151,7 @@ impl<S: Store + 'static> Kernel<S> {
 mod tests {
     use super::*;
     use crate::MemStore;
-    use crate::journal::mem::MemJournal;
+    use crate::journal::Journal;
     use crate::world::test_support::empty_manifest;
     use aos_air_types::{SecretDecl, SecretEntry, catalog::EffectCatalog};
     use std::collections::HashMap;
@@ -183,7 +184,7 @@ mod tests {
             effect_catalog: EffectCatalog::new(),
         };
 
-        let result = Kernel::from_loaded_manifest(store, loaded, Box::new(MemJournal::new()));
+        let result = Kernel::from_loaded_manifest(store, loaded, Journal::new());
 
         assert!(matches!(result, Err(KernelError::SecretResolverMissing)));
     }

@@ -58,7 +58,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();
-    let requests = http.collect_requests(host.kernel_mut())?;
+    let requests = http.collect_requests(&mut host.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "summarizer workflow expected 1 http intent, got {}",
@@ -72,7 +72,7 @@ pub fn run(example_root: &Path) -> Result<()> {
             + " reviewers can trust the replay path.";
     let store = host.store();
     http.respond_with_body(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         Some(store.as_ref()),
         http_ctx,
         MockHttpResponse::json(200, document.clone()),

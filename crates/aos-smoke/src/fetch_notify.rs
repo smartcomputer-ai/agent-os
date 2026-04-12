@@ -56,7 +56,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();
-    let requests = http.collect_requests(host.kernel_mut())?;
+    let requests = http.collect_requests(&mut host.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "fetch-notify demo expected a single http request, got {}",
@@ -73,7 +73,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         request.params.url, request.params.method
     );
     http.respond_with(
-        host.kernel_mut(),
+        &mut host.kernel_mut(),
         request,
         MockHttpResponse::json(200, body),
     )?;

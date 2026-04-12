@@ -12,8 +12,9 @@ fn help_describes_subcommands_and_examples() {
         "control",
         "node",
         "Examples:",
-        "--universe-id",
+        "--state-root",
         "--bind",
+        "--checkpoint-every-events",
     ] {
         assert!(
             text.contains(needle),
@@ -23,12 +24,12 @@ fn help_describes_subcommands_and_examples() {
 }
 
 #[test]
-fn worker_command_defaults_to_all_universes() {
+fn worker_command_mentions_partitions() {
     let output = std::process::Command::new(assert_cmd::cargo::cargo_bin!("aos-node-hosted"))
         .args(["worker", "--help"])
         .output()
         .expect("run aos-node-hosted worker --help");
     assert!(output.status.success(), "worker help should succeed");
     let text = String::from_utf8_lossy(&output.stdout);
-    assert!(text.contains("omit to supervise all universes"));
+    assert!(text.contains("journal partitions"));
 }

@@ -40,9 +40,10 @@ Options:
   -h, --help                 Show this help.
 
 Notes:
-  - Uses the currently selected CLI profile, universe, and world.
+  - Uses the currently selected CLI profile and world.
   - The selected world must already be a Demiurge world.
   - This script does not modify profile selection.
+  - Hosted targets may reject `world status` while projections catch up; this script avoids that probe.
 USAGE
 }
 
@@ -134,9 +135,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if ! "${AOS_BIN}" --json --quiet world status >/dev/null; then
-  echo "current CLI target must resolve to a selected universe and world" >&2
-  echo "use \`aos universe create --select\`, \`aos world create --select\`, or explicit --universe/--world overrides" >&2
+PROFILE_DOC="$("${AOS_BIN}" --json --quiet profile show 2>/dev/null || true)"
+if ! python3 - <<'PY' "${PROFILE_DOC}"
+import json
+import sys
+
+raw = sys.argv[1].strip()
+if not raw:
+    raise SystemExit(1)
+try:
+    doc = json.loads(raw)
+except Exception:
+    raise SystemExit(1)
+
+profile = (doc.get("data") or {}).get("profile") or {}
+world = profile.get("world")
+if not isinstance(world, str) or not world.strip():
+    raise SystemExit(1)
+PY
+then
+  echo "current CLI target must resolve to a selected profile and world" >&2
+  echo "use \`aos profile select <name>\` and \`aos profile set --world <uuid>\`, or pass \`--profile/--world\` to \`aos\` explicitly" >&2
   exit 1
 fi
 
@@ -228,15 +247,19 @@ def get_state(workflow):
 deadline = time.time() + (timeout_ms / 1000.0)
 state = {}
 session = {}
+terminal_seen_without_output = False
 while time.time() < deadline:
     state = get_state("demiurge/Demiurge@1")
     session = get_state("aos.agent/SessionWorkflow@1")
     task_finished = bool(state.get("finished"))
     task_failure = state.get("failure")
+    output_ref = state.get("output_ref") or session.get("last_output_ref")
     if task_failure:
         break
-    if task_finished and session:
+    if task_finished and session and output_ref:
         break
+    if task_finished and session:
+        terminal_seen_without_output = True
     time.sleep(poll_interval)
 
 task_status = ((state.get("status") or {}).get("$tag")) or "Unknown"
@@ -284,6 +307,8 @@ elif task_failure:
     failure_exit = f"task failure={json.dumps(task_failure, sort_keys=True)}"
 elif not task_finished:
     failure_exit = f"task did not finish before timeout terminal_state={terminal_state}"
+elif terminal_seen_without_output and not output_ref:
+    failure_exit = "task finished but no output_ref became visible before timeout"
 
 print("")
 print(f"task_id: {task_id}")

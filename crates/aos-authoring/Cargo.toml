@@ -12,7 +12,6 @@ aos-kernel = { path = "../aos-kernel" }
 aos-node = { path = "../aos-node" }
 aos-effect-adapters = { path = "../aos-effect-adapters" }
 aos-runtime = { path = "../aos-runtime" }
-aos-sqlite = { path = "../aos-sqlite" }
 aos-wasm-build = { path = "../aos-wasm-build" }
 camino = "1"
 dotenvy = "0.15"

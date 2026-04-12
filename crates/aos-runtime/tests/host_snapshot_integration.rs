@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_kernel::KernelConfig;
-use aos_runtime::{ExternalEvent, WorldConfig, WorldHost};
-use aos_sqlite::{FsCas, LocalStatePaths};
+use aos_kernel::journal::{Journal, JournalRecord};
+use aos_node::{FsCas, LocalStatePaths};
+use aos_runtime::{ExternalEvent, JournalReplayOpen, TimerScheduler, WorldConfig, WorldHost};
 use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use helpers::fixtures;
 use serde_cbor;
@@ -49,20 +50,40 @@ async fn worldhost_snapshot_preserves_effect_queue() {
     assert_eq!(host.kernel().queued_effects_snapshot().len(), 1);
 
     host.snapshot().unwrap();
+    let entries = host.kernel().dump_journal().unwrap();
+    let active_baseline = entries
+        .iter()
+        .filter_map(
+            |entry| match serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok() {
+                Some(JournalRecord::Snapshot(record)) => Some(record),
+                _ => None,
+            },
+        )
+        .last()
+        .expect("latest snapshot record");
     drop(host);
 
-    // Reopen and ensure the queued intent was restored from snapshot/journal.
+    // Reopen from the snapshot+journal path and ensure timer state survives restart.
     let loaded2 = build_timer_manifest(&store);
-    let host2 = WorldHost::from_loaded_manifest(
+    let mut host2 = WorldHost::from_loaded_manifest_with_journal_replay(
         store.clone(),
         loaded2,
-        world_root,
+        Journal::from_entries(&entries).unwrap(),
         WorldConfig::default(),
         EffectAdapterConfig::default(),
         KernelConfig::default(),
+        Some(JournalReplayOpen {
+            active_baseline,
+            replay_seed: None,
+        }),
     )
     .unwrap();
-    assert_eq!(host2.kernel().queued_effects_snapshot().len(), 1);
+    let mut scheduler = TimerScheduler::new();
+    scheduler.rehydrate_daemon_state(host2.kernel_mut());
+    assert_eq!(host2.kernel().queued_effects_snapshot().len(), 0);
+    let status = host2.quiescence_status(Some(&scheduler));
+    assert_eq!(status.timers_pending, 1);
+    assert!(!status.runtime_quiescent);
 }
 
 fn build_timer_manifest<S: aos_kernel::Store + ?Sized>(

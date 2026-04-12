@@ -8,7 +8,7 @@ use aos_cbor::Hash;
 use aos_effects::builtins::LlmGenerateParams;
 use aos_kernel::MemStore;
 use aos_kernel::error::KernelError;
-use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::journal::Journal;
 use aos_kernel::secret::{
     MapSecretResolver, SecretCatalog, enforce_secret_policy, inject_secrets_in_params,
     normalize_secret_variants,
@@ -362,12 +362,7 @@ fn missing_env_var_yields_secret_resolver_missing() {
         allow_placeholder_secrets: false,
         ..KernelConfig::default()
     };
-    let result = Kernel::from_loaded_manifest_with_config(
-        store,
-        loaded,
-        Box::new(MemJournal::new()),
-        config,
-    );
+    let result = Kernel::from_loaded_manifest_with_config(store, loaded, Journal::new(), config);
 
     assert!(matches!(result, Err(KernelError::SecretResolverMissing)));
 }

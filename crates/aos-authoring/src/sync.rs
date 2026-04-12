@@ -312,6 +312,53 @@ pub fn load_required_secret_value_map(
     Ok(values)
 }
 
+pub fn load_available_secret_value_map(
+    world_root: &Path,
+    map: Option<&Path>,
+    required_bindings: &BTreeSet<String>,
+) -> Result<HashMap<String, Vec<u8>>> {
+    if required_bindings.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let resolved = match map {
+        Some(map) => {
+            let (map_path, config) = load_sync_config(world_root, Some(map))?;
+            let map_root = map_path.parent().unwrap_or(world_root);
+            resolve_secret_values_allow_missing(map_root, &config, Some(required_bindings))?
+        }
+        None => {
+            let default_map = world_root.join("aos.sync.json");
+            if default_map.exists() {
+                let (map_path, config) = load_sync_config(world_root, None)?;
+                let map_root = map_path.parent().unwrap_or(world_root);
+                resolve_secret_values_allow_missing(map_root, &config, Some(required_bindings))?
+            } else {
+                Vec::new()
+            }
+        }
+    };
+    let mut values: HashMap<String, Vec<u8>> = resolved
+        .into_iter()
+        .map(|entry| (entry.binding, entry.plaintext))
+        .collect();
+
+    for binding in required_bindings {
+        if values.contains_key(binding) {
+            continue;
+        }
+        let Some(var_name) = binding.strip_prefix("env:") else {
+            continue;
+        };
+        if var_name.is_empty() {
+            anyhow::bail!("invalid empty env binding '{}'", binding);
+        }
+        if let Ok(value) = std::env::var(var_name) {
+            values.insert(binding.clone(), value.into_bytes());
+        }
+    }
+    Ok(values)
+}
+
 fn resolve_secret_values(
     map_root: &Path,
     config: &SyncConfig,
@@ -374,6 +421,74 @@ fn resolve_secret_values(
     Ok(values)
 }
 
+fn resolve_secret_values_allow_missing(
+    map_root: &Path,
+    config: &SyncConfig,
+    required_bindings: Option<&BTreeSet<String>>,
+) -> Result<Vec<ResolvedSecretValue>> {
+    let Some(secrets) = &config.secrets else {
+        return Ok(Vec::new());
+    };
+    if secrets.bindings.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut sources = HashMap::new();
+    for source in &secrets.sources {
+        let name = source.name.trim();
+        if name.is_empty() {
+            anyhow::bail!("sync secret source name must be non-empty");
+        }
+        if sources
+            .insert(
+                name.to_string(),
+                load_secret_source_allow_missing(map_root, source)?,
+            )
+            .is_some()
+        {
+            anyhow::bail!("duplicate sync secret source '{}'", name);
+        }
+    }
+
+    let mut seen_bindings = HashSet::new();
+    let mut values = Vec::new();
+    for binding in &secrets.bindings {
+        let binding_id = binding.binding.trim();
+        if binding_id.is_empty() {
+            anyhow::bail!("sync secret binding id must be non-empty");
+        }
+        if !seen_bindings.insert(binding_id.to_string()) {
+            anyhow::bail!("duplicate sync secret binding '{}'", binding_id);
+        }
+        if let Some(required) = required_bindings {
+            if !required.contains(binding_id) {
+                continue;
+            }
+        }
+        let source = sources.get(binding.from.source.as_str()).ok_or_else(|| {
+            anyhow::anyhow!(
+                "sync secret binding '{}' references unknown source '{}'",
+                binding_id,
+                binding.from.source
+            )
+        })?;
+        let Some(plaintext) = source
+            .maybe_resolve(binding.from.key.as_str())
+            .with_context(|| format!("resolve sync secret binding '{}'", binding_id))?
+        else {
+            continue;
+        };
+        values.push(ResolvedSecretValue {
+            binding: binding_id.to_string(),
+            source: binding.from.source.clone(),
+            key: binding.from.key.clone(),
+            plaintext,
+        });
+    }
+
+    Ok(values)
+}
+
 enum LoadedSecretSource {
     Dotenv {
         path: PathBuf,
@@ -398,6 +513,22 @@ impl LoadedSecretSource {
                 .map_err(|_| anyhow::anyhow!("missing env var '{}'", trimmed)),
         }
     }
+
+    fn maybe_resolve(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let trimmed = key.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("secret source key must be non-empty");
+        }
+        match self {
+            LoadedSecretSource::Dotenv { values, .. } => Ok(std::env::var(trimmed)
+                .ok()
+                .map(|value| value.into_bytes())
+                .or_else(|| values.get(trimmed).cloned())),
+            LoadedSecretSource::Env => {
+                Ok(std::env::var(trimmed).ok().map(|value| value.into_bytes()))
+            }
+        }
+    }
 }
 
 fn load_secret_source(map_root: &Path, source: &SecretSourceSync) -> Result<LoadedSecretSource> {
@@ -418,6 +549,41 @@ fn load_secret_source(map_root: &Path, source: &SecretSourceSync) -> Result<Load
             {
                 let (key, value) = item?;
                 values.insert(key, value.into_bytes());
+            }
+            Ok(LoadedSecretSource::Dotenv { path, values })
+        }
+        "env" => Ok(LoadedSecretSource::Env),
+        other => anyhow::bail!(
+            "unsupported sync secret source kind '{}' for source '{}'",
+            other,
+            source.name
+        ),
+    }
+}
+
+fn load_secret_source_allow_missing(
+    map_root: &Path,
+    source: &SecretSourceSync,
+) -> Result<LoadedSecretSource> {
+    let kind = source.kind.trim();
+    if kind.is_empty() {
+        anyhow::bail!("sync secret source '{}' must set kind", source.name);
+    }
+    match kind {
+        "dotenv" => {
+            let path = source
+                .path
+                .as_ref()
+                .map(|path| resolve_map_path(map_root, path))
+                .unwrap_or_else(|| map_root.join(".env"));
+            let mut values = HashMap::new();
+            if path.exists() {
+                for item in from_path_iter(&path)
+                    .with_context(|| format!("load dotenv secret source {}", path.display()))?
+                {
+                    let (key, value) = item?;
+                    values.insert(key, value.into_bytes());
+                }
             }
             Ok(LoadedSecretSource::Dotenv { path, values })
         }

@@ -167,7 +167,6 @@ mod tests {
     use super::*;
     use crate::MemStore;
     use crate::journal::Journal;
-    use crate::journal::mem::MemJournal;
     use aos_air_types::{AirNode, CURRENT_AIR_VERSION};
     use indexmap::IndexMap;
     use std::collections::HashMap;
@@ -205,7 +204,7 @@ mod tests {
             schemas: HashMap::new(),
             effect_catalog: aos_air_types::catalog::EffectCatalog::default(),
         };
-        let journal: Box<dyn Journal> = Box::new(MemJournal::new());
+        let journal = Journal::new();
         let mut kernel = Kernel::from_loaded_manifest_with_config(
             store,
             loaded,

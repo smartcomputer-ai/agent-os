@@ -3,8 +3,12 @@
 
 extern crate alloc;
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use aos_effects::builtins::{
+    HashRef, LlmGenerateParams, LlmGenerateReceipt, LlmRuntimeArgs, LlmToolChoice, SecretRef,
+    TextOrSecretRef,
+};
 use aos_wasm_sdk::{
     EffectReceiptEnvelope, ReduceError, Workflow, WorkflowCtx, aos_variant, aos_workflow,
 };
@@ -34,61 +38,6 @@ impl Default for LiveState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RunOutput {
     request_id: u64,
-    output_ref: String,
-}
-
-aos_variant! {
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    enum LlmToolChoice {
-        Auto,
-        #[serde(rename = "None")]
-        NoneChoice,
-        Required,
-        Tool { name: String },
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SecretRef {
-    alias: String,
-    version: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "$tag", content = "$value")]
-enum TextOrSecretRef {
-    #[serde(rename = "literal")]
-    Literal(String),
-    #[serde(rename = "secret")]
-    Secret(SecretRef),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LlmRuntimeArgs {
-    temperature: Option<String>,
-    top_p: Option<String>,
-    max_tokens: Option<u64>,
-    tool_refs: Option<Vec<String>>,
-    tool_choice: Option<LlmToolChoice>,
-    reasoning_effort: Option<String>,
-    stop_sequences: Option<Vec<String>>,
-    metadata: Option<alloc::collections::BTreeMap<String, String>>,
-    provider_options_ref: Option<String>,
-    response_format_ref: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LlmGenerateParams {
-    correlation_id: Option<String>,
-    provider: String,
-    model: String,
-    message_refs: Vec<String>,
-    runtime: LlmRuntimeArgs,
-    api_key: Option<TextOrSecretRef>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LlmGenerateReceipt {
     output_ref: String,
 }
 
@@ -181,12 +130,25 @@ fn on_run_requested(
         correlation_id: Some(alloc::format!("chat-live-{request_id}")),
         provider,
         model,
-        message_refs,
+        message_refs: message_refs
+            .into_iter()
+            .map(|value| {
+                HashRef::new(value)
+                    .unwrap_or_else(|_| panic!("invalid message ref in chat-live workflow"))
+            })
+            .collect(),
         runtime: LlmRuntimeArgs {
             temperature: None,
             top_p: None,
             max_tokens,
-            tool_refs,
+            tool_refs: tool_refs.map(|refs| {
+                refs.into_iter()
+                    .map(|value| {
+                        HashRef::new(value)
+                            .unwrap_or_else(|_| panic!("invalid tool ref in chat-live workflow"))
+                    })
+                    .collect()
+            }),
             tool_choice,
             reasoning_effort: None,
             stop_sequences: None,
@@ -223,7 +185,7 @@ fn on_receipt(
         .decode_receipt_payload()
         .map_err(|_| ReduceError::new("invalid llm.generate receipt payload"))?;
 
-    apply_run_result(ctx, request_id, receipt.output_ref);
+    apply_run_result(ctx, request_id, receipt.output_ref.to_string());
     Ok(())
 }
 
@@ -245,5 +207,67 @@ fn apply_run_result(ctx: &mut WorkflowCtx<LiveState, ()>, request_id: u64, outpu
             request_id,
             output_ref,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use super::*;
+    use aos_wasm_abi::{ABI_VERSION, DomainEvent, WorkflowContext, WorkflowInput, WorkflowOutput};
+    use aos_wasm_sdk::{StepError, step_bytes};
+    use alloc::vec;
+
+    fn context_bytes() -> Vec<u8> {
+        let ctx = WorkflowContext {
+            now_ns: 1,
+            logical_now_ns: 1,
+            journal_height: 7,
+            entropy: vec![0x11; 64],
+            event_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
+            manifest_hash:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
+            workflow: "demo/LiveChat@1".into(),
+            key: None,
+            cell_mode: false,
+        };
+        serde_cbor::to_vec(&ctx).expect("context bytes")
+    }
+
+    fn step_with(state: Option<Vec<u8>>, event: &LiveEvent) -> Result<WorkflowOutput, StepError> {
+        let input = WorkflowInput {
+            version: ABI_VERSION,
+            state,
+            event: DomainEvent::new(
+                "demo/LiveEvent@1",
+                serde_cbor::to_vec(event).expect("event bytes"),
+            ),
+            ctx: Some(context_bytes()),
+        };
+        let input_bytes = input.encode().expect("encode input");
+        let output_bytes = step_bytes::<LiveAgentWorkflow>(&input_bytes)?;
+        WorkflowOutput::decode(&output_bytes).map_err(StepError::AbiDecode)
+    }
+
+    #[test]
+    fn run_requested_reduces_without_trap() {
+        let event = LiveEvent::RunRequested {
+            request_id: 1,
+            provider: "openai-responses".into(),
+            model: "gpt-5.2".into(),
+            api_key_alias: "llm/openai_api".into(),
+            message_refs: vec![
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            ],
+            tool_refs: Some(vec![
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            ]),
+            tool_choice: Some(LlmToolChoice::Required),
+            max_tokens: Some(768),
+        };
+        let output = step_with(None, &event).expect("step");
+        assert_eq!(output.effects.len(), 1);
     }
 }

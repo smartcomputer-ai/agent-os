@@ -1,6 +1,6 @@
 use super::*;
 use crate::MemStore;
-use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
+use crate::journal::{Journal, JournalEntry, JournalKind};
 use aos_air_types::{
     CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, Routing,
     RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord, WorkflowAbi,
@@ -134,7 +134,7 @@ pub(crate) fn event_record(schema: &str, journal_height: u64) -> DomainEventReco
     }
 }
 
-pub(crate) fn append_record(journal: &mut MemJournal, record: JournalRecord) {
+pub(crate) fn append_record(journal: &mut Journal, record: JournalRecord) {
     let bytes = serde_cbor::to_vec(&record).expect("encode record");
     journal
         .append(JournalEntry::new(record.kind(), &bytes))
@@ -204,12 +204,7 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<crate::MemStore> {
         schemas,
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
-    Kernel::from_loaded_manifest(
-        Arc::new(store),
-        loaded,
-        Box::new(crate::journal::mem::MemJournal::default()),
-    )
-    .unwrap()
+    Kernel::from_loaded_manifest(Arc::new(store), loaded, Journal::new()).unwrap()
 }
 
 pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<crate::MemStore> {
@@ -274,12 +269,7 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<crate::MemStore> 
         schemas,
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
-    Kernel::from_loaded_manifest(
-        Arc::new(store),
-        loaded,
-        Box::new(crate::journal::mem::MemJournal::default()),
-    )
-    .unwrap()
+    Kernel::from_loaded_manifest(Arc::new(store), loaded, Journal::new()).unwrap()
 }
 
 pub(crate) fn minimal_kernel_non_keyed() -> Kernel<crate::MemStore> {
@@ -344,12 +334,7 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<crate::MemStore> {
         schemas,
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
-    Kernel::from_loaded_manifest(
-        Arc::new(store),
-        loaded,
-        Box::new(crate::journal::mem::MemJournal::default()),
-    )
-    .unwrap()
+    Kernel::from_loaded_manifest(Arc::new(store), loaded, Journal::new()).unwrap()
 }
 
 pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<crate::MemStore> {
@@ -415,12 +400,7 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<crate::MemStore
         schemas,
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
-    Kernel::from_loaded_manifest(
-        Arc::new(store),
-        loaded,
-        Box::new(crate::journal::mem::MemJournal::default()),
-    )
-    .unwrap()
+    Kernel::from_loaded_manifest(Arc::new(store), loaded, Journal::new()).unwrap()
 }
 
 pub(crate) fn empty_manifest() -> Manifest {
@@ -448,7 +428,7 @@ pub(crate) fn write_manifest(path: &std::path::Path, manifest: &Manifest) {
 
 pub(crate) fn kernel_with_store_and_journal(
     store: Arc<MemStore>,
-    journal: Box<dyn Journal>,
+    journal: Journal,
 ) -> Kernel<MemStore> {
     let manifest = empty_manifest();
     let loaded = LoadedManifest {

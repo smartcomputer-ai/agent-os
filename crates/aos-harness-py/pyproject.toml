@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "aos_harness"
+version = "0.1.0"
+description = "Python bindings for the AgentOS world harness"
+requires-python = ">=3.9"
+
+[tool.maturin]
+python-source = "python"
+module-name = "aos_harness._core"
+manifest-path = "Cargo.toml"

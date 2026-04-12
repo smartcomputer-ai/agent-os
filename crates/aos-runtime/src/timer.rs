@@ -14,9 +14,10 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::time::{Duration, Instant};
 
-use aos_effects::EffectIntent;
 use aos_effects::builtins::TimerSetParams;
+use aos_effects::{EffectIntent, EffectKind};
 use aos_kernel::snapshot::WorkflowReceiptSnapshot;
+use aos_kernel::{Kernel, Store};
 use tracing::warn;
 
 use crate::error::HostError;
@@ -178,7 +179,7 @@ impl TimerScheduler {
     /// that were pending when the daemon last shut down.
     pub fn rehydrate_from_pending(&mut self, contexts: &[WorkflowReceiptSnapshot]) {
         for ctx in contexts {
-            if ctx.effect_kind == "timer.set" {
+            if ctx.effect_kind == EffectKind::TIMER_SET {
                 // Try to decode params to get deadline
                 if let Ok(params) = serde_cbor::from_slice::<TimerSetParams>(&ctx.params_cbor) {
                     let entry = TimerEntry {
@@ -197,6 +198,57 @@ impl TimerScheduler {
                 }
             }
         }
+    }
+
+    /// Rehydrate scheduler state from pending timer receipts and remove any duplicate timer
+    /// intents that reopen logic reconstructed into the kernel effect queue.
+    ///
+    /// Timer intents that already have pending receipt context are owned by the scheduler in
+    /// daemon mode. Leaving them in the queued effect list would cause reopen to double-own the
+    /// same timer.
+    pub fn rehydrate_daemon_state<S: Store + 'static>(&mut self, kernel: &mut Kernel<S>) {
+        let pending = kernel.pending_workflow_receipts_snapshot();
+        let pending_timers: Vec<(&str, [u8; 32], TimerSetParams)> = pending
+            .iter()
+            .filter(|ctx| ctx.effect_kind == EffectKind::TIMER_SET)
+            .filter_map(|ctx| {
+                serde_cbor::from_slice::<TimerSetParams>(&ctx.params_cbor)
+                    .ok()
+                    .map(|params| (ctx.cap_name.as_str(), ctx.idempotency_key, params))
+            })
+            .collect();
+
+        self.rehydrate_from_pending(&pending);
+
+        if pending_timers.is_empty() {
+            return;
+        }
+
+        let retained = kernel
+            .queued_effects_snapshot()
+            .into_iter()
+            .filter(|intent| {
+                if intent.kind != EffectKind::TIMER_SET {
+                    return true;
+                }
+
+                let Ok(params) = serde_cbor::from_slice::<TimerSetParams>(&intent.params_cbor)
+                else {
+                    return true;
+                };
+
+                !pending_timers
+                    .iter()
+                    .any(|(cap_name, idempotency_key, pending_params)| {
+                        intent.cap_name == *cap_name
+                            && intent.idempotency_key == *idempotency_key
+                            && params.deliver_at_ns == pending_params.deliver_at_ns
+                            && params.key == pending_params.key
+                    })
+            })
+            .map(|intent| intent.into_intent())
+            .collect();
+        kernel.restore_effect_queue(retained);
     }
 
     /// Check if any timers are scheduled.
