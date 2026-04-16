@@ -16,7 +16,8 @@ use aos_kernel::patch_doc::{
     AddDef, ManifestRef, PatchDocument, PatchOp, SetDefaults, SetManifestRefs, SetModuleBindings,
     SetRoutingEvents, SetRoutingInboxes, SetSecrets,
 };
-use aos_runtime::manifest_loader;
+
+use crate::manifest_loader;
 
 #[derive(Debug, Clone, Copy)]
 pub enum BundleFilter {

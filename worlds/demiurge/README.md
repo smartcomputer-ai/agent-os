@@ -61,7 +61,6 @@ In terminal 2, create and select the world, and emit verbose progress while buil
 target/debug/aos world create \
   --local-root worlds/demiurge \
   --handle demiurge \
-  --force-build \
   --select \
   --verbose
 ```

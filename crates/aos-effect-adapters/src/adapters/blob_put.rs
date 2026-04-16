@@ -24,7 +24,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for BlobPutAdapter<S> 
         aos_effects::EffectKind::BLOB_PUT
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: BlobPutParams = serde_cbor::from_slice(&intent.params_cbor)?;
         let refs = params.refs.unwrap_or_default();
         let expected_ref = params
@@ -103,12 +103,12 @@ mod tests {
             refs: None,
         };
         let intent = blob_intent(params.clone());
-        let receipt_a = adapter.execute(&intent).await.expect("receipt A");
+        let receipt_a = adapter.run_terminal(&intent).await.expect("receipt A");
         let payload_a: BlobPutReceipt = serde_cbor::from_slice(&receipt_a.payload_cbor).unwrap();
         assert_eq!(receipt_a.status, ReceiptStatus::Ok);
 
         let receipt_b = adapter
-            .execute(&blob_intent(params))
+            .run_terminal(&blob_intent(params))
             .await
             .expect("receipt B");
         let payload_b: BlobPutReceipt = serde_cbor::from_slice(&receipt_b.payload_cbor).unwrap();

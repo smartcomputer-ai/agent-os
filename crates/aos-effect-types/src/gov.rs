@@ -31,7 +31,7 @@ pub struct GovDefChange {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GovPatchSummary {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub base_manifest_hash: Option<HashRef>,
     pub patch_hash: HashRef,
     pub ops: Vec<String>,
@@ -42,11 +42,11 @@ pub struct GovPatchSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GovProposeParams {
     pub patch: GovPatchInput,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub summary: Option<GovPatchSummary>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub manifest_base: Option<HashRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub description: Option<String>,
 }
 
@@ -54,7 +54,7 @@ pub struct GovProposeParams {
 pub struct GovProposeReceipt {
     pub proposal_id: u64,
     pub patch_hash: HashRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub manifest_base: Option<HashRef>,
 }
 
@@ -68,7 +68,7 @@ pub struct GovPredictedEffect {
     pub kind: String,
     pub cap: String,
     pub intent_hash: HashRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub params_json: Option<String>,
 }
 
@@ -76,7 +76,7 @@ pub struct GovPredictedEffect {
 pub struct GovPendingWorkflowReceipt {
     pub instance_id: String,
     pub origin_module_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub origin_instance_key_b64: Option<String>,
     pub intent_hash: HashRef,
     pub effect_kind: String,
@@ -88,7 +88,7 @@ pub struct GovWorkflowInstancePreview {
     pub instance_id: String,
     pub status: String,
     pub last_processed_event_seq: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub module_version: Option<String>,
     pub inflight_intents: u64,
 }
@@ -144,7 +144,7 @@ pub struct GovApproveParams {
     pub proposal_id: u64,
     pub decision: GovDecision,
     pub approver: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub reason: Option<String>,
 }
 
@@ -154,7 +154,7 @@ pub struct GovApproveReceipt {
     pub decision: GovDecision,
     pub patch_hash: HashRef,
     pub approver: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub reason: Option<String>,
 }
 

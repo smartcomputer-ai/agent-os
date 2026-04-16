@@ -12,6 +12,7 @@ pub use infra::{blobstore, kafka, vault};
 
 pub use env::load_dotenv_candidates;
 pub use worker::{
-    CreateWorldAccepted, HostedWorker, HostedWorldSummary, SubmissionAccepted, SubmitEventRequest,
-    SupervisorOutcome, SupervisorRunProfile, WorkerError, WorkerSupervisor,
+    CreateWorldAccepted, HostedWorker, HostedWorkerRuntime, HostedWorldSummary, SubmissionAccepted,
+    SubmitEventRequest, SupervisorOutcome, SupervisorRunProfile, WorkerError, WorkerSupervisor,
+    WorkerSupervisorHandle,
 };

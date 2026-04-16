@@ -1,22 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::thread;
-use std::time::{Duration, Instant};
-
-use aos_kernel::journal::JournalRecord;
-use aos_node::partition_for_world;
-use aos_runtime::{RunMode, now_wallclock_ns};
-use tokio::runtime::Builder as RuntimeBuilder;
-use tracing::{debug, warn};
+use std::time::Instant;
 
 use crate::config::HostedWorkerConfig;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
+use super::core::SchedulerMsg;
+use super::layers::{CheckpointPolicy, IngressBridge, JournalCoordinator, WorkerScheduler};
 use super::runtime::HostedWorkerRuntime;
-use super::timers::PartitionTimerState;
-use super::types::{
-    HostedWorkerRuntimeInner, PartitionRunOutcome, SupervisorOutcome, SupervisorRunProfile,
-    WorkerError,
-};
-use super::util::unix_time_ns;
+use super::types::{SupervisorRunProfile, WorkerError};
 
 #[derive(Clone)]
 pub struct HostedWorker {
@@ -31,486 +22,289 @@ impl HostedWorker {
     pub fn with_worker_runtime(&self, runtime: HostedWorkerRuntime) -> WorkerSupervisor {
         WorkerSupervisor {
             runtime,
-            workers: BTreeMap::new(),
-            poll_interval: self.config.supervisor_poll_interval,
-            checkpoint_interval: self.config.checkpoint_interval,
-            checkpoint_every_events: self
-                .config
-                .checkpoint_every_events
-                .map(|count| count as usize),
-            checkpoint_on_create: self.config.checkpoint_on_create,
-            last_checkpoint: Instant::now(),
+            config: self.config.clone(),
         }
-    }
-}
-
-struct PartitionWorker {
-    partition: u32,
-    events_since_checkpoint: usize,
-    timers: PartitionTimerState,
-    disabled_worlds: BTreeMap<aos_node::WorldId, String>,
-}
-
-impl PartitionWorker {
-    fn new(partition: u32) -> Self {
-        Self {
-            partition,
-            events_since_checkpoint: 0,
-            timers: PartitionTimerState::default(),
-            disabled_worlds: BTreeMap::new(),
-        }
-    }
-
-    fn run_once(
-        &mut self,
-        runtime: &mut HostedWorkerRuntimeInner,
-        profile: &mut SupervisorRunProfile,
-        checkpoint_on_create: bool,
-    ) -> Result<PartitionRunOutcome, WorkerError> {
-        let (mut outcome, run_profile) = runtime
-            .run_partition_once_profiled(self.partition, checkpoint_on_create)
-            .inspect_err(|err| {
-                tracing::error!(
-                    partition = self.partition,
-                    error = %err,
-                    "hosted worker failed during partition submission replay"
-                );
-            })?;
-        profile.partition_drain_submissions += run_profile.drain_submissions;
-        profile.partition_process_create += run_profile.process_create;
-        profile.partition_process_existing += run_profile.process_existing;
-        profile.partition_activate_world += run_profile.activate_world;
-        profile.partition_apply_submission += run_profile.apply_submission;
-        profile.partition_build_external_event += run_profile.build_external_event;
-        profile.partition_host_drain += run_profile.host_drain;
-        profile.partition_post_apply += run_profile.post_apply;
-        profile.partition_commit_batch += run_profile.commit_batch;
-        profile.partition_commit_command_records += run_profile.commit_command_records;
-        profile.partition_promote_worlds += run_profile.promote_worlds;
-        profile.partition_inline_checkpoint += run_profile.inline_checkpoint;
-        if outcome.inline_checkpoint_published {
-            self.events_since_checkpoint = 0;
-        } else {
-            self.events_since_checkpoint = self
-                .events_since_checkpoint
-                .saturating_add(outcome.checkpoint_event_frames);
-        }
-        let active_worlds = self.activate_partition_worlds(runtime).inspect_err(|err| {
-            tracing::error!(
-                partition = self.partition,
-                error = %err,
-                "hosted worker failed while activating partition worlds"
-            );
-        })?;
-        self.timers.retain_worlds(
-            &active_worlds
-                .iter()
-                .map(|(_, world_id)| *world_id)
-                .collect::<Vec<_>>(),
-        );
-        outcome.frames_appended = outcome
-            .frames_appended
-            .checked_add(self.process_worlds_once(runtime, &active_worlds)?)
-            .expect("hosted partition frame count overflow");
-        Ok(outcome)
-    }
-
-    fn publish_checkpoint(
-        &mut self,
-        runtime: &mut HostedWorkerRuntimeInner,
-        created_at_ns: u64,
-        trigger: &'static str,
-    ) -> Result<aos_node::PartitionCheckpoint, WorkerError> {
-        let checkpoint =
-            runtime.create_partition_checkpoint(self.partition, created_at_ns, trigger)?;
-        self.events_since_checkpoint = 0;
-        Ok(checkpoint)
-    }
-
-    fn checkpoint_due_by_events(&self, threshold: Option<usize>) -> bool {
-        threshold.is_some_and(|threshold| self.events_since_checkpoint >= threshold)
-    }
-
-    fn activate_partition_worlds(
-        &mut self,
-        runtime: &mut HostedWorkerRuntimeInner,
-    ) -> Result<Vec<(aos_node::UniverseId, aos_node::WorldId)>, WorkerError> {
-        let mut worlds = Vec::new();
-        let default_universe_id = runtime.infra.default_universe_id;
-        let world_ids = runtime.infra.kafka.world_ids();
-        for world_id in world_ids {
-            let effective_partition =
-                partition_for_world(world_id, runtime.infra.kafka.partition_count());
-            if effective_partition != self.partition {
-                continue;
-            }
-            let universe_id = runtime
-                .state
-                .registered_worlds
-                .get(&world_id)
-                .map(|world| world.universe_id)
-                .unwrap_or(default_universe_id);
-            if self.disabled_worlds.contains_key(&world_id) {
-                continue;
-            }
-            if let Some(reason) = runtime.world_disabled_reason(world_id) {
-                tracing::warn!(
-                    universe_id = %universe_id,
-                    world_id = %world_id,
-                    reason,
-                    "skipping disabled hosted world"
-                );
-                self.disabled_worlds.insert(world_id, reason.to_owned());
-                continue;
-            }
-            match (|| -> Result<(), WorkerError> {
-                runtime.ensure_registered_world(default_universe_id, world_id)?;
-                let universe_id = runtime
-                    .state
-                    .registered_worlds
-                    .get(&world_id)
-                    .map(|world| world.universe_id)
-                    .unwrap_or(default_universe_id);
-                runtime.activate_world(universe_id, world_id)
-            })() {
-                Ok(()) => worlds.push((universe_id, world_id)),
-                Err(WorkerError::Host(err)) => {
-                    let reason = err.to_string();
-                    tracing::error!(
-                        universe_id = %universe_id,
-                        world_id = %world_id,
-                        error = %reason,
-                        "disabling hosted world after activation host error"
-                    );
-                    self.disabled_worlds.insert(world_id, reason.clone());
-                    runtime.disable_world(world_id, reason);
-                    self.timers.reset_world(world_id);
-                }
-                Err(WorkerError::Kernel(err)) => {
-                    let reason = err.to_string();
-                    tracing::error!(
-                        universe_id = %universe_id,
-                        world_id = %world_id,
-                        error = %reason,
-                        "disabling hosted world after activation kernel error"
-                    );
-                    self.disabled_worlds.insert(world_id, reason.clone());
-                    runtime.disable_world(world_id, reason);
-                    self.timers.reset_world(world_id);
-                }
-                Err(err) => {
-                    let reason = err.to_string();
-                    tracing::error!(
-                        universe_id = %universe_id,
-                        world_id = %world_id,
-                        error = %reason,
-                        "disabling hosted world after activation error"
-                    );
-                    self.disabled_worlds.insert(world_id, reason.clone());
-                    runtime.disable_world(world_id, reason);
-                    self.timers.reset_world(world_id);
-                }
-            }
-        }
-        Ok(worlds)
-    }
-
-    fn process_worlds_once(
-        &mut self,
-        runtime: &mut HostedWorkerRuntimeInner,
-        worlds: &[(aos_node::UniverseId, aos_node::WorldId)],
-    ) -> Result<usize, WorkerError> {
-        let mut frames_appended = 0usize;
-        for (universe_id, world_id) in worlds {
-            match self.process_world_until_stable(runtime, *universe_id, *world_id) {
-                Ok(count) => {
-                    frames_appended = frames_appended.saturating_add(count);
-                }
-                Err(WorkerError::Host(err)) => {
-                    let reason = err.to_string();
-                    tracing::error!(
-                        universe_id = %universe_id,
-                        world_id = %world_id,
-                        error = %reason,
-                        "disabling hosted world after daemon cycle host error"
-                    );
-                    runtime.disable_world(*world_id, reason);
-                    self.timers.reset_world(*world_id);
-                }
-                Err(WorkerError::Kernel(err)) => {
-                    let reason = err.to_string();
-                    tracing::error!(
-                        universe_id = %universe_id,
-                        world_id = %world_id,
-                        error = %reason,
-                        "disabling hosted world after daemon cycle kernel error"
-                    );
-                    runtime.disable_world(*world_id, reason);
-                    self.timers.reset_world(*world_id);
-                }
-                Err(err) => return Err(err),
-            }
-        }
-        Ok(frames_appended)
-    }
-
-    fn process_world_until_stable(
-        &mut self,
-        runtime: &mut HostedWorkerRuntimeInner,
-        universe_id: aos_node::UniverseId,
-        world_id: aos_node::WorldId,
-    ) -> Result<usize, WorkerError> {
-        let timer_state = self.timers.world_mut(world_id);
-        let mut frames_appended = 0usize;
-        for _ in 0..32 {
-            let journal_tail_start = {
-                let world = runtime.state.active_worlds.get_mut(&world_id).ok_or(
-                    WorkerError::UnknownWorld {
-                        universe_id,
-                        world_id,
-                    },
-                )?;
-                if !timer_state.rehydrated {
-                    timer_state
-                        .scheduler
-                        .rehydrate_daemon_state(world.host.kernel_mut());
-                    timer_state.rehydrated = true;
-                }
-                let now_ns = now_wallclock_ns();
-                if world.host.logical_time_now_ns() < now_ns {
-                    let _ = world.host.set_logical_time_ns(now_ns);
-                }
-                world.host.journal_bounds().next_seq
-            };
-
-            let cycle = thread::scope(|scope| -> Result<_, WorkerError> {
-                let world = runtime.state.active_worlds.get_mut(&world_id).ok_or(
-                    WorkerError::UnknownWorld {
-                        universe_id,
-                        world_id,
-                    },
-                )?;
-                let handle = scope.spawn(|| -> Result<_, WorkerError> {
-                    let exec = RuntimeBuilder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .expect("build hosted world cycle runtime");
-                    exec.block_on(world.host.run_cycle(RunMode::Daemon {
-                        scheduler: &mut timer_state.scheduler,
-                    }))
-                    .map_err(WorkerError::from)
-                });
-                handle.join().map_err(|panic| {
-                    let message = if let Some(message) = panic.downcast_ref::<&str>() {
-                        (*message).to_owned()
-                    } else if let Some(message) = panic.downcast_ref::<String>() {
-                        message.clone()
-                    } else {
-                        "hosted world cycle thread panicked".to_owned()
-                    };
-                    WorkerError::Build(anyhow::anyhow!(message))
-                })?
-            })?;
-
-            let fired = {
-                let world = runtime.state.active_worlds.get_mut(&world_id).ok_or(
-                    WorkerError::UnknownWorld {
-                        universe_id,
-                        world_id,
-                    },
-                )?;
-                let fired = world.host.fire_due_timers(&mut timer_state.scheduler)?;
-                if fired > 0 {
-                    let _ = world.host.drain()?;
-                }
-                fired
-            };
-
-            let tail = {
-                let world = runtime.state.active_worlds.get(&world_id).ok_or(
-                    WorkerError::UnknownWorld {
-                        universe_id,
-                        world_id,
-                    },
-                )?;
-                world.host.kernel().dump_journal_from(journal_tail_start)?
-            };
-
-            let progressed = cycle.effects_dispatched > 0
-                || cycle.receipts_applied > 0
-                || cycle.initial_drain.ticks > 0
-                || cycle.final_drain.ticks > 0
-                || fired > 0;
-            if tail.is_empty() {
-                if progressed {
-                    continue;
-                }
-                return Ok(frames_appended);
-            }
-
-            let mut records = Vec::with_capacity(tail.len());
-            for entry in tail {
-                let record: JournalRecord = serde_cbor::from_slice(&entry.payload)?;
-                records.push(record);
-            }
-            let world_epoch = runtime
-                .state
-                .registered_worlds
-                .get(&world_id)
-                .map(|world| world.world_epoch)
-                .ok_or(WorkerError::UnknownWorld {
-                    universe_id,
-                    world_id,
-                })?;
-            let expected_world_seq = runtime.infra.kafka.next_world_seq(world_id);
-            if expected_world_seq > journal_tail_start {
-                warn!(
-                    universe_id = %universe_id,
-                    world_id = %world_id,
-                    expected_world_seq,
-                    journal_tail_start,
-                    "hosted worker daemon world sequence diverged from host journal tail; using host tail"
-                );
-            } else if expected_world_seq < journal_tail_start {
-                debug!(
-                    universe_id = %universe_id,
-                    world_id = %world_id,
-                    expected_world_seq,
-                    journal_tail_start,
-                    "hosted worker daemon world sequence advanced ahead of persisted tail; using host tail"
-                );
-            }
-            let world_seq_start = journal_tail_start;
-            let world_seq_end = world_seq_start + records.len() as u64 - 1;
-            let frame = aos_node::WorldLogFrame {
-                format_version: 1,
-                universe_id,
-                world_id,
-                world_epoch,
-                world_seq_start,
-                world_seq_end,
-                records,
-            };
-            if let Err(err) = runtime.infra.kafka.append_frame(frame) {
-                let accepted_submission_ids = runtime
-                    .state
-                    .active_worlds
-                    .get(&world_id)
-                    .map(|world| world.accepted_submission_ids.clone())
-                    .ok_or(WorkerError::UnknownWorld {
-                        universe_id,
-                        world_id,
-                    })?;
-                runtime.rollback_active_worlds(BTreeMap::from([(
-                    world_id,
-                    accepted_submission_ids,
-                )]))?;
-                self.timers.reset_world(world_id);
-                return Err(WorkerError::LogFirst(err));
-            }
-            runtime.emit_projection_updates_for_worlds(&[world_id])?;
-            frames_appended = frames_appended.saturating_add(1);
-        }
-
-        warn!("hosted worker hit max cycle budget while processing world {world_id}");
-        Ok(frames_appended)
     }
 }
 
 pub struct WorkerSupervisor {
     runtime: HostedWorkerRuntime,
-    workers: BTreeMap<u32, PartitionWorker>,
-    poll_interval: Duration,
-    checkpoint_interval: Duration,
-    checkpoint_every_events: Option<usize>,
-    checkpoint_on_create: bool,
-    last_checkpoint: Instant,
+    config: HostedWorkerConfig,
+}
+
+pub struct WorkerSupervisorHandle {
+    runtime: HostedWorkerRuntime,
+    join: Option<JoinHandle<Result<(), WorkerError>>>,
+    profile_rx: Option<mpsc::UnboundedReceiver<SupervisorRunProfile>>,
 }
 
 impl WorkerSupervisor {
-    pub async fn run_once(&mut self) -> Result<SupervisorOutcome, WorkerError> {
-        Ok(self.run_once_profiled().await?.0)
+    pub async fn serve_forever(&mut self) -> Result<(), WorkerError> {
+        let (scheduler_tx, scheduler_rx) = self.prepare_scheduler()?;
+        self.serve_forever_with_scheduler(scheduler_tx, scheduler_rx, None)
+            .await
     }
 
-    pub async fn run_once_profiled(
+    fn prepare_scheduler(
+        &self,
+    ) -> Result<
+        (
+            mpsc::UnboundedSender<SchedulerMsg>,
+            mpsc::UnboundedReceiver<SchedulerMsg>,
+        ),
+        WorkerError,
+    > {
+        let (scheduler_tx, scheduler_rx) = tokio::sync::mpsc::unbounded_channel();
+        self.runtime.set_scheduler_tx(scheduler_tx.clone())?;
+        Ok((scheduler_tx, scheduler_rx))
+    }
+
+    async fn serve_forever_with_scheduler(
         &mut self,
-    ) -> Result<(SupervisorOutcome, SupervisorRunProfile), WorkerError> {
-        let total_started = Instant::now();
-        let mut frames_appended = 0usize;
-        let mut checkpoints_published = 0usize;
-        let mut profile = SupervisorRunProfile::default();
-        {
-            let mut inner = self.runtime.lock_inner()?;
-            let sync_assignments_started = Instant::now();
-            let (newly_assigned, _): (Vec<u32>, Vec<u32>) =
-                inner.infra.kafka.sync_assignments_and_poll()?;
-            profile.sync_assignments = sync_assignments_started.elapsed();
-            let assigned = inner.infra.kafka.assigned_partitions();
-            profile.assigned_partitions = assigned.len();
-            profile.newly_assigned_partitions = newly_assigned.len();
-            let sync_worlds_started = Instant::now();
-            inner.sync_active_worlds(&assigned, &newly_assigned)?;
-            profile.sync_active_worlds = sync_worlds_started.elapsed();
-            let assigned_set = assigned.iter().copied().collect::<BTreeSet<_>>();
-            self.workers
-                .retain(|partition, _| assigned_set.contains(partition));
-            for partition in assigned {
-                self.workers
-                    .entry(partition)
-                    .or_insert_with(|| PartitionWorker::new(partition));
+        scheduler_tx: mpsc::UnboundedSender<SchedulerMsg>,
+        mut scheduler_rx: mpsc::UnboundedReceiver<SchedulerMsg>,
+        profile_tx: Option<mpsc::UnboundedSender<SupervisorRunProfile>>,
+    ) -> Result<(), WorkerError> {
+        self.runtime.set_max_local_continuation_slices_per_flush(
+            self.config.max_local_continuation_slices_per_flush,
+        )?;
+        self.runtime
+            .set_projection_commit_mode(self.config.projection_commit_mode)?;
+        self.runtime
+            .set_max_uncommitted_slices_per_world(self.config.max_uncommitted_slices_per_world)?;
+        let checkpoint_policy = CheckpointPolicy::from(&self.config);
+        let journal = JournalCoordinator::new(checkpoint_policy);
+
+        let mut ingress_task = IngressBridge::spawn_polling_task(
+            self.runtime.clone(),
+            scheduler_tx.clone(),
+            profile_tx.clone(),
+        );
+
+        if let Some(effect_rx) = self.runtime.take_effect_event_rx()? {
+            WorkerScheduler::spawn_effect_forwarder(effect_rx, scheduler_tx.clone());
+        }
+
+        let flush_tx = scheduler_tx.clone();
+        let flush_period = self.runtime.flush_max_delay()?;
+        let flush_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(flush_period);
+            loop {
+                interval.tick().await;
+                if flush_tx.send(SchedulerMsg::FlushTick).is_err() {
+                    break;
+                }
             }
-            let run_partitions_started = Instant::now();
-            for worker in self.workers.values_mut() {
-                let outcome =
-                    worker.run_once(&mut inner, &mut profile, self.checkpoint_on_create)?;
-                frames_appended += outcome.frames_appended;
+        });
+
+        let checkpoint_tx = scheduler_tx.clone();
+        let checkpoint_period = self.config.checkpoint_interval;
+        let checkpoint_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(checkpoint_period);
+            loop {
+                interval.tick().await;
+                if checkpoint_tx.send(SchedulerMsg::CheckpointTick).is_err() {
+                    break;
+                }
             }
-            profile.run_partitions = run_partitions_started.elapsed();
-            let checkpoint_due_by_time = self.last_checkpoint.elapsed() >= self.checkpoint_interval;
-            let checkpoint_due_by_events = self
-                .workers
-                .iter()
-                .filter_map(|(partition, worker)| {
-                    worker
-                        .checkpoint_due_by_events(self.checkpoint_every_events)
-                        .then_some(*partition)
-                })
-                .collect::<BTreeSet<_>>();
-            let publish_checkpoints_started = Instant::now();
-            if checkpoint_due_by_time || !checkpoint_due_by_events.is_empty() {
-                for worker in self.workers.values_mut() {
-                    if checkpoint_due_by_time
-                        || checkpoint_due_by_events.contains(&worker.partition)
+        });
+
+        let result = loop {
+            tokio::select! {
+                ingress = &mut ingress_task => {
+                    break match ingress {
+                        Ok(result) => result,
+                        Err(err) => Err(WorkerError::BackgroundBuild(format!("hosted ingress bridge join failed: {err}"))),
+                    };
+                }
+                maybe_msg = scheduler_rx.recv() => {
+                    let Some(msg) = maybe_msg else {
+                        break Ok(());
+                    };
+                    let mut force_flush =
+                        matches!(msg, SchedulerMsg::CheckpointTick | SchedulerMsg::Shutdown);
+                    let mut checkpoint_tick = matches!(msg, SchedulerMsg::CheckpointTick);
+                    let mut shutdown_requested = matches!(msg, SchedulerMsg::Shutdown);
+                    let mut pending = if shutdown_requested {
+                        Vec::new()
+                    } else {
+                        vec![msg]
+                    };
+                    while let Ok(queued) = scheduler_rx.try_recv() {
+                        match queued {
+                            SchedulerMsg::Shutdown => {
+                                shutdown_requested = true;
+                                force_flush = true;
+                                break;
+                            }
+                            SchedulerMsg::FlushTick => {
+                                pending.push(SchedulerMsg::FlushTick);
+                            }
+                            SchedulerMsg::CheckpointTick => {
+                                force_flush = true;
+                                checkpoint_tick = true;
+                                pending.push(SchedulerMsg::CheckpointTick);
+                            }
+                            other => pending.push(other),
+                        }
+                    }
+                    let mut profile = SupervisorRunProfile::default();
+                    let started = Instant::now();
+                    let mut core = self.runtime.lock_core()?;
+                    let _ = WorkerScheduler::handle_messages(&mut core, pending)?;
+                    let _ = WorkerScheduler::drive_until_quiescent(
+                        &mut core,
+                        force_flush,
+                        &mut profile,
+                    )?;
+                    if checkpoint_tick {
+                        let _ = journal.publish_due_checkpoints(&mut core, &mut profile)?;
+                        let _ = WorkerScheduler::drive_until_quiescent(
+                            &mut core,
+                            true,
+                            &mut profile,
+                        )?;
+                    }
+                    profile.total += started.elapsed();
+                    if let Some(profile_tx) = profile_tx.as_ref()
+                        && profile.has_activity()
                     {
-                        let trigger = if checkpoint_due_by_time {
-                            "interval"
-                        } else {
-                            "events"
-                        };
-                        worker.publish_checkpoint(&mut inner, unix_time_ns(), trigger)?;
-                        checkpoints_published += 1;
+                        let _ = profile_tx.send(profile);
+                    }
+                    if shutdown_requested {
+                        break Ok(());
                     }
                 }
-                self.last_checkpoint = Instant::now();
             }
-            profile.publish_checkpoints = publish_checkpoints_started.elapsed();
-            profile.total = total_started.elapsed();
-            Ok((
-                SupervisorOutcome {
-                    frames_appended,
-                    checkpoints_published,
-                    registered_worlds: inner.state.registered_worlds.len(),
-                    pending_submissions: inner.infra.kafka.pending_submission_count(),
-                },
-                profile,
-            ))
+        };
+
+        ingress_task.abort();
+        flush_task.abort();
+        checkpoint_task.abort();
+        self.runtime.clear_scheduler_tx()?;
+        result
+    }
+
+    pub fn spawn(self) -> Result<WorkerSupervisorHandle, WorkerError> {
+        let (scheduler_tx, scheduler_rx) = self.prepare_scheduler()?;
+        Ok(WorkerSupervisorHandle::spawn(
+            self,
+            scheduler_tx,
+            scheduler_rx,
+            false,
+        ))
+    }
+
+    pub fn spawn_profiled(self) -> Result<WorkerSupervisorHandle, WorkerError> {
+        let (scheduler_tx, scheduler_rx) = self.prepare_scheduler()?;
+        Ok(WorkerSupervisorHandle::spawn(
+            self,
+            scheduler_tx,
+            scheduler_rx,
+            true,
+        ))
+    }
+}
+
+impl WorkerSupervisorHandle {
+    fn spawn(
+        mut supervisor: WorkerSupervisor,
+        scheduler_tx: mpsc::UnboundedSender<SchedulerMsg>,
+        scheduler_rx: mpsc::UnboundedReceiver<SchedulerMsg>,
+        capture_profiles: bool,
+    ) -> Self {
+        let runtime = supervisor.runtime.clone();
+        let (profile_tx, profile_rx) = if capture_profiles {
+            let (tx, rx) = mpsc::unbounded_channel();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
+        let join = tokio::spawn(async move {
+            supervisor
+                .serve_forever_with_scheduler(scheduler_tx, scheduler_rx, profile_tx)
+                .await
+        });
+        Self {
+            runtime,
+            join: Some(join),
+            profile_rx,
         }
     }
 
-    pub async fn serve_forever(&mut self) -> Result<(), WorkerError> {
-        loop {
-            self.run_once().await?;
-            tokio::time::sleep(self.poll_interval).await;
+    async fn ensure_running(&mut self) -> Result<(), WorkerError> {
+        let Some(join) = self.join.as_ref() else {
+            return Ok(());
+        };
+        if !join.is_finished() {
+            return Ok(());
+        }
+        let join = self.join.take().expect("join handle present when finished");
+        match join.await {
+            Ok(Ok(())) => Err(WorkerError::BackgroundBuild(
+                "hosted worker exited before shutdown was requested".to_owned(),
+            )),
+            Ok(Err(err)) => Err(err),
+            Err(err) => Err(WorkerError::BackgroundBuild(format!(
+                "hosted worker join failed: {err}"
+            ))),
+        }
+    }
+
+    pub fn drain_profiles(&mut self) -> SupervisorRunProfile {
+        let mut aggregate = SupervisorRunProfile::default();
+        let Some(profile_rx) = self.profile_rx.as_mut() else {
+            return aggregate;
+        };
+        while let Ok(profile) = profile_rx.try_recv() {
+            aggregate.merge(profile);
+        }
+        aggregate
+    }
+
+    pub async fn wait_for_progress(
+        &mut self,
+        wait: std::time::Duration,
+    ) -> Result<(), WorkerError> {
+        let _ = self.drain_profiles();
+        tokio::task::yield_now().await;
+        self.ensure_running().await?;
+        tokio::time::sleep(wait).await;
+        self.ensure_running().await
+    }
+
+    pub async fn observe_interval(
+        &mut self,
+        wait: std::time::Duration,
+    ) -> Result<SupervisorRunProfile, WorkerError> {
+        let mut aggregate = self.drain_profiles();
+        tokio::task::yield_now().await;
+        self.ensure_running().await?;
+        tokio::time::sleep(wait).await;
+        self.ensure_running().await?;
+        aggregate.merge(self.drain_profiles());
+        Ok(aggregate)
+    }
+
+    pub async fn shutdown(mut self) -> Result<(), WorkerError> {
+        let _ = self.runtime.request_shutdown()?;
+        let Some(join) = self.join.take() else {
+            return Ok(());
+        };
+        match join.await {
+            Ok(result) => result,
+            Err(err) => Err(WorkerError::BackgroundBuild(format!(
+                "hosted worker join failed: {err}"
+            ))),
+        }
+    }
+}
+
+impl Drop for WorkerSupervisorHandle {
+    fn drop(&mut self) {
+        let _ = self.runtime.request_shutdown();
+        if let Some(join) = self.join.take() {
+            join.abort();
         }
     }
 }

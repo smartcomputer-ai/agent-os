@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use aos_cbor::Hash;
 use aos_kernel::{MemStore, Store, StoreError, StoreResult};
-use aos_node::{BlobPlane, FsCas, PersistError, PlaneError, UniverseId};
+use aos_node::{BackendError, BlobBackend, FsCas, PersistError, UniverseId};
 use object_store::ObjectStore;
 use object_store::ObjectStoreExt;
 use object_store::PutPayload;
@@ -50,15 +50,15 @@ impl EmbeddedRemoteCasStore {
         Self { store }
     }
 
-    fn put_cas_blob(&self, bytes: &[u8]) -> Result<Hash, PlaneError> {
+    fn put_cas_blob(&self, bytes: &[u8]) -> Result<Hash, BackendError> {
         Ok(self.store.put_blob(bytes)?)
     }
 
-    fn get_cas_blob(&self, hash: Hash) -> Result<Vec<u8>, PlaneError> {
+    fn get_cas_blob(&self, hash: Hash) -> Result<Vec<u8>, BackendError> {
         Ok(self.store.get_blob(hash)?)
     }
 
-    fn has_cas_blob(&self, hash: Hash) -> Result<bool, PlaneError> {
+    fn has_cas_blob(&self, hash: Hash) -> Result<bool, BackendError> {
         Ok(self.store.has_blob(hash)?)
     }
 }
@@ -70,14 +70,14 @@ pub struct ObjectStoreRemoteCasStore {
 }
 
 impl ObjectStoreRemoteCasStore {
-    pub fn new(config: BlobStoreConfig) -> Result<Self, PlaneError> {
+    pub fn new(config: BlobStoreConfig) -> Result<Self, BackendError> {
         let bucket = config
             .bucket
             .clone()
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| {
-                PlaneError::Persist(PersistError::validation(
-                    "AOS_BLOBSTORE_BUCKET must be set for object-store-backed blob planes",
+                BackendError::Persist(PersistError::validation(
+                    "AOS_BLOBSTORE_BUCKET must be set for object-store-backed blob backends",
                 ))
             })?;
         let store = build_object_store(&config, &bucket)?;
@@ -105,7 +105,7 @@ impl ObjectStoreRemoteCasStore {
         &self.config
     }
 
-    fn put_object_sync(&self, key: String, payload: Vec<u8>) -> Result<(), PlaneError> {
+    fn put_object_sync(&self, key: String, payload: Vec<u8>) -> Result<(), BackendError> {
         let store = Arc::clone(&self.store);
         let path = ObjectPath::from(key.clone());
         run_async(
@@ -120,7 +120,7 @@ impl ObjectStoreRemoteCasStore {
         )
     }
 
-    fn get_object_sync(&self, key: &str) -> Result<Option<Vec<u8>>, PlaneError> {
+    fn get_object_sync(&self, key: &str) -> Result<Option<Vec<u8>>, BackendError> {
         let store = Arc::clone(&self.store);
         let path = ObjectPath::from(key);
         let label = format!("get object-store://{}/{}", self.bucket, key);
@@ -139,7 +139,7 @@ impl ObjectStoreRemoteCasStore {
         })
     }
 
-    fn get_object_range_sync(&self, key: &str, range: Range<u64>) -> Result<Vec<u8>, PlaneError> {
+    fn get_object_range_sync(&self, key: &str, range: Range<u64>) -> Result<Vec<u8>, BackendError> {
         let store = Arc::clone(&self.store);
         let path = ObjectPath::from(key);
         let label = format!(
@@ -155,19 +155,19 @@ impl ObjectStoreRemoteCasStore {
         })
     }
 
-    fn load_cas_root(&self, hash: Hash) -> Result<Option<CasRootRecord>, PlaneError> {
+    fn load_cas_root(&self, hash: Hash) -> Result<Option<CasRootRecord>, BackendError> {
         let key = cas_root_key(&self.config, hash);
         self.get_object_sync(&key)?
-            .map(|payload| serde_cbor::from_slice(&payload).map_err(PlaneError::from))
+            .map(|payload| serde_cbor::from_slice(&payload).map_err(BackendError::from))
             .transpose()
     }
 
-    fn store_cas_root(&self, hash: Hash, record: &CasRootRecord) -> Result<(), PlaneError> {
+    fn store_cas_root(&self, hash: Hash, record: &CasRootRecord) -> Result<(), BackendError> {
         let key = cas_root_key(&self.config, hash);
         self.put_object_sync(key, serde_cbor::to_vec(record)?)
     }
 
-    fn write_direct_blob(&self, hash: Hash, bytes: Vec<u8>) -> Result<(), PlaneError> {
+    fn write_direct_blob(&self, hash: Hash, bytes: Vec<u8>) -> Result<(), BackendError> {
         let object_key = direct_blob_key(&self.config, hash);
         self.put_object_sync(object_key.clone(), bytes.clone())?;
         self.store_cas_root(
@@ -180,7 +180,7 @@ impl ObjectStoreRemoteCasStore {
         )
     }
 
-    fn write_packed_blob_group(&self, blobs: Vec<(Hash, Vec<u8>)>) -> Result<(), PlaneError> {
+    fn write_packed_blob_group(&self, blobs: Vec<(Hash, Vec<u8>)>) -> Result<(), BackendError> {
         if blobs.is_empty() {
             return Ok(());
         }
@@ -199,7 +199,7 @@ impl ObjectStoreRemoteCasStore {
         self.flush_pack(current)
     }
 
-    fn flush_pack(&self, blobs: Vec<(Hash, Vec<u8>)>) -> Result<(), PlaneError> {
+    fn flush_pack(&self, blobs: Vec<(Hash, Vec<u8>)>) -> Result<(), BackendError> {
         if blobs.is_empty() {
             return Ok(());
         }
@@ -233,7 +233,7 @@ impl ObjectStoreRemoteCasStore {
         Ok(())
     }
 
-    fn put_cas_blob(&self, bytes: &[u8]) -> Result<Hash, PlaneError> {
+    fn put_cas_blob(&self, bytes: &[u8]) -> Result<Hash, BackendError> {
         let hash = Hash::of_bytes(bytes);
         if bytes.len() <= self.config.pack_threshold_bytes {
             self.write_packed_blob_group(vec![(hash, bytes.to_vec())])?;
@@ -243,12 +243,12 @@ impl ObjectStoreRemoteCasStore {
         Ok(hash)
     }
 
-    fn get_cas_blob(&self, hash: Hash) -> Result<Vec<u8>, PlaneError> {
+    fn get_cas_blob(&self, hash: Hash) -> Result<Vec<u8>, BackendError> {
         let bytes = match self.load_cas_root(hash)? {
             Some(root) => match root.layout {
                 BlobLayout::Direct { object_key } => {
                     self.get_object_sync(&object_key)?.ok_or_else(|| {
-                        PlaneError::Persist(PersistError::not_found(format!(
+                        BackendError::Persist(PersistError::not_found(format!(
                             "blob object-store://{}/{}",
                             self.bucket, object_key
                         )))
@@ -263,7 +263,7 @@ impl ObjectStoreRemoteCasStore {
             None => {
                 let key = direct_blob_key(&self.config, hash);
                 self.get_object_sync(&key)?.ok_or_else(|| {
-                    PlaneError::Persist(PersistError::not_found(format!(
+                    BackendError::Persist(PersistError::not_found(format!(
                         "blob object-store://{}/{key}",
                         self.bucket
                     )))
@@ -272,7 +272,7 @@ impl ObjectStoreRemoteCasStore {
         };
         let actual = Hash::of_bytes(&bytes);
         if actual != hash {
-            return Err(PlaneError::Persist(PersistError::backend(format!(
+            return Err(BackendError::Persist(PersistError::backend(format!(
                 "blob hash mismatch after read: expected {}, got {}",
                 hash.to_hex(),
                 actual.to_hex()
@@ -281,7 +281,7 @@ impl ObjectStoreRemoteCasStore {
         Ok(bytes)
     }
 
-    fn has_cas_blob(&self, hash: Hash) -> Result<bool, PlaneError> {
+    fn has_cas_blob(&self, hash: Hash) -> Result<bool, BackendError> {
         if self.load_cas_root(hash)?.is_some() {
             return Ok(true);
         }
@@ -306,7 +306,7 @@ pub enum RemoteCasStore {
 }
 
 impl RemoteCasStore {
-    pub fn new(config: BlobStoreConfig) -> Result<Self, PlaneError> {
+    pub fn new(config: BlobStoreConfig) -> Result<Self, BackendError> {
         if config
             .bucket
             .as_ref()
@@ -327,21 +327,21 @@ impl RemoteCasStore {
         matches!(self, Self::ObjectStore(_))
     }
 
-    pub fn put_cas_blob(&self, bytes: &[u8]) -> Result<Hash, PlaneError> {
+    pub fn put_cas_blob(&self, bytes: &[u8]) -> Result<Hash, BackendError> {
         match self {
             Self::Embedded(inner) => inner.put_cas_blob(bytes),
             Self::ObjectStore(inner) => inner.put_cas_blob(bytes),
         }
     }
 
-    pub fn get_cas_blob(&self, hash: Hash) -> Result<Vec<u8>, PlaneError> {
+    pub fn get_cas_blob(&self, hash: Hash) -> Result<Vec<u8>, BackendError> {
         match self {
             Self::Embedded(inner) => inner.get_cas_blob(hash),
             Self::ObjectStore(inner) => inner.get_cas_blob(hash),
         }
     }
 
-    pub fn has_cas_blob(&self, hash: Hash) -> Result<bool, PlaneError> {
+    pub fn has_cas_blob(&self, hash: Hash) -> Result<bool, BackendError> {
         match self {
             Self::Embedded(inner) => inner.has_cas_blob(hash),
             Self::ObjectStore(inner) => inner.has_cas_blob(hash),
@@ -349,16 +349,16 @@ impl RemoteCasStore {
     }
 }
 
-impl BlobPlane for RemoteCasStore {
-    fn put_blob(&self, _universe_id: UniverseId, bytes: &[u8]) -> Result<Hash, PlaneError> {
+impl BlobBackend for RemoteCasStore {
+    fn put_blob(&self, _universe_id: UniverseId, bytes: &[u8]) -> Result<Hash, BackendError> {
         self.put_cas_blob(bytes)
     }
 
-    fn get_blob(&self, _universe_id: UniverseId, hash: Hash) -> Result<Vec<u8>, PlaneError> {
+    fn get_blob(&self, _universe_id: UniverseId, hash: Hash) -> Result<Vec<u8>, BackendError> {
         self.get_cas_blob(hash)
     }
 
-    fn has_blob(&self, _universe_id: UniverseId, hash: Hash) -> Result<bool, PlaneError> {
+    fn has_blob(&self, _universe_id: UniverseId, hash: Hash) -> Result<bool, BackendError> {
         self.has_cas_blob(hash)
     }
 }
@@ -383,7 +383,7 @@ impl HostedCas {
         let remote_hash = self
             .remote
             .put_cas_blob(bytes)
-            .map_err(plane_to_persist_error)?;
+            .map_err(backend_to_persist_error)?;
         if remote_hash != local_hash {
             return Err(PersistError::backend(format!(
                 "hosted CAS write hash mismatch: local {}, remote {}",
@@ -405,7 +405,7 @@ impl HostedCas {
         let bytes = self
             .remote
             .get_cas_blob(hash)
-            .map_err(plane_to_persist_error)?;
+            .map_err(backend_to_persist_error)?;
         let stored = self.local.put_verified(&bytes)?;
         if stored != hash {
             return Err(PersistError::backend(format!(
@@ -450,7 +450,9 @@ impl Store for HostedCas {
         if self.local.has(hash) {
             return Ok(true);
         }
-        self.remote.has_cas_blob(hash).map_err(plane_to_store_error)
+        self.remote
+            .has_cas_blob(hash)
+            .map_err(backend_to_store_error)
     }
 }
 
@@ -478,15 +480,15 @@ fn pack_blob_key(config: &BlobStoreConfig, pack_hash: Hash) -> String {
     )
 }
 
-fn plane_to_persist_error(err: PlaneError) -> PersistError {
+fn backend_to_persist_error(err: BackendError) -> PersistError {
     match err {
-        PlaneError::Persist(err) => err,
+        BackendError::Persist(err) => err,
         other => PersistError::backend(other.to_string()),
     }
 }
 
-fn plane_to_store_error(err: PlaneError) -> StoreError {
-    persist_error_to_store_error(plane_to_persist_error(err))
+fn backend_to_store_error(err: BackendError) -> StoreError {
+    persist_error_to_store_error(backend_to_persist_error(err))
 }
 
 fn persist_error_to_store_error(err: PersistError) -> StoreError {

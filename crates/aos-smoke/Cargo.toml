@@ -18,7 +18,6 @@ aos-wasm-abi = { path = "../aos-wasm-abi" }
 aos-wasm-sdk = { path = "../aos-wasm-sdk" }
 aos-effects = { path = "../aos-effects" }
 aos-effect-adapters = { path = "../aos-effect-adapters", features = ["e2e-tests"] }
-aos-runtime = { path = "../aos-runtime" }
 aos-wasm-build = { path = "../aos-wasm-build" }
 clap = { version = "4", features = ["derive"] }
 indexmap = "2"

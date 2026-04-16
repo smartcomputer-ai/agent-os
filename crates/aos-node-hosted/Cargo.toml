@@ -5,6 +5,11 @@ edition = "2024"
 publish = false
 autobins = false
 
+[features]
+default = []
+e2e-tests = []
+legacy-bins = []
+
 [dependencies]
 aos-authoring = { path = "../aos-authoring" }
 aos-air-types = { path = "../aos-air-types" }
@@ -14,7 +19,7 @@ aos-effect-types = { path = "../aos-effect-types" }
 aos-effects = { path = "../aos-effects" }
 aos-kernel = { path = "../aos-kernel" }
 aos-node = { path = "../aos-node" }
-aos-runtime = { path = "../aos-runtime" }
+aos-wasm-abi = { path = "../aos-wasm-abi" }
 
 anyhow = "1"
 aes-gcm-siv = "0.11"
@@ -40,18 +45,37 @@ rdkafka = "0.39.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
 
 [dev-dependencies]
-assert_cmd = "2"
+aos-wasm-build = { path = "../aos-wasm-build" }
 serial_test = "3"
 tempfile = "3"
 
 [[bin]]
 name = "aos-node-hosted"
 path = "src/main.rs"
+test = false
+required-features = ["legacy-bins"]
 
 [[bin]]
 name = "hosted-prof"
 path = "src/bin/hosted-prof.rs"
+test = false
 
-[[bin]]
-name = "hosted-repro"
-path = "src/bin/hosted-repro.rs"
+[[test]]
+name = "blobstore_broker_e2e"
+path = "tests_e2e/blobstore_broker_e2e.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "http_control_e2e"
+path = "tests_e2e/http_control_e2e.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "kafka_broker_backend_e2e"
+path = "tests_e2e/kafka_broker_backend_e2e.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "kafka_broker_e2e"
+path = "tests_e2e/kafka_broker_e2e.rs"
+required-features = ["e2e-tests"]

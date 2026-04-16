@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use aos_node::{CheckpointPlane, CommandRecord, PartitionCheckpoint, UniverseId, WorldId};
+use aos_node::{CheckpointBackend, CommandRecord, PartitionCheckpoint, UniverseId, WorldId};
 
 use crate::blobstore::{BlobStoreConfig, HostedBlobMetaStore, scoped_blobstore_config};
 use crate::worker::WorkerError;

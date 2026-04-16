@@ -4,14 +4,12 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_air_types::HashRef;
+use aos_authoring::{is_placeholder_hash, load_from_assets_with_imports, patch_modules};
 use aos_effect_adapters::adapters::mock::{MockHttpHarness, MockHttpResponse};
 use aos_kernel::Store;
 use aos_kernel::journal::{CapDecisionOutcome, Journal, JournalRecord, PolicyDecisionOutcome};
-use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
+use aos_kernel::{Kernel, KernelConfig, LoadedManifest, workflow_trace_summary};
 use aos_node::FsCas;
-use aos_runtime::manifest_loader;
-use aos_runtime::trace::workflow_trace_summary;
-use aos_runtime::util::{is_placeholder_hash, patch_modules};
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -271,10 +269,9 @@ fn load_manifest_for_runtime<S: Store + 'static>(
     assets_root: &Path,
     wasm_hash: &HashRef,
 ) -> Result<LoadedManifest> {
-    let mut loaded =
-        manifest_loader::load_from_assets_with_imports(store.clone(), assets_root, &[])
-            .context("load fixture manifest")?
-            .ok_or_else(|| anyhow!("manifest missing at {}", assets_root.display()))?;
+    let mut loaded = load_from_assets_with_imports(store.clone(), assets_root, &[])
+        .context("load fixture manifest")?
+        .ok_or_else(|| anyhow!("manifest missing at {}", assets_root.display()))?;
 
     let patched = patch_modules(&mut loaded, wasm_hash, |name, _| name == MODULE_NAME);
     if patched == 0 {

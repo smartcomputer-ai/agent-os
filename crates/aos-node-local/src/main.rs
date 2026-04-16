@@ -40,17 +40,17 @@ fn main() -> Result<()> {
         Command::Serve(args) => {
             let paths = LocalStatePaths::new(args.state_root);
             paths.ensure_root()?;
-            tracing::info!(
-                bind = %args.bind,
-                state_root = %paths.root().display(),
-                roles = "supervisor,control",
-                "aos-node-local initialized"
-            );
-            let control = LocalControl::open(paths.root())?;
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .context("build local node runtime")?;
+            let control = LocalControl::open_with_handle(paths.root(), runtime.handle().clone())?;
+            tracing::info!(
+                bind = %args.bind,
+                state_root = %paths.root().display(),
+                roles = "scheduler,control",
+                "aos-node-local initialized"
+            );
             runtime.block_on(serve(
                 LocalHttpConfig {
                     bind_addr: args.bind,

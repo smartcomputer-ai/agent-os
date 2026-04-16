@@ -99,7 +99,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
         aos_effects::EffectKind::HTTP_REQUEST
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HttpRequestParams = serde_cbor::from_slice(&intent.params_cbor)
             .map_err(|e| anyhow::anyhow!("decode HttpRequestParams: {e}"))?;
 

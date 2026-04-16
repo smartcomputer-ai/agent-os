@@ -1,7 +1,7 @@
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::time::{Duration, Instant};
 
-use aos_node::PlaneError;
+use aos_node::BackendError;
 use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext};
@@ -78,7 +78,7 @@ pub(super) fn create_producer(
     config: &KafkaConfig,
     transactional: bool,
     partition: Option<u32>,
-) -> Result<ProducerHandle, PlaneError> {
+) -> Result<ProducerHandle, BackendError> {
     let mut client = ClientConfig::new();
     client
         .set("bootstrap.servers", broker_hosts(config)?)
@@ -105,7 +105,7 @@ pub(super) fn create_producer(
         }))
 }
 
-pub(super) fn create_group_consumer(config: &KafkaConfig) -> Result<ConsumerHandle, PlaneError> {
+pub(super) fn create_group_consumer(config: &KafkaConfig) -> Result<ConsumerHandle, BackendError> {
     let consumer: ConsumerHandle = ClientConfig::new()
         .set("bootstrap.servers", broker_hosts(config)?)
         .set("group.id", config.submission_group_prefix.clone())
@@ -134,7 +134,7 @@ pub(super) fn create_group_consumer(config: &KafkaConfig) -> Result<ConsumerHand
 pub(super) fn create_direct_consumer(
     config: &KafkaConfig,
     partitions: &std::collections::BTreeSet<u32>,
-) -> Result<ConsumerHandle, PlaneError> {
+) -> Result<ConsumerHandle, BackendError> {
     let consumer: ConsumerHandle = ClientConfig::new()
         .set("bootstrap.servers", broker_hosts(config)?)
         .set(
@@ -174,7 +174,7 @@ pub(super) fn topic_partitions(
     config: &KafkaConfig,
     producer: &ProducerHandle,
     topic: &str,
-) -> Result<Vec<i32>, PlaneError> {
+) -> Result<Vec<i32>, BackendError> {
     let metadata = producer
         .client()
         .fetch_metadata(
@@ -187,13 +187,13 @@ pub(super) fn topic_partitions(
     Ok(partitions_from_metadata(&metadata, topic))
 }
 
-pub(crate) fn fetch_partition_records(
+pub fn fetch_partition_records(
     config: &KafkaConfig,
     topic: &str,
     partition: i32,
     start_offset: Option<i64>,
     read_committed: bool,
-) -> Result<Vec<FetchedRecord>, PlaneError> {
+) -> Result<Vec<FetchedRecord>, BackendError> {
     let consumer: ConsumerHandle = ClientConfig::new()
         .set("bootstrap.servers", broker_hosts(config)?)
         .set(
@@ -322,7 +322,7 @@ fn send_record_with_opaque<'a>(
     payload: Option<&'a [u8]>,
     delivery_opaque: Box<DeliveryOpaque>,
     label: &str,
-) -> Result<(), PlaneError> {
+) -> Result<(), BackendError> {
     let mut record = BaseRecord::with_opaque_to(topic, delivery_opaque)
         .partition(partition)
         .key(key);
@@ -351,7 +351,7 @@ pub(super) fn send_record(
     key: &[u8],
     payload: &[u8],
     label: &str,
-) -> Result<(), PlaneError> {
+) -> Result<(), BackendError> {
     send_record_with_opaque(
         config,
         producer,
@@ -372,7 +372,7 @@ pub(super) fn send_record_with_delivery(
     key: &[u8],
     payload: &[u8],
     label: &str,
-) -> Result<DeliveryReportRx, PlaneError> {
+) -> Result<DeliveryReportRx, BackendError> {
     let (tx, rx) = sync_channel(1);
     send_record_with_opaque(
         config,
@@ -394,7 +394,7 @@ pub(super) fn send_tombstone_with_delivery(
     partition: i32,
     key: &[u8],
     label: &str,
-) -> Result<DeliveryReportRx, PlaneError> {
+) -> Result<DeliveryReportRx, BackendError> {
     let (tx, rx) = sync_channel(1);
     send_record_with_opaque(
         config,
@@ -413,17 +413,17 @@ pub(super) fn await_delivery(
     config: &KafkaConfig,
     rx: DeliveryReportRx,
     label: &str,
-) -> Result<(i32, i64), PlaneError> {
+) -> Result<(i32, i64), BackendError> {
     match rx.recv_timeout(delivery_timeout(config)) {
         Ok(Ok(result)) => Ok(result),
         Ok(Err(err)) => Err(kafka_backend_err(label.to_owned())(err)),
         Err(RecvTimeoutError::Timeout) => {
-            Err(PlaneError::Persist(aos_node::PersistError::backend(
+            Err(BackendError::Persist(aos_node::PersistError::backend(
                 format!("{label}: timed out waiting for Kafka delivery report"),
             )))
         }
         Err(RecvTimeoutError::Disconnected) => {
-            Err(PlaneError::Persist(aos_node::PersistError::backend(
+            Err(BackendError::Persist(aos_node::PersistError::backend(
                 format!("{label}: Kafka delivery report channel disconnected"),
             )))
         }
@@ -434,7 +434,7 @@ pub(super) fn flush_producer(
     config: &KafkaConfig,
     producer: &ProducerHandle,
     label: impl Into<String>,
-) -> Result<(), PlaneError> {
+) -> Result<(), BackendError> {
     producer
         .flush(Timeout::After(Duration::from_millis(u64::from(
             config.producer_flush_timeout_ms,
@@ -442,14 +442,14 @@ pub(super) fn flush_producer(
         .map_err(kafka_backend_err(label.into()))
 }
 
-fn broker_hosts(config: &KafkaConfig) -> Result<String, PlaneError> {
+fn broker_hosts(config: &KafkaConfig) -> Result<String, BackendError> {
     config
         .bootstrap_servers
         .clone()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
-            PlaneError::Persist(aos_node::PersistError::validation(
-                "AOS_KAFKA_BOOTSTRAP_SERVERS must be set for broker-backed Kafka planes",
+            BackendError::Persist(aos_node::PersistError::validation(
+                "AOS_KAFKA_BOOTSTRAP_SERVERS must be set for broker-backed Kafka backends",
             ))
         })
 }
@@ -468,7 +468,7 @@ fn partitions_from_metadata(metadata: &Metadata, topic: &str) -> Vec<i32> {
         .unwrap_or_default()
 }
 
-fn kafka_backend_err<T: Into<String>>(label: T) -> impl FnOnce(KafkaError) -> PlaneError {
+fn kafka_backend_err<T: Into<String>>(label: T) -> impl FnOnce(KafkaError) -> BackendError {
     let label = label.into();
-    move |err| PlaneError::Persist(aos_node::PersistError::backend(format!("{label}: {err}")))
+    move |err| BackendError::Persist(aos_node::PersistError::backend(format!("{label}: {err}")))
 }

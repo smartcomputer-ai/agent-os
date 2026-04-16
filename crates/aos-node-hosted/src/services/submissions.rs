@@ -4,12 +4,18 @@ use aos_cbor::to_canonical_cbor;
 use serde::Serialize;
 use uuid::Uuid;
 
+use aos_kernel::WorldInput;
 use aos_node::{
-    CborPayload, CommandIngress, CommandRecord, CommandStatus, CreateWorldRequest, ReceiptIngress,
+    CborPayload, CommandIngress, CommandRecord, CreateWorldRequest, HostControl, ReceiptIngress,
     SubmissionEnvelope, SubmissionPayload, UniverseId, WorldId, partition_for_world,
+    validate_create_world_request,
 };
 
+use crate::services::HostedCasService;
 use crate::services::{HostedJournalService, HostedMetaService};
+use crate::worker::commands::{
+    command_submit_response, synthesize_queued_command_record, world_control_from_command_payload,
+};
 use crate::worker::{CreateWorldAccepted, SubmissionAccepted, SubmitEventRequest, WorkerError};
 
 #[derive(Clone)]
@@ -17,6 +23,8 @@ pub struct HostedSubmissionService {
     default_universe_id: UniverseId,
     journal: HostedJournalService,
     meta: HostedMetaService,
+    cas: HostedCasService,
+    runtime: Option<crate::worker::HostedWorkerRuntime>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -30,11 +38,30 @@ impl HostedSubmissionService {
         default_universe_id: UniverseId,
         journal: HostedJournalService,
         meta: HostedMetaService,
+        cas: HostedCasService,
     ) -> Self {
         Self {
             default_universe_id,
             journal,
             meta,
+            cas,
+            runtime: None,
+        }
+    }
+
+    pub fn from_runtime(
+        runtime: crate::worker::HostedWorkerRuntime,
+        default_universe_id: UniverseId,
+        journal: HostedJournalService,
+        meta: HostedMetaService,
+        cas: HostedCasService,
+    ) -> Self {
+        Self {
+            default_universe_id,
+            journal,
+            meta,
+            cas,
+            runtime: Some(runtime),
         }
     }
 
@@ -92,17 +119,23 @@ impl HostedSubmissionService {
     fn create_world_inner(
         &self,
         universe_id: UniverseId,
-        mut request: CreateWorldRequest,
+        request: CreateWorldRequest,
     ) -> Result<CreateWorldAccepted, WorkerError> {
+        validate_create_world_request(&request)?;
         let world_id = request
             .world_id
             .unwrap_or_else(|| WorldId::from(Uuid::new_v4()));
-        request.universe_id = universe_id;
-        request.world_id = Some(world_id);
-
-        let submission_id = format!("create-{}", Uuid::new_v4());
-        let submission =
-            SubmissionEnvelope::create_world(submission_id.clone(), universe_id, world_id, request);
+        let request = CreateWorldRequest {
+            world_id: Some(world_id),
+            ..request
+        };
+        let submission_id = format!("create-{world_id}-{}", Uuid::new_v4());
+        let submission = SubmissionEnvelope::host_control(
+            submission_id.clone(),
+            universe_id,
+            world_id,
+            HostControl::CreateWorld { request },
+        );
         let submission_offset = self.journal.submit(submission)?;
         Ok(CreateWorldAccepted {
             submission_id,
@@ -116,6 +149,9 @@ impl HostedSubmissionService {
         &self,
         request: SubmitEventRequest,
     ) -> Result<SubmissionAccepted, WorkerError> {
+        if let Some(runtime) = &self.runtime {
+            return runtime.submit_event(request);
+        }
         let resolved = self.resolve_world(request.universe_id, request.world_id)?;
         if let Some(expected_world_epoch) = request.expected_world_epoch
             && expected_world_epoch != resolved.world_epoch
@@ -136,10 +172,13 @@ impl HostedSubmissionService {
             universe_id: resolved.universe_id,
             world_id: request.world_id,
             world_epoch: resolved.world_epoch,
-            payload: SubmissionPayload::DomainEvent {
-                schema: request.schema,
-                value: CborPayload::inline(serde_cbor::to_vec(&request.value)?),
-                key: None,
+            command: None,
+            payload: SubmissionPayload::WorldInput {
+                input: WorldInput::DomainEvent(aos_wasm_abi::DomainEvent {
+                    schema: request.schema,
+                    value: serde_cbor::to_vec(&request.value)?,
+                    key: None,
+                }),
             },
         };
         let submission_offset = self.journal.submit(submission)?;
@@ -160,6 +199,9 @@ impl HostedSubmissionService {
         world_id: WorldId,
         ingress: ReceiptIngress,
     ) -> Result<SubmissionAccepted, WorkerError> {
+        if let Some(runtime) = &self.runtime {
+            return runtime.submit_receipt(universe_id, world_id, ingress);
+        }
         let resolved = self.resolve_world(universe_id, world_id)?;
         let submission_id = ingress
             .correlation_id
@@ -170,13 +212,20 @@ impl HostedSubmissionService {
             universe_id: resolved.universe_id,
             world_id,
             world_epoch: resolved.world_epoch,
-            payload: SubmissionPayload::EffectReceipt {
-                intent_hash: ingress.intent_hash,
-                adapter_id: ingress.adapter_id,
-                status: ingress.status,
-                payload: ingress.payload,
-                cost_cents: ingress.cost_cents,
-                signature: ingress.signature,
+            command: None,
+            payload: SubmissionPayload::WorldInput {
+                input: WorldInput::Receipt(aos_effects::EffectReceipt {
+                    intent_hash: ingress.intent_hash.clone().try_into().map_err(|_| {
+                        WorkerError::LogFirst(aos_node::BackendError::InvalidIntentHashLen(
+                            ingress.intent_hash.len(),
+                        ))
+                    })?,
+                    adapter_id: ingress.adapter_id,
+                    status: ingress.status,
+                    payload_cbor: resolve_cbor_payload(&ingress.payload)?,
+                    cost_cents: ingress.cost_cents,
+                    signature: ingress.signature,
+                }),
             },
         };
         let submission_offset = self.journal.submit(submission)?;
@@ -194,6 +243,9 @@ impl HostedSubmissionService {
         world_id: WorldId,
         command_id: &str,
     ) -> Result<CommandRecord, WorkerError> {
+        if let Some(runtime) = &self.runtime {
+            return runtime.get_command_record(universe_id, world_id, command_id);
+        }
         let resolved = self.resolve_world(universe_id, world_id)?;
         self.meta
             .get_command_record(resolved.universe_id, world_id, command_id)?
@@ -231,40 +283,25 @@ impl HostedSubmissionService {
             payload: CborPayload::inline(to_canonical_cbor(payload)?),
             submitted_at_ns,
         };
-        let submission = SubmissionEnvelope::command(
-            command_id.clone(),
+        let queued = synthesize_queued_command_record(&ingress);
+        let payload_bytes = to_canonical_cbor(payload)?;
+        let world_control = world_control_from_command_payload(
+            self.resolve_store_for_world(resolved.universe_id)?.as_ref(),
+            command,
+            &payload_bytes,
+        )?;
+        let submission = SubmissionEnvelope::world_control(
+            format!("cmd-{command_id}"),
             resolved.universe_id,
             world_id,
             resolved.world_epoch,
             ingress,
+            world_control,
         );
-        let _submission_offset = self.journal.submit(submission)?;
-
-        let queued = CommandRecord {
-            command_id: command_id.clone(),
-            command: command.to_owned(),
-            status: CommandStatus::Queued,
-            submitted_at_ns,
-            started_at_ns: None,
-            finished_at_ns: None,
-            journal_height: None,
-            manifest_hash: None,
-            result_payload: None,
-            error: None,
-        };
-        let record =
-            match self
-                .meta
-                .get_command_record(resolved.universe_id, world_id, &command_id)?
-            {
-                Some(existing) if existing.status != CommandStatus::Queued => existing,
-                _ => {
-                    self.meta
-                        .put_command_record(resolved.universe_id, world_id, queued.clone())?;
-                    queued
-                }
-            };
-        Ok(command_submit_response(world_id, record))
+        let _ = self.journal.submit(submission)?;
+        self.meta
+            .put_command_record(resolved.universe_id, world_id, queued.clone())?;
+        Ok(command_submit_response(world_id, queued))
     }
 
     fn resolve_world(
@@ -300,6 +337,15 @@ impl HostedSubmissionService {
     }
 }
 
+impl HostedSubmissionService {
+    fn resolve_store_for_world(
+        &self,
+        universe_id: UniverseId,
+    ) -> Result<std::sync::Arc<crate::blobstore::HostedCas>, WorkerError> {
+        self.cas.store_for_domain(universe_id)
+    }
+}
+
 fn unix_time_ns() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -307,13 +353,12 @@ fn unix_time_ns() -> u64 {
         .unwrap_or_default()
 }
 
-fn command_submit_response(
-    world_id: WorldId,
-    record: CommandRecord,
-) -> aos_node::api::CommandSubmitResponse {
-    aos_node::api::CommandSubmitResponse {
-        poll_url: format!("/v1/worlds/{world_id}/commands/{}", record.command_id),
-        command_id: record.command_id,
-        status: record.status,
+fn resolve_cbor_payload(payload: &CborPayload) -> Result<Vec<u8>, WorkerError> {
+    payload.validate()?;
+    if let Some(inline) = &payload.inline_cbor {
+        return Ok(inline.clone());
     }
+    Err(WorkerError::Persist(aos_node::PersistError::validation(
+        "standalone hosted submission service requires inline CBOR payloads",
+    )))
 }

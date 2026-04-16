@@ -1,37 +1,35 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use aos_cbor::to_canonical_cbor;
 use aos_node::{
-    PlaneError, RejectedSubmission, SubmissionEnvelope, SubmissionPlane, WorldId,
-    WorldLogAppendResult, WorldLogFrame, WorldLogPlane, partition_for_world,
+    BackendError, RejectedSubmission, SubmissionBackend, SubmissionEnvelope, WorldId,
+    WorldLogAppendResult, WorldLogBackend, WorldLogFrame, partition_for_world,
 };
-use rdkafka::consumer::Consumer;
-use rdkafka::message::Message;
 use rdkafka::producer::Producer;
 use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
 use rdkafka::util::Timeout;
 
 use super::backend::{
-    ConsumerHandle, ProducerHandle, await_delivery, create_direct_consumer, create_group_consumer,
-    create_producer, fetch_partition_records, send_record, send_record_with_delivery,
-    send_tombstone_with_delivery, topic_partitions,
+    ProducerHandle, await_delivery, create_producer, fetch_partition_records, send_record,
+    send_record_with_delivery, send_tombstone_with_delivery, topic_partitions,
 };
+use super::ingress::BrokerKafkaIngress;
 use super::local_state::{append_frame_locally, append_projection_locally, world_key_bytes};
 use super::projection::ProjectionRecord;
 use super::types::{
-    CommitFailpoint, KafkaConfig, PartitionLogEntry, ProjectionTopicEntry, QueuedSubmission,
-    SubmissionBatch, SubmissionCommit,
+    CommitFailpoint, FlushCommit, HostedJournalRecord, KafkaConfig, PartitionLogEntry,
+    ProjectionTopicEntry, SharedConsumerGroupMetadata,
 };
 
-pub struct BrokerKafkaPlanes {
+pub struct BrokerKafkaBackend {
     partition_count: u32,
     config: KafkaConfig,
     producer: ProducerHandle,
+    shared_tx_producer: Option<ProducerHandle>,
     tx_producers: BTreeMap<u32, ProducerHandle>,
-    consumer: Option<ConsumerHandle>,
-    assigned_partitions: BTreeSet<u32>,
-    pending_submissions: BTreeMap<u32, VecDeque<QueuedSubmission>>,
+    consumer_group_metadata: SharedConsumerGroupMetadata,
     world_frames: BTreeMap<WorldId, Vec<WorldLogFrame>>,
     partition_logs: BTreeMap<(String, u32), Vec<PartitionLogEntry>>,
     projection_logs: BTreeMap<(String, u32), Vec<ProjectionTopicEntry>>,
@@ -41,13 +39,11 @@ pub struct BrokerKafkaPlanes {
     failpoint: Option<CommitFailpoint>,
 }
 
-impl std::fmt::Debug for BrokerKafkaPlanes {
+impl std::fmt::Debug for BrokerKafkaBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BrokerKafkaPlanes")
+        f.debug_struct("BrokerKafkaBackend")
             .field("partition_count", &self.partition_count)
             .field("config", &self.config)
-            .field("assigned_partitions", &self.assigned_partitions)
-            .field("pending_submissions", &self.pending_submission_count())
             .field("world_frames", &self.world_frames.len())
             .field("partition_logs", &self.partition_logs.len())
             .field("rejected_submissions", &self.rejected_submissions.len())
@@ -55,10 +51,10 @@ impl std::fmt::Debug for BrokerKafkaPlanes {
     }
 }
 
-impl BrokerKafkaPlanes {
-    pub fn new(partition_count: u32, config: KafkaConfig) -> Result<Self, PlaneError> {
+impl BrokerKafkaBackend {
+    pub fn new(partition_count: u32, config: KafkaConfig) -> Result<Self, BackendError> {
         if partition_count == 0 {
-            return Err(PlaneError::InvalidPartitionCount);
+            return Err(BackendError::InvalidPartitionCount);
         }
 
         let producer = create_producer(&config, false, None)?;
@@ -66,10 +62,9 @@ impl BrokerKafkaPlanes {
             partition_count,
             config,
             producer,
+            shared_tx_producer: None,
             tx_producers: BTreeMap::new(),
-            consumer: None,
-            assigned_partitions: BTreeSet::new(),
-            pending_submissions: BTreeMap::new(),
+            consumer_group_metadata: Arc::new(Mutex::new(None)),
             world_frames: BTreeMap::new(),
             partition_logs: BTreeMap::new(),
             projection_logs: BTreeMap::new(),
@@ -92,8 +87,11 @@ impl BrokerKafkaPlanes {
         self.world_frames.keys().copied().collect()
     }
 
-    pub fn pending_submission_count(&self) -> usize {
-        self.pending_submissions.values().map(VecDeque::len).sum()
+    pub fn broker_ingress_driver(&self) -> BrokerKafkaIngress {
+        BrokerKafkaIngress::new(
+            self.config.clone(),
+            Arc::clone(&self.consumer_group_metadata),
+        )
     }
 
     fn uses_direct_assignment(&self) -> bool {
@@ -140,7 +138,7 @@ impl BrokerKafkaPlanes {
     pub fn publish_projection_records(
         &mut self,
         records: Vec<ProjectionRecord>,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         for record in records {
             let partition = partition_for_world(record.key.world_id(), self.partition_count);
             let key = serde_cbor::to_vec(&record.key)?;
@@ -168,7 +166,7 @@ impl BrokerKafkaPlanes {
             let (_delivery_partition, offset) =
                 await_delivery(&self.config, delivery, "publish Kafka projection record")?;
             let offset = u64::try_from(offset).map_err(|_| {
-                PlaneError::Persist(aos_node::PersistError::backend(format!(
+                BackendError::Persist(aos_node::PersistError::backend(format!(
                     "Kafka delivery offset for projection partition {partition} was negative: {offset}"
                 )))
             })?;
@@ -185,97 +183,74 @@ impl BrokerKafkaPlanes {
         Ok(())
     }
 
-    pub fn drain_partition_submissions(
-        &mut self,
-        partition: u32,
-    ) -> Result<SubmissionBatch, PlaneError> {
-        let mut submissions = Vec::new();
-        let mut last_offset = None;
-        let queued = self.pending_submissions.entry(partition).or_default();
-        while let Some(item) = queued.pop_front() {
-            last_offset = Some(item.offset);
-            submissions.push(item.submission);
-        }
-
-        Ok(SubmissionBatch {
-            submissions,
-            commit: if self.uses_direct_assignment() {
-                SubmissionCommit::DirectKafka { partition }
-            } else {
-                SubmissionCommit::Kafka {
-                    topic: self.config.ingress_topic.clone(),
-                    partition,
-                    last_offset,
-                }
-            },
-        })
-    }
-
-    pub fn commit_submission_batch(
-        &mut self,
-        batch: SubmissionBatch,
-        frames: Vec<WorldLogFrame>,
-    ) -> Result<(), PlaneError> {
-        let (partition, topic, last_offset, direct_mode, submissions) = match batch.commit {
-            SubmissionCommit::Kafka {
-                topic,
-                partition,
-                last_offset,
-            } => (
-                partition,
-                Some(topic),
-                last_offset,
-                false,
-                batch.submissions,
-            ),
-            SubmissionCommit::DirectKafka { partition } => {
-                (partition, None, None, true, batch.submissions)
-            }
-            SubmissionCommit::Embedded { .. } => {
-                unreachable!("broker runtime received non-broker commit handle")
-            }
-        };
-        if !direct_mode && last_offset.is_none() {
+    pub fn commit_flush_batch(&mut self, batch: FlushCommit) -> Result<(), BackendError> {
+        if batch.frames.is_empty()
+            && batch.dispositions.is_empty()
+            && batch.offset_commits.is_empty()
+        {
             return Ok(());
         }
-        let last_offset = last_offset.unwrap_or_default();
-        let topic = topic.unwrap_or_default();
 
-        if !direct_mode {
-            self.ensure_consumer()?;
-        }
-        let tx_producer = self.tx_producer_for_partition(partition)?;
+        let tx_producer = self.shared_tx_producer()?;
         tx_producer
             .begin_transaction()
-            .map_err(|err| kafka_backend_err("begin Kafka transaction", err))?;
+            .map_err(|err| kafka_backend_err("begin hosted Kafka flush transaction", err))?;
 
-        let mut delivered_frames = Vec::with_capacity(frames.len());
-        let result = (|| -> Result<(), PlaneError> {
-            for frame in frames {
-                let frame_partition = partition_for_world(frame.world_id, self.partition_count);
-                let payload = to_canonical_cbor(&frame)?;
+        let result = (|| -> Result<(), BackendError> {
+            let mut delivered_frames = Vec::with_capacity(batch.frames.len());
+            for frame in batch.frames {
+                let partition = partition_for_world(frame.world_id, self.partition_count);
+                let payload = to_canonical_cbor(&HostedJournalRecord::Frame(frame.clone()))?;
                 let key = world_key_bytes(frame.world_id);
                 let delivery = send_record_with_delivery(
                     &self.config,
                     &tx_producer,
                     &self.config.journal_topic,
-                    frame_partition as i32,
+                    partition as i32,
                     &key,
                     &payload,
                     "publish Kafka world frame",
                 )?;
-                delivered_frames.push((frame, delivery));
+                delivered_frames.push((frame, partition, delivery));
             }
 
-            if !direct_mode {
+            for disposition in batch.dispositions {
+                let partition = disposition_partition(&disposition, self.partition_count);
+                let key = disposition_key_bytes(&disposition);
+                let payload = to_canonical_cbor(&HostedJournalRecord::Disposition(disposition))?;
+                let _delivery = send_record_with_delivery(
+                    &self.config,
+                    &tx_producer,
+                    &self.config.journal_topic,
+                    partition as i32,
+                    &key,
+                    &payload,
+                    "publish Kafka durable disposition",
+                )?;
+            }
+
+            if !self.uses_direct_assignment() && !batch.offset_commits.is_empty() {
                 let mut offsets = TopicPartitionList::new();
-                offsets
-                    .add_partition_offset(&topic, partition as i32, Offset::Offset(last_offset + 1))
-                    .map_err(|err| kafka_backend_err("build transactional ingress offsets", err))?;
-                let metadata = self.consumer()?.group_metadata().ok_or_else(|| {
-                    PlaneError::Persist(aos_node::PersistError::backend(format!(
-                        "missing Kafka consumer group metadata for partition {partition}"
-                    )))
+                for (partition, last_offset) in &batch.offset_commits {
+                    offsets
+                        .add_partition_offset(
+                            &self.config.ingress_topic,
+                            *partition as i32,
+                            Offset::Offset(last_offset.saturating_add(1)),
+                        )
+                        .map_err(|err| {
+                            kafka_backend_err("build hosted transactional ingress offsets", err)
+                        })?;
+                }
+                let metadata_guard = self.consumer_group_metadata.lock().map_err(|_| {
+                    BackendError::Persist(aos_node::PersistError::backend(
+                        "Kafka consumer-group metadata mutex poisoned".to_owned(),
+                    ))
+                })?;
+                let metadata = metadata_guard.as_ref().ok_or_else(|| {
+                    BackendError::Persist(aos_node::PersistError::backend(
+                        "missing Kafka consumer group metadata".to_owned(),
+                    ))
                 })?;
                 tx_producer
                     .send_offsets_to_transaction(
@@ -286,17 +261,12 @@ impl BrokerKafkaPlanes {
                         ))),
                     )
                     .map_err(|err| {
-                        kafka_backend_err(
-                            format!(
-                                "send Kafka ingress offsets to transaction for partition {partition}"
-                            ),
-                            err,
-                        )
+                        kafka_backend_err("send hosted Kafka ingress offsets to transaction", err)
                     })?;
             }
 
             if self.failpoint.take() == Some(CommitFailpoint::AbortBeforeCommit) {
-                return Err(PlaneError::Persist(aos_node::PersistError::backend(
+                return Err(BackendError::Persist(aos_node::PersistError::backend(
                     "broker Kafka failpoint: abort before commit",
                 )));
             }
@@ -305,13 +275,13 @@ impl BrokerKafkaPlanes {
                 .commit_transaction(Timeout::After(Duration::from_millis(u64::from(
                     self.config.transaction_timeout_ms,
                 ))))
-                .map_err(|err| kafka_backend_err("commit Kafka transaction", err))?;
-            let mut max_offset = self.recovered_journal_offsets.get(&partition).copied();
-            for (frame, delivery) in delivered_frames {
+                .map_err(|err| kafka_backend_err("commit hosted Kafka flush transaction", err))?;
+
+            for (frame, partition, delivery) in delivered_frames {
                 let (_delivery_partition, offset) =
                     await_delivery(&self.config, delivery, "publish Kafka world frame")?;
                 let offset = u64::try_from(offset).map_err(|_| {
-                    PlaneError::Persist(aos_node::PersistError::backend(format!(
+                    BackendError::Persist(aos_node::PersistError::backend(format!(
                         "Kafka delivery offset for partition {partition} was negative: {offset}"
                     )))
                 })?;
@@ -323,10 +293,10 @@ impl BrokerKafkaPlanes {
                     frame,
                     Some(offset),
                 )?;
-                max_offset = Some(max_offset.map_or(offset, |current| current.max(offset)));
-            }
-            if let Some(max_offset) = max_offset {
-                self.recovered_journal_offsets.insert(partition, max_offset);
+                self.recovered_journal_offsets
+                    .entry(partition)
+                    .and_modify(|current| *current = (*current).max(offset))
+                    .or_insert(offset);
             }
             Ok(())
         })();
@@ -335,55 +305,13 @@ impl BrokerKafkaPlanes {
             let _ = tx_producer.abort_transaction(Timeout::After(Duration::from_millis(
                 u64::from(self.config.transaction_timeout_ms),
             )));
-            if direct_mode {
-                self.requeue_partition_submissions(partition, submissions);
-            }
             return Err(err);
         }
 
-        self.recover_partition_from_broker(partition)?;
         Ok(())
     }
 
-    pub fn sync_assignments_and_poll(&mut self) -> Result<(Vec<u32>, Vec<u32>), PlaneError> {
-        if self.uses_direct_assignment() {
-            let previous = self.assigned_partitions.clone();
-            self.ensure_consumer()?;
-            self.poll_consumer_once(Duration::from_millis(0))?;
-            while self.poll_consumer_once(Duration::from_millis(0))? {}
-            self.assigned_partitions = self.config.direct_assigned_partitions.clone();
-            let newly_assigned = self
-                .assigned_partitions
-                .difference(&previous)
-                .copied()
-                .collect::<Vec<_>>();
-            let revoked = previous
-                .difference(&self.assigned_partitions)
-                .copied()
-                .collect::<Vec<_>>();
-            return Ok((newly_assigned, revoked));
-        }
-        self.ensure_consumer()?;
-        let previous = self.assigned_partitions.clone();
-        self.poll_consumer_once(Duration::from_millis(u64::from(
-            self.config.group_poll_wait_ms,
-        )))?;
-        while self.poll_consumer_once(Duration::from_millis(0))? {}
-        let assigned = self.current_assignment()?;
-        let newly_assigned = assigned.difference(&previous).copied().collect::<Vec<_>>();
-        let revoked = previous.difference(&assigned).copied().collect::<Vec<_>>();
-        for partition in &revoked {
-            self.pending_submissions.remove(partition);
-        }
-        self.assigned_partitions = assigned;
-        Ok((newly_assigned, revoked))
-    }
-
-    pub fn assigned_partitions(&self) -> Vec<u32> {
-        self.assigned_partitions.iter().copied().collect()
-    }
-
-    pub fn recover_partition_from_broker(&mut self, partition: u32) -> Result<(), PlaneError> {
+    pub fn recover_partition_from_broker(&mut self, partition: u32) -> Result<(), BackendError> {
         let records = fetch_partition_records(
             &self.config,
             &self.config.journal_topic,
@@ -398,21 +326,25 @@ impl BrokerKafkaPlanes {
             let Some(value) = record.value else {
                 continue;
             };
-            let frame: WorldLogFrame = serde_cbor::from_slice(&value)?;
-            let _ = append_frame_locally(
-                &self.config.journal_topic,
-                &mut self.world_frames,
-                &mut self.partition_logs,
-                self.partition_count,
-                frame,
-                Some(offset),
-            )?;
+            match decode_hosted_journal_record(&value)? {
+                HostedJournalRecord::Frame(frame) => {
+                    let _ = append_frame_locally(
+                        &self.config.journal_topic,
+                        &mut self.world_frames,
+                        &mut self.partition_logs,
+                        self.partition_count,
+                        frame,
+                        Some(offset),
+                    )?;
+                }
+                HostedJournalRecord::Disposition(_disposition) => {}
+            }
             self.recovered_journal_offsets.insert(partition, offset);
         }
         Ok(())
     }
 
-    pub fn recover_from_broker(&mut self) -> Result<(), PlaneError> {
+    pub fn recover_from_broker(&mut self) -> Result<(), BackendError> {
         self.world_frames.clear();
         self.partition_logs.clear();
         self.recovered_journal_offsets.clear();
@@ -431,15 +363,15 @@ impl BrokerKafkaPlanes {
     pub fn append_frame_transactional(
         &mut self,
         frame: WorldLogFrame,
-    ) -> Result<WorldLogAppendResult, PlaneError> {
+    ) -> Result<WorldLogAppendResult, BackendError> {
         let partition = partition_for_world(frame.world_id, self.partition_count);
         let tx_producer = self.tx_producer_for_partition(partition)?;
         tx_producer
             .begin_transaction()
             .map_err(|err| kafka_backend_err("begin Kafka checkpoint transaction", err))?;
 
-        let result = (|| -> Result<WorldLogAppendResult, PlaneError> {
-            let payload = to_canonical_cbor(&frame)?;
+        let result = (|| -> Result<WorldLogAppendResult, BackendError> {
+            let payload = to_canonical_cbor(&HostedJournalRecord::Frame(frame.clone()))?;
             let key = world_key_bytes(frame.world_id);
             let delivery = send_record_with_delivery(
                 &self.config,
@@ -458,7 +390,7 @@ impl BrokerKafkaPlanes {
             let (_delivery_partition, offset) =
                 await_delivery(&self.config, delivery, "publish Kafka checkpoint frame")?;
             let offset = u64::try_from(offset).map_err(|_| {
-                PlaneError::Persist(aos_node::PersistError::backend(format!(
+                BackendError::Persist(aos_node::PersistError::backend(format!(
                     "Kafka delivery offset for partition {partition} was negative: {offset}"
                 )))
             })?;
@@ -484,65 +416,10 @@ impl BrokerKafkaPlanes {
         result
     }
 
-    fn poll_consumer_once(&mut self, timeout: Duration) -> Result<bool, PlaneError> {
-        self.ensure_consumer()?;
-        let message = match self
-            .consumer
-            .as_ref()
-            .expect("consumer initialized")
-            .poll(timeout)
-        {
-            Some(Ok(message)) => message,
-            Some(Err(rdkafka::error::KafkaError::PartitionEOF(_))) | None => {
-                return Ok(false);
-            }
-            Some(Err(err)) => {
-                return Err(kafka_backend_err("poll Kafka ingress consumer", err));
-            }
-        };
-        let partition = message.partition();
-        if partition < 0 {
-            return Ok(false);
-        }
-        let payload = message.payload().ok_or_else(|| {
-            PlaneError::Persist(aos_node::PersistError::backend(format!(
-                "Kafka ingress message at partition {} offset {} had no payload",
-                partition,
-                message.offset()
-            )))
-        })?;
-        let submission: SubmissionEnvelope = serde_cbor::from_slice(payload)?;
-        self.pending_submissions
-            .entry(partition as u32)
-            .or_default()
-            .push_back(QueuedSubmission {
-                offset: message.offset(),
-                submission,
-            });
-        Ok(true)
-    }
-
-    fn current_assignment(&self) -> Result<BTreeSet<u32>, PlaneError> {
-        let assignment = self
-            .consumer
-            .as_ref()
-            .ok_or_else(|| {
-                PlaneError::Persist(aos_node::PersistError::backend(
-                    "Kafka ingress consumer is not initialized".to_owned(),
-                ))
-            })?
-            .assignment()
-            .map_err(|err| kafka_backend_err("read Kafka consumer assignment", err))?;
-        let partitions = assignment
-            .elements()
-            .iter()
-            .filter(|entry| entry.topic() == self.config.ingress_topic)
-            .filter_map(|entry| u32::try_from(entry.partition()).ok())
-            .collect();
-        Ok(partitions)
-    }
-
-    fn tx_producer_for_partition(&mut self, partition: u32) -> Result<ProducerHandle, PlaneError> {
+    fn tx_producer_for_partition(
+        &mut self,
+        partition: u32,
+    ) -> Result<ProducerHandle, BackendError> {
         if !self.tx_producers.contains_key(&partition) {
             let producer = create_producer(&self.config, true, Some(partition))?;
             producer
@@ -558,49 +435,171 @@ impl BrokerKafkaPlanes {
             self.tx_producers.insert(partition, producer);
         }
         self.tx_producers.get(&partition).cloned().ok_or_else(|| {
-            PlaneError::Persist(aos_node::PersistError::backend(format!(
+            BackendError::Persist(aos_node::PersistError::backend(format!(
                 "missing transactional producer for partition {partition}"
             )))
         })
     }
 
-    fn ensure_consumer(&mut self) -> Result<(), PlaneError> {
-        if self.consumer.is_none() {
-            self.consumer = Some(if self.uses_direct_assignment() {
-                create_direct_consumer(&self.config, &self.config.direct_assigned_partitions)?
-            } else {
-                create_group_consumer(&self.config)?
-            });
+    fn shared_tx_producer(&mut self) -> Result<ProducerHandle, BackendError> {
+        if self.shared_tx_producer.is_none() {
+            let producer = create_producer(&self.config, true, None)?;
+            producer
+                .init_transactions(Timeout::After(Duration::from_millis(u64::from(
+                    self.config.transaction_timeout_ms,
+                ))))
+                .map_err(|err| {
+                    kafka_backend_err("initialize hosted Kafka flush transactions", err)
+                })?;
+            self.shared_tx_producer = Some(producer);
         }
-        Ok(())
-    }
-
-    fn consumer(&mut self) -> Result<&ConsumerHandle, PlaneError> {
-        self.ensure_consumer()?;
-        self.consumer.as_ref().ok_or_else(|| {
-            PlaneError::Persist(aos_node::PersistError::backend(
-                "Kafka ingress consumer is not initialized".to_owned(),
+        self.shared_tx_producer.clone().ok_or_else(|| {
+            BackendError::Persist(aos_node::PersistError::backend(
+                "missing shared hosted Kafka transactional producer".to_owned(),
             ))
         })
     }
+}
 
-    fn requeue_partition_submissions(
-        &mut self,
-        partition: u32,
-        submissions: Vec<SubmissionEnvelope>,
-    ) {
-        let queued = self.pending_submissions.entry(partition).or_default();
-        for submission in submissions.into_iter().rev() {
-            queued.push_front(QueuedSubmission {
-                offset: -1,
-                submission,
-            });
+fn decode_hosted_journal_record(payload: &[u8]) -> Result<HostedJournalRecord, BackendError> {
+    match serde_cbor::from_slice::<HostedJournalRecord>(payload) {
+        Ok(record) => Ok(record),
+        Err(_) => {
+            if let Ok(value) = serde_cbor::from_slice::<serde_cbor::Value>(payload)
+                && let Some(record) = decode_hosted_journal_value(value)?
+            {
+                return Ok(record);
+            }
+            Err(BackendError::from(
+                serde_cbor::from_slice::<HostedJournalRecord>(payload)
+                    .expect_err("already handled successful HostedJournalRecord decode"),
+            ))
         }
     }
 }
 
-impl SubmissionPlane for BrokerKafkaPlanes {
-    fn submit(&mut self, submission: SubmissionEnvelope) -> Result<u64, PlaneError> {
+fn decode_hosted_journal_value(
+    value: serde_cbor::Value,
+) -> Result<Option<HostedJournalRecord>, BackendError> {
+    match value {
+        serde_cbor::Value::Map(entries) if entries.len() == 1 => {
+            let Some((serde_cbor::Value::Text(tag), value)) = entries.into_iter().next() else {
+                return Ok(None);
+            };
+            decode_hosted_journal_tagged_value(&tag, value)
+        }
+        serde_cbor::Value::Array(mut values) if values.len() == 2 => {
+            let tag = values.remove(0);
+            let value = values.remove(0);
+            let serde_cbor::Value::Text(tag) = tag else {
+                return Ok(None);
+            };
+            decode_hosted_journal_tagged_value(&tag, value)
+        }
+        _ => Ok(None),
+    }
+}
+
+fn decode_hosted_journal_tagged_value(
+    tag: &str,
+    value: serde_cbor::Value,
+) -> Result<Option<HostedJournalRecord>, BackendError> {
+    match tag {
+        "Frame" => serde_cbor::value::from_value::<WorldLogFrame>(value)
+            .map(HostedJournalRecord::Frame)
+            .map(Some)
+            .map_err(BackendError::from),
+        "Disposition" => serde_cbor::value::from_value::<super::types::DurableDisposition>(value)
+            .map(HostedJournalRecord::Disposition)
+            .map(Some)
+            .map_err(BackendError::from),
+        _ => Ok(None),
+    }
+}
+
+fn disposition_partition(
+    disposition: &super::types::DurableDisposition,
+    partition_count: u32,
+) -> u32 {
+    match disposition {
+        super::types::DurableDisposition::RejectedSubmission { world_id, .. }
+        | super::types::DurableDisposition::CommandFailure { world_id, .. } => {
+            partition_for_world(*world_id, partition_count)
+        }
+    }
+}
+
+fn disposition_key_bytes(disposition: &super::types::DurableDisposition) -> Vec<u8> {
+    match disposition {
+        super::types::DurableDisposition::RejectedSubmission {
+            partition,
+            offset,
+            world_id,
+            ..
+        } => format!("reject:{world_id}:{partition}:{offset}").into_bytes(),
+        super::types::DurableDisposition::CommandFailure {
+            partition,
+            offset,
+            world_id,
+            command_id,
+            ..
+        } => format!("command:{world_id}:{command_id}:{partition}:{offset}").into_bytes(),
+    }
+}
+
+pub(super) fn ingress_partition_list(topic: &str, partitions: &[u32]) -> TopicPartitionList {
+    let mut assignment = TopicPartitionList::new();
+    for partition in partitions {
+        assignment.add_partition(topic, *partition as i32);
+    }
+    assignment
+}
+
+pub(super) fn compute_ingress_flow_control(
+    assigned: &BTreeSet<u32>,
+    paused: &BTreeSet<u32>,
+    backlog_by_partition: &BTreeMap<u32, usize>,
+    max_pending: usize,
+) -> (Vec<u32>, Vec<u32>, BTreeSet<u32>) {
+    if max_pending == 0 {
+        return (
+            Vec::new(),
+            paused
+                .iter()
+                .copied()
+                .filter(|partition| assigned.contains(partition))
+                .collect(),
+            BTreeSet::new(),
+        );
+    }
+
+    let mut to_pause = Vec::new();
+    let mut to_resume = Vec::new();
+    let mut next_paused = paused
+        .iter()
+        .copied()
+        .filter(|partition| assigned.contains(partition))
+        .collect::<BTreeSet<_>>();
+
+    for partition in assigned {
+        let backlog = backlog_by_partition
+            .get(partition)
+            .copied()
+            .unwrap_or_default();
+        if backlog >= max_pending {
+            if next_paused.insert(*partition) {
+                to_pause.push(*partition);
+            }
+        } else if next_paused.remove(partition) {
+            to_resume.push(*partition);
+        }
+    }
+
+    (to_pause, to_resume, next_paused)
+}
+
+impl SubmissionBackend for BrokerKafkaBackend {
+    fn submit(&mut self, submission: SubmissionEnvelope) -> Result<u64, BackendError> {
         let partition = partition_for_world(submission.world_id, self.partition_count);
         let payload = to_canonical_cbor(&submission)?;
         let key = world_key_bytes(submission.world_id);
@@ -619,10 +618,10 @@ impl SubmissionPlane for BrokerKafkaPlanes {
     }
 }
 
-impl WorldLogPlane for BrokerKafkaPlanes {
-    fn append_frame(&mut self, frame: WorldLogFrame) -> Result<WorldLogAppendResult, PlaneError> {
+impl WorldLogBackend for BrokerKafkaBackend {
+    fn append_frame(&mut self, frame: WorldLogFrame) -> Result<WorldLogAppendResult, BackendError> {
         let partition = partition_for_world(frame.world_id, self.partition_count);
-        let payload = to_canonical_cbor(&frame)?;
+        let payload = to_canonical_cbor(&HostedJournalRecord::Frame(frame.clone()))?;
         let key = world_key_bytes(frame.world_id);
         let delivery = send_record_with_delivery(
             &self.config,
@@ -636,7 +635,7 @@ impl WorldLogPlane for BrokerKafkaPlanes {
         let (_delivery_partition, offset) =
             await_delivery(&self.config, delivery, "publish Kafka world frame")?;
         let offset = u64::try_from(offset).map_err(|_| {
-            PlaneError::Persist(aos_node::PersistError::backend(format!(
+            BackendError::Persist(aos_node::PersistError::backend(format!(
                 "Kafka delivery offset for partition {partition} was negative: {offset}"
             )))
         })?;
@@ -657,9 +656,46 @@ impl WorldLogPlane for BrokerKafkaPlanes {
     }
 }
 
-fn kafka_backend_err<T: Into<String>>(label: T, err: impl std::fmt::Display) -> PlaneError {
-    PlaneError::Persist(aos_node::PersistError::backend(format!(
+pub(super) fn kafka_backend_err<T: Into<String>>(
+    label: T,
+    err: impl std::fmt::Display,
+) -> BackendError {
+    BackendError::Persist(aos_node::PersistError::backend(format!(
         "{}: {err}",
         label.into()
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_ingress_flow_control;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    #[test]
+    fn compute_ingress_flow_control_pauses_when_backlog_hits_cap() {
+        let assigned = BTreeSet::from([1_u32, 2]);
+        let paused = BTreeSet::new();
+        let backlog = BTreeMap::from([(1_u32, 4_usize), (2, 1)]);
+
+        let (to_pause, to_resume, next_paused) =
+            compute_ingress_flow_control(&assigned, &paused, &backlog, 4);
+
+        assert_eq!(to_pause, vec![1]);
+        assert!(to_resume.is_empty());
+        assert_eq!(next_paused, BTreeSet::from([1_u32]));
+    }
+
+    #[test]
+    fn compute_ingress_flow_control_resumes_when_backlog_drops_below_cap() {
+        let assigned = BTreeSet::from([1_u32, 2]);
+        let paused = BTreeSet::from([1_u32, 2]);
+        let backlog = BTreeMap::from([(1_u32, 3_usize)]);
+
+        let (to_pause, to_resume, next_paused) =
+            compute_ingress_flow_control(&assigned, &paused, &backlog, 4);
+
+        assert!(to_pause.is_empty());
+        assert_eq!(to_resume, vec![1, 2]);
+        assert!(next_paused.is_empty());
+    }
 }

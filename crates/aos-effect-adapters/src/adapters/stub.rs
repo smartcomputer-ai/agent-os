@@ -19,7 +19,7 @@ impl AsyncEffectAdapter for StubHttpAdapter {
         "http.request"
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let _: HttpRequestParams =
             serde_cbor::from_slice(&intent.params_cbor).context("decode http.request params")?;
         let receipt_payload = HttpRequestReceipt {
@@ -51,7 +51,7 @@ impl AsyncEffectAdapter for StubLlmAdapter {
         "llm.generate"
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: LlmGenerateParams =
             serde_cbor::from_slice(&intent.params_cbor).context("decode llm.generate params")?;
         let receipt_payload = LlmGenerateReceipt {
@@ -92,7 +92,7 @@ impl AsyncEffectAdapter for StubBlobAdapter {
         "blob.put"
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: BlobPutParams =
             serde_cbor::from_slice(&intent.params_cbor).context("decode blob.put params")?;
         let receipt_payload = BlobPutReceipt {
@@ -119,7 +119,7 @@ impl AsyncEffectAdapter for StubBlobGetAdapter {
         "blob.get"
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: BlobGetParams =
             serde_cbor::from_slice(&intent.params_cbor).context("decode blob.get params")?;
         let receipt_payload = BlobGetReceipt {
@@ -146,7 +146,7 @@ impl AsyncEffectAdapter for StubTimerAdapter {
         "timer.set"
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: TimerSetParams =
             serde_cbor::from_slice(&intent.params_cbor).context("decode timer.set params")?;
         let receipt_payload = TimerSetReceipt {
@@ -173,7 +173,7 @@ impl AsyncEffectAdapter for StubVaultPutAdapter {
         "vault.put"
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
             adapter_id: "stub.vault.put".to_string(),
@@ -193,7 +193,7 @@ impl AsyncEffectAdapter for StubVaultRotateAdapter {
         "vault.rotate"
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
             adapter_id: "stub.vault.rotate".to_string(),

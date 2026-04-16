@@ -3,15 +3,17 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_cbor::Hash;
+use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_effects::ReceiptStatus;
 use aos_effects::builtins::{LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCallList};
 use aos_kernel::Store;
 use aos_kernel::journal::JournalRecord;
+use aos_node::WorldConfig;
 use clap::ValueEnum;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::example_host::{ExampleHost, HarnessConfig};
+use crate::example_host::{EffectMode, ExampleHost, ExampleHostConfig, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "demo/LiveChat@1";
 const EVENT_SCHEMA: &str = "demo/LiveEvent@1";
@@ -52,13 +54,20 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let fixture_root = crate::workspace_root().join(FIXTURE_ROOT);
     let assets_root = fixture_root.join("air");
 
-    let mut host = ExampleHost::prepare(HarnessConfig {
-        example_root: &fixture_root,
-        assets_root: Some(&assets_root),
-        workflow_name: WORKFLOW_NAME,
-        event_schema: EVENT_SCHEMA,
-        module_crate: MODULE_CRATE,
-    })?;
+    let mut host = ExampleHost::prepare_with_host_config(
+        HarnessConfig {
+            example_root: &fixture_root,
+            assets_root: Some(&assets_root),
+            workflow_name: WORKFLOW_NAME,
+            event_schema: EVENT_SCHEMA,
+            module_crate: MODULE_CRATE,
+        },
+        ExampleHostConfig {
+            world: WorldConfig::default(),
+            adapters: EffectAdapterConfig::default(),
+            effect_mode: EffectMode::Twin,
+        },
+    )?;
 
     let tool_ref = register_tool_blob(&host)?;
     let tool_refs = vec![tool_ref];

@@ -20,7 +20,7 @@ use aos_effects::builtins::{
 };
 use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_kernel::Store;
-use aos_runtime::WorldConfig;
+use aos_node::WorldConfig;
 use clap::ValueEnum;
 use serde_json::{Value, json};
 use tokio::runtime::Builder;
@@ -536,7 +536,7 @@ fn execute_llm<S: aos_kernel::Store + 'static>(
 ) -> Result<LlmOutputEnvelope> {
     let intent = build_llm_intent(params)?;
     let receipt = runtime
-        .block_on(adapter.execute(&intent))
+        .block_on(adapter.run_terminal(&intent))
         .context("execute live llm")?;
 
     let payload: LlmGenerateReceipt =

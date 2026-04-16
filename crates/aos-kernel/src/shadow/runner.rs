@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::Store;
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_wasm_abi::DomainEvent;
 
 use crate::journal::Journal;
 use crate::world::{Kernel, KernelConfig};
@@ -66,7 +67,10 @@ impl ShadowExecutor {
 
         if let Some(harness) = &config.harness {
             for (schema, bytes) in &harness.seed_events {
-                kernel.submit_domain_event(schema.clone(), bytes.clone())?;
+                kernel.accept(crate::world::WorldInput::DomainEvent(DomainEvent::new(
+                    schema.clone(),
+                    bytes.clone(),
+                )))?;
             }
         }
 
@@ -74,13 +78,14 @@ impl ShadowExecutor {
         let mut pending_workflow_receipts = Vec::new();
 
         loop {
-            kernel.tick_until_idle()?;
-            let intents = kernel.drain_effects()?;
-            if intents.is_empty() {
+            let tail_start = kernel.journal_head();
+            let drain = kernel.drain_until_idle_from(tail_start)?;
+            if drain.opened_effects.is_empty() {
                 break;
             }
 
-            for intent in intents {
+            for opened in drain.opened_effects {
+                let intent = opened.intent;
                 predicted_effects.push(PredictedEffect {
                     kind: intent.kind.as_str().to_string(),
                     cap: intent.cap_name.clone(),
@@ -90,7 +95,7 @@ impl ShadowExecutor {
 
                 // Prefer real internal handling so shadow predictions stay faithful.
                 if let Some(receipt) = kernel.handle_internal_intent(&intent)? {
-                    kernel.handle_receipt(receipt)?;
+                    kernel.accept(crate::world::WorldInput::Receipt(receipt))?;
                     continue;
                 }
 
@@ -102,7 +107,7 @@ impl ShadowExecutor {
                     cost_cents: None,
                     signature: Vec::new(),
                 };
-                kernel.handle_receipt(receipt)?;
+                kernel.accept(crate::world::WorldInput::Receipt(receipt))?;
             }
         }
 

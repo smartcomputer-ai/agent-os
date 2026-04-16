@@ -9,16 +9,16 @@ use aos_cbor::Hash;
 use aos_kernel::Store;
 use aos_kernel::{LoadedManifest, MemStore};
 use aos_node::{FsCas, LocalStatePaths};
-use aos_runtime::manifest_loader;
-use aos_runtime::util::is_placeholder_hash;
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use walkdir::WalkDir;
 
 use crate::bundle::WorldBundle;
 use crate::local::local_state_paths;
+use crate::manifest_loader;
 use crate::sync::ResolvedAirImport;
 use crate::sync::{load_sync_config, resolve_air_sources};
+use crate::util::is_placeholder_hash;
 
 pub struct CompiledWorkflow {
     pub hash: HashRef,
@@ -809,12 +809,10 @@ fn normalize_hash_str(input: &str) -> Option<String> {
 mod tests {
     use std::path::PathBuf;
 
-    use aos_runtime::EffectMode;
-    use aos_runtime::manifest_loader::ZERO_HASH_SENTINEL;
-    use serde_json::json;
     use tempfile::tempdir;
 
     use super::*;
+    use crate::manifest_loader::ZERO_HASH_SENTINEL;
 
     fn fixture_root(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -844,31 +842,6 @@ mod tests {
     }
 
     #[test]
-    fn build_runtime_workflow_harness_from_authored_paths_supports_release_profile() -> Result<()> {
-        let fixture = fixture_root("01-hello-timer");
-        let scratch = tempdir()?;
-        let mut harness = crate::local::build_runtime_workflow_harness_from_authored_paths(
-            "demo/TimerSM@1",
-            &fixture.join("air"),
-            Some(&fixture.join("workflow")),
-            &[],
-            scratch.path(),
-            false,
-            WorkflowBuildProfile::Release,
-            EffectMode::Scripted,
-        )?;
-
-        harness.send_event(
-            "demo/TimerEvent@1",
-            json!({"Start": {"deliver_at_ns": 1_000_000, "key": "retry"}}),
-        )?;
-        let status = harness.run_until_kernel_idle()?;
-        assert!(status.kernel.kernel_idle);
-        assert_eq!(harness.pull_effects()?.len(), 1);
-        Ok(())
-    }
-
-    #[test]
     fn ephemeral_bundle_build_keeps_local_cas_out_of_world_root() -> Result<()> {
         let fixture = fixture_root("01-hello-timer");
         let temp = tempdir()?;
@@ -888,6 +861,21 @@ mod tests {
                 std::fs::copy(entry.path(), &target)?;
             }
         }
+        std::fs::write(
+            temp.path().join("aos.sync.json"),
+            serde_json::to_vec(&serde_json::json!({ "version": 1 }))?,
+        )?;
+        let aos_state = temp.path().join(".aos");
+        if aos_state.exists() {
+            std::fs::remove_dir_all(&aos_state)?;
+        }
+        let crates_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .canonicalize()?;
+        let cargo_toml = temp.path().join("workflow/Cargo.toml");
+        let cargo_text = std::fs::read_to_string(&cargo_toml)?;
+        let cargo_text = cargo_text.replace("../../../../", &format!("{}/", crates_root.display()));
+        std::fs::write(cargo_toml, cargo_text)?;
 
         let (_store, bundle, _warnings) = build_bundle_from_local_world_ephemeral_with_profile(
             temp.path(),

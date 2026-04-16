@@ -32,7 +32,8 @@ Still not completed in this milestone's forward direction:
 
 Deferred follow-up:
 
-1. `FabricPlane` execution-lane work moves to `roadmap/v0.18-fabric/`.
+1. External execution seam work moves to `roadmap/v0.18-execution/`.
+2. Fabric/session/artifact/log follow-on work moves to `roadmap/v0.19-fabric/`.
 
 ## Why This Is A Reset
 

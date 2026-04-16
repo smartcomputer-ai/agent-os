@@ -24,7 +24,7 @@ use aos_effects::builtins::{
 };
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Store;
-use aos_runtime::WorldConfig;
+use aos_node::WorldConfig;
 use casefile::{EvalCase, FileExpectation, load_cases};
 use clap::{Parser, Subcommand, ValueEnum};
 use eval_host::{EvalHost, EvalHostConfig, EvalModuleBuild, EvalModulePatch};
@@ -759,7 +759,7 @@ fn execute_live_llm_intent<S: Store + 'static>(
         .build()
         .context("build eval llm runtime")?;
     let mut receipt = runtime
-        .block_on(llm_adapter.execute(&patched_intent))
+        .block_on(llm_adapter.run_terminal(&patched_intent))
         .context("execute live llm adapter")?;
 
     if receipt.status != ReceiptStatus::Ok {

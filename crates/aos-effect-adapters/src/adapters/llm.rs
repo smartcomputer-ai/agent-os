@@ -241,7 +241,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         aos_effects::EffectKind::LLM_GENERATE
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: LlmGenerateParams = serde_cbor::from_slice(&intent.params_cbor)
             .map_err(|e| anyhow::anyhow!("decode LlmGenerateParams: {e}"))?;
 

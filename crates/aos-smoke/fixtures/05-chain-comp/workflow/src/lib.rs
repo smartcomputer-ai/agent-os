@@ -5,10 +5,10 @@ extern crate alloc;
 
 use alloc::{collections::BTreeMap, format, string::String};
 use aos_wasm_sdk::{
-    EffectReceiptEnvelope, ReduceError, Workflow, WorkflowCtx, aos_workflow, aos_variant,
+    EffectReceiptEnvelope, HttpRequestParams, ReduceError, Workflow, WorkflowCtx,
+    aos_workflow, aos_variant,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 const HTTP_REQUEST_EFFECT: &str = "http.request";
 
@@ -78,14 +78,6 @@ aos_variant! {
         },
         Receipt(EffectReceiptEnvelope),
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct HttpRequestParams {
-    method: String,
-    url: String,
-    headers: BTreeMap<String, String>,
-    body_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,14 +195,7 @@ fn handle_receipt(
         return Ok(());
     };
 
-    let expected_hash = {
-        let Some(saga) = ctx.state.current_saga.as_ref() else {
-            return Ok(());
-        };
-        hash_request_params(&params_for_step(saga, step))?
-    };
-
-    if envelope.params_hash.as_deref() != Some(expected_hash.as_str()) {
+    if envelope.issuer_ref.as_deref() != Some(step_issuer_ref(step)) {
         return Ok(());
     }
 
@@ -266,8 +251,12 @@ fn emit_for_step(ctx: &mut WorkflowCtx<ChainState, ()>, step: SagaStep) -> Resul
         return Ok(());
     };
     let params = params_for_step(saga, step);
-    ctx.effects()
-        .emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+    ctx.effects().emit_raw_with_issuer_ref(
+        HTTP_REQUEST_EFFECT,
+        &params,
+        Some("default"),
+        Some(step_issuer_ref(step)),
+    );
     Ok(())
 }
 
@@ -296,28 +285,18 @@ fn step_for_phase(phase: &ChainPhase) -> Option<SagaStep> {
     }
 }
 
+fn step_issuer_ref(step: SagaStep) -> &'static str {
+    match step {
+        SagaStep::Charge => "charge",
+        SagaStep::Reserve => "reserve",
+        SagaStep::Notify => "notify",
+        SagaStep::Refund => "refund",
+    }
+}
+
 fn reserve_failure_message(receipt: &HttpRequestReceipt) -> String {
     match receipt.body_ref.as_ref() {
         Some(body_ref) => format!("reserve failed: status={} body_ref={body_ref}", receipt.status),
         None => format!("reserve failed: status={}", receipt.status),
-    }
-}
-
-fn hash_request_params(params: &HttpRequestParams) -> Result<String, ReduceError> {
-    let bytes = serde_cbor::to_vec(params)
-        .map_err(|_| ReduceError::new("failed to encode http.request params"))?;
-    let digest = Sha256::digest(&bytes);
-    let mut hex = String::with_capacity(64);
-    for byte in digest {
-        hex.push(nibble_to_hex((byte >> 4) & 0x0f));
-        hex.push(nibble_to_hex(byte & 0x0f));
-    }
-    Ok(format!("sha256:{hex}"))
-}
-
-fn nibble_to_hex(nibble: u8) -> char {
-    match nibble {
-        0..=9 => (b'0' + nibble) as char,
-        _ => (b'a' + (nibble - 10)) as char,
     }
 }

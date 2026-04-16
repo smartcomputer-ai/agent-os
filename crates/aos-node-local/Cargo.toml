@@ -12,7 +12,6 @@ aos-effect-types = { path = "../aos-effect-types" }
 aos-effects = { path = "../aos-effects" }
 aos-kernel = { path = "../aos-kernel" }
 aos-node = { path = "../aos-node" }
-aos-runtime = { path = "../aos-runtime" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 
 anyhow = "1"
@@ -35,6 +34,7 @@ uuid = { version = "1", features = ["v4"] }
 aos-air-exec = { path = "../aos-air-exec" }
 indexmap = "2"
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
 wat = "1"
 
 [[bin]]

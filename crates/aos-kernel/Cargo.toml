@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+default = []
+e2e-tests = []
+
 [dependencies]
 aos-air-types = { path = "../aos-air-types" }
 aos-air-exec = { path = "../aos-air-exec" }
@@ -32,8 +36,19 @@ tempfile = "3"
 aos-wasm-build = { path = "../aos-wasm-build" }
 camino = "1"
 walkdir = "2"
+tokio = { version = "1", features = ["macros", "rt", "time"] }
 
 [lints.rust]
 unused_imports = "allow"
 unused_variables = "allow"
 dead_code = "allow"
+
+[[test]]
+name = "cap_enforcer_e2e"
+path = "tests_e2e/cap_enforcer_e2e.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "workspace_e2e"
+path = "tests_e2e/workspace_e2e.rs"
+required-features = ["e2e-tests"]

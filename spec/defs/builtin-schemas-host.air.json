@@ -390,7 +390,17 @@
             "nat": {}
           }
         },
+        "mtime_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
         "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_message": {
           "option": {
             "text": {}
           }

@@ -1,3 +1,4 @@
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use aos_wasm_abi::{
@@ -327,24 +328,32 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         cap_slot: Option<&str>,
         issuer_ref: Option<&str>,
     ) -> crate::PendingEffect {
-        let encoded = match crate::encode_effect_params(params) {
+        let payload = match serde_cbor::to_vec(params) {
             Ok(value) => value,
             Err(err) => self.ctx.trap(StepError::EffectPayload(err)),
         };
-        let pending_effect = crate::PendingEffect::new(
+        let emitted_at_ns = self.ctx.now_ns().unwrap_or_default();
+        let issuer_ref = issuer_ref
+            .map(|value| value.to_string())
+            .or_else(|| Some(synthesize_pending_issuer_ref(pending, kind, emitted_at_ns)));
+        let cap_slot = cap_slot.map(|slot| slot.to_string());
+        let pending_effect = match crate::PendingEffect::from_params_with_issuer_ref(
             kind,
-            encoded.params_hash.clone(),
-            cap_slot.map(|slot| slot.to_string()),
-            self.ctx.now_ns().unwrap_or_default(),
-        )
-        .with_issuer_ref_opt(issuer_ref.map(|value| value.to_string()));
+            params,
+            cap_slot.clone(),
+            emitted_at_ns,
+            issuer_ref.clone(),
+        ) {
+            Ok(value) => value,
+            Err(err) => self.ctx.trap(StepError::EffectPayload(err)),
+        };
         pending.insert(pending_effect.clone());
         self.ctx.emit_effect(EmittedEffect {
             kind,
-            params: encoded.cbor,
-            cap_slot: cap_slot.map(|s| s.to_string()),
+            params: payload,
+            cap_slot,
             idempotency_key: None,
-            issuer_ref: issuer_ref.map(|value| value.to_string()),
+            issuer_ref,
         });
         pending_effect
     }
@@ -372,6 +381,24 @@ struct EmittedEffect {
     cap_slot: Option<String>,
     idempotency_key: Option<Vec<u8>>,
     issuer_ref: Option<String>,
+}
+
+fn synthesize_pending_issuer_ref(
+    pending: &crate::PendingEffects,
+    kind: &str,
+    emitted_at_ns: u64,
+) -> String {
+    let mut ordinal = pending.len();
+    loop {
+        let candidate = format!("sdk:{kind}:{emitted_at_ns}:{ordinal}");
+        if pending
+            .values()
+            .all(|entry| entry.issuer_ref.as_deref() != Some(candidate.as_str()))
+        {
+            return candidate;
+        }
+        ordinal += 1;
+    }
 }
 
 impl EmittedEffect {
@@ -591,7 +618,9 @@ macro_rules! aos_event_union {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EffectReceiptEnvelope, PendingEffects, TimerSetParams};
+    use crate::{
+        BlobPutParams, EffectReceiptEnvelope, PendingEffect, PendingEffects, TimerSetParams,
+    };
     use alloc::collections::BTreeMap;
     use alloc::string::String;
     use aos_wasm_abi::{DomainEvent, WorkflowContext, WorkflowInput};
@@ -838,9 +867,91 @@ mod tests {
         let output = step_bytes::<TrackedWorkflow>(&bytes).expect("step");
         let decoded = WorkflowOutput::decode(&output).expect("decode");
         assert_eq!(decoded.effects.len(), 1);
+        assert!(decoded.effects[0].issuer_ref.is_some());
         let state: TrackedState =
             serde_cbor::from_slice(decoded.state.as_ref().expect("state")).expect("state decode");
         assert_eq!(state.pending.len(), 1);
+        let pending = state.pending.values().next().expect("pending handle");
+        assert_eq!(pending.issuer_ref, decoded.effects[0].issuer_ref);
+        let expected = PendingEffect::from_params(
+            "llm.generate",
+            &TrackedParams {
+                prompt: "hello".into(),
+            },
+            Some("llm".into()),
+            1,
+        )
+        .expect("expected pending handle");
+        assert_eq!(pending.params_hash, expected.params_hash);
+    }
+
+    #[test]
+    fn sys_blob_put_tracked_uses_kernel_compatible_params_hash() {
+        #[derive(Default)]
+        struct BlobWorkflow;
+
+        #[derive(Default, Serialize, Deserialize)]
+        struct BlobState {
+            pending: PendingEffects,
+        }
+
+        #[derive(Serialize, Deserialize)]
+        struct BlobEvent;
+
+        impl Workflow for BlobWorkflow {
+            type State = BlobState;
+            type Event = BlobEvent;
+            type Ann = Value;
+
+            fn reduce(
+                &mut self,
+                _event: Self::Event,
+                ctx: &mut WorkflowCtx<Self::State>,
+            ) -> Result<(), ReduceError> {
+                let mut pending = core::mem::take(&mut ctx.state.pending);
+                let params = BlobPutParams {
+                    bytes: b"hello".to_vec(),
+                    blob_ref: None,
+                    refs: None,
+                };
+                let handle = ctx
+                    .effects()
+                    .sys()
+                    .blob_put_tracked(&mut pending, &params, "blob");
+                ctx.state.pending = pending;
+                let expected =
+                    PendingEffect::from_params("blob.put", &params, Some("blob".into()), 1)
+                        .expect("expected blob pending handle");
+                assert_eq!(handle.params_hash, expected.params_hash);
+                Ok(())
+            }
+        }
+
+        let input = WorkflowInput {
+            version: aos_wasm_abi::ABI_VERSION,
+            state: None,
+            event: DomainEvent::new("schema", serde_cbor::to_vec(&BlobEvent).unwrap()),
+            ctx: Some(context_bytes("com.acme/BlobWorkflow@1")),
+        };
+        let bytes = input.encode().unwrap();
+        let output = step_bytes::<BlobWorkflow>(&bytes).expect("step");
+        let decoded = WorkflowOutput::decode(&output).expect("decode");
+        assert_eq!(decoded.effects.len(), 1);
+        let state: BlobState =
+            serde_cbor::from_slice(decoded.state.as_ref().expect("state")).expect("state decode");
+        let pending = state.pending.values().next().expect("pending handle");
+        let expected = PendingEffect::from_params(
+            "blob.put",
+            &BlobPutParams {
+                bytes: b"hello".to_vec(),
+                blob_ref: None,
+                refs: None,
+            },
+            Some("blob".into()),
+            1,
+        )
+        .expect("expected blob pending handle");
+        assert_eq!(pending.params_hash, expected.params_hash);
     }
 
     #[test]

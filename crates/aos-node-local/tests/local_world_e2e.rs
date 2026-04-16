@@ -1,62 +1,31 @@
 mod common;
+mod support;
 
-#[path = "../../aos-runtime/tests/helpers.rs"]
-mod runtime_helpers;
-
-use aos_cbor::{Hash, to_canonical_cbor};
-use aos_kernel::Store;
+use aos_cbor::to_canonical_cbor;
 use aos_node::{
     CborPayload, CreateWorldRequest, CreateWorldSource, DomainEventIngress,
     ForkPendingEffectPolicy, ForkWorldRequest, ImportedSeedSource, SeedKind, SnapshotSelector,
     WorldSeed,
 };
-use aos_node_local::{FsCas, LocalControl, LocalStatePaths};
-use aos_runtime::manifest_loader::store_loaded_manifest;
-use runtime_helpers::{fixtures, simple_state_manifest};
+use aos_node_local::{LocalControl, LocalStatePaths};
 
 use common::{world, world2, world3};
-
-fn copy_manifest_module_blobs(
-    source: &std::sync::Arc<fixtures::TestStore>,
-    target: &FsCas,
-    loaded: &aos_kernel::LoadedManifest,
-) -> Result<(), Box<dyn std::error::Error>> {
-    for module in loaded.modules.values() {
-        let hash = Hash::from_hex_str(module.wasm_hash.as_str())?;
-        let bytes = source.get_blob(hash)?;
-        let stored = target.put_blob(&bytes)?;
-        assert_eq!(stored, hash, "copied wasm blob hash mismatch");
-    }
-    Ok(())
-}
 
 #[test]
 fn local_control_runs_a_real_world_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     let paths = LocalStatePaths::new(temp.path().join(".aos"));
     let control = LocalControl::open_batch(paths.root())?;
-
-    let cas = FsCas::open_with_paths(&paths)?;
-    let fixture_store = fixtures::new_mem_store();
-    let loaded = simple_state_manifest(&fixture_store);
-    copy_manifest_module_blobs(&fixture_store, &cas, &loaded)?;
-    let manifest_hash = store_loaded_manifest(&cas, &loaded)?;
-
-    let created = control.create_world(CreateWorldRequest {
-        world_id: Some(world()),
-        universe_id: aos_node::UniverseId::nil(),
-        created_at_ns: 123,
-        source: CreateWorldSource::Manifest {
-            manifest_hash: manifest_hash.to_hex(),
-        },
-    })?;
+    let created = support::create_simple_world(&control, &paths, world(), 123)?;
     assert_eq!(created.record.world_id, world());
 
     let seq = control.enqueue_event(
         world(),
         DomainEventIngress {
-            schema: fixtures::START_SCHEMA.into(),
-            value: CborPayload::inline(to_canonical_cbor(&fixtures::start_event("e2e-1"))?),
+            schema: support::fixtures::START_SCHEMA.into(),
+            value: CborPayload::inline(to_canonical_cbor(&support::fixtures::start_event(
+                "e2e-1",
+            ))?),
             key: None,
             correlation_id: Some("corr-e2e-1".into()),
         },
@@ -119,21 +88,7 @@ fn local_control_supports_seeded_create_and_world_forking() -> Result<(), Box<dy
     let temp = tempfile::tempdir()?;
     let paths = LocalStatePaths::new(temp.path().join(".aos"));
     let control = LocalControl::open_batch(paths.root())?;
-
-    let cas = FsCas::open_with_paths(&paths)?;
-    let fixture_store = fixtures::new_mem_store();
-    let loaded = simple_state_manifest(&fixture_store);
-    copy_manifest_module_blobs(&fixture_store, &cas, &loaded)?;
-    let manifest_hash = store_loaded_manifest(&cas, &loaded)?;
-
-    let created = control.create_world(CreateWorldRequest {
-        world_id: Some(world()),
-        universe_id: aos_node::UniverseId::nil(),
-        created_at_ns: 10,
-        source: CreateWorldSource::Manifest {
-            manifest_hash: manifest_hash.to_hex(),
-        },
-    })?;
+    let created = support::create_simple_world(&control, &paths, world(), 10)?;
 
     let seeded = control.create_world(CreateWorldRequest {
         world_id: Some(world2()),
@@ -171,8 +126,10 @@ fn local_control_supports_seeded_create_and_world_forking() -> Result<(), Box<dy
     let seq = control.enqueue_event(
         world3(),
         DomainEventIngress {
-            schema: fixtures::START_SCHEMA.into(),
-            value: CborPayload::inline(to_canonical_cbor(&fixtures::start_event("forked-1"))?),
+            schema: support::fixtures::START_SCHEMA.into(),
+            value: CborPayload::inline(to_canonical_cbor(&support::fixtures::start_event(
+                "forked-1",
+            ))?),
             key: None,
             correlation_id: Some("corr-forked-1".into()),
         },

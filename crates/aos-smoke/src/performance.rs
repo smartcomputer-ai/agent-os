@@ -4,11 +4,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_air_types::HashRef;
-use aos_kernel::{MemStore, Store};
+use aos_authoring::{manifest_loader, patch_modules};
+use aos_kernel::journal::Journal;
+use aos_kernel::{Kernel, MemStore, Store};
 use aos_node::FsCas;
-use aos_runtime::TestHost;
-use aos_runtime::manifest_loader;
-use aos_runtime::util::patch_modules;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{EventDispatchTiming, ExampleHost, HarnessConfig};
@@ -61,10 +60,9 @@ impl ScopeTimers {
 }
 
 struct MemPerfHost {
-    host: TestHost<MemStore>,
+    kernel: Kernel<MemStore>,
     workflow_name: String,
     event_schema: String,
-    store: Arc<MemStore>,
 }
 
 impl MemPerfHost {
@@ -87,14 +85,18 @@ impl MemPerfHost {
             anyhow::bail!("module '{WORKFLOW_NAME}' missing from manifest");
         }
 
-        let host = TestHost::from_loaded_manifest(store.clone(), loaded)
-            .context("create in-memory test host")?;
+        let kernel = Kernel::from_loaded_manifest_with_config(
+            store.clone(),
+            loaded,
+            Journal::new(),
+            crate::util::kernel_config(example_root)?,
+        )
+        .context("create in-memory test host")?;
 
         Ok(Self {
-            host,
+            kernel,
             workflow_name: WORKFLOW_NAME.to_string(),
             event_schema: EVENT_SCHEMA.to_string(),
-            store,
         })
     }
 
@@ -108,13 +110,13 @@ impl MemPerfHost {
         let encode = encode_start.elapsed();
 
         let submit_start = Instant::now();
-        self.host
-            .send_event_cbor(&self.event_schema, cbor)
+        self.kernel
+            .submit_domain_event_result(self.event_schema.clone(), cbor)
             .context("send event")?;
         let submit = submit_start.elapsed();
 
         let drain_start = Instant::now();
-        self.host.run_to_idle().context("drain after event")?;
+        self.kernel.tick_until_idle().context("drain after event")?;
         let drain = drain_start.elapsed();
 
         Ok(EventDispatchTiming {
@@ -125,14 +127,15 @@ impl MemPerfHost {
     }
 
     fn read_state(&self) -> Result<PerfState> {
-        self.host
-            .state(&self.workflow_name)
-            .context("read workflow state")
+        let bytes = self
+            .kernel
+            .workflow_state(&self.workflow_name)
+            .ok_or_else(|| anyhow!("read workflow state"))?;
+        serde_cbor::from_slice(&bytes).context("decode workflow state")
     }
 
     fn workflow_state_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        self.host
-            .kernel()
+        self.kernel
             .workflow_state_bytes(&self.workflow_name, Some(key))
             .context("read keyed workflow state bytes")
     }
@@ -441,7 +444,7 @@ fn run_keyed_in_memory(example_root: &Path, messages: u64, cells: u64) -> Result
     let mut observed_cells = vec![false; cells as usize];
     let mut total_count = 0_u64;
 
-    for meta in host.host.kernel().list_cells(WORKFLOW_NAME)? {
+    for meta in host.kernel.list_cells(WORKFLOW_NAME)? {
         let key_text: String =
             serde_cbor::from_slice(&meta.key_bytes).context("decode keyed cell key")?;
         let idx = parse_cell_index(&key_text, cells)? as usize;

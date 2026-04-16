@@ -6,22 +6,22 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
-use aos_authoring::{
-    WorldBundle, build_world_harness_from_bundle, local_state_paths, resolve_placeholder_modules,
-};
+use aos_authoring::{LoadedAssets, local_state_paths, patch_modules, resolve_placeholder_modules};
 use aos_effect_adapters::config::EffectAdapterConfig;
+use aos_effect_adapters::{
+    default_registry, registry::AdapterRegistry, traits::AsyncEffectAdapter,
+};
 use aos_kernel::Store;
+use aos_kernel::journal::Journal;
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
-use aos_node::FsCas;
-use aos_node::{EmbeddedWorldHarness, LocalKernelGuard};
-use aos_runtime::manifest_loader;
-use aos_runtime::util::patch_modules;
-use aos_runtime::{EffectMode, WorldConfig};
+use aos_node::{FsCas, WorldConfig};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub struct EvalHost {
-    host: EmbeddedWorldHarness,
+    kernel: Kernel<FsCas>,
+    store: Arc<FsCas>,
+    adapter_registry: AdapterRegistry,
     workflow_name: String,
     event_schema: String,
 }
@@ -123,20 +123,21 @@ impl EvalHost {
             None,
         )?;
 
-        let kernel_config = kernel_config(cfg.world_root)?;
-        let bundle = WorldBundle::from_loaded_assets(assets.loaded, assets.secrets);
-        let host = build_world_harness_from_bundle(
+        let kernel_config = cfg
+            .world_config
+            .apply_kernel_defaults(kernel_config(cfg.world_root)?);
+        let adapter_registry = default_registry(Arc::clone(&store), &cfg.adapter_config);
+        let kernel = Kernel::from_loaded_manifest_with_config(
             Arc::clone(&store),
-            bundle,
-            Some(&paths),
-            cfg.world_config,
-            cfg.adapter_config,
+            assets.loaded,
+            Journal::new(),
             kernel_config,
-            EffectMode::Scripted,
         )?;
 
         Ok(Self {
-            host,
+            kernel,
+            store,
+            adapter_registry,
             workflow_name: cfg.workflow_name.to_string(),
             event_schema: cfg.event_schema.to_string(),
         })
@@ -144,20 +145,20 @@ impl EvalHost {
 
     pub fn send_event<T: Serialize>(&mut self, event: &T) -> Result<()> {
         let cbor = serde_cbor::to_vec(event).context("encode event cbor")?;
-        self.host
-            .send_event_cbor(&self.event_schema, cbor)
+        self.kernel
+            .submit_domain_event_result(self.event_schema.clone(), cbor)
             .context("enqueue event")?;
         self.run_to_idle()
     }
 
     pub fn run_to_idle(&mut self) -> Result<()> {
-        self.host.run_until_kernel_idle().context("drain kernel")?;
+        self.kernel.tick_until_idle().context("drain kernel")?;
         Ok(())
     }
 
     pub fn read_state_for_session<T: DeserializeOwned>(&self, session_id: &str) -> Result<T> {
         let mut matched: Option<Vec<u8>> = None;
-        for entry in self.host.list_cells(&self.workflow_name)? {
+        for entry in self.kernel.list_cells(&self.workflow_name)? {
             let Ok(candidate) = serde_cbor::from_slice::<String>(&entry.key_bytes) else {
                 continue;
             };
@@ -180,34 +181,32 @@ impl EvalHost {
             )
         })?;
         let bytes = self
-            .host
-            .state_bytes(&self.workflow_name, Some(&key_bytes))
+            .kernel
+            .workflow_state_bytes(&self.workflow_name, Some(&key_bytes))
+            .context("load keyed workflow state bytes")?
             .ok_or_else(|| anyhow!("missing keyed workflow state bytes"))?;
         serde_cbor::from_slice(&bytes).context("decode keyed workflow state")
     }
 
-    pub fn kernel_mut(&mut self) -> LocalKernelGuard<'_> {
-        self.host
-            .kernel_mut()
-            .expect("embedded eval harness kernel_mut")
-    }
-
     pub fn store(&self) -> Arc<FsCas> {
-        self.host.store()
+        Arc::clone(&self.store)
     }
 
     pub fn with_kernel_mut<R>(
         &mut self,
         f: impl FnOnce(&mut Kernel<FsCas>) -> Result<R, aos_kernel::KernelError>,
     ) -> Result<R> {
-        self.host.with_kernel_mut(f).map_err(Into::into)
+        f(&mut self.kernel).map_err(Into::into)
     }
 
     pub fn execute_batch_routed(
         &mut self,
         intents: Vec<(aos_effects::EffectIntent, String)>,
     ) -> Result<Vec<aos_effects::EffectReceipt>> {
-        self.host.execute_batch_routed(intents).map_err(Into::into)
+        intents
+            .into_iter()
+            .map(|(intent, route_id)| self.execute_single_routed(intent, route_id))
+            .collect()
     }
 
     pub fn execute_single_routed(
@@ -215,9 +214,19 @@ impl EvalHost {
         intent: aos_effects::EffectIntent,
         route_id: String,
     ) -> Result<aos_effects::EffectReceipt> {
-        self.host
-            .execute_single_routed(intent, route_id)
-            .map_err(Into::into)
+        let adapter = self
+            .adapter_registry
+            .get_route(&route_id)
+            .ok_or_else(|| anyhow!("missing adapter route '{route_id}'"))?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("build eval adapter runtime")?;
+        let mut receipt = runtime
+            .block_on(adapter.run_terminal(&intent))
+            .with_context(|| format!("execute adapter route '{route_id}'"))?;
+        receipt.intent_hash = intent.intent_hash;
+        Ok(receipt)
     }
 }
 
@@ -237,7 +246,7 @@ fn kernel_config(world_root: &Path) -> Result<KernelConfig> {
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
     Ok(KernelConfig {
         module_cache_dir: Some(cache_dir),
-        eager_module_load: true,
+        eager_module_load: false,
         secret_resolver: None,
         allow_placeholder_secrets: false,
         cell_cache_size: aos_kernel::world::DEFAULT_CELL_CACHE_SIZE,
@@ -334,8 +343,8 @@ fn load_manifest_assets<S: Store + 'static>(
     store: Arc<S>,
     assets_root: &Path,
     import_roots: &[PathBuf],
-) -> Result<manifest_loader::LoadedAssets> {
-    manifest_loader::load_from_assets_with_imports_and_defs(store, assets_root, import_roots)
+) -> Result<LoadedAssets> {
+    aos_authoring::load_from_assets_with_imports_and_defs(store, assets_root, import_roots)
         .context("load manifest from eval assets")?
         .ok_or_else(|| anyhow!("eval manifest missing at {}", assets_root.display()))
 }

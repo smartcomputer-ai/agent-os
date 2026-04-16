@@ -194,7 +194,7 @@ impl AsyncEffectAdapter for HostSessionOpenAdapter {
         EffectKind::HOST_SESSION_OPEN
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let started_at_ns = now_wallclock_ns();
         let params: HostSessionOpenParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
@@ -294,7 +294,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostExecAdapter<S>
         EffectKind::HOST_EXEC
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let started_at_ns = now_wallclock_ns();
         let params: HostExecParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
@@ -578,7 +578,7 @@ impl AsyncEffectAdapter for HostSessionSignalAdapter {
         EffectKind::HOST_SESSION_SIGNAL
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostSessionSignalParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => {
@@ -657,7 +657,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
         EffectKind::HOST_FS_READ_FILE
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostFsReadFileParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => return fs_read_error(intent, "invalid_params", err.to_string()),
@@ -871,7 +871,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsWriteFileAda
         EffectKind::HOST_FS_WRITE_FILE
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostFsWriteFileParams =
             match decode_host_fs_write_file_params(&intent.params_cbor) {
                 Ok(params) => params,
@@ -987,7 +987,7 @@ impl AsyncEffectAdapter for HostFsEditFileAdapter {
         EffectKind::HOST_FS_EDIT_FILE
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostFsEditFileParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => return fs_edit_error(intent, "invalid_params", err.to_string()),
@@ -1139,7 +1139,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsApplyPatchAd
         EffectKind::HOST_FS_APPLY_PATCH
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostFsApplyPatchParams =
             match decode_host_fs_apply_patch_params(&intent.params_cbor) {
                 Ok(params) => params,
@@ -1267,7 +1267,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGrepAdapter<
         EffectKind::HOST_FS_GREP
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostFsGrepParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => return fs_grep_error(intent, "invalid_params", err.to_string()),
@@ -1419,7 +1419,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGlobAdapter<
         EffectKind::HOST_FS_GLOB
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostFsGlobParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => return fs_glob_error(intent, "invalid_params", err.to_string()),
@@ -1562,7 +1562,7 @@ impl AsyncEffectAdapter for HostFsStatAdapter {
         EffectKind::HOST_FS_STAT
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostFsStatParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => return fs_stat_error(intent, "invalid_params", err.to_string()),
@@ -1646,7 +1646,7 @@ impl AsyncEffectAdapter for HostFsExistsAdapter {
         EffectKind::HOST_FS_EXISTS
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostFsExistsParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => return fs_exists_error(intent, "invalid_params", err.to_string()),
@@ -1699,7 +1699,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsListDirAdapt
         EffectKind::HOST_FS_LIST_DIR
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: HostFsListDirParams = match serde_cbor::from_slice(&intent.params_cbor) {
             Ok(params) => params,
             Err(err) => return fs_list_dir_error(intent, "invalid_params", err.to_string()),
@@ -2740,7 +2740,7 @@ mod tests {
         let (open_adapter, exec_adapter, signal_adapter) = make_host_adapters(store);
 
         let open_receipt = open_adapter
-            .execute(&intent_for(
+            .run_terminal(&intent_for(
                 EffectKind::HOST_SESSION_OPEN,
                 &open_params("."),
                 1,
@@ -2762,7 +2762,7 @@ mod tests {
             output_mode: Some("require_inline".into()),
         };
         let exec_receipt = exec_adapter
-            .execute(&intent_for(EffectKind::HOST_EXEC, &exec_params, 2))
+            .run_terminal(&intent_for(EffectKind::HOST_EXEC, &exec_params, 2))
             .await
             .expect("exec receipt");
         assert_eq!(exec_receipt.status, ReceiptStatus::Ok);
@@ -2774,7 +2774,7 @@ mod tests {
             grace_timeout_ns: None,
         };
         let signal_receipt = signal_adapter
-            .execute(&intent_for(
+            .run_terminal(&intent_for(
                 EffectKind::HOST_SESSION_SIGNAL,
                 &signal_params,
                 3,
@@ -2796,7 +2796,7 @@ mod tests {
 
         let open_receipt = set
             .session_open
-            .execute(&intent_for(
+            .run_terminal(&intent_for(
                 EffectKind::HOST_SESSION_OPEN,
                 &open_params(tmp.path().to_string_lossy().as_ref()),
                 9,
@@ -2819,7 +2819,7 @@ mod tests {
         };
         let write_receipt = set
             .fs_write_file
-            .execute(&intent_for(
+            .run_terminal(&intent_for(
                 EffectKind::HOST_FS_WRITE_FILE,
                 &write_params,
                 10,
@@ -2839,7 +2839,7 @@ mod tests {
         };
         let read_receipt = set
             .fs_read_file
-            .execute(&intent_for(EffectKind::HOST_FS_READ_FILE, &read_params, 11))
+            .run_terminal(&intent_for(EffectKind::HOST_FS_READ_FILE, &read_params, 11))
             .await
             .expect("read receipt");
         assert_eq!(read_receipt.status, ReceiptStatus::Ok);

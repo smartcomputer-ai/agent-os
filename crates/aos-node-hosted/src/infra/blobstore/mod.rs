@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use aos_cbor::HASH_PREFIX;
 use aos_node::{
-    CheckpointPlane, CommandRecord, PartitionCheckpoint, PersistError, PlaneError, UniverseId,
+    BackendError, CheckpointBackend, CommandRecord, PartitionCheckpoint, PersistError, UniverseId,
     WorldId,
 };
 use object_store::ObjectStore;
@@ -88,7 +88,7 @@ impl EmbeddedBlobMetaStore {
         &mut self,
         _journal_topic: &str,
         _partition_count: u32,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         Ok(())
     }
 
@@ -96,7 +96,7 @@ impl EmbeddedBlobMetaStore {
         &mut self,
         world_id: WorldId,
         record: CommandRecord,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         self.command_records
             .insert((world_id, record.command_id.clone()), record);
         Ok(())
@@ -118,14 +118,14 @@ pub struct ObjectStoreBlobMetaStore {
 }
 
 impl ObjectStoreBlobMetaStore {
-    pub fn new(config: BlobStoreConfig) -> Result<Self, PlaneError> {
+    pub fn new(config: BlobStoreConfig) -> Result<Self, BackendError> {
         let bucket = config
             .bucket
             .clone()
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| {
-                PlaneError::Persist(PersistError::validation(
-                    "AOS_BLOBSTORE_BUCKET must be set for object-store-backed blob planes",
+                BackendError::Persist(PersistError::validation(
+                    "AOS_BLOBSTORE_BUCKET must be set for object-store-backed blob backends",
                 ))
             })?;
         let store = build_object_store(&config, &bucket)?;
@@ -161,7 +161,7 @@ impl ObjectStoreBlobMetaStore {
         &mut self,
         journal_topic: &str,
         partition_count: u32,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         for partition in 0..partition_count {
             let key = checkpoint_key(&self.config, journal_topic, partition);
             if let Some(payload) = self.get_object_sync(&key)? {
@@ -177,7 +177,7 @@ impl ObjectStoreBlobMetaStore {
         &mut self,
         world_id: WorldId,
         record: CommandRecord,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         let key = command_record_key(&self.config, world_id, &record.command_id);
         let payload = serde_cbor::to_vec(&record)?;
         self.put_object_sync(key, payload)?;
@@ -190,7 +190,7 @@ impl ObjectStoreBlobMetaStore {
         &mut self,
         world_id: WorldId,
         command_id: &str,
-    ) -> Result<Option<CommandRecord>, PlaneError> {
+    ) -> Result<Option<CommandRecord>, BackendError> {
         if let Some(record) = self.command_records.get(&(world_id, command_id.to_owned())) {
             return Ok(Some(record.clone()));
         }
@@ -204,7 +204,7 @@ impl ObjectStoreBlobMetaStore {
         Ok(Some(record))
     }
 
-    fn put_object_sync(&self, key: String, payload: Vec<u8>) -> Result<(), PlaneError> {
+    fn put_object_sync(&self, key: String, payload: Vec<u8>) -> Result<(), BackendError> {
         let store = Arc::clone(&self.store);
         let path = ObjectPath::from(key.clone());
         run_async(
@@ -219,7 +219,7 @@ impl ObjectStoreBlobMetaStore {
         )
     }
 
-    fn get_object_sync(&self, key: &str) -> Result<Option<Vec<u8>>, PlaneError> {
+    fn get_object_sync(&self, key: &str) -> Result<Option<Vec<u8>>, BackendError> {
         let store = Arc::clone(&self.store);
         let path = ObjectPath::from(key);
         let label = format!("get object-store://{}/{}", self.bucket, key);
@@ -238,7 +238,7 @@ impl ObjectStoreBlobMetaStore {
         })
     }
 
-    fn list_object_keys_sync(&self, prefix: &str) -> Result<Vec<String>, PlaneError> {
+    fn list_object_keys_sync(&self, prefix: &str) -> Result<Vec<String>, BackendError> {
         let store = Arc::clone(&self.store);
         let path = ObjectPath::from(prefix);
         let label = format!("list object-store://{}/{}", self.bucket, prefix);
@@ -255,7 +255,7 @@ impl ObjectStoreBlobMetaStore {
         })
     }
 
-    fn delete_object_sync(&self, key: &str) -> Result<(), PlaneError> {
+    fn delete_object_sync(&self, key: &str) -> Result<(), BackendError> {
         let store = Arc::clone(&self.store);
         let path = ObjectPath::from(key);
         let label = format!("delete object-store://{}/{}", self.bucket, key);
@@ -271,7 +271,7 @@ impl ObjectStoreBlobMetaStore {
         &self,
         journal_topic: &str,
         partition: u32,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         let retain = self.config.retained_checkpoints_per_partition.max(1);
         let prefix = checkpoint_manifest_prefix(&self.config, journal_topic, partition);
         let mut keys = self.list_object_keys_sync(&prefix)?;
@@ -304,7 +304,7 @@ pub enum HostedBlobMetaStore {
 }
 
 impl HostedBlobMetaStore {
-    pub fn new(config: BlobStoreConfig) -> Result<Self, PlaneError> {
+    pub fn new(config: BlobStoreConfig) -> Result<Self, BackendError> {
         if config
             .bucket
             .as_ref()
@@ -330,7 +330,7 @@ impl HostedBlobMetaStore {
         &mut self,
         journal_topic: &str,
         partition_count: u32,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         match self {
             Self::Embedded(inner) => inner.prime_latest_checkpoints(journal_topic, partition_count),
             Self::ObjectStore(inner) => {
@@ -343,7 +343,7 @@ impl HostedBlobMetaStore {
         &mut self,
         world_id: WorldId,
         record: CommandRecord,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         match self {
             Self::Embedded(inner) => inner.put_command_record(world_id, record),
             Self::ObjectStore(inner) => inner.put_command_record(world_id, record),
@@ -354,7 +354,7 @@ impl HostedBlobMetaStore {
         &mut self,
         world_id: WorldId,
         command_id: &str,
-    ) -> Result<Option<CommandRecord>, PlaneError> {
+    ) -> Result<Option<CommandRecord>, BackendError> {
         match self {
             Self::Embedded(inner) => Ok(inner.get_command_record(world_id, command_id)),
             Self::ObjectStore(inner) => inner.get_command_record(world_id, command_id),
@@ -362,8 +362,8 @@ impl HostedBlobMetaStore {
     }
 }
 
-impl CheckpointPlane for EmbeddedBlobMetaStore {
-    fn commit_checkpoint(&mut self, checkpoint: PartitionCheckpoint) -> Result<(), PlaneError> {
+impl CheckpointBackend for EmbeddedBlobMetaStore {
+    fn commit_checkpoint(&mut self, checkpoint: PartitionCheckpoint) -> Result<(), BackendError> {
         self.latest_checkpoints.insert(
             (checkpoint.journal_topic.clone(), checkpoint.partition),
             checkpoint,
@@ -381,8 +381,8 @@ impl CheckpointPlane for EmbeddedBlobMetaStore {
     }
 }
 
-impl CheckpointPlane for ObjectStoreBlobMetaStore {
-    fn commit_checkpoint(&mut self, checkpoint: PartitionCheckpoint) -> Result<(), PlaneError> {
+impl CheckpointBackend for ObjectStoreBlobMetaStore {
+    fn commit_checkpoint(&mut self, checkpoint: PartitionCheckpoint) -> Result<(), BackendError> {
         let journal_topic = checkpoint.journal_topic.clone();
         let partition = checkpoint.partition;
         let latest_key = checkpoint_key(
@@ -417,8 +417,8 @@ impl CheckpointPlane for ObjectStoreBlobMetaStore {
     }
 }
 
-impl CheckpointPlane for HostedBlobMetaStore {
-    fn commit_checkpoint(&mut self, checkpoint: PartitionCheckpoint) -> Result<(), PlaneError> {
+impl CheckpointBackend for HostedBlobMetaStore {
+    fn commit_checkpoint(&mut self, checkpoint: PartitionCheckpoint) -> Result<(), BackendError> {
         match self {
             Self::Embedded(inner) => inner.commit_checkpoint(checkpoint),
             Self::ObjectStore(inner) => inner.commit_checkpoint(checkpoint),
@@ -440,7 +440,7 @@ impl CheckpointPlane for HostedBlobMetaStore {
 pub(crate) fn build_object_store(
     config: &BlobStoreConfig,
     bucket: &str,
-) -> Result<Arc<dyn ObjectStore>, PlaneError> {
+) -> Result<Arc<dyn ObjectStore>, BackendError> {
     let region = config
         .region
         .clone()
@@ -461,17 +461,17 @@ pub(crate) fn build_object_store(
     }
 
     let store = builder.build().map_err(|err| {
-        PlaneError::Persist(PersistError::backend(format!(
+        BackendError::Persist(PersistError::backend(format!(
             "build object store client: {err}"
         )))
     })?;
     Ok(Arc::new(store))
 }
 
-pub(crate) fn run_async<T, F>(label: impl Into<String>, future: F) -> Result<T, PlaneError>
+pub(crate) fn run_async<T, F>(label: impl Into<String>, future: F) -> Result<T, BackendError>
 where
     T: Send + 'static,
-    F: std::future::Future<Output = Result<T, PlaneError>> + Send + 'static,
+    F: std::future::Future<Output = Result<T, BackendError>> + Send + 'static,
 {
     let label = label.into();
     let join_label = label.clone();
@@ -480,7 +480,7 @@ where
             .enable_all()
             .build()
             .map_err(|err| {
-                PlaneError::Persist(PersistError::backend(format!(
+                BackendError::Persist(PersistError::backend(format!(
                     "create tokio runtime for {label}: {err}"
                 )))
             })?;
@@ -488,7 +488,7 @@ where
     })
     .join()
     .map_err(|_| {
-        PlaneError::Persist(PersistError::backend(format!(
+        BackendError::Persist(PersistError::backend(format!(
             "join async worker for {join_label}"
         )))
     })?
@@ -542,14 +542,14 @@ pub fn scoped_blobstore_config(base: &BlobStoreConfig, universe_id: UniverseId) 
 }
 
 #[allow(dead_code)]
-fn parse_hash_ref(value: &str) -> Result<aos_cbor::Hash, PlaneError> {
+fn parse_hash_ref(value: &str) -> Result<aos_cbor::Hash, BackendError> {
     let normalized = if value.starts_with(HASH_PREFIX) {
         value.to_owned()
     } else {
         format!("{HASH_PREFIX}{value}")
     };
     aos_cbor::Hash::from_hex_str(&normalized)
-        .map_err(|_| PlaneError::InvalidHashRef(value.to_owned()))
+        .map_err(|_| BackendError::InvalidHashRef(value.to_owned()))
 }
 
 fn env_or_legacy(primary: &str, legacy: &str) -> Option<String> {
@@ -560,9 +560,9 @@ fn env_or_legacy(primary: &str, legacy: &str) -> Option<String> {
 
 pub(crate) fn object_store_backend_err(
     label: impl Into<String>,
-) -> impl FnOnce(object_store::Error) -> PlaneError {
+) -> impl FnOnce(object_store::Error) -> BackendError {
     let label = label.into();
-    move |err| PlaneError::Persist(PersistError::backend(format!("{label}: {err}")))
+    move |err| BackendError::Persist(PersistError::backend(format!("{label}: {err}")))
 }
 
 #[cfg(test)]
@@ -619,12 +619,12 @@ mod tests {
     #[test]
     fn object_store_blob_meta_store_prunes_old_checkpoint_manifests() {
         let store = Arc::new(InMemory::new());
-        let mut plane = ObjectStoreBlobMetaStore::from_store(test_config(), "test-bucket", store);
+        let mut backend = ObjectStoreBlobMetaStore::from_store(test_config(), "test-bucket", store);
         let universe_id = UniverseId::from(uuid::Uuid::new_v4());
         let world_id = WorldId::from(uuid::Uuid::new_v4());
 
         for ts in 1..=4 {
-            plane
+            backend
                 .commit_checkpoint(checkpoint_for(
                     "aos-journal",
                     ts,
@@ -636,8 +636,12 @@ mod tests {
                 .unwrap();
         }
 
-        let manifests = plane
-            .list_object_keys_sync(&checkpoint_manifest_prefix(&plane.config, "aos-journal", 0))
+        let manifests = backend
+            .list_object_keys_sync(&checkpoint_manifest_prefix(
+                &backend.config,
+                "aos-journal",
+                0,
+            ))
             .unwrap();
         assert_eq!(manifests.len(), 2);
         assert!(
@@ -651,7 +655,7 @@ mod tests {
                 .any(|item| item.ends_with("00000000000000000004.cbor"))
         );
 
-        let latest = plane.latest_checkpoint("aos-journal", 0).unwrap();
+        let latest = backend.latest_checkpoint("aos-journal", 0).unwrap();
         assert_eq!(latest.created_at_ns, 4);
     }
 }

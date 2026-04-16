@@ -3,8 +3,9 @@ use aos_effects::ReceiptStatus;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::config::*;
 use super::identity::*;
+
+pub type JournalHeight = u64;
 
 mod serde_bytes_opt {
     use serde::{Deserialize, Deserializer, Serializer};

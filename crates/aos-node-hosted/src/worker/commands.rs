@@ -3,57 +3,59 @@ use aos_effect_types::{
 };
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::governance_utils::canonicalize_patch;
+use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::{PatchDocument, compile_patch_document};
-use aos_kernel::{KernelError, Store};
+use aos_kernel::{KernelError, Store, WorldControl};
 use aos_node::{CommandErrorBody, CommandIngress, CommandRecord, CommandStatus, WorldId};
-use aos_runtime::{HostError, WorldHost};
 
 use super::types::WorkerError;
 use super::util::{parse_hash_ref, unix_time_ns};
 
-pub(super) fn run_plane_command<S: Store + 'static>(
-    host: &mut WorldHost<S>,
-    control: &CommandIngress,
+pub(crate) fn world_control_from_command_payload<S: Store + 'static>(
+    store: &S,
+    command: &str,
     payload: &[u8],
-) -> Result<(), WorkerError> {
-    match control.command.as_str() {
+) -> Result<WorldControl, WorkerError> {
+    match command {
         "gov-propose" => {
             let params: GovProposeParams = serde_cbor::from_slice(payload)?;
-            let patch = prepare_manifest_patch(host, params.patch.clone(), params.manifest_base)?;
-            host.kernel_mut()
-                .submit_proposal(patch, params.description.clone())?;
-            Ok(())
+            let patch = prepare_manifest_patch(store, params.patch, params.manifest_base)?;
+            Ok(WorldControl::SubmitProposal {
+                patch,
+                description: params.description,
+            })
         }
         "gov-shadow" => {
             let params: GovShadowParams = serde_cbor::from_slice(payload)?;
-            let _ = host.kernel_mut().run_shadow(params.proposal_id, None)?;
-            Ok(())
+            Ok(WorldControl::RunShadow {
+                proposal_id: params.proposal_id,
+            })
         }
         "gov-approve" => {
             let params: GovApproveParams = serde_cbor::from_slice(payload)?;
-            match params.decision {
-                GovDecision::Approve => host
-                    .kernel_mut()
-                    .approve_proposal(params.proposal_id, params.approver.clone())?,
-                GovDecision::Reject => host
-                    .kernel_mut()
-                    .reject_proposal(params.proposal_id, params.approver.clone())?,
-            }
-            Ok(())
+            Ok(WorldControl::DecideProposal {
+                proposal_id: params.proposal_id,
+                approver: params.approver,
+                decision: match params.decision {
+                    GovDecision::Approve => ApprovalDecisionRecord::Approve,
+                    GovDecision::Reject => ApprovalDecisionRecord::Reject,
+                },
+            })
         }
         "gov-apply" => {
             let params: GovApplyParams = serde_cbor::from_slice(payload)?;
-            host.kernel_mut().apply_proposal(params.proposal_id)?;
-            Ok(())
+            Ok(WorldControl::ApplyProposal {
+                proposal_id: params.proposal_id,
+            })
         }
-        other => Err(WorkerError::Host(HostError::External(format!(
-            "unsupported log-first command submission '{other}'"
-        )))),
+        other => Err(WorkerError::Persist(aos_node::PersistError::validation(
+            format!("unsupported world control command '{other}'"),
+        ))),
     }
 }
 
 fn prepare_manifest_patch<S: Store + 'static>(
-    host: &WorldHost<S>,
+    store: &S,
     input: GovPatchInput,
     manifest_base: Option<aos_effect_types::HashRef>,
 ) -> Result<ManifestPatch, WorkerError> {
@@ -64,10 +66,7 @@ fn prepare_manifest_patch<S: Store + 'static>(
                     "manifest_base is not supported with patch hash input".into(),
                 )));
             }
-            let bytes = host
-                .store()
-                .get_blob(parse_hash_ref(hash.as_str())?)
-                .map_err(WorkerError::Store)?;
+            let bytes = store.get_blob(parse_hash_ref(hash.as_str())?)?;
             Ok(serde_cbor::from_slice(&bytes)?)
         }
         GovPatchInput::PatchCbor(bytes) => {
@@ -77,7 +76,7 @@ fn prepare_manifest_patch<S: Store + 'static>(
                 )));
             }
             let patch: ManifestPatch = serde_cbor::from_slice(&bytes)?;
-            canonicalize_patch(host.store(), patch).map_err(WorkerError::Kernel)
+            canonicalize_patch(store, patch).map_err(WorkerError::Kernel)
         }
         GovPatchInput::PatchDocJson(bytes) => {
             let doc: PatchDocument = serde_json::from_slice(&bytes).map_err(WorkerError::Json)?;
@@ -89,19 +88,16 @@ fn prepare_manifest_patch<S: Store + 'static>(
                     doc.base_manifest_hash
                 ))));
             }
-            compile_patch_document(host.store(), doc).map_err(WorkerError::Kernel)
+            compile_patch_document(store, doc).map_err(WorkerError::Kernel)
         }
         GovPatchInput::PatchBlobRef { blob_ref, format } => {
-            let bytes = host
-                .store()
-                .get_blob(parse_hash_ref(blob_ref.as_str())?)
-                .map_err(WorkerError::Store)?;
+            let bytes = store.get_blob(parse_hash_ref(blob_ref.as_str())?)?;
             match format.as_str() {
                 "manifest_patch_cbor" => {
-                    prepare_manifest_patch(host, GovPatchInput::PatchCbor(bytes), manifest_base)
+                    prepare_manifest_patch(store, GovPatchInput::PatchCbor(bytes), manifest_base)
                 }
                 "patch_doc_json" => {
-                    prepare_manifest_patch(host, GovPatchInput::PatchDocJson(bytes), manifest_base)
+                    prepare_manifest_patch(store, GovPatchInput::PatchDocJson(bytes), manifest_base)
                 }
                 other => Err(WorkerError::Kernel(KernelError::Manifest(format!(
                     "unknown patch blob format '{other}'"
@@ -122,7 +118,7 @@ pub(crate) fn command_submit_response(
     }
 }
 
-pub(super) fn synthesize_queued_command_record(command: &CommandIngress) -> CommandRecord {
+pub(crate) fn synthesize_queued_command_record(command: &CommandIngress) -> CommandRecord {
     CommandRecord {
         command_id: command.command_id.clone(),
         command: command.command.clone(),
@@ -134,19 +130,6 @@ pub(super) fn synthesize_queued_command_record(command: &CommandIngress) -> Comm
         manifest_hash: None,
         result_payload: None,
         error: None,
-    }
-}
-
-pub(super) fn command_running_record(record: &CommandRecord) -> CommandRecord {
-    CommandRecord {
-        status: CommandStatus::Running,
-        started_at_ns: Some(record.started_at_ns.unwrap_or_else(unix_time_ns)),
-        finished_at_ns: None,
-        journal_height: None,
-        manifest_hash: None,
-        result_payload: None,
-        error: None,
-        ..record.clone()
     }
 }
 

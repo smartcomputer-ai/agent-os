@@ -5,6 +5,7 @@ use crate::contracts::{
 };
 use crate::helpers::workflow::SessionReduceError;
 use crate::{helpers::llm::LlmMappingError, tools::ToolEffectKind};
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_effects::builtins::{
@@ -49,13 +50,12 @@ impl SessionEffectCommand {
     pub fn emit(self, ctx: &mut WorkflowCtx<SessionState, Value>) {
         match self {
             Self::LlmGenerate { params, pending } => {
-                if let Some(cap_slot) = pending.cap_slot.as_deref() {
-                    let mut effects = ctx.effects();
-                    effects.sys().llm_generate(&params, cap_slot);
-                } else {
-                    ctx.effects()
-                        .emit_raw_with_issuer_ref("llm.generate", &params, None, None);
-                }
+                ctx.effects().emit_raw_with_issuer_ref(
+                    "llm.generate",
+                    &params,
+                    pending.cap_slot.as_deref(),
+                    pending.issuer_ref.as_deref(),
+                );
             }
             Self::ToolEffect {
                 kind,
@@ -72,30 +72,20 @@ impl SessionEffectCommand {
                 );
             }
             Self::BlobPut { params, pending } => {
-                if let Some(cap_slot) = pending.cap_slot.as_deref() {
-                    let mut effects = ctx.effects();
-                    effects.sys().blob_put(&params, cap_slot);
-                } else {
-                    ctx.effects().emit_raw_with_issuer_ref(
-                        "blob.put",
-                        &params,
-                        None,
-                        pending.issuer_ref.as_deref(),
-                    );
-                }
+                ctx.effects().emit_raw_with_issuer_ref(
+                    "blob.put",
+                    &params,
+                    pending.cap_slot.as_deref(),
+                    pending.issuer_ref.as_deref(),
+                );
             }
             Self::BlobGet { params, pending } => {
-                if let Some(cap_slot) = pending.cap_slot.as_deref() {
-                    let mut effects = ctx.effects();
-                    effects.sys().blob_get(&params, cap_slot);
-                } else {
-                    ctx.effects().emit_raw_with_issuer_ref(
-                        "blob.get",
-                        &params,
-                        None,
-                        pending.issuer_ref.as_deref(),
-                    );
-                }
+                ctx.effects().emit_raw_with_issuer_ref(
+                    "blob.get",
+                    &params,
+                    pending.cap_slot.as_deref(),
+                    pending.issuer_ref.as_deref(),
+                );
             }
         }
     }
@@ -330,6 +320,7 @@ pub fn begin_pending_effect<T: serde::Serialize>(
     cap_slot: Option<String>,
     issuer_ref: Option<String>,
 ) -> PendingEffect {
+    let issuer_ref = issuer_ref.or_else(|| Some(synthesize_pending_issuer_ref(state, effect_kind)));
     match state.pending_effects.begin_with_issuer_ref(
         effect_kind,
         params,
@@ -345,6 +336,21 @@ pub fn begin_pending_effect<T: serde::Serialize>(
             state.pending_effects.insert(pending.clone());
             pending
         }
+    }
+}
+
+fn synthesize_pending_issuer_ref(state: &SessionState, effect_kind: &str) -> String {
+    let mut ordinal = state.pending_effects.len();
+    loop {
+        let candidate = format!("session:{effect_kind}:{}:{ordinal}", state.updated_at);
+        if state
+            .pending_effects
+            .values()
+            .all(|pending| pending.issuer_ref.as_deref() != Some(candidate.as_str()))
+        {
+            return candidate;
+        }
+        ordinal += 1;
     }
 }
 

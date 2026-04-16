@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow, ensure};
 use aos_effects::builtins::{HeaderMap, HttpRequestReceipt, RequestTimings};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::journal::{JournalKind, JournalRecord};
-use aos_runtime::trace::{TraceQuery, diagnose_trace, trace_get};
+use aos_kernel::{TraceQuery, diagnose_trace, trace_get};
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 

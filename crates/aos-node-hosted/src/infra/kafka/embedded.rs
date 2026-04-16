@@ -1,34 +1,37 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
 
 use aos_node::{
-    PlaneError, RejectedSubmission, SubmissionEnvelope, SubmissionPlane, WorldId,
-    WorldLogAppendResult, WorldLogFrame, WorldLogPlane, partition_for_world,
+    BackendError, RejectedSubmission, SubmissionBackend, SubmissionEnvelope, WorldId,
+    WorldLogAppendResult, WorldLogBackend, WorldLogFrame, partition_for_world,
 };
+use tokio::sync::Notify;
 
 use super::ProjectionRecord;
 use super::local_state::{append_frame_locally, append_projection_locally};
 use super::types::{
-    CommitFailpoint, KafkaConfig, PartitionLogEntry, ProjectionTopicEntry, SubmissionBatch,
-    SubmissionCommit,
+    CommitFailpoint, FlushCommit, IngressRecord, KafkaConfig, PartitionLogEntry,
+    ProjectionTopicEntry, QueuedSubmission,
 };
 
 #[derive(Debug)]
-pub struct EmbeddedKafkaPlanes {
+pub struct EmbeddedKafkaBackend {
     partition_count: u32,
     config: KafkaConfig,
-    pending_submissions: VecDeque<SubmissionEnvelope>,
+    pending_submissions: VecDeque<QueuedSubmission>,
     world_frames: BTreeMap<WorldId, Vec<WorldLogFrame>>,
     partition_logs: BTreeMap<(String, u32), Vec<PartitionLogEntry>>,
     projection_logs: BTreeMap<(String, u32), Vec<ProjectionTopicEntry>>,
     rejected_submissions: Vec<RejectedSubmission>,
     next_submission_offset: u64,
     failpoint: Option<CommitFailpoint>,
+    ingress_notify: Arc<Notify>,
 }
 
-impl EmbeddedKafkaPlanes {
-    pub fn new(partition_count: u32, config: KafkaConfig) -> Result<Self, PlaneError> {
+impl EmbeddedKafkaBackend {
+    pub fn new(partition_count: u32, config: KafkaConfig) -> Result<Self, BackendError> {
         if partition_count == 0 {
-            return Err(PlaneError::InvalidPartitionCount);
+            return Err(BackendError::InvalidPartitionCount);
         }
         Ok(Self {
             partition_count,
@@ -40,6 +43,7 @@ impl EmbeddedKafkaPlanes {
             rejected_submissions: Vec::new(),
             next_submission_offset: 0,
             failpoint: None,
+            ingress_notify: Arc::new(Notify::new()),
         })
     }
 
@@ -57,6 +61,10 @@ impl EmbeddedKafkaPlanes {
 
     pub fn pending_submission_count(&self) -> usize {
         self.pending_submissions.len()
+    }
+
+    pub fn ingress_notify(&self) -> Arc<Notify> {
+        Arc::clone(&self.ingress_notify)
     }
 
     pub fn record_rejected(&mut self, rejected: RejectedSubmission) {
@@ -99,7 +107,7 @@ impl EmbeddedKafkaPlanes {
     pub fn publish_projection_records(
         &mut self,
         records: Vec<ProjectionRecord>,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         for record in records {
             let partition = partition_for_world(record.key.world_id(), self.partition_count);
             let key = serde_cbor::to_vec(&record.key)?;
@@ -116,45 +124,35 @@ impl EmbeddedKafkaPlanes {
         Ok(())
     }
 
-    pub fn drain_partition_submissions(
-        &mut self,
-        partition: u32,
-    ) -> Result<SubmissionBatch, PlaneError> {
+    pub fn drain_pending_ingress(&mut self, partition: u32) -> Vec<IngressRecord> {
         let mut matching = Vec::new();
         let mut remaining = VecDeque::new();
 
         while let Some(submission) = self.pending_submissions.pop_front() {
             let submission_partition =
-                partition_for_world(submission.world_id, self.partition_count);
+                partition_for_world(submission.submission.world_id, self.partition_count);
             if submission_partition == partition {
-                matching.push(submission);
+                matching.push(IngressRecord {
+                    partition,
+                    offset: submission.offset,
+                    envelope: submission.submission,
+                });
             } else {
                 remaining.push_back(submission);
             }
         }
 
         self.pending_submissions = remaining;
-        Ok(SubmissionBatch {
-            submissions: matching,
-            commit: SubmissionCommit::Embedded { partition },
-        })
+        matching
     }
 
-    pub fn commit_submission_batch(
-        &mut self,
-        batch: SubmissionBatch,
-        frames: Vec<WorldLogFrame>,
-    ) -> Result<(), PlaneError> {
-        let SubmissionCommit::Embedded { partition } = batch.commit else {
-            unreachable!("embedded runtime received non-embedded commit handle");
-        };
+    pub fn commit_flush_batch(&mut self, batch: FlushCommit) -> Result<(), BackendError> {
         if self.failpoint.take() == Some(CommitFailpoint::AbortBeforeCommit) {
-            self.requeue_partition_submissions(partition, batch.submissions);
-            return Err(PlaneError::Persist(aos_node::PersistError::backend(
+            return Err(BackendError::Persist(aos_node::PersistError::backend(
                 "embedded Kafka failpoint: abort before commit",
             )));
         }
-        for frame in frames {
+        for frame in batch.frames {
             let _ = append_frame_locally(
                 &self.config.journal_topic,
                 &mut self.world_frames,
@@ -164,10 +162,12 @@ impl EmbeddedKafkaPlanes {
                 None,
             )?;
         }
+        let _ = batch.dispositions;
+        let _ = batch.offset_commits;
         Ok(())
     }
 
-    pub fn recover_from_broker(&mut self) -> Result<(), PlaneError> {
+    pub fn recover_from_broker(&mut self) -> Result<(), BackendError> {
         Ok(())
     }
 
@@ -178,32 +178,26 @@ impl EmbeddedKafkaPlanes {
     pub fn append_frame_transactional(
         &mut self,
         frame: WorldLogFrame,
-    ) -> Result<WorldLogAppendResult, PlaneError> {
+    ) -> Result<WorldLogAppendResult, BackendError> {
         self.append_frame(frame)
-    }
-
-    fn requeue_partition_submissions(
-        &mut self,
-        _partition: u32,
-        submissions: Vec<SubmissionEnvelope>,
-    ) {
-        for submission in submissions.into_iter().rev() {
-            self.pending_submissions.push_front(submission);
-        }
     }
 }
 
-impl SubmissionPlane for EmbeddedKafkaPlanes {
-    fn submit(&mut self, submission: SubmissionEnvelope) -> Result<u64, PlaneError> {
+impl SubmissionBackend for EmbeddedKafkaBackend {
+    fn submit(&mut self, submission: SubmissionEnvelope) -> Result<u64, BackendError> {
         let offset = self.next_submission_offset;
         self.next_submission_offset = self.next_submission_offset.saturating_add(1);
-        self.pending_submissions.push_back(submission);
+        self.pending_submissions.push_back(QueuedSubmission {
+            offset: offset as i64,
+            submission,
+        });
+        self.ingress_notify.notify_one();
         Ok(offset)
     }
 }
 
-impl WorldLogPlane for EmbeddedKafkaPlanes {
-    fn append_frame(&mut self, frame: WorldLogFrame) -> Result<WorldLogAppendResult, PlaneError> {
+impl WorldLogBackend for EmbeddedKafkaBackend {
+    fn append_frame(&mut self, frame: WorldLogFrame) -> Result<WorldLogAppendResult, BackendError> {
         append_frame_locally(
             &self.config.journal_topic,
             &mut self.world_frames,

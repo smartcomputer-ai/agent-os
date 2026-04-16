@@ -5,8 +5,7 @@ use std::sync::Arc;
 use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_kernel::journal::JournalRecord;
 use aos_kernel::{KernelConfig, Store, StoreError};
-use aos_node::{LocalStatePaths, WorldId, WorldLogFrame};
-use aos_runtime::{HostError, WorldConfig};
+use aos_node::{LocalStatePaths, WorldConfig, WorldId, WorldLogFrame};
 use thiserror::Error;
 
 use crate::kafka::PartitionLogEntry;
@@ -33,6 +32,7 @@ impl MaterializerConfig {
         let mut world_config =
             WorldConfig::from_env_with_fallback_module_cache_dir(Some(paths.wasmtime_cache_dir()));
         world_config.eager_module_load = true;
+        let kernel_config = world_config.apply_kernel_defaults(KernelConfig::default());
         Self {
             journal_topic: journal_topic.into(),
             projection_topic: crate::kafka::KafkaConfig::default().projection_topic,
@@ -40,7 +40,7 @@ impl MaterializerConfig {
             retained_journal_entries_per_world: None,
             world_config,
             adapter_config: EffectAdapterConfig::default(),
-            kernel_config: KernelConfig::default(),
+            kernel_config,
         }
     }
 }
@@ -59,11 +59,9 @@ pub struct MaterializePartitionOutcome {
 #[derive(Debug, Error)]
 pub enum MaterializerError {
     #[error(transparent)]
-    LogFirst(#[from] aos_node::PlaneError),
+    LogFirst(#[from] aos_node::BackendError),
     #[error(transparent)]
     Store(#[from] StoreError),
-    #[error(transparent)]
-    Host(#[from] HostError),
     #[error(transparent)]
     Sqlite(#[from] MaterializerStoreError),
     #[error(transparent)]

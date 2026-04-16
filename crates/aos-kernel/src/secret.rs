@@ -5,6 +5,8 @@ use aos_cbor::Hash;
 use aos_effects::EffectSource;
 use thiserror::Error;
 
+use crate::LoadedManifest;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedSecret {
     pub binding_id: String,
@@ -269,6 +271,23 @@ pub fn enforce_secret_policy(
         }
     }
     Ok(())
+}
+
+pub fn env_secret_resolver_from_manifest(loaded: &LoadedManifest) -> Option<SharedSecretResolver> {
+    if loaded.secrets.is_empty() {
+        return None;
+    }
+    let mut values = HashMap::new();
+    for secret in &loaded.secrets {
+        let binding = secret.binding_id.as_str();
+        let var_name = binding.strip_prefix("env:")?;
+        if var_name.is_empty() {
+            return None;
+        }
+        let value = std::env::var(var_name).ok()?;
+        values.insert(binding.to_string(), value.into_bytes());
+    }
+    Some(Arc::new(MapSecretResolver::new(values)))
 }
 
 /// Normalizes secret variant sugar to the canonical `$tag/$value` form so hashing/policy see one shape.

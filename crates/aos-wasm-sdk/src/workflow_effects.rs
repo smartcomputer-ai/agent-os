@@ -3,6 +3,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_cbor::value::Value as CborValue;
 use sha2::{Digest, Sha256};
 
 mod serde_bytes_opt {
@@ -315,9 +316,10 @@ impl PendingEffect {
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<Self, serde_cbor::Error> {
+        let effect_kind = effect_kind.into();
         Ok(Self::new(
-            effect_kind,
-            effect_params_hash(params)?,
+            effect_kind.as_str(),
+            pending_effect_params_hash(effect_kind.as_str(), params)?,
             cap_slot,
             emitted_at_ns,
         )
@@ -334,9 +336,10 @@ impl PendingEffect {
         }
 
         if let Some(issuer_ref) = self.issuer_ref.as_deref() {
-            return continuation
-                .issuer_ref()
-                .is_some_and(|value| value == issuer_ref);
+            match continuation.issuer_ref() {
+                Some(value) => return value == issuer_ref,
+                None => {}
+            }
         }
 
         continuation
@@ -896,6 +899,11 @@ pub struct EncodedEffectParams {
     pub params_hash: String,
 }
 
+/// Encode effect params exactly as guest code emits them.
+///
+/// This preserves the authored payload shape. It does not apply the kernel's
+/// schema normalization pass, so its `params_hash` is not suitable for receipt
+/// correlation. For continuation matching, use [`pending_effect_params_hash`].
 pub fn encode_effect_params<T: Serialize>(
     params: &T,
 ) -> Result<EncodedEffectParams, serde_cbor::Error> {
@@ -904,8 +912,50 @@ pub fn encode_effect_params<T: Serialize>(
     Ok(EncodedEffectParams { cbor, params_hash })
 }
 
+/// Hash effect params exactly as [`encode_effect_params`] serializes them.
+///
+/// This is a generic CBOR hash helper, not the kernel-compatible `params_hash`
+/// echoed in receipt and stream continuations. For continuation matching,
+/// prefer [`PendingEffects::settle`], `issuer_ref`, or
+/// [`pending_effect_params_hash`].
 pub fn effect_params_hash<T: Serialize>(params: &T) -> Result<String, serde_cbor::Error> {
     Ok(encode_effect_params(params)?.params_hash)
+}
+
+/// Compute the kernel-compatible fallback `params_hash` for a pending effect.
+///
+/// This mirrors the normalization used by [`PendingEffect::from_params`] and the
+/// kernel's continuation envelopes for effect payloads that need workflow-side
+/// reconstruction.
+pub fn pending_effect_params_hash<T: Serialize>(
+    effect_kind: &str,
+    params: &T,
+) -> Result<String, serde_cbor::Error> {
+    let cbor = if effect_kind == "blob.put" {
+        let mut params: aos_effect_types::BlobPutParams =
+            serde_cbor::from_slice(&serde_cbor::to_vec(params)?)?;
+        if params.refs.is_none() {
+            params.refs = Some(Vec::new());
+        }
+        params.blob_ref = Some(
+            aos_effect_types::HashRef::new(hash_bytes(&params.bytes))
+                .expect("sha256 hash_bytes output is valid"),
+        );
+        tracked_effect_params_cbor(&params)?
+    } else {
+        tracked_effect_params_cbor(params)?
+    };
+
+    Ok(hash_bytes(&cbor))
+}
+
+fn tracked_effect_params_cbor<T: Serialize>(params: &T) -> Result<Vec<u8>, serde_cbor::Error> {
+    let canonical_value: CborValue = serde_cbor::value::to_value(params)?;
+    let mut buf = Vec::with_capacity(256);
+    let mut serializer = serde_cbor::ser::Serializer::new(&mut buf);
+    serializer.self_describe()?;
+    canonical_value.serialize(&mut serializer)?;
+    Ok(buf)
 }
 
 pub fn hash_bytes(bytes: &[u8]) -> String {
@@ -1174,6 +1224,12 @@ define_sys_effect_helpers!(
 mod tests {
     use super::*;
     use alloc::vec;
+    use aos_air_types::{
+        builtins::{builtin_effects, builtin_schemas},
+        catalog::EffectCatalog,
+        schema_index::SchemaIndex,
+    };
+    use std::collections::HashMap;
 
     fn fake_hash(seed: char) -> String {
         let mut out = String::from("sha256:");
@@ -1181,6 +1237,37 @@ mod tests {
             out.push(seed);
         }
         out
+    }
+
+    fn kernel_normalized_params_hash<T: Serialize>(effect_kind: &str, params: &T) -> String {
+        if effect_kind == "blob.put" {
+            let mut params: BlobPutParams =
+                serde_cbor::from_slice(&serde_cbor::to_vec(params).expect("encode params"))
+                    .expect("decode blob.put params");
+            if params.refs.is_none() {
+                params.refs = Some(Vec::new());
+            }
+            params.blob_ref =
+                Some(HashRef::new(hash_bytes(&params.bytes)).expect("blob.put blob ref"));
+            let normalized = tracked_effect_params_cbor(&params).expect("canonical blob.put");
+            return hash_bytes(&normalized);
+        }
+
+        let catalog = EffectCatalog::from_defs(builtin_effects().iter().map(|e| e.effect.clone()));
+        let mut schemas = HashMap::new();
+        for builtin in builtin_schemas() {
+            schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
+        }
+        let schema_index = SchemaIndex::new(schemas);
+        let raw = serde_cbor::to_vec(params).expect("encode params");
+        let normalized = aos_effects::normalize_effect_params(
+            &catalog,
+            &schema_index,
+            &aos_effects::EffectKind::new(effect_kind),
+            &raw,
+        )
+        .expect("kernel normalize params");
+        hash_bytes(&normalized)
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1278,5 +1365,105 @@ mod tests {
         assert_eq!(matched.pending.params_hash, handle.params_hash);
         assert!(matches!(matched.observed, ObservedEffect::Rejected(_)));
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn settle_falls_back_to_params_hash_when_continuation_has_no_issuer_ref() {
+        let mut pending = PendingEffects::new();
+        let handle = PendingEffect::new("llm.generate", fake_hash('p'), Some("llm".into()), 9)
+            .with_issuer_ref("run-1");
+        pending.insert(handle.clone());
+
+        let receipt = EffectReceiptEnvelope {
+            intent_id: fake_hash('i'),
+            effect_kind: "llm.generate".into(),
+            params_hash: Some(handle.params_hash.clone()),
+            receipt_payload: serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap(),
+            status: "ok".into(),
+            ..EffectReceiptEnvelope::default()
+        };
+
+        let matched = pending.settle((&receipt).into()).expect("receipt match");
+        assert_eq!(matched.pending.params_hash, handle.params_hash);
+        assert!(matches!(matched.observed, ObservedEffect::Settled(_)));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn pending_blob_puts_use_kernel_normalized_params_hash() {
+        let mut pending = PendingEffects::new();
+        let params = BlobPutParams {
+            bytes: b"hello".to_vec(),
+            blob_ref: None,
+            refs: None,
+        };
+        let handle = pending
+            .begin("blob.put", &params, Some("blob".into()), 7)
+            .expect("begin blob.put");
+
+        let receipt = EffectReceiptEnvelope {
+            intent_id: fake_hash('i'),
+            effect_kind: "blob.put".into(),
+            params_hash: Some(
+                pending_effect_params_hash("blob.put", &params)
+                    .expect("normalized blob.put params hash"),
+            ),
+            receipt_payload: serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap(),
+            status: "ok".into(),
+            ..EffectReceiptEnvelope::default()
+        };
+
+        let settled = pending.settle((&receipt).into()).expect("settle blob.put");
+        assert_eq!(settled.pending.params_hash, handle.params_hash);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn http_request_pending_hash_matches_kernel_normalization() {
+        let params = HttpRequestParams {
+            method: "GET".into(),
+            url: "https://example.com/data.json".into(),
+            headers: HeaderMap::new(),
+            body_ref: None,
+        };
+        let pending =
+            PendingEffect::from_params("http.request", &params, Some("default".into()), 7)
+                .expect("build pending http.request");
+        assert_eq!(
+            pending.params_hash,
+            kernel_normalized_params_hash("http.request", &params)
+        );
+    }
+
+    #[test]
+    fn blob_put_pending_hash_matches_kernel_normalization() {
+        let params = BlobPutParams {
+            bytes: b"hello".to_vec(),
+            blob_ref: None,
+            refs: None,
+        };
+        let pending = PendingEffect::from_params("blob.put", &params, Some("blob".into()), 7)
+            .expect("build pending blob.put");
+        assert_eq!(
+            pending.params_hash,
+            kernel_normalized_params_hash("blob.put", &params)
+        );
+    }
+
+    #[test]
+    fn workspace_write_bytes_pending_hash_matches_kernel_normalization() {
+        let params = WorkspaceWriteBytesParams {
+            root_hash: HashRef::new(fake_hash('a')).expect("workspace root hash"),
+            path: "docs/README.md".into(),
+            bytes: b"hello".to_vec(),
+            mode: None,
+        };
+        let pending =
+            PendingEffect::from_params("workspace.write_bytes", &params, Some("default".into()), 7)
+                .expect("build pending workspace.write_bytes");
+        assert_eq!(
+            pending.params_hash,
+            kernel_normalized_params_hash("workspace.write_bytes", &params)
+        );
     }
 }

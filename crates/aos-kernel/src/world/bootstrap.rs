@@ -73,6 +73,7 @@ impl<S: Store + 'static> Kernel<S> {
             workflow_index_roots: HashMap::new(),
             snapshot_index: HashMap::new(),
             journal,
+            compat_drain_cursor: 0,
             suppress_journal: false,
             replay_applying_domain_record: false,
             replay_generated_domain_event_hashes: HashMap::new(),
@@ -133,7 +134,6 @@ impl<S: Store + 'static> Kernel<S> {
             kernel.record_manifest()?;
         }
         kernel.ensure_active_baseline()?;
-        kernel.rehydrate_effect_queue_from_runtime_state()?;
         Ok(kernel)
     }
 

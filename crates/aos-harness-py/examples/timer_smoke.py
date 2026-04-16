@@ -13,12 +13,7 @@ VERBOSE = os.environ.get("AOS_HARNESS_VERBOSE", "").lower() not in {"", "0", "fa
 
 
 def runtime_quiescent(status: dict) -> bool:
-    return bool(
-        status.get(
-            "runtime_quiescent",
-            status.get("daemon_quiescent", False),
-        )
-    )
+    return bool(status.get("runtime_quiescent", False))
 
 
 class StepLogger:
@@ -90,8 +85,7 @@ def main():
     assert state["deadline_ns"] == DELIVER_AT_NS
     assert state["fired_key"] == "retry"
     assert reopened_state == state
-    assert artifacts["evidence"]["backend"] == "ephemeral"
-    assert artifacts["evidence"]["effect_mode"] == "scripted"
+    assert artifacts["evidence"]["cycles_run"] >= 1
     assert artifacts["journal_entries"], "expected journal entries in exported artifacts"
 
     print("timer_smoke.py: OK")

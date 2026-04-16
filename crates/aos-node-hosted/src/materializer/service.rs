@@ -12,28 +12,23 @@ use thiserror::Error;
 
 use crate::bootstrap::MaterializerDeps;
 use crate::kafka::{
-    FetchedRecord, KafkaConfig, PartitionLogEntry, ProjectionKey, ProjectionRecord,
-    ProjectionValue, fetch_partition_records,
+    FetchedRecord, HostedJournalRecord, KafkaConfig, PartitionLogEntry, ProjectionKey,
+    ProjectionRecord, ProjectionValue, fetch_partition_records,
 };
 use crate::worker::WorkerError;
 
 use super::{Materializer, MaterializerError};
 
+const MATERIALIZER_CONSUMER_POLL_WAIT: Duration = Duration::from_millis(500);
+
 #[derive(Debug, Clone)]
 pub struct HostedMaterializerConfig {
-    pub poll_interval: Duration,
     pub retained_journal_entries_per_world: u64,
 }
 
 impl Default for HostedMaterializerConfig {
     fn default() -> Self {
         Self {
-            poll_interval: Duration::from_millis(
-                std::env::var("AOS_MATERIALIZER_POLL_INTERVAL_MS")
-                    .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .unwrap_or(500),
-            ),
             retained_journal_entries_per_world: std::env::var(
                 "AOS_MATERIALIZER_RETAINED_JOURNAL_ENTRIES_PER_WORLD",
             )
@@ -105,7 +100,7 @@ impl HostedMaterializer {
         let mut assigned = BTreeSet::new();
 
         loop {
-            let polled = consumer.poll(self.config.poll_interval);
+            let polled = consumer.poll(MATERIALIZER_CONSUMER_POLL_WAIT);
             let newly_assigned = sync_consumer_assignments(
                 &consumer,
                 &[projection_topic.clone(), journal_topic.clone()],
@@ -135,7 +130,15 @@ impl HostedMaterializer {
                 let (offset, record) = decode_projection_entry(&message)?;
                 materializer.apply_projection_record(partition, offset, &record)?
             } else if topic == journal_topic {
-                let entry = decode_journal_entry(&message)?;
+                let Some(entry) = decode_journal_entry(&message)? else {
+                    commit_partition_offset(
+                        &consumer,
+                        &topic,
+                        partition,
+                        (message.offset() as u64).saturating_add(1),
+                    )?;
+                    continue;
+                };
                 materializer.index_journal_entry(partition, &entry)?
             } else {
                 continue;
@@ -339,7 +342,7 @@ fn commit_partition_offset(
 
 fn decode_journal_entry(
     message: &rdkafka::message::BorrowedMessage<'_>,
-) -> Result<PartitionLogEntry, HostedMaterializerError> {
+) -> Result<Option<PartitionLogEntry>, HostedMaterializerError> {
     let payload = message.payload().ok_or_else(|| {
         WorkerError::Persist(PersistError::backend(format!(
             "journal message at partition {} offset {} had no payload",
@@ -347,11 +350,71 @@ fn decode_journal_entry(
             message.offset()
         )))
     })?;
-    let frame = serde_cbor::from_slice(payload).map_err(MaterializerError::from)?;
-    Ok(PartitionLogEntry {
+    let Some(frame) = decode_journal_frame(payload).map_err(MaterializerError::from)? else {
+        return Ok(None);
+    };
+    Ok(Some(PartitionLogEntry {
         offset: message.offset() as u64,
         frame,
-    })
+    }))
+}
+
+fn decode_journal_frame(
+    payload: &[u8],
+) -> Result<Option<aos_node::WorldLogFrame>, serde_cbor::Error> {
+    match serde_cbor::from_slice::<HostedJournalRecord>(payload) {
+        Ok(HostedJournalRecord::Frame(frame)) => Ok(Some(frame)),
+        Ok(HostedJournalRecord::Disposition(_)) => Ok(None),
+        Err(_) => {
+            if let Ok(value) = serde_cbor::from_slice::<serde_cbor::Value>(payload)
+                && let Some(record) = decode_hosted_journal_value(value)?
+            {
+                return Ok(match record {
+                    HostedJournalRecord::Frame(frame) => Some(frame),
+                    HostedJournalRecord::Disposition(_) => None,
+                });
+            }
+            Err(serde_cbor::from_slice::<HostedJournalRecord>(payload)
+                .expect_err("already handled successful HostedJournalRecord decode"))
+        }
+    }
+}
+
+fn decode_hosted_journal_value(
+    value: serde_cbor::Value,
+) -> Result<Option<HostedJournalRecord>, serde_cbor::Error> {
+    match value {
+        serde_cbor::Value::Map(entries) if entries.len() == 1 => {
+            let Some((serde_cbor::Value::Text(tag), value)) = entries.into_iter().next() else {
+                return Ok(None);
+            };
+            decode_hosted_journal_tagged_value(&tag, value)
+        }
+        serde_cbor::Value::Array(mut values) if values.len() == 2 => {
+            let tag = values.remove(0);
+            let value = values.remove(0);
+            let serde_cbor::Value::Text(tag) = tag else {
+                return Ok(None);
+            };
+            decode_hosted_journal_tagged_value(&tag, value)
+        }
+        _ => Ok(None),
+    }
+}
+
+fn decode_hosted_journal_tagged_value(
+    tag: &str,
+    value: serde_cbor::Value,
+) -> Result<Option<HostedJournalRecord>, serde_cbor::Error> {
+    match tag {
+        "Frame" => serde_cbor::value::from_value::<aos_node::WorldLogFrame>(value)
+            .map(HostedJournalRecord::Frame)
+            .map(Some),
+        "Disposition" => serde_cbor::value::from_value::<crate::kafka::DurableDisposition>(value)
+            .map(HostedJournalRecord::Disposition)
+            .map(Some),
+        _ => Ok(None),
+    }
 }
 
 fn decode_projection_entry(
@@ -413,11 +476,13 @@ fn kafka_plane_err(label: &str, err: impl std::fmt::Display) -> HostedMaterializ
 #[cfg(test)]
 mod tests {
     use aos_cbor::to_canonical_cbor;
-    use aos_node::{SnapshotRecord, UniverseId, WorldId};
+    use aos_node::{SnapshotRecord, UniverseId, WorldId, WorldLogFrame};
     use uuid::Uuid;
 
-    use super::{HostedMaterializerError, MaterializerError, decode_projection_parts};
-    use crate::kafka::{ProjectionKey, ProjectionValue, WorldMetaProjection};
+    use super::{
+        HostedMaterializerError, MaterializerError, decode_journal_frame, decode_projection_parts,
+    };
+    use crate::kafka::{HostedJournalRecord, ProjectionKey, ProjectionValue, WorldMetaProjection};
 
     fn sample_projection_key() -> ProjectionKey {
         ProjectionKey::WorldMeta {
@@ -468,5 +533,54 @@ mod tests {
             err,
             HostedMaterializerError::Materializer(MaterializerError::Cbor(_))
         ));
+    }
+
+    fn sample_frame() -> WorldLogFrame {
+        WorldLogFrame {
+            format_version: 1,
+            universe_id: UniverseId::nil(),
+            world_id: WorldId::new(Uuid::nil()),
+            world_epoch: 1,
+            world_seq_start: 1,
+            world_seq_end: 1,
+            records: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn decode_journal_frame_accepts_wrapped_frame_payloads() {
+        let payload = to_canonical_cbor(&HostedJournalRecord::Frame(sample_frame()))
+            .expect("encode wrapped hosted journal frame");
+
+        let decoded = decode_journal_frame(&payload)
+            .expect("decode wrapped hosted journal frame")
+            .expect("frame variant");
+
+        assert_eq!(decoded, sample_frame());
+    }
+
+    #[test]
+    fn decode_journal_frame_ignores_wrapped_dispositions() {
+        let payload = to_canonical_cbor(&HostedJournalRecord::Disposition(
+            crate::kafka::DurableDisposition::RejectedSubmission {
+                partition: 0,
+                offset: 0,
+                world_id: WorldId::new(Uuid::nil()),
+                reason: aos_node::SubmissionRejection::UnknownWorld,
+            },
+        ))
+        .expect("encode wrapped hosted journal disposition");
+
+        let decoded =
+            decode_journal_frame(&payload).expect("decode wrapped hosted journal disposition");
+
+        assert!(decoded.is_none());
+    }
+
+    #[test]
+    fn decode_journal_frame_rejects_bare_frames() {
+        let payload = to_canonical_cbor(&sample_frame()).expect("encode bare world log frame");
+
+        let _err = decode_journal_frame(&payload).expect_err("bare frame should be rejected");
     }
 }

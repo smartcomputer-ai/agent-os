@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, mpsc as std_mpsc};
+use std::thread;
 
 use crate::api::http::{HttpBackend, decode_b64};
 use crate::api::{
@@ -14,7 +15,8 @@ use crate::{
     CommandRecord, CreateWorldRequest, DomainEventIngress, ForkWorldRequest, ReceiptIngress,
     WorldId, WorldRuntimeInfo,
 };
-use aos_cbor::Hash;
+use aos_air_types::AirNode;
+use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effect_types::{
     GovApplyParams, GovApproveParams, GovProposeParams, GovShadowParams, HashRef,
     WorkspaceAnnotationsGetReceipt, WorkspaceDiffReceipt, WorkspaceListReceipt,
@@ -22,67 +24,213 @@ use aos_effect_types::{
 };
 use serde::Serialize;
 
-use super::{
-    LocalLogRuntime, LocalStatePaths, LocalSupervisor, LocalSupervisorConfig, def_matches_kind,
-};
+use super::{LocalRuntime, LocalStatePaths};
+
+type SchedulerJob = Box<dyn FnOnce(&Arc<LocalRuntime>) + Send + 'static>;
+
+enum SchedulerCommand {
+    Run(SchedulerJob),
+}
+
+#[derive(Clone)]
+enum LocalControlMode {
+    Direct(Arc<LocalRuntime>),
+    Server(LocalServerControl),
+}
+
+#[derive(Clone)]
+struct LocalServerControl {
+    runtime: Arc<LocalRuntime>,
+    scheduler_tx: std_mpsc::Sender<SchedulerCommand>,
+}
 
 #[derive(Clone)]
 pub struct LocalControl {
-    runtime: Arc<LocalLogRuntime>,
-    supervisor: Arc<LocalSupervisor>,
-    mode: LocalExecutionMode,
-}
-
-#[derive(Clone, Copy)]
-enum LocalExecutionMode {
-    Worker,
-    Direct,
+    mode: LocalControlMode,
 }
 
 impl LocalControl {
     pub const WORKER_ID: &str = "local";
 
     pub fn open(state_root: &std::path::Path) -> Result<Arc<Self>, ControlError> {
-        Self::open_with_supervisor(state_root, true)
+        let paths = LocalStatePaths::new(state_root.to_path_buf());
+        let runtime = LocalRuntime::open(paths)?;
+        Self::open_server_with_runtime(runtime)
+    }
+
+    pub fn open_with_handle(
+        state_root: &std::path::Path,
+        edge_handle: tokio::runtime::Handle,
+    ) -> Result<Arc<Self>, ControlError> {
+        let paths = LocalStatePaths::new(state_root.to_path_buf());
+        let runtime = LocalRuntime::open_with_handle(paths, edge_handle)?;
+        Self::open_server_with_runtime(runtime)
     }
 
     pub fn open_batch(state_root: &std::path::Path) -> Result<Arc<Self>, ControlError> {
-        Self::open_with_supervisor(state_root, false)
-    }
-
-    fn open_with_supervisor(
-        state_root: &std::path::Path,
-        start_supervisor: bool,
-    ) -> Result<Arc<Self>, ControlError> {
         let paths = LocalStatePaths::new(state_root.to_path_buf());
-        let runtime = LocalLogRuntime::open(paths.clone())?;
-        let supervisor = LocalSupervisor::new(runtime.clone(), LocalSupervisorConfig::default());
-        if start_supervisor {
-            supervisor.start();
-        }
+        let runtime = LocalRuntime::open(paths)?;
         Ok(Arc::new(Self {
-            runtime,
-            supervisor,
-            mode: if start_supervisor {
-                LocalExecutionMode::Worker
-            } else {
-                LocalExecutionMode::Direct
-            },
+            mode: LocalControlMode::Direct(runtime),
         }))
     }
 
-    pub fn step_world(&self, world: WorldId) -> Result<WorldSummaryResponse, ControlError> {
-        if matches!(self.mode, LocalExecutionMode::Worker) {
-            let _ = self.supervisor.run_once()?;
+    fn open_server_with_runtime(runtime: Arc<LocalRuntime>) -> Result<Arc<Self>, ControlError> {
+        let (scheduler_tx, scheduler_rx) = std_mpsc::channel::<SchedulerCommand>();
+
+        {
+            let runtime = Arc::clone(&runtime);
+            thread::Builder::new()
+                .name("aos-local-scheduler".into())
+                .spawn(move || {
+                    while let Ok(command) = scheduler_rx.recv() {
+                        match command {
+                            SchedulerCommand::Run(job) => job(&runtime),
+                        }
+                    }
+                })
+                .map_err(|err| {
+                    ControlError::invalid(format!("spawn local scheduler thread: {err}"))
+                })?;
         }
-        self.get_world(world)
+
+        if let Some(effect_rx) = runtime.take_effect_event_rx() {
+            let scheduler_tx = scheduler_tx.clone();
+            thread::Builder::new()
+                .name("aos-local-effect-bridge".into())
+                .spawn(move || {
+                    let mut effect_rx = effect_rx;
+                    while let Some(event) = effect_rx.blocking_recv() {
+                        if scheduler_tx
+                            .send(SchedulerCommand::Run(Box::new(move |runtime| {
+                                if let Err(err) = runtime.enqueue_effect_runtime_event(event) {
+                                    tracing::error!(error = %err, "enqueue local effect continuation");
+                                    return;
+                                }
+                                if let Err(err) = runtime.process_all_pending() {
+                                    tracing::error!(error = %err, "process local effect continuation");
+                                }
+                            })))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                })
+                .map_err(|err| {
+                    ControlError::invalid(format!("spawn local effect bridge thread: {err}"))
+                })?;
+        }
+
+        if let Some(timer_rx) = runtime.take_timer_wake_rx() {
+            let scheduler_tx = scheduler_tx.clone();
+            thread::Builder::new()
+                .name("aos-local-timer-bridge".into())
+                .spawn(move || {
+                    let mut timer_rx = timer_rx;
+                    while let Some(wake) = timer_rx.blocking_recv() {
+                        if scheduler_tx
+                            .send(SchedulerCommand::Run(Box::new(move |runtime| {
+                                if let Err(err) = runtime.process_timer_wake(wake.world_id) {
+                                    tracing::error!(error = %err, world_id = %wake.world_id, "enqueue local timer wake");
+                                    return;
+                                }
+                                if let Err(err) = runtime.process_all_pending() {
+                                    tracing::error!(error = %err, world_id = %wake.world_id, "process local timer wake");
+                                }
+                            })))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                })
+                .map_err(|err| {
+                    ControlError::invalid(format!("spawn local timer bridge thread: {err}"))
+                })?;
+        }
+
+        let checkpoint_interval = runtime.checkpoint_interval();
+        if !checkpoint_interval.is_zero() {
+            let scheduler_tx = scheduler_tx.clone();
+            thread::Builder::new()
+                .name("aos-local-maintenance".into())
+                .spawn(move || {
+                    loop {
+                        thread::sleep(checkpoint_interval);
+                        if scheduler_tx
+                            .send(SchedulerCommand::Run(Box::new(|runtime| {
+                                if let Err(err) = runtime.process_all_pending() {
+                                    tracing::error!(error = %err, "process local maintenance tick");
+                                }
+                            })))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                })
+                .map_err(|err| {
+                    ControlError::invalid(format!("spawn local maintenance thread: {err}"))
+                })?;
+        }
+
+        Ok(Arc::new(Self {
+            mode: LocalControlMode::Server(LocalServerControl {
+                runtime,
+                scheduler_tx,
+            }),
+        }))
+    }
+
+    fn local_runtime(&self) -> &Arc<LocalRuntime> {
+        match &self.mode {
+            LocalControlMode::Direct(runtime) => runtime,
+            LocalControlMode::Server(server) => &server.runtime,
+        }
+    }
+
+    fn server_call<T, F>(&self, f: F) -> Result<T, ControlError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Arc<LocalRuntime>) -> Result<T, ControlError> + Send + 'static,
+    {
+        let LocalControlMode::Server(server) = &self.mode else {
+            return f(self.local_runtime());
+        };
+        let (reply_tx, reply_rx) = std_mpsc::sync_channel(1);
+        server
+            .scheduler_tx
+            .send(SchedulerCommand::Run(Box::new(move |runtime| {
+                let _ = reply_tx.send(f(runtime));
+            })))
+            .map_err(|_| ControlError::invalid("local scheduler is not available"))?;
+        reply_rx
+            .recv()
+            .map_err(|_| ControlError::invalid("local scheduler did not reply"))?
+    }
+
+    pub fn step_world(&self, world: WorldId) -> Result<WorldSummaryResponse, ControlError> {
+        self.server_call(move |runtime| {
+            runtime.process_all_pending().map_err(ControlError::from)?;
+            let (runtime_info, active_baseline) = runtime.world_summary(world)?;
+            Ok(WorldSummaryResponse {
+                runtime: runtime_info,
+                active_baseline,
+            })
+        })
     }
 
     pub fn workers(&self, limit: u32) -> Result<Vec<crate::WorkerHeartbeat>, ControlError> {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        Ok(vec![self.supervisor.worker_heartbeat(Self::WORKER_ID)])
+        Ok(vec![crate::WorkerHeartbeat {
+            worker_id: Self::WORKER_ID.to_string(),
+            pins: Vec::new(),
+            last_seen_ns: 0,
+            expires_at_ns: u64::MAX,
+        }])
     }
 
     pub fn worker_worlds(
@@ -90,15 +238,22 @@ impl LocalControl {
         worker_id: &str,
         limit: u32,
     ) -> Result<Vec<WorldRuntimeInfo>, ControlError> {
-        self.supervisor
-            .worker_worlds(worker_id, limit, Self::WORKER_ID)
-            .map_err(ControlError::from)
+        if worker_id != Self::WORKER_ID {
+            return Ok(Vec::new());
+        }
+        self.server_call(move |runtime| runtime.worker_worlds(limit).map_err(ControlError::from))
     }
 
     pub fn health(&self) -> Result<ServiceInfoResponse, ControlError> {
+        let state_root = match &self.mode {
+            LocalControlMode::Direct(runtime) => runtime.state_root().to_path_buf(),
+            LocalControlMode::Server(server) => server.runtime.state_root().to_path_buf(),
+        };
         Ok(ServiceInfoResponse {
             service: "aos-node-local",
             version: env!("CARGO_PKG_VERSION"),
+            pid: Some(std::process::id()),
+            state_root: Some(state_root),
         })
     }
 
@@ -107,31 +262,45 @@ impl LocalControl {
         after: Option<WorldId>,
         limit: u32,
     ) -> Result<Vec<WorldRuntimeInfo>, ControlError> {
-        self.supervisor
-            .list_worlds(after, limit)
-            .map_err(ControlError::from)
+        self.server_call(move |runtime| {
+            runtime
+                .list_worlds(after, limit)
+                .map_err(ControlError::from)
+        })
     }
 
     pub fn create_world(
         &self,
         request: CreateWorldRequest,
     ) -> Result<crate::WorldCreateResult, ControlError> {
-        self.runtime
-            .create_world(request)
-            .map_err(ControlError::from)
+        self.server_call(move |runtime| runtime.create_world(request).map_err(ControlError::from))
     }
 
     pub fn get_world(&self, world: WorldId) -> Result<WorldSummaryResponse, ControlError> {
-        self.supervisor
-            .world_summary(world)
-            .map_err(ControlError::from)
+        self.server_call(move |runtime| {
+            let (runtime_info, active_baseline) = runtime.world_summary(world)?;
+            Ok(WorldSummaryResponse {
+                runtime: runtime_info,
+                active_baseline,
+            })
+        })
+    }
+
+    pub fn checkpoint_world(&self, world: WorldId) -> Result<WorldSummaryResponse, ControlError> {
+        self.server_call(move |runtime| {
+            let (runtime_info, active_baseline) = runtime.checkpoint_world(world)?;
+            Ok(WorldSummaryResponse {
+                runtime: runtime_info,
+                active_baseline,
+            })
+        })
     }
 
     pub fn fork_world(
         &self,
         request: ForkWorldRequest,
     ) -> Result<crate::WorldForkResult, ControlError> {
-        self.runtime.fork_world(request).map_err(ControlError::from)
+        self.server_call(move |runtime| runtime.fork_world(request).map_err(ControlError::from))
     }
 
     pub fn get_command(
@@ -139,9 +308,12 @@ impl LocalControl {
         world: WorldId,
         command_id: &str,
     ) -> Result<CommandRecord, ControlError> {
-        self.supervisor
-            .get_command(world, command_id)
-            .map_err(ControlError::from)
+        let command_id = command_id.to_string();
+        self.server_call(move |runtime| {
+            runtime
+                .get_command(world, &command_id)
+                .map_err(ControlError::from)
+        })
     }
 
     pub fn submit_command<T: Serialize>(
@@ -152,16 +324,14 @@ impl LocalControl {
         actor: Option<String>,
         payload: &T,
     ) -> Result<CommandSubmitResponse, ControlError> {
-        let record = match self.mode {
-            LocalExecutionMode::Worker => self
-                .supervisor
-                .submit_command(world, command, command_id, actor, payload)
-                .map_err(ControlError::from)?,
-            LocalExecutionMode::Direct => self
-                .runtime
-                .submit_command(world, command, command_id, actor, payload)
-                .map_err(ControlError::from)?,
-        };
+        let command = command.to_string();
+        let payload = to_canonical_cbor(payload)?;
+        let record = self.server_call(move |runtime| {
+            let payload: serde_cbor::Value = serde_cbor::from_slice(&payload)?;
+            runtime
+                .submit_command(world, &command, command_id, actor, &payload)
+                .map_err(ControlError::from)
+        })?;
         Ok(CommandSubmitResponse {
             poll_url: format!("/v1/worlds/{world}/commands/{}", record.command_id),
             command_id: record.command_id,
@@ -170,7 +340,7 @@ impl LocalControl {
     }
 
     pub fn manifest(&self, world: WorldId) -> Result<ManifestResponse, ControlError> {
-        self.supervisor.manifest(world).map_err(ControlError::from)
+        self.server_call(move |runtime| runtime.manifest(world).map_err(ControlError::from))
     }
 
     pub fn defs_list(
@@ -179,9 +349,11 @@ impl LocalControl {
         kinds: Option<Vec<String>>,
         prefix: Option<String>,
     ) -> Result<DefsListResponse, ControlError> {
-        self.supervisor
-            .defs_list(world, kinds, prefix)
-            .map_err(ControlError::from)
+        self.server_call(move |runtime| {
+            runtime
+                .defs_list(world, kinds, prefix)
+                .map_err(ControlError::from)
+        })
     }
 
     pub fn def_get(
@@ -190,10 +362,13 @@ impl LocalControl {
         kind: &str,
         name: &str,
     ) -> Result<DefGetResponse, ControlError> {
-        let response = self
-            .supervisor
-            .def_get(world, name)
-            .map_err(ControlError::from)?;
+        let name = name.to_string();
+        let lookup_name = name.clone();
+        let response = self.server_call(move |runtime| {
+            runtime
+                .def_get(world, &lookup_name)
+                .map_err(ControlError::from)
+        })?;
         if !def_matches_kind(&response.def, kind) {
             return Err(ControlError::not_found(format!(
                 "definition '{name}' with kind '{kind}'"
@@ -210,9 +385,12 @@ impl LocalControl {
         consistency: Option<&str>,
     ) -> Result<StateGetResponse, ControlError> {
         require_latest_durable(consistency)?;
-        self.supervisor
-            .state_get(world, workflow, key)
-            .map_err(ControlError::from)
+        let workflow = workflow.to_string();
+        self.server_call(move |runtime| {
+            runtime
+                .state_get(world, &workflow, key)
+                .map_err(ControlError::from)
+        })
     }
 
     pub fn state_list(
@@ -223,9 +401,12 @@ impl LocalControl {
         consistency: Option<&str>,
     ) -> Result<StateListResponse, ControlError> {
         require_latest_durable(consistency)?;
-        self.supervisor
-            .state_list(world, workflow, limit)
-            .map_err(ControlError::from)
+        let workflow = workflow.to_string();
+        self.server_call(move |runtime| {
+            runtime
+                .state_list(world, &workflow, limit)
+                .map_err(ControlError::from)
+        })
     }
 
     pub fn enqueue_event(
@@ -233,16 +414,13 @@ impl LocalControl {
         world: WorldId,
         ingress: DomainEventIngress,
     ) -> Result<crate::InboxSeq, ControlError> {
-        match self.mode {
-            LocalExecutionMode::Worker => self
-                .supervisor
+        self.server_call(move |runtime| {
+            let seq = runtime
                 .enqueue_event(world, ingress)
-                .map_err(ControlError::from),
-            LocalExecutionMode::Direct => self
-                .runtime
-                .enqueue_event(world, ingress)
-                .map_err(ControlError::from),
-        }
+                .map_err(ControlError::from)?;
+            runtime.process_all_pending().map_err(ControlError::from)?;
+            Ok(seq)
+        })
     }
 
     pub fn enqueue_receipt(
@@ -250,22 +428,17 @@ impl LocalControl {
         world: WorldId,
         ingress: ReceiptIngress,
     ) -> Result<crate::InboxSeq, ControlError> {
-        match self.mode {
-            LocalExecutionMode::Worker => self
-                .supervisor
+        self.server_call(move |runtime| {
+            let seq = runtime
                 .enqueue_receipt(world, ingress)
-                .map_err(ControlError::from),
-            LocalExecutionMode::Direct => self
-                .runtime
-                .enqueue_receipt(world, ingress)
-                .map_err(ControlError::from),
-        }
+                .map_err(ControlError::from)?;
+            runtime.process_all_pending().map_err(ControlError::from)?;
+            Ok(seq)
+        })
     }
 
     pub fn journal_head(&self, world: WorldId) -> Result<HeadInfoResponse, ControlError> {
-        self.supervisor
-            .journal_head(world)
-            .map_err(ControlError::from)
+        self.server_call(move |runtime| runtime.journal_head(world).map_err(ControlError::from))
     }
 
     pub fn journal_entries(
@@ -274,9 +447,11 @@ impl LocalControl {
         from: u64,
         limit: u32,
     ) -> Result<crate::api::JournalEntriesResponse, ControlError> {
-        self.supervisor
-            .journal_entries(world, from, limit)
-            .map_err(ControlError::from)
+        self.server_call(move |runtime| {
+            runtime
+                .journal_entries(world, from, limit)
+                .map_err(ControlError::from)
+        })
     }
 
     pub fn journal_entries_raw(
@@ -285,15 +460,15 @@ impl LocalControl {
         from: u64,
         limit: u32,
     ) -> Result<crate::api::RawJournalEntriesResponse, ControlError> {
-        self.supervisor
-            .journal_entries_raw(world, from, limit)
-            .map_err(ControlError::from)
+        self.server_call(move |runtime| {
+            runtime
+                .journal_entries_raw(world, from, limit)
+                .map_err(ControlError::from)
+        })
     }
 
     pub fn runtime(&self, world: WorldId) -> Result<WorldRuntimeInfo, ControlError> {
-        self.supervisor
-            .runtime_info(world)
-            .map_err(ControlError::from)
+        self.server_call(move |runtime| runtime.world_runtime(world).map_err(ControlError::from))
     }
 
     pub fn trace(
@@ -305,18 +480,23 @@ impl LocalControl {
         correlate_value: Option<serde_json::Value>,
         window_limit: Option<u64>,
     ) -> Result<serde_json::Value, ControlError> {
-        self.supervisor
-            .trace(
-                world,
-                aos_runtime::trace::TraceQuery {
-                    event_hash: event_hash.map(ToOwned::to_owned),
-                    schema: schema.map(ToOwned::to_owned),
-                    correlate_by: correlate_by.map(ToOwned::to_owned),
-                    correlate_value,
-                    window_limit,
-                },
-            )
-            .map_err(ControlError::from)
+        let event_hash = event_hash.map(ToOwned::to_owned);
+        let schema = schema.map(ToOwned::to_owned);
+        let correlate_by = correlate_by.map(ToOwned::to_owned);
+        self.server_call(move |runtime| {
+            runtime
+                .trace(
+                    world,
+                    aos_kernel::TraceQuery {
+                        event_hash,
+                        schema,
+                        correlate_by,
+                        correlate_value,
+                        window_limit,
+                    },
+                )
+                .map_err(ControlError::from)
+        })
     }
 
     pub fn trace_summary(
@@ -324,9 +504,7 @@ impl LocalControl {
         world: WorldId,
         _recent_limit: u32,
     ) -> Result<serde_json::Value, ControlError> {
-        self.supervisor
-            .trace_summary(world)
-            .map_err(ControlError::from)
+        self.server_call(move |runtime| runtime.trace_summary(world).map_err(ControlError::from))
     }
 
     pub fn workspace_resolve(
@@ -335,13 +513,16 @@ impl LocalControl {
         workspace_name: &str,
         version: Option<u64>,
     ) -> Result<WorkspaceResolveResponse, ControlError> {
-        self.supervisor
-            .workspace_resolve(world, workspace_name, version)
-            .map_err(ControlError::from)
+        let workspace_name = workspace_name.to_string();
+        self.server_call(move |runtime| {
+            runtime
+                .workspace_resolve(world, &workspace_name, version)
+                .map_err(ControlError::from)
+        })
     }
 
     pub fn workspace_empty_root(&self) -> Result<HashRef, ControlError> {
-        self.runtime
+        self.local_runtime()
             .workspace_empty_root()
             .map_err(ControlError::from)
     }
@@ -354,7 +535,7 @@ impl LocalControl {
         cursor: Option<&str>,
         limit: u64,
     ) -> Result<WorkspaceListReceipt, ControlError> {
-        self.runtime
+        self.local_runtime()
             .workspace_entries(root_hash, path, scope, cursor, limit)
             .map_err(ControlError::from)
     }
@@ -364,7 +545,7 @@ impl LocalControl {
         root_hash: &HashRef,
         path: &str,
     ) -> Result<WorkspaceReadRefReceipt, ControlError> {
-        self.runtime
+        self.local_runtime()
             .workspace_entry(root_hash, path)
             .map_err(ControlError::from)
     }
@@ -375,7 +556,7 @@ impl LocalControl {
         path: &str,
         range: Option<(u64, u64)>,
     ) -> Result<Vec<u8>, ControlError> {
-        self.runtime
+        self.local_runtime()
             .workspace_bytes(root_hash, path, range)
             .map_err(ControlError::from)
     }
@@ -385,7 +566,7 @@ impl LocalControl {
         root_hash: &HashRef,
         path: Option<&str>,
     ) -> Result<WorkspaceAnnotationsGetReceipt, ControlError> {
-        self.runtime
+        self.local_runtime()
             .workspace_annotations(root_hash, path)
             .map_err(ControlError::from)
     }
@@ -395,7 +576,7 @@ impl LocalControl {
         root_hash: HashRef,
         request: WorkspaceApplyRequest,
     ) -> Result<WorkspaceApplyResponse, ControlError> {
-        self.runtime
+        self.local_runtime()
             .workspace_apply(root_hash, request)
             .map_err(ControlError::from)
     }
@@ -406,7 +587,7 @@ impl LocalControl {
         root_b: &HashRef,
         prefix: Option<&str>,
     ) -> Result<WorkspaceDiffReceipt, ControlError> {
-        self.runtime
+        self.local_runtime()
             .workspace_diff(root_a, root_b, prefix)
             .map_err(ControlError::from)
     }
@@ -416,7 +597,7 @@ impl LocalControl {
         bytes: &[u8],
         expected_hash: Option<Hash>,
     ) -> Result<BlobPutResponse, ControlError> {
-        let hash = self.runtime.put_blob(bytes)?;
+        let hash = self.local_runtime().put_blob(bytes)?;
         if let Some(expected_hash) = expected_hash
             && expected_hash != hash
         {
@@ -434,18 +615,14 @@ impl LocalControl {
     pub fn head_blob(&self, hash: Hash) -> Result<CasBlobMetadata, ControlError> {
         Ok(CasBlobMetadata {
             hash: hash.to_hex(),
-            exists: self.runtime.blob_metadata(hash)?,
+            exists: self.local_runtime().blob_metadata(hash)?,
         })
     }
 
     pub fn get_blob(&self, hash: Hash) -> Result<Vec<u8>, ControlError> {
-        self.runtime.get_blob(hash).map_err(ControlError::from)
-    }
-}
-
-impl Drop for LocalControl {
-    fn drop(&mut self) {
-        self.supervisor.stop();
+        self.local_runtime()
+            .get_blob(hash)
+            .map_err(ControlError::from)
     }
 }
 
@@ -485,6 +662,10 @@ impl HttpBackend for LocalControl {
 
     fn get_world(&self, world_id: WorldId) -> Result<WorldSummaryResponse, ControlError> {
         LocalControl::get_world(self, world_id)
+    }
+
+    fn checkpoint_world(&self, world_id: WorldId) -> Result<WorldSummaryResponse, ControlError> {
+        LocalControl::checkpoint_world(self, world_id)
     }
 
     fn fork_world(
@@ -886,4 +1067,17 @@ fn require_latest_durable(consistency: Option<&str>) -> Result<(), ControlError>
             "unsupported consistency '{other}'"
         ))),
     }
+}
+
+fn def_matches_kind(def: &AirNode, kind: &str) -> bool {
+    matches!(
+        (def, kind),
+        (AirNode::Defschema(_), "defschema")
+            | (AirNode::Defmodule(_), "defmodule")
+            | (AirNode::Defcap(_), "defcap")
+            | (AirNode::Defpolicy(_), "defpolicy")
+            | (AirNode::Defsecret(_), "defsecret")
+            | (AirNode::Defeffect(_), "defeffect")
+            | (AirNode::Manifest(_), "manifest")
+    )
 }

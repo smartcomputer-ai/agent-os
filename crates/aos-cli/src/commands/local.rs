@@ -18,6 +18,7 @@ use crate::output::{OutputOpts, print_success};
 
 const DEFAULT_LOCAL_PROFILE: &str = "local";
 const DEFAULT_LOCAL_BIND: &str = "127.0.0.1:9010";
+const DEFAULT_LOCAL_STARTUP_WAIT_MS: u64 = 30_000;
 
 #[derive(Args, Debug)]
 #[command(about = "Manage the local AgentOS node")]
@@ -62,7 +63,7 @@ struct LocalUpArgs {
     #[arg(long)]
     background: bool,
     /// Milliseconds to wait for health before considering startup failed.
-    #[arg(long, default_value_t = 10_000)]
+    #[arg(long, default_value_t = DEFAULT_LOCAL_STARTUP_WAIT_MS)]
     wait_ms: u64,
 }
 
@@ -129,6 +130,16 @@ struct LocalStatusView {
     version: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct HealthInfo {
+    service: String,
+    version: String,
+    #[serde(default)]
+    pid: Option<u32>,
+    #[serde(default)]
+    state_root: Option<PathBuf>,
+}
+
 pub(crate) async fn handle(global: &GlobalOpts, output: OutputOpts, args: LocalArgs) -> Result<()> {
     match args.cmd {
         LocalCommand::Up(args) => handle_up(global, output, args).await,
@@ -173,6 +184,42 @@ async fn handle_up(global: &GlobalOpts, output: OutputOpts, args: LocalUpArgs) -
             return print_success(output, serde_json::to_value(status)?, None, vec![]);
         }
         cleanup_stale_state(&paths)?;
+    }
+
+    if let Ok(health) = fetch_health(&api, 500).await {
+        if health.service == "aos-node-local" {
+            if let (Some(pid), Some(state_root)) = (health.pid, health.state_root.as_ref()) {
+                if paths_equivalent(state_root, paths.state_root.root()) && process_is_running(pid)?
+                {
+                    let recovered = LocalRuntimeState {
+                        pid,
+                        api: api.clone(),
+                        bind: args.bind.to_string(),
+                        profile: args.profile.clone(),
+                        state_root: paths.state_root.root().to_path_buf(),
+                        log: paths.log.clone(),
+                    };
+                    save_local_state(&paths, &recovered)?;
+                    ensure_local_profile(global, &args.profile, &api, args.select)?;
+                    let status = status_from_state(&paths, Some(&recovered), 500).await?;
+                    return print_success(output, serde_json::to_value(status)?, None, vec![]);
+                }
+                return Err(anyhow!(
+                    "local bind {} is already served by another state root ({})",
+                    args.bind,
+                    state_root.display()
+                ));
+            }
+            return Err(anyhow!(
+                "local bind {} is already served by an incompatible local node",
+                args.bind
+            ));
+        }
+        return Err(anyhow!(
+            "local bind {} is already served by {}",
+            args.bind,
+            health.service
+        ));
     }
 
     ensure_local_profile(global, &args.profile, &api, args.select)?;
@@ -268,10 +315,15 @@ async fn handle_status(output: OutputOpts, args: LocalRuntimeArgs) -> Result<()>
 async fn handle_down(global: &GlobalOpts, output: OutputOpts, args: LocalDownArgs) -> Result<()> {
     let paths = resolve_local_paths(args.runtime.root.as_deref())?;
     let state = load_local_state(&paths)?;
-    let Some(state) = state else {
+    let Some(state) = state.or(if args.runtime.root.is_none() {
+        discover_local_state_via_profile(global, &args.profile).await?
+    } else {
+        None
+    }) else {
         let status = status_from_state(&paths, None, 200).await?;
         return print_success(output, serde_json::to_value(status)?, None, vec![]);
     };
+    let runtime_paths = resolve_local_paths_from_state_root(&state.state_root)?;
 
     terminate_process(state.pid, false)?;
     wait_for_process_exit(state.pid, args.wait_ms).await?;
@@ -279,9 +331,9 @@ async fn handle_down(global: &GlobalOpts, output: OutputOpts, args: LocalDownArg
         terminate_process(state.pid, true)?;
         wait_for_process_exit(state.pid, args.wait_ms).await?;
     }
-    cleanup_stale_state(&paths)?;
+    cleanup_stale_state(&runtime_paths)?;
     clear_current_profile_if_matches(global, &args.profile)?;
-    let status = status_from_state(&paths, None, 200).await?;
+    let status = status_from_state(&runtime_paths, None, 200).await?;
     print_success(output, serde_json::to_value(status)?, None, vec![])
 }
 
@@ -366,6 +418,55 @@ fn cleanup_stale_state(paths: &LocalPaths) -> Result<()> {
     Ok(())
 }
 
+fn resolve_local_paths_from_state_root(state_root: &Path) -> Result<LocalPaths> {
+    let Some(root) = state_root.parent() else {
+        return Err(anyhow!(
+            "local state root '{}' has no parent runtime root",
+            state_root.display()
+        ));
+    };
+    resolve_local_paths(Some(root))
+}
+
+async fn discover_local_state_via_profile(
+    global: &GlobalOpts,
+    profile_name: &str,
+) -> Result<Option<LocalRuntimeState>> {
+    let config_paths = ConfigPaths::resolve(global.config.as_deref())?;
+    let config = load_config(&config_paths)?;
+    let Some(profile) = config.profiles.get(profile_name) else {
+        return Ok(None);
+    };
+    if profile.kind != ProfileKind::Local {
+        return Ok(None);
+    }
+    let Ok(health) = fetch_health(&profile.api, 500).await else {
+        return Ok(None);
+    };
+    if health.service != "aos-node-local" {
+        return Ok(None);
+    }
+    let (Some(pid), Some(state_root)) = (health.pid, health.state_root) else {
+        return Ok(None);
+    };
+    if !process_is_running(pid)? {
+        return Ok(None);
+    }
+    let runtime_paths = resolve_local_paths_from_state_root(&state_root)?;
+    Ok(Some(LocalRuntimeState {
+        pid,
+        api: profile.api.clone(),
+        bind: profile
+            .api
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .to_string(),
+        profile: profile_name.to_string(),
+        state_root: runtime_paths.state_root.root().to_path_buf(),
+        log: runtime_paths.log,
+    }))
+}
+
 async fn status_from_state(
     paths: &LocalPaths,
     state: Option<&LocalRuntimeState>,
@@ -378,7 +479,10 @@ async fn status_from_state(
         false
     };
     let health = if let Some(state) = state {
-        fetch_health(&state.api, health_timeout_ms).await.ok()
+        fetch_health(&state.api, health_timeout_ms)
+            .await
+            .ok()
+            .filter(|health| health_matches_runtime(health, state.pid, &state.state_root))
     } else {
         None
     };
@@ -392,20 +496,12 @@ async fn status_from_state(
         profile: state.map(|state| state.profile.clone()),
         state_root: state.map(|state| state.state_root.clone()),
         log: state.map(|state| state.log.clone()),
-        service: health
-            .as_ref()
-            .and_then(|value| value.get("service"))
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string),
-        version: health
-            .as_ref()
-            .and_then(|value| value.get("version"))
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string),
+        service: health.as_ref().map(|value| value.service.clone()),
+        version: health.as_ref().map(|value| value.version.clone()),
     })
 }
 
-async fn fetch_health(api: &str, timeout_ms: u64) -> Result<serde_json::Value> {
+async fn fetch_health(api: &str, timeout_ms: u64) -> Result<HealthInfo> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms.max(1)))
         .build()
@@ -425,6 +521,21 @@ async fn fetch_health(api: &str, timeout_ms: u64) -> Result<serde_json::Value> {
         .context("decode local node health response")
 }
 
+fn health_matches_runtime(health: &HealthInfo, pid: u32, state_root: &Path) -> bool {
+    health.pid == Some(pid)
+        && health
+            .state_root
+            .as_ref()
+            .is_some_and(|root| paths_equivalent(root, state_root))
+}
+
+fn paths_equivalent(lhs: &Path, rhs: &Path) -> bool {
+    match (lhs.canonicalize(), rhs.canonicalize()) {
+        (Ok(lhs), Ok(rhs)) => lhs == rhs,
+        _ => lhs == rhs,
+    }
+}
+
 async fn wait_for_healthy_status(
     paths: &LocalPaths,
     state: &LocalRuntimeState,
@@ -436,6 +547,9 @@ async fn wait_for_healthy_status(
         if status.healthy {
             return Ok(status);
         }
+        if let Some(reason) = health_incompatibility_reason(state).await? {
+            return Err(anyhow!("{reason}"));
+        }
         if !status.running {
             return Err(anyhow!(
                 "local node process {} exited before becoming healthy",
@@ -444,12 +558,45 @@ async fn wait_for_healthy_status(
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(anyhow!(
-                "local node did not become healthy within {} ms",
+                "local node did not become healthy within {} ms; retry with --wait-ms if cold start needs more time",
                 wait_ms.max(1)
             ));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+async fn health_incompatibility_reason(state: &LocalRuntimeState) -> Result<Option<String>> {
+    let Ok(health) = fetch_health(&state.api, 500).await else {
+        return Ok(None);
+    };
+    if health.service != "aos-node-local" {
+        return Ok(Some(format!(
+            "local bind {} is served by {} instead of aos-node-local",
+            state.bind, health.service
+        )));
+    }
+    let Some(pid) = health.pid else {
+        return Ok(Some(format!(
+            "local node at {} responded to /v1/health without pid/state_root; this usually means the `aos-node-local` binary is older than `aos`. Rebuild it with `cargo build -p aos-node-local --bin aos-node-local`",
+            state.api
+        )));
+    };
+    let Some(state_root) = health.state_root.as_ref() else {
+        return Ok(Some(format!(
+            "local node at {} responded to /v1/health without pid/state_root; this usually means the `aos-node-local` binary is older than `aos`. Rebuild it with `cargo build -p aos-node-local --bin aos-node-local`",
+            state.api
+        )));
+    };
+    if pid != state.pid || !paths_equivalent(state_root, &state.state_root) {
+        return Ok(Some(format!(
+            "local bind {} is served by another local runtime (pid {}, state root {})",
+            state.bind,
+            pid,
+            state_root.display()
+        )));
+    }
+    Ok(None)
 }
 
 fn ensure_local_profile(
@@ -556,5 +703,26 @@ async fn wait_for_process_exit(pid: u32, wait_ms: u64) -> Result<()> {
             return Err(anyhow!("process {pid} did not exit before timeout"));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser, Debug)]
+    struct TestCli {
+        #[command(flatten)]
+        args: LocalArgs,
+    }
+
+    #[test]
+    fn local_up_default_wait_budget_covers_cold_start_replay() {
+        let cli = TestCli::parse_from(["test", "up"]);
+        let LocalCommand::Up(args) = cli.args.cmd else {
+            panic!("expected local up command");
+        };
+        assert_eq!(args.wait_ms, DEFAULT_LOCAL_STARTUP_WAIT_MS);
     }
 }

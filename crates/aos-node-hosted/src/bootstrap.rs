@@ -17,6 +17,7 @@ use crate::vault::HostedVault;
 use crate::worker::{HostedWorkerRuntime, WorkerError};
 
 pub struct ControlDeps {
+    pub state_root: PathBuf,
     pub default_universe_id: aos_node::UniverseId,
     pub submissions: HostedSubmissionService,
     pub cas: HostedCasService,
@@ -61,16 +62,18 @@ pub fn build_control_deps_broker(
         )))
     })?;
     Ok(ControlDeps {
+        state_root: paths.root().to_path_buf(),
         default_universe_id,
         submissions: HostedSubmissionService::new(
             default_universe_id,
             journal.clone(),
             meta.clone(),
+            cas.clone(),
         ),
         cas: cas.clone(),
         secrets: HostedSecretService::new(vault.clone()),
         projections,
-        replay: HostedReplayService::new(paths, journal, cas, meta, vault),
+        replay: HostedReplayService::new(journal, cas, meta, vault),
     })
 }
 
@@ -106,10 +109,16 @@ pub fn build_control_deps_from_worker_runtime(
             )))
         })?;
         (
-            HostedSubmissionService::new(default_universe_id, journal.clone(), meta.clone()),
+            HostedSubmissionService::from_runtime(
+                runtime.clone(),
+                default_universe_id,
+                journal.clone(),
+                meta.clone(),
+                cas.clone(),
+            ),
             cas.clone(),
             HostedSecretService::new(vault.clone()),
-            HostedReplayService::new(runtime.paths().clone(), journal, cas, meta, vault),
+            HostedReplayService::new(journal, cas, meta, vault),
         )
     } else {
         let secrets = runtime.vault().map_err(control_error_from_worker)?;
@@ -117,11 +126,16 @@ pub fn build_control_deps_from_worker_runtime(
         let cas = cas_service_from_worker_runtime(runtime.clone());
         let meta = meta_service_from_worker_runtime(runtime.clone());
         (
-            HostedSubmissionService::new(default_universe_id, journal.clone(), meta.clone()),
+            HostedSubmissionService::from_runtime(
+                runtime.clone(),
+                default_universe_id,
+                journal.clone(),
+                meta.clone(),
+                cas.clone(),
+            ),
             cas.clone(),
             HostedSecretService::new(secrets),
             HostedReplayService::new(
-                runtime.paths().clone(),
                 journal,
                 cas,
                 meta,
@@ -130,6 +144,7 @@ pub fn build_control_deps_from_worker_runtime(
         )
     };
     Ok(ControlDeps {
+        state_root: runtime.paths().root().to_path_buf(),
         default_universe_id,
         submissions,
         cas,
@@ -179,7 +194,18 @@ pub fn build_worker_runtime_broker(
 }
 
 fn cas_service_from_worker_runtime(runtime: HostedWorkerRuntime) -> HostedCasService {
-    HostedCasService::from_provider(move |universe_id| runtime.cas_store_for_domain(universe_id))
+    HostedCasService::from_provider_with_module_cache_dir(
+        {
+            let runtime = runtime.clone();
+            move |universe_id| runtime.cas_store_for_domain(universe_id)
+        },
+        move |universe_id| {
+            Ok(runtime
+                .paths()
+                .for_universe(universe_id)
+                .wasmtime_cache_dir())
+        },
+    )
 }
 
 fn journal_service_from_worker_runtime(runtime: HostedWorkerRuntime) -> HostedJournalService {
@@ -221,8 +247,14 @@ fn meta_service_from_worker_runtime(runtime: HostedWorkerRuntime) -> HostedMetaS
     HostedMetaService::from_callbacks(
         {
             let runtime = runtime.clone();
-            move |universe_id, world_id, command_id| {
-                runtime.get_command_record(universe_id, world_id, command_id)
+            move |universe_id, world_id, command_id| match runtime.get_command_record(
+                universe_id,
+                world_id,
+                command_id,
+            ) {
+                Ok(record) => Ok(Some(record)),
+                Err(WorkerError::UnknownCommand { .. }) => Ok(None),
+                Err(err) => Err(err),
             }
         },
         {

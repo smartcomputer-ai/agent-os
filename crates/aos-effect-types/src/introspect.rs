@@ -8,7 +8,7 @@ use crate::serde_helpers;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReadMeta {
     pub journal_height: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub snapshot_hash: Option<HashRef>,
     pub manifest_hash: HashRef,
 }
@@ -28,22 +28,14 @@ pub struct IntrospectManifestReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntrospectWorkflowStateParams {
     pub workflow: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "serde_helpers::bytes_opt"
-    )]
+    #[serde(default, with = "serde_helpers::bytes_opt")]
     pub key: Option<Vec<u8>>,
     pub consistency: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntrospectWorkflowStateReceipt {
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "serde_helpers::bytes_opt"
-    )]
+    #[serde(default, with = "serde_helpers::bytes_opt")]
     pub state: Option<Vec<u8>>,
     pub meta: ReadMeta,
 }

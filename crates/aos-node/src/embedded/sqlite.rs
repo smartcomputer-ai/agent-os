@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{LocalStatePaths, LocalStoreError};
 
-const RUNTIME_SCHEMA_VERSION: i64 = 3;
+const RUNTIME_SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug, Clone)]
 pub struct LocalSqliteConfig {
@@ -36,14 +36,15 @@ pub struct CheckpointHeadRow {
     pub world_id: WorldId,
     pub active_baseline: SnapshotRecord,
     pub next_world_seq: u64,
+    pub checkpointed_at_ns: u64,
 }
 
-pub struct LocalSqlitePlanes {
+pub struct LocalSqliteBackend {
     config: LocalSqliteConfig,
     conn: Connection,
 }
 
-impl LocalSqlitePlanes {
+impl LocalSqliteBackend {
     pub fn from_paths(paths: &LocalStatePaths) -> Result<Self, LocalStoreError> {
         Self::new(LocalSqliteConfig::from_paths(paths))
     }
@@ -88,7 +89,7 @@ impl LocalSqlitePlanes {
         &self,
     ) -> Result<Vec<(WorldDirectoryRow, CheckpointHeadRow)>, LocalStoreError> {
         let mut stmt = self.conn.prepare(
-            "select d.world_id, d.universe_id, d.created_at_ns, d.initial_manifest_hash, d.world_epoch, h.active_baseline, h.next_world_seq
+            "select d.world_id, d.universe_id, d.created_at_ns, d.initial_manifest_hash, d.world_epoch, h.active_baseline, h.next_world_seq, h.checkpointed_at_ns
              from world_directory d
              join checkpoint_heads h on h.world_id = d.world_id
              order by d.world_id asc",
@@ -116,6 +117,7 @@ impl LocalSqlitePlanes {
                     active_baseline: serde_cbor::from_slice(&row.get::<_, Vec<u8>>(5)?)
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,
                     next_world_seq: row.get(6)?,
+                    checkpointed_at_ns: row.get(7)?,
                 },
             ))
         })?;
@@ -223,18 +225,21 @@ impl LocalSqlitePlanes {
         world_id: WorldId,
         active_baseline: &SnapshotRecord,
         next_world_seq: u64,
+        checkpointed_at_ns: u64,
     ) -> Result<(), LocalStoreError> {
         self.conn.execute(
             "insert into checkpoint_heads (
-                world_id, active_baseline, next_world_seq
-            ) values (?1, ?2, ?3)
+                world_id, active_baseline, next_world_seq, checkpointed_at_ns
+            ) values (?1, ?2, ?3, ?4)
             on conflict(world_id) do update set
                 active_baseline = excluded.active_baseline,
-                next_world_seq = excluded.next_world_seq",
+                next_world_seq = excluded.next_world_seq,
+                checkpointed_at_ns = excluded.checkpointed_at_ns",
             params![
                 world_id.to_string(),
                 serde_cbor::to_vec(active_baseline)?,
                 next_world_seq,
+                checkpointed_at_ns,
             ],
         )?;
         Ok(())
@@ -260,7 +265,8 @@ fn initialize_schema(conn: &Connection) -> Result<(), LocalStoreError> {
         create table if not exists checkpoint_heads (
             world_id text primary key,
             active_baseline blob not null,
-            next_world_seq integer not null
+            next_world_seq integer not null,
+            checkpointed_at_ns integer not null default 0
         );
         create table if not exists journal_frames (
             offset integer primary key,
@@ -285,6 +291,17 @@ fn initialize_schema(conn: &Connection) -> Result<(), LocalStoreError> {
         .optional()?;
     match existing {
         Some(existing) if existing == RUNTIME_SCHEMA_VERSION => Ok(()),
+        Some(3) => {
+            conn.execute(
+                "alter table checkpoint_heads add column checkpointed_at_ns integer not null default 0",
+                [],
+            )?;
+            conn.execute(
+                "update runtime_meta set schema_version = ?1 where singleton = 1",
+                params![RUNTIME_SCHEMA_VERSION],
+            )?;
+            Ok(())
+        }
         Some(existing) => Err(LocalStoreError::Backend(format!(
             "local runtime schema version {existing} does not match expected {RUNTIME_SCHEMA_VERSION}"
         ))),
