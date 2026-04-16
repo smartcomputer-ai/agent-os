@@ -8,8 +8,9 @@ fn top_level_help_lists_resource_roots() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("profile"))
-        .stdout(predicate::str::contains("local"))
-        .stdout(predicate::str::contains("hosted"))
+        .stdout(predicate::str::contains("node"))
+        .stdout(predicate::str::contains("local").not())
+        .stdout(predicate::str::contains("hosted").not())
         .stdout(predicate::str::contains("universe"))
         .stdout(predicate::str::contains("world"))
         .stdout(predicate::str::contains("workspace"))
@@ -53,9 +54,9 @@ fn world_help_exposes_world_only_commands() {
 }
 
 #[test]
-fn local_help_lists_lifecycle_commands() {
+fn node_help_lists_lifecycle_commands() {
     let mut cmd = cargo_bin_cmd!("aos");
-    cmd.args(["local", "--help"]);
+    cmd.args(["node", "--help"]);
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("up"))
@@ -65,22 +66,24 @@ fn local_help_lists_lifecycle_commands() {
 }
 
 #[test]
-fn local_up_help_lists_background_flag_only() {
+fn node_up_help_lists_backend_and_background_flags() {
     let mut cmd = cargo_bin_cmd!("aos");
-    cmd.args(["local", "up", "--help"]);
+    cmd.args(["node", "up", "--help"]);
     cmd.assert()
         .success()
+        .stdout(predicate::str::contains("--journal-backend"))
+        .stdout(predicate::str::contains("--blob-backend"))
         .stdout(predicate::str::contains("--background"))
         .stdout(predicate::str::contains("--foreground").not());
 }
 
 #[test]
-fn local_status_reports_stopped_without_runtime_state() {
+fn node_status_reports_stopped_without_runtime_state() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let mut cmd = cargo_bin_cmd!("aos");
     cmd.args([
         "--json",
-        "local",
+        "node",
         "status",
         "--root",
         temp.path().to_str().unwrap(),
@@ -92,42 +95,17 @@ fn local_status_reports_stopped_without_runtime_state() {
 }
 
 #[test]
-fn hosted_help_lists_lifecycle_commands() {
-    let mut cmd = cargo_bin_cmd!("aos");
-    cmd.args(["hosted", "--help"]);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("up"))
-        .stdout(predicate::str::contains("status"))
-        .stdout(predicate::str::contains("down"))
-        .stdout(predicate::str::contains("use"));
-}
-
-#[test]
-fn hosted_up_help_lists_background_flag_only() {
-    let mut cmd = cargo_bin_cmd!("aos");
-    cmd.args(["hosted", "up", "--help"]);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("--background"))
-        .stdout(predicate::str::contains("--foreground").not());
-}
-
-#[test]
-fn hosted_status_reports_stopped_without_runtime_state() {
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let mut cmd = cargo_bin_cmd!("aos");
-    cmd.args([
-        "--json",
-        "hosted",
-        "status",
-        "--root",
-        temp.path().to_str().unwrap(),
-    ]);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("\"running\":false"))
-        .stdout(predicate::str::contains("\"healthy\":false"));
+fn old_node_product_commands_are_not_public_aliases() {
+    cargo_bin_cmd!("aos")
+        .arg("local")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+    cargo_bin_cmd!("aos")
+        .arg("hosted")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
 }
 
 #[test]

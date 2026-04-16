@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use crate::GlobalOpts;
 use crate::authoring::{
     build_bundle_from_world, build_patch, fetch_remote_manifest, resolve_local_dirs,
-    sync_hosted_secrets, upload_bundle, upload_patch_bytes, upload_patch_json,
+    sync_node_secrets, upload_bundle, upload_patch_bytes, upload_patch_json,
 };
 use crate::client::ApiClient;
 use crate::config::{ConfigPaths, load_config, save_config};
@@ -48,7 +48,7 @@ enum WorldCommand {
     Ls,
     /// Show one world by ID or the selected default.
     Get(WorldGetArgs),
-    /// Create a hosted world, upload a local bundle, or fork from an existing world.
+    /// Create a node world, upload a local bundle, or fork from an existing world.
     Create(WorldCreateArgs),
     /// Show current runtime and scheduling status for a world.
     Status(WorldGetArgs),
@@ -422,10 +422,10 @@ struct WorldTraceSummaryArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Compare the local authored bundle against the selected hosted world's current manifest, build a governance patch document, submit governance propose, and optionally chain shadow, approve, and apply. Use this for manifest-level changes such as defs, modules, routing, policies, effects, and secrets."
+    long_about = "Compare the local authored bundle against the selected node world's current manifest, build a governance patch document, submit governance propose, and optionally chain shadow, approve, and apply. Use this for manifest-level changes such as defs, modules, routing, policies, effects, and secrets."
 )]
 struct WorldPatchArgs {
-    /// Local world root to build and diff against the hosted manifest.
+    /// Local world root to build and diff against the node manifest.
     #[arg(long)]
     local_root: Option<PathBuf>,
     /// Force a fresh workflow build instead of reusing cache.
@@ -664,8 +664,8 @@ async fn handle_create(
                     "local --sync-secrets is a compatibility no-op; local secrets resolve from env/.env at world load",
                 );
             } else {
-                print_verbose(output, "syncing hosted secrets from aos.sync.json");
-                let synced = sync_hosted_secrets(
+                print_verbose(output, "syncing node secrets from aos.sync.json");
+                let synced = sync_node_secrets(
                     client,
                     secret_universe.as_deref(),
                     args.local_root.as_deref(),
@@ -1123,9 +1123,9 @@ async fn handle_patch(
                 "local --sync-secrets is a compatibility no-op; local secrets resolve from env/.env at world load",
             );
         } else {
-            print_verbose(output, "syncing hosted secrets from aos.sync.json");
+            print_verbose(output, "syncing node secrets from aos.sync.json");
             let universe_id = super::common::universe_id_for_world(client, &world).await?;
-            let synced = sync_hosted_secrets(
+            let synced = sync_node_secrets(
                 client,
                 Some(&universe_id),
                 args.local_root.as_deref(),
@@ -1193,7 +1193,7 @@ async fn handle_patch(
             warnings,
         );
     }
-    print_verbose(output, "uploading bundle to hosted CAS");
+    print_verbose(output, "uploading bundle to node CAS");
     let uploaded = upload_bundle(client, &store, &bundle, warnings, Some(&dirs)).await?;
     print_verbose(output, "building governance patch document");
     let patch = build_patch(&remote, &bundle)?;
@@ -1761,7 +1761,7 @@ mod tests {
     }
 
     #[test]
-    fn created_world_id_accepts_hosted_response_shape() {
+    fn created_world_id_accepts_node_response_shape() {
         let data = json!({
             "submission_id": "create-123",
             "submission_offset": 7,
@@ -1769,7 +1769,7 @@ mod tests {
             "effective_partition": 0
         });
 
-        let world_id = created_world_id(&data).expect("extract hosted world id");
+        let world_id = created_world_id(&data).expect("extract node world id");
         assert_eq!(world_id, "22222222-2222-2222-2222-222222222222");
     }
 

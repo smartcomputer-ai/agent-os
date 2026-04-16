@@ -37,7 +37,7 @@ pub(crate) struct GlobalOpts {
     /// Add a custom HTTP header as `KEY=VALUE`.
     #[arg(long, global = true)]
     header: Vec<String>,
-    /// Select the active hosted secret universe by UUID.
+    /// Select the active node universe by UUID.
     #[arg(long, global = true, env = "AOS_UNIVERSE")]
     universe: Option<String>,
     /// Select the active world by UUID.

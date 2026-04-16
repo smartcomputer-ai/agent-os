@@ -216,7 +216,7 @@ pub async fn upload_bundle(
     })
 }
 
-pub async fn sync_hosted_secrets(
+pub async fn sync_node_secrets(
     client: &ApiClient,
     universe_id: Option<&str>,
     local_root: Option<&Path>,
@@ -231,7 +231,7 @@ pub async fn sync_hosted_secrets(
     for value in values {
         let digest = Hash::of_bytes(&value.plaintext).to_hex();
         client.log(format!(
-            "syncing hosted secret binding {} from {}:{}",
+            "syncing node secret binding {} from {}:{}",
             value.binding, value.source, value.key
         ));
         let binding = client
@@ -243,10 +243,10 @@ pub async fn sync_hosted_secrets(
                     ),
                     universe_id,
                 ),
-                &hosted_secret_binding_body(actor),
+                &node_secret_binding_body(actor),
             )
             .await
-            .with_context(|| format!("upsert hosted secret binding '{}'", value.binding))?;
+            .with_context(|| format!("upsert node secret binding '{}'", value.binding))?;
         let latest_version = binding.get("latest_version").and_then(Value::as_u64);
         if let Some(version) = latest_version {
             let existing = client
@@ -263,10 +263,7 @@ pub async fn sync_hosted_secrets(
                 )
                 .await
                 .with_context(|| {
-                    format!(
-                        "fetch hosted secret version '{}@{}'",
-                        value.binding, version
-                    )
+                    format!("fetch node secret version '{}@{}'", value.binding, version)
                 })?;
             if existing.get("digest").and_then(Value::as_str) == Some(digest.as_str()) {
                 unchanged.push(serde_json::json!({
@@ -296,7 +293,7 @@ pub async fn sync_hosted_secrets(
                 }),
             )
             .await
-            .with_context(|| format!("upload hosted secret value for '{}'", value.binding))?;
+            .with_context(|| format!("upload node secret value for '{}'", value.binding))?;
         synced.push(serde_json::json!({
             "binding": value.binding,
             "digest": put.get("digest").cloned().unwrap_or(Value::String(digest)),
@@ -313,7 +310,7 @@ pub async fn sync_hosted_secrets(
     }))
 }
 
-fn hosted_secret_binding_body(actor: Option<&str>) -> Value {
+fn node_secret_binding_body(actor: Option<&str>) -> Value {
     serde_json::json!({
         "source_kind": "node_secret_store",
         "actor": actor,
@@ -885,8 +882,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hosted_secret_binding_body_uses_node_secret_store() {
-        let body = hosted_secret_binding_body(Some("sync"));
+    fn node_secret_binding_body_uses_node_secret_store() {
+        let body = node_secret_binding_body(Some("sync"));
         assert_eq!(
             body.get("source_kind").and_then(Value::as_str),
             Some("node_secret_store")

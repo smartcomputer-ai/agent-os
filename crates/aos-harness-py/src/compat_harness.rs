@@ -19,10 +19,8 @@ use aos_kernel::{
     Kernel, KernelConfig, LoadedManifest, MapSecretResolver, MemStore, Store,
     workflow_trace_summary_with_routes,
 };
-use aos_node::api::StateCellSummary;
-use aos_node::{
-    CborPayload, DomainEventIngress, EmbeddedWorldHarness as NodeEmbeddedWorldHarness, WorldId,
-};
+use aos_node::control::StateCellSummary;
+use aos_node::{CborPayload, DomainEventIngress, NodeWorldHarness as AosNodeWorldHarness, WorldId};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde::Serialize;
@@ -106,7 +104,7 @@ struct PendingTimer {
 }
 
 pub struct BootstrappedWorldHarness {
-    pub harness: EmbeddedWorldHarness,
+    pub harness: NodeRuntimeWorldHarness,
     pub world_id: Uuid,
     pub warnings: Vec<String>,
 }
@@ -123,8 +121,8 @@ struct WorkflowHarnessCore<S: Store + Clone + Send + Sync + 'static> {
     cycles_run: u64,
 }
 
-pub struct EmbeddedWorldHarness {
-    inner: NodeEmbeddedWorldHarness,
+pub struct NodeRuntimeWorldHarness {
+    inner: AosNodeWorldHarness,
     world_id: WorldId,
     cycles_run: u64,
 }
@@ -134,7 +132,7 @@ pub struct RuntimeWorkflowHarness<S: Store + Clone + Send + Sync + 'static> {
     inner: WorkflowHarnessCore<S>,
 }
 
-pub fn bootstrap_seeded_local_world_harness(
+pub fn bootstrap_node_world_harness(
     world_root: &Path,
     reset: bool,
     force_build: bool,
@@ -176,23 +174,28 @@ pub fn bootstrap_seeded_local_world_harness(
     .context("build local world harness manifest")?;
     let warnings = air_sources.warnings;
 
+    let node_harness =
+        AosNodeWorldHarness::open(paths.root()).context("open node harness state root")?;
     if sync_secrets {
         let bindings = required_secret_bindings(&loaded);
         if !bindings.is_empty() {
-            let _ = load_required_secret_value_map(world_root, None, &bindings)
-                .context("load synced local secret values")?;
+            let values = load_required_secret_value_map(world_root, None, &bindings)
+                .context("load synced node secret values")?;
+            for (binding_id, plaintext) in values {
+                node_harness
+                    .control()
+                    .put_node_secret(&binding_id, &plaintext)
+                    .with_context(|| format!("sync node secret binding '{binding_id}'"))?;
+            }
         }
     }
-
-    let node_harness = NodeEmbeddedWorldHarness::open(paths.root())
-        .context("open embedded node harness state root")?;
     let world_id = WorldId::from(Uuid::new_v4());
     node_harness
         .create_world_from_loaded_manifest(&store, &loaded, world_id, 0)
         .context("create harness world from loaded manifest")?;
 
     Ok(BootstrappedWorldHarness {
-        harness: EmbeddedWorldHarness {
+        harness: NodeRuntimeWorldHarness {
             inner: node_harness,
             world_id,
             cycles_run: 0,
@@ -732,7 +735,7 @@ impl HarnessCell {
     }
 }
 
-impl EmbeddedWorldHarness {
+impl NodeRuntimeWorldHarness {
     pub fn send_event(&mut self, schema: &str, json_value: JsonValue) -> Result<()> {
         self.inner.control().enqueue_event(
             self.world_id,
@@ -1037,10 +1040,7 @@ impl EmbeddedWorldHarness {
 
     pub fn reopen(&self) -> Result<Self> {
         Ok(Self {
-            inner: self
-                .inner
-                .reopen()
-                .context("reopen embedded world harness")?,
+            inner: self.inner.reopen().context("reopen node world harness")?,
             world_id: self.world_id,
             cycles_run: self.cycles_run,
         })

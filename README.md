@@ -46,13 +46,21 @@ AOS is not quite ready for daily use yet, but it is close. The main proof of con
 
 Before you get started, make sure you have the Rust toolchain installed.
 
-### Try Demiurge Locally
+### Try Demiurge With The Local Node
 
-`worlds/demiurge` is the task-driven local agent workflow in this repo. A simple happy path is:
+`worlds/demiurge` is the task-driven agent workflow in this repo. The simplest way to run it is
+with the unified node and the default SQLite journal backend. This keeps node state under
+`.aos-node`, uses local filesystem CAS storage, and saves a CLI profile pointing at
+the local node API.
 
 If you want live LLM calls, set a provider API key first. You can either export it in your shell or
-put it in `worlds/demiurge/.env`. Local Demiurge reads local secrets from env/`.env`; nothing is
-stored in the world or local backend. For example:
+put it in `worlds/demiurge/.env`. `aos world create --sync-secrets` uploads the required values
+into the node secret store for the selected universe. For example:
+
+*Note*: Secrets synced this way are copied into the local node state under `.aos-node/`. They are encrypted
+at rest by the node vault, but the default local setup uses the built-in `unsafe-dev` key encryption
+key. Treat the repo-root `.aos-node/` directory as sensitive local state: do not commit it, share it,
+or copy it to machines you do not trust.
 
 ```bash
 export OPENAI_API_KEY=...
@@ -60,28 +68,32 @@ export OPENAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
 ```
 
-1. Build the local debug binaries and workflow artifacts:
+1. Build the debug CLI and workflow artifacts:
 
 ```bash
 rustup target add wasm32-unknown-unknown
 
-cargo build -p aos-cli -p aos-node-local
+cargo build -p aos-cli
 cargo build -p aos-sys --target wasm32-unknown-unknown
 cargo build -p aos-agent --bin session_workflow --target wasm32-unknown-unknown
 ```
 
-2. In terminal 1, start the local node on the Demiurge world root:
+2. In terminal 1, start the node from the repo root:
 
 ```bash
-target/debug/aos local up --root worlds/demiurge --select
+target/debug/aos node up --select
 ```
 
-3. In terminal 2, create and select the world and build from the local root:
+`sqlite` is the default journal backend and the CAS is also stored on the local file system. All
+node data is stored under the repo-root `.aos-node/` directory.
+
+3. In terminal 2, create and select the world, build from the local root, and sync provider
+   secrets from `worlds/demiurge/.env`:
 
 ```bash
 target/debug/aos world create \
   --local-root worlds/demiurge \
-  --force-build \
+  --sync-secrets \
   --select \
   --verbose
 ```
@@ -93,58 +105,7 @@ worlds/demiurge/scripts/demiurge_task.sh \
   --task "Summarize what this project is about, start with the README."
 ```
 
-For more details, see [`worlds/demiurge/README.md`](worlds/demiurge/README.md).
-
-### Try Demiurge With the Hosted Node
-
-You can also run the Kafka broker-backed hosted runtime locally against the same world root. This keeps
-the hosted node state under `worlds/demiurge/.aos-hosted` and points a saved hosted profile at the
-local control API.
-
-1. Build the hosted binary alongside the CLI and workflow artifacts:
-
-```bash
-rustup target add wasm32-unknown-unknown
-
-cargo build -p aos-cli -p aos-node-hosted
-cargo build -p aos-sys --target wasm32-unknown-unknown
-cargo build -p aos-agent --bin session_workflow --target wasm32-unknown-unknown
-```
-
-2. Bring up the local hosted infra from `dev/`. This starts Redpanda (Kafka) on
-   `localhost:19092`, MinIO, and creates the local topics:
-
-```bash
-dev/scripts/hosted-up.sh
-```
-
-For teardown, topic resets, and blobstore resets, see
-[`dev/README-hosted.md`](dev/README-hosted.md).
-
-3. Export the hosted runtime environment before starting `aos-node-hosted`:
-
-```bash
-export AOS_KAFKA_BOOTSTRAP_SERVERS=localhost:19092
-export AOS_KAFKA_INGRESS_TOPIC=aos-ingress
-export AOS_KAFKA_JOURNAL_TOPIC=aos-journal
-export AOS_KAFKA_PROJECTION_TOPIC=aos-projection
-
-export AOS_BLOBSTORE_BUCKET=aos-dev
-export AOS_BLOBSTORE_ENDPOINT=http://localhost:19000
-export AOS_BLOBSTORE_REGION=us-east-1
-export AOS_BLOBSTORE_PREFIX=aos
-export AOS_BLOBSTORE_FORCE_PATH_STYLE=true
-
-export AOS_PARTITION_COUNT=1
-export AWS_ACCESS_KEY_ID=minioadmin
-export AWS_SECRET_ACCESS_KEY=minioadmin
-```
-
-Provider secrets such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` should still live in
-`worlds/demiurge/.env` (or whatever secret sources are configured by `aos.sync.json`). In hosted
-mode those values are not read directly from the worker process environment at task runtime;
-`--sync-secrets` uploads them into the hosted node secret store for the selected universe. If you
-change `worlds/demiurge/.env` later, resync with:
+If you change `worlds/demiurge/.env` later, resync secrets before submitting the next task:
 
 ```bash
 target/debug/aos world patch \
@@ -152,30 +113,13 @@ target/debug/aos world patch \
   --sync-secrets
 ```
 
-4. In terminal 1, start the locally hosted node on the Demiurge world root:
+Stop the local node when you are done:
 
 ```bash
-target/debug/aos hosted up --root .aos-hosted --select
+target/debug/aos node down
 ```
 
-5. In terminal 2, create and select the hosted world and sync hosted secrets from
-   `worlds/demiurge/.env`:
-
-```bash
-target/debug/aos world create \
-  --local-root worlds/demiurge \
-  --sync-secrets \
-  --force-build \
-  --select \
-  --verbose
-```
-
-6. Submit a task:
-
-```bash
-worlds/demiurge/scripts/demiurge_task.sh \
-  --task "Summarize what this project is about, start with the README."
-```
+For more details, see [`worlds/demiurge/README.md`](worlds/demiurge/README.md).
 
 ### Running the Examples
 

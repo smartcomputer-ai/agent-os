@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, Optional
 
 from .fixtures import smoke_fixture_root, stage_authored_world, stage_smoke_fixture
-from .types import BackendName, BuildProfileName, EffectModeName, PathLike
+from .types import BuildProfileName, EffectModeName, PathLike
 
 if TYPE_CHECKING:
     from ._core import WorkflowHarness, WorldHarness
@@ -16,7 +16,6 @@ def world_from_authored_dir(
     source_root: PathLike,
     *,
     sdk_root: Optional[PathLike] = None,
-    backend: BackendName = "embedded",
     effect_mode: EffectModeName = "scripted",
     reset: bool = True,
     force_build: bool = False,
@@ -29,7 +28,6 @@ def world_from_authored_dir(
         include_workspaces=include_workspaces,
     ) as world:
         yield world.open_harness(
-            backend=backend,
             effect_mode=effect_mode,
             reset=reset,
             force_build=force_build,
@@ -42,7 +40,6 @@ def world_from_smoke_fixture(
     fixture_name: str,
     *,
     repo_root: Optional[PathLike] = None,
-    backend: BackendName = "embedded",
     effect_mode: EffectModeName = "scripted",
     reset: bool = True,
     force_build: bool = False,
@@ -55,7 +52,6 @@ def world_from_smoke_fixture(
         include_workspaces=include_workspaces,
     ) as world:
         yield world.open_harness(
-            backend=backend,
             effect_mode=effect_mode,
             reset=reset,
             force_build=force_build,
@@ -115,7 +111,3 @@ def workflow_from_smoke_fixture(
         build_profile=build_profile,
         effect_mode=effect_mode,
     )
-
-
-seeded_authored_world = world_from_authored_dir
-seeded_smoke_fixture = world_from_smoke_fixture

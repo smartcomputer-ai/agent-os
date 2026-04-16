@@ -262,7 +262,6 @@ dependencies = [
  "aos-effect-types",
  "aos-kernel",
  "aos-node",
- "aos-node-hosted",
  "aos-sys",
  "assert_cmd",
  "axum",
@@ -279,6 +278,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower",
+ "tracing-subscriber",
  "uuid",
  "walkdir",
 ]
@@ -410,6 +410,8 @@ dependencies = [
 name = "aos-node"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm-siv",
+ "anyhow",
  "aos-air-exec",
  "aos-air-types",
  "aos-cbor",
@@ -418,49 +420,14 @@ dependencies = [
  "aos-effects",
  "aos-kernel",
  "aos-wasm-abi",
- "axum",
- "base64 0.22.1",
- "dotenvy",
- "hex",
- "indexmap",
- "rusqlite",
- "serde",
- "serde_bytes",
- "serde_cbor",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "utoipa",
- "utoipa-swagger-ui",
- "uuid",
- "wat",
-]
-
-[[package]]
-name = "aos-node-hosted"
-version = "0.1.0"
-dependencies = [
- "aes-gcm-siv",
- "anyhow",
- "aos-air-types",
- "aos-authoring",
- "aos-cbor",
- "aos-effect-adapters",
- "aos-effect-types",
- "aos-effects",
- "aos-kernel",
- "aos-node",
- "aos-wasm-abi",
  "aos-wasm-build",
  "axum",
  "base64 0.22.1",
- "clap",
  "dotenvy",
+ "futures",
  "getrandom 0.2.16",
  "hex",
+ "indexmap",
  "object_store",
  "rdkafka",
  "rusqlite",
@@ -470,45 +437,14 @@ dependencies = [
  "serde_json",
  "serial_test",
  "sha2",
+ "temp-env",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tower",
  "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "aos-node-local"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aos-air-exec",
- "aos-air-types",
- "aos-cbor",
- "aos-effect-adapters",
- "aos-effect-types",
- "aos-effects",
- "aos-kernel",
- "aos-node",
- "aos-wasm-abi",
- "axum",
- "base64 0.22.1",
- "clap",
- "hex",
- "indexmap",
- "rusqlite",
- "serde",
- "serde_bytes",
- "serde_cbor",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
+ "utoipa",
+ "utoipa-swagger-ui",
  "uuid",
  "wat",
 ]
@@ -2325,6 +2261,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "matchers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+dependencies = [
+ "regex-automata",
+]
+
+[[package]]
 name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3843,6 +3788,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df7f62577c25e07834649fc3b39fafdc597c0a3527dc1c60129201ccfcbaa50c"
 
 [[package]]
+name = "temp-env"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96374855068f47402c3121c6eed88d29cb1de8f3ab27090e273e420bdabcf050"
+dependencies = [
+ "parking_lot",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4208,14 +4162,18 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.22"
+version = "0.3.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f30143827ddab0d256fd843b7a66d164e9f271cfa0dde49142c5ca0ca291f1e"
+checksum = "2054a14f5307d601f88daf0553e1cbf472acc4f2c51afab632431cdcd72124d5"
 dependencies = [
+ "matchers",
  "nu-ansi-term",
+ "once_cell",
+ "regex-automata",
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "tracing",
  "tracing-core",
  "tracing-log",
 ]

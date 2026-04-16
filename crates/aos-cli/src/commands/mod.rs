@@ -1,7 +1,6 @@
 pub(crate) mod cas;
 pub(crate) mod common;
-pub(crate) mod hosted;
-pub(crate) mod local;
+pub(crate) mod node;
 pub(crate) mod ops;
 pub(crate) mod profile;
 pub(crate) mod universe;
@@ -19,17 +18,18 @@ pub(crate) enum Command {
     /// Manage saved CLI profiles and the current target selection.
     #[command(visible_aliases = ["p", "profiles"])]
     Profile(profile::ProfileArgs),
-    /// Manage the local node runtime and local target selection.
-    Local(local::LocalArgs),
-    /// Manage the locally hosted node runtime and hosted target selection.
-    Hosted(hosted::HostedArgs),
-    /// Manage hosted secret bindings and secret versions.
+    /// Manage the AgentOS node runtime and target selection.
+    Node(node::NodeArgs),
+    /// Internal node server entrypoint used by `aos node up`.
+    #[command(name = "node-serve", hide = true)]
+    NodeServe(node::NodeServeArgs),
+    /// Manage node secret bindings and secret versions.
     #[command(visible_aliases = ["u", "universes"])]
     Universe(universe::UniverseArgs),
     /// Manage worlds, governance, events, and world queries.
     #[command(visible_aliases = ["w", "worlds"])]
     World(world::WorldArgs),
-    /// Inspect and synchronize hosted workspaces.
+    /// Inspect and synchronize node workspaces.
     #[command(visible_alias = "ws")]
     Workspace(workspace::WorkspaceArgs),
     /// Interact with the universe CAS directly.
@@ -45,8 +45,8 @@ pub(crate) async fn dispatch(
 ) -> Result<()> {
     match command {
         Command::Profile(args) => profile::handle(global, output, args).await,
-        Command::Local(args) => local::handle(global, output, args).await,
-        Command::Hosted(args) => hosted::handle(global, output, args).await,
+        Command::Node(args) => node::handle(global, output, args).await,
+        Command::NodeServe(args) => node::handle_node_serve(args).await,
         Command::Universe(args) => universe::handle(global, output, args).await,
         Command::World(args) => world::handle(global, output, args).await,
         Command::Workspace(args) => workspace::handle(global, output, args).await,

@@ -14,8 +14,6 @@ from .receipts import (
     timer_set_ok,
 )
 from .testing import (
-    seeded_authored_world,
-    seeded_smoke_fixture,
     workflow_from_authored_dir,
     workflow_from_smoke_fixture,
     world_from_authored_dir,
@@ -32,8 +30,6 @@ __all__ = [
     "http_request_ok",
     "llm_generate_ok",
     "repo_root",
-    "seeded_authored_world",
-    "seeded_smoke_fixture",
     "smoke_fixture_root",
     "stage_authored_world",
     "stage_smoke_fixture",

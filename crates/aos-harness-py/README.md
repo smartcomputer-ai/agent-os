@@ -5,7 +5,7 @@ Python bindings for two test lanes:
 - `WorkflowHarness`
   isolated, kernel-first workflow tests with scripted receipt choreography
 - `WorldHarness`
-  runtime-backed single-world tests on the embedded `aos-node` local runtime
+  runtime-backed single-world tests on the unified `aos-node` SQLite runtime
 
 ## Current Shape
 
@@ -18,7 +18,8 @@ Python bindings for two test lanes:
 
 `WorldHarness` is the realistic world lane:
 
-- stages authored inputs, creates a real local world, and reopens it through `aos-node`
+- stages authored inputs, creates a real local world, and reopens it through the unified `aos-node`
+  runtime in-process
 - exercises real world creation, state reads, journal/checkpoint flow, and trace queries
 - does not expose scripted effect pulling or logical time control
 
@@ -31,8 +32,7 @@ That split is intentional:
 
 - `aos-harness-py` no longer depends directly on `aos-runtime`
 - `effect_mode="scripted"` is the only supported mode today
-- legacy backend aliases such as `persisted_local` and `ephemeral` still parse on the Python side,
-  but the world harness is now one runtime-backed embedded lane
+- `WorldHarness` has one backend: the unified in-process node runtime with a SQLite journal
 
 ## Example
 

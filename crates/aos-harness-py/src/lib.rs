@@ -13,8 +13,8 @@ use aos_effects::builtins::{
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use aos_kernel::MemStore;
 use compat_harness::{
-    CycleOutcome, EffectMode, EmbeddedWorldHarness, HarnessArtifacts, HarnessCell, HostError,
-    QuiescenceStatus, RuntimeWorkflowHarness, bootstrap_seeded_local_world_harness,
+    CycleOutcome, EffectMode, HarnessArtifacts, HarnessCell, HostError, NodeRuntimeWorldHarness,
+    QuiescenceStatus, RuntimeWorkflowHarness, bootstrap_node_world_harness,
     build_runtime_workflow_harness_from_authored_paths_with_secret_config,
 };
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
@@ -49,15 +49,6 @@ fn parse_build_profile(value: &str) -> PyResult<WorkflowBuildProfile> {
         "release" => Ok(WorkflowBuildProfile::Release),
         other => Err(PyValueError::new_err(format!(
             "unsupported build_profile '{other}' (expected 'debug' or 'release')"
-        ))),
-    }
-}
-
-fn parse_backend(value: &str) -> PyResult<()> {
-    match value {
-        "embedded" | "ephemeral" | "persisted_local" | "persisted-local" => Ok(()),
-        other => Err(PyValueError::new_err(format!(
-            "unsupported backend '{other}', expected embedded|ephemeral|persisted_local"
         ))),
     }
 }
@@ -284,7 +275,7 @@ trait CommonHarnessOps {
     ) -> Result<EffectReceipt, HostError>;
 }
 
-impl CommonHarnessOps for EmbeddedWorldHarness {
+impl CommonHarnessOps for NodeRuntimeWorldHarness {
     fn send_event(&mut self, schema: &str, json_value: JsonValue) -> Result<(), HostError> {
         self.send_event(schema, json_value)
     }
@@ -895,7 +886,7 @@ fn common_artifact_export<H: CommonHarnessOps>(
 
 #[pyclass(name = "WorldHarness", unsendable)]
 struct PyWorldHarness {
-    inner: Mutex<EmbeddedWorldHarness>,
+    inner: Mutex<NodeRuntimeWorldHarness>,
     world_id: String,
     warnings: Vec<String>,
 }
@@ -903,7 +894,7 @@ struct PyWorldHarness {
 impl PyWorldHarness {
     const LABEL: &'static str = "world harness";
 
-    fn lock(&self) -> PyResult<MutexGuard<'_, EmbeddedWorldHarness>> {
+    fn lock(&self) -> PyResult<MutexGuard<'_, NodeRuntimeWorldHarness>> {
         lock_harness(&self.inner, Self::LABEL)
     }
 
@@ -915,14 +906,9 @@ impl PyWorldHarness {
         effect_mode: EffectMode,
     ) -> PyResult<Self> {
         let world_root = Path::new(world_root);
-        let boot = bootstrap_seeded_local_world_harness(
-            world_root,
-            reset,
-            force_build,
-            sync_secrets,
-            effect_mode,
-        )
-        .map_err(|err| py_runtime_error(err.to_string()))?;
+        let boot =
+            bootstrap_node_world_harness(world_root, reset, force_build, sync_secrets, effect_mode)
+                .map_err(|err| py_runtime_error(err.to_string()))?;
         Ok(Self {
             inner: Mutex::new(boot.harness),
             world_id: boot.world_id.to_string(),
@@ -934,28 +920,12 @@ impl PyWorldHarness {
 #[pymethods]
 impl PyWorldHarness {
     #[staticmethod]
-    #[pyo3(signature=(world_root, reset=false, force_build=false, sync_secrets=false, backend="embedded", effect_mode="scripted"))]
+    #[pyo3(signature=(world_root, reset=false, force_build=false, sync_secrets=false, effect_mode="scripted"))]
     fn from_world_dir(
         world_root: &str,
         reset: bool,
         force_build: bool,
         sync_secrets: bool,
-        backend: &str,
-        effect_mode: &str,
-    ) -> PyResult<Self> {
-        Self::from_world_dir_inner(world_root, reset, force_build, sync_secrets, {
-            parse_backend(backend)?;
-            parse_effect_mode(effect_mode)?
-        })
-    }
-
-    #[staticmethod]
-    #[pyo3(signature=(world_root, reset=false, force_build=false, sync_secrets=false, effect_mode="scripted"))]
-    fn from_persisted_world_dir(
-        world_root: &str,
-        reset: bool,
-        force_build: bool,
-        sync_secrets: bool,
         effect_mode: &str,
     ) -> PyResult<Self> {
         Self::from_world_dir_inner(
@@ -965,68 +935,6 @@ impl PyWorldHarness {
             sync_secrets,
             parse_effect_mode(effect_mode)?,
         )
-    }
-
-    #[staticmethod]
-    #[pyo3(signature=(world_root, reset=false, force_build=false, sync_secrets=false, effect_mode="scripted"))]
-    fn from_ephemeral_world_dir(
-        world_root: &str,
-        reset: bool,
-        force_build: bool,
-        sync_secrets: bool,
-        effect_mode: &str,
-    ) -> PyResult<Self> {
-        Self::from_world_dir_inner(
-            world_root,
-            reset,
-            force_build,
-            sync_secrets,
-            parse_effect_mode(effect_mode)?,
-        )
-    }
-
-    #[staticmethod]
-    #[pyo3(signature=(world_root, reset=false, force_build=false, sync_secrets=false, backend="embedded", effect_mode="scripted"))]
-    fn seeded_local(
-        world_root: &str,
-        reset: bool,
-        force_build: bool,
-        sync_secrets: bool,
-        backend: &str,
-        effect_mode: &str,
-    ) -> PyResult<Self> {
-        Self::from_world_dir(
-            world_root,
-            reset,
-            force_build,
-            sync_secrets,
-            backend,
-            effect_mode,
-        )
-    }
-
-    #[staticmethod]
-    #[pyo3(signature=(world_root, reset=false, force_build=false, sync_secrets=false, effect_mode="scripted"))]
-    fn seeded_persisted_local(
-        world_root: &str,
-        reset: bool,
-        force_build: bool,
-        sync_secrets: bool,
-        effect_mode: &str,
-    ) -> PyResult<Self> {
-        Self::from_persisted_world_dir(world_root, reset, force_build, sync_secrets, effect_mode)
-    }
-
-    #[staticmethod]
-    #[pyo3(signature=(world_root, reset=false, force_build=false, sync_secrets=false, effect_mode="scripted"))]
-    fn seeded_ephemeral_local(
-        world_root: &str,
-        reset: bool,
-        force_build: bool,
-        sync_secrets: bool,
-        effect_mode: &str,
-    ) -> PyResult<Self> {
-        Self::from_ephemeral_world_dir(world_root, reset, force_build, sync_secrets, effect_mode)
     }
 
     #[getter]
@@ -1061,206 +969,6 @@ impl PyWorldHarness {
 
     fn quiescence_status(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         common_quiescence_status(&self.inner, Self::LABEL, py)
-    }
-
-    fn pull_effects(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        common_pull_effects(&self.inner, Self::LABEL, py)
-    }
-
-    fn apply_receipt_object(&self, receipt: &Bound<'_, PyAny>) -> PyResult<()> {
-        common_apply_receipt_object(&self.inner, Self::LABEL, receipt)
-    }
-
-    #[pyo3(signature=(intent_hash, adapter_id, status, payload_cbor, cost_cents=None, signature=None))]
-    fn apply_receipt(
-        &self,
-        intent_hash: Vec<u8>,
-        adapter_id: &str,
-        status: &str,
-        payload_cbor: Vec<u8>,
-        cost_cents: Option<u64>,
-        signature: Option<Vec<u8>>,
-    ) -> PyResult<()> {
-        common_apply_receipt(
-            &self.inner,
-            Self::LABEL,
-            intent_hash,
-            adapter_id,
-            status,
-            payload_cbor,
-            cost_cents,
-            signature,
-        )
-    }
-
-    fn receipt_ok(
-        &self,
-        py: Python<'_>,
-        intent_hash: Vec<u8>,
-        adapter_id: &str,
-        payload: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        common_receipt_ok(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            adapter_id,
-            payload,
-        )
-    }
-
-    fn receipt_error(
-        &self,
-        py: Python<'_>,
-        intent_hash: Vec<u8>,
-        adapter_id: &str,
-        payload: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        common_receipt_error(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            adapter_id,
-            payload,
-        )
-    }
-
-    fn receipt_timeout(
-        &self,
-        py: Python<'_>,
-        intent_hash: Vec<u8>,
-        adapter_id: &str,
-        payload: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        common_receipt_timeout(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            adapter_id,
-            payload,
-        )
-    }
-
-    #[pyo3(signature=(intent_hash, delivered_at_ns, key=None))]
-    fn receipt_timer_set_ok(
-        &self,
-        py: Python<'_>,
-        intent_hash: Vec<u8>,
-        delivered_at_ns: u64,
-        key: Option<String>,
-    ) -> PyResult<Py<PyAny>> {
-        common_receipt_timer_set_ok(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            delivered_at_ns,
-            key,
-        )
-    }
-
-    fn receipt_blob_put_ok(
-        &self,
-        py: Python<'_>,
-        intent_hash: Vec<u8>,
-        blob_ref: &str,
-        edge_ref: &str,
-        size: u64,
-    ) -> PyResult<Py<PyAny>> {
-        common_receipt_blob_put_ok(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            blob_ref,
-            edge_ref,
-            size,
-        )
-    }
-
-    #[pyo3(signature=(intent_hash, blob_ref, bytes, size=None))]
-    fn receipt_blob_get_ok(
-        &self,
-        py: Python<'_>,
-        intent_hash: Vec<u8>,
-        blob_ref: &str,
-        bytes: Vec<u8>,
-        size: Option<u64>,
-    ) -> PyResult<Py<PyAny>> {
-        common_receipt_blob_get_ok(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            blob_ref,
-            bytes,
-            size,
-        )
-    }
-
-    #[pyo3(signature=(intent_hash, status, adapter_id="adapter.http.harness", headers=None, body_ref=None, start_ns=None, end_ns=None))]
-    fn receipt_http_request_ok(
-        &self,
-        py: Python<'_>,
-        intent_hash: Vec<u8>,
-        status: i32,
-        adapter_id: &str,
-        headers: Option<&Bound<'_, PyAny>>,
-        body_ref: Option<&str>,
-        start_ns: Option<u64>,
-        end_ns: Option<u64>,
-    ) -> PyResult<Py<PyAny>> {
-        common_receipt_http_request_ok(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            status,
-            adapter_id,
-            headers,
-            body_ref,
-            start_ns,
-            end_ns,
-        )
-    }
-
-    #[pyo3(signature=(intent_hash, output_ref, provider_id, finish_reason="stop", prompt_tokens=0, completion_tokens=0, total_tokens=None, raw_output_ref=None, provider_response_id=None, cost_cents=None, warnings_ref=None, rate_limit_ref=None))]
-    fn receipt_llm_generate_ok(
-        &self,
-        py: Python<'_>,
-        intent_hash: Vec<u8>,
-        output_ref: &str,
-        provider_id: &str,
-        finish_reason: &str,
-        prompt_tokens: u64,
-        completion_tokens: u64,
-        total_tokens: Option<u64>,
-        raw_output_ref: Option<&str>,
-        provider_response_id: Option<String>,
-        cost_cents: Option<u64>,
-        warnings_ref: Option<&str>,
-        rate_limit_ref: Option<&str>,
-    ) -> PyResult<Py<PyAny>> {
-        common_receipt_llm_generate_ok(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            output_ref,
-            provider_id,
-            finish_reason,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-            raw_output_ref,
-            provider_response_id,
-            cost_cents,
-            warnings_ref,
-            rate_limit_ref,
-        )
     }
 
     #[pyo3(signature=(workflow, key=None))]
@@ -1341,22 +1049,6 @@ impl PyWorldHarness {
             world_id: self.world_id.clone(),
             warnings: self.warnings.clone(),
         })
-    }
-
-    fn time_get(&self) -> PyResult<u64> {
-        common_time_get(&self.inner, Self::LABEL)
-    }
-
-    fn time_set(&self, now_ns: u64) -> PyResult<u64> {
-        common_time_set(&self.inner, Self::LABEL, now_ns)
-    }
-
-    fn time_advance(&self, delta_ns: u64) -> PyResult<u64> {
-        common_time_advance(&self.inner, Self::LABEL, delta_ns)
-    }
-
-    fn time_jump_next_due(&self) -> PyResult<Option<u64>> {
-        common_time_jump_next_due(&self.inner, Self::LABEL)
     }
 
     fn artifact_export(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
