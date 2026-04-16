@@ -1,52 +1,60 @@
 mod backend;
 mod broker;
 mod embedded;
+mod ingress;
 mod local_state;
 mod projection;
 mod types;
 
+use std::sync::Arc;
+
 use aos_node::{
-    PlaneError, RejectedSubmission, SubmissionEnvelope, SubmissionPlane, WorldId,
-    WorldLogAppendResult, WorldLogFrame, WorldLogPlane,
+    BackendError, RejectedSubmission, SubmissionBackend, SubmissionEnvelope, WorldId,
+    WorldLogAppendResult, WorldLogBackend, WorldLogFrame,
 };
+use tokio::sync::Notify;
 
-use self::broker::BrokerKafkaPlanes;
-use self::embedded::EmbeddedKafkaPlanes;
+pub use self::backend::fetch_partition_records;
+use self::broker::BrokerKafkaBackend;
+use self::embedded::EmbeddedKafkaBackend;
+pub use self::ingress::BrokerKafkaIngress;
 
-pub(crate) use self::backend::fetch_partition_records;
-pub(crate) use self::types::FetchedRecord;
-pub use self::types::{KafkaConfig, PartitionLogEntry, ProjectionTopicEntry, SubmissionBatch};
+pub use self::types::{
+    AssignmentSync, DurableDisposition, FetchedRecord, FlushCommit, HostedJournalRecord,
+    IngressPollBatch, IngressRecord, KafkaConfig, PartitionLogEntry, ProjectionTopicEntry,
+};
 pub use projection::{
-    CellProjectionUpsert, ProjectionKey, ProjectionRecord, ProjectionValue,
-    WorkspaceProjectionUpsert, WorldMetaProjection,
+    CellProjectionUpsert, CellStateProjectionRecord, ProjectionKey, ProjectionRecord,
+    ProjectionValue, WorkspaceProjectionUpsert, WorkspaceRegistryProjectionRecord,
+    WorkspaceVersionProjectionRecord, WorldMetaProjection,
 };
 
 #[derive(Debug)]
 pub enum HostedKafkaBackend {
-    Embedded(EmbeddedKafkaPlanes),
-    Broker(BrokerKafkaPlanes),
+    Embedded(EmbeddedKafkaBackend),
+    Broker(BrokerKafkaBackend),
 }
 
 impl HostedKafkaBackend {
-    pub fn new(partition_count: u32, config: KafkaConfig) -> Result<Self, PlaneError> {
+    pub fn new(partition_count: u32, config: KafkaConfig) -> Result<Self, BackendError> {
         if config
             .bootstrap_servers
             .as_ref()
             .is_some_and(|value| !value.trim().is_empty())
         {
-            return Ok(Self::Broker(BrokerKafkaPlanes::new(
+            return Ok(Self::Broker(BrokerKafkaBackend::new(
                 partition_count,
                 config,
             )?));
         }
-        Ok(Self::Embedded(EmbeddedKafkaPlanes::new(
+        Ok(Self::Embedded(EmbeddedKafkaBackend::new(
             partition_count,
             config,
         )?))
     }
 
-    pub fn new_embedded(partition_count: u32, config: KafkaConfig) -> Result<Self, PlaneError> {
-        Ok(Self::Embedded(EmbeddedKafkaPlanes::new(
+    pub fn new_embedded(partition_count: u32, config: KafkaConfig) -> Result<Self, BackendError> {
+        Ok(Self::Embedded(EmbeddedKafkaBackend::new(
             partition_count,
             config,
         )?))
@@ -56,14 +64,14 @@ impl HostedKafkaBackend {
         matches!(self, Self::Broker(_))
     }
 
-    pub fn recover_from_broker(&mut self) -> Result<(), PlaneError> {
+    pub fn recover_from_broker(&mut self) -> Result<(), BackendError> {
         match self {
             Self::Embedded(inner) => inner.recover_from_broker(),
             Self::Broker(inner) => inner.recover_from_broker(),
         }
     }
 
-    pub fn recover_partition_from_broker(&mut self, partition: u32) -> Result<(), PlaneError> {
+    pub fn recover_partition_from_broker(&mut self, partition: u32) -> Result<(), BackendError> {
         match self {
             Self::Embedded(inner) => inner.recover_from_broker(),
             Self::Broker(inner) => inner.recover_partition_from_broker(partition),
@@ -95,7 +103,7 @@ impl HostedKafkaBackend {
         }
     }
 
-    pub fn submit(&mut self, submission: SubmissionEnvelope) -> Result<u64, PlaneError> {
+    pub fn submit(&mut self, submission: SubmissionEnvelope) -> Result<u64, BackendError> {
         match self {
             Self::Embedded(inner) => inner.submit(submission),
             Self::Broker(inner) => inner.submit(submission),
@@ -105,7 +113,7 @@ impl HostedKafkaBackend {
     pub fn append_frame(
         &mut self,
         frame: WorldLogFrame,
-    ) -> Result<WorldLogAppendResult, PlaneError> {
+    ) -> Result<WorldLogAppendResult, BackendError> {
         match self {
             Self::Embedded(inner) => inner.append_frame(frame),
             Self::Broker(inner) => inner.append_frame(frame),
@@ -115,7 +123,7 @@ impl HostedKafkaBackend {
     pub fn append_frame_transactional(
         &mut self,
         frame: WorldLogFrame,
-    ) -> Result<WorldLogAppendResult, PlaneError> {
+    ) -> Result<WorldLogAppendResult, BackendError> {
         match self {
             Self::Embedded(inner) => inner.append_frame_transactional(frame),
             Self::Broker(inner) => inner.append_frame_transactional(frame),
@@ -157,24 +165,21 @@ impl HostedKafkaBackend {
     pub fn pending_submission_count(&self) -> usize {
         match self {
             Self::Embedded(inner) => inner.pending_submission_count(),
-            Self::Broker(inner) => inner.pending_submission_count(),
+            Self::Broker(_) => 0,
         }
     }
 
-    pub fn sync_assignments_and_poll(&mut self) -> Result<(Vec<u32>, Vec<u32>), PlaneError> {
+    pub fn embedded_ingress_notify(&self) -> Option<Arc<Notify>> {
         match self {
-            Self::Embedded(inner) => {
-                let assigned = (0..inner.partition_count()).collect::<Vec<_>>();
-                Ok((assigned, Vec::new()))
-            }
-            Self::Broker(inner) => inner.sync_assignments_and_poll(),
+            Self::Embedded(inner) => Some(inner.ingress_notify()),
+            Self::Broker(_) => None,
         }
     }
 
-    pub fn assigned_partitions(&self) -> Vec<u32> {
+    pub fn broker_ingress_driver(&self) -> Option<BrokerKafkaIngress> {
         match self {
-            Self::Embedded(inner) => (0..inner.partition_count()).collect(),
-            Self::Broker(inner) => inner.assigned_partitions(),
+            Self::Embedded(_) => None,
+            Self::Broker(inner) => Some(inner.broker_ingress_driver()),
         }
     }
 
@@ -185,31 +190,24 @@ impl HostedKafkaBackend {
         }
     }
 
-    pub fn drain_partition_submissions(
-        &mut self,
-        partition: u32,
-    ) -> Result<SubmissionBatch, PlaneError> {
+    pub fn drain_pending_ingress(&mut self, partition: u32) -> Vec<IngressRecord> {
         match self {
-            Self::Embedded(inner) => inner.drain_partition_submissions(partition),
-            Self::Broker(inner) => inner.drain_partition_submissions(partition),
+            Self::Embedded(inner) => inner.drain_pending_ingress(partition),
+            Self::Broker(_) => Vec::new(),
         }
     }
 
-    pub fn commit_submission_batch(
-        &mut self,
-        batch: SubmissionBatch,
-        frames: Vec<WorldLogFrame>,
-    ) -> Result<(), PlaneError> {
+    pub fn commit_flush_batch(&mut self, batch: FlushCommit) -> Result<(), BackendError> {
         match self {
-            Self::Embedded(inner) => inner.commit_submission_batch(batch, frames),
-            Self::Broker(inner) => inner.commit_submission_batch(batch, frames),
+            Self::Embedded(inner) => inner.commit_flush_batch(batch),
+            Self::Broker(inner) => inner.commit_flush_batch(batch),
         }
     }
 
     pub fn publish_projection_records(
         &mut self,
         records: Vec<ProjectionRecord>,
-    ) -> Result<(), PlaneError> {
+    ) -> Result<(), BackendError> {
         match self {
             Self::Embedded(inner) => inner.publish_projection_records(records),
             Self::Broker(inner) => inner.publish_projection_records(records),

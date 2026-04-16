@@ -1,23 +1,21 @@
+mod compat_harness;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use aos_authoring::{
-    WorkflowBuildProfile, bootstrap_seeded_local_world_harness,
-    build_runtime_workflow_harness_from_authored_paths_with_secret_config, local_kernel_config,
-};
+use aos_authoring::WorkflowBuildProfile;
 use aos_cbor::{Hash, to_canonical_cbor};
-use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_effects::builtins::{
     BlobGetReceipt, BlobPutReceipt, HashRef, HttpRequestReceipt, LlmFinishReason,
     LlmGenerateReceipt, RequestTimings, TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
-use aos_kernel::{KernelConfig, MemStore, Store, cell_index::CellMeta};
-use aos_node::EmbeddedWorldHarness;
-use aos_runtime::{
-    CycleOutcome, EffectMode, HarnessArtifacts, HostError, QuiescenceStatus,
-    WorkflowHarness as RuntimeWorkflowHarness, WorldConfig,
+use aos_kernel::MemStore;
+use compat_harness::{
+    CycleOutcome, EffectMode, EmbeddedWorldHarness, HarnessArtifacts, HarnessCell, HostError,
+    QuiescenceStatus, RuntimeWorkflowHarness, bootstrap_seeded_local_world_harness,
+    build_runtime_workflow_harness_from_authored_paths_with_secret_config,
 };
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -141,12 +139,7 @@ fn parse_secret_bindings(
     Ok(Some(bindings))
 }
 
-fn parse_blob_ref(value: &str) -> PyResult<Hash> {
-    Hash::from_hex_str(value)
-        .map_err(|err| PyValueError::new_err(format!("invalid blob ref '{value}': {err}")))
-}
-
-fn cell_meta_to_py(py: Python<'_>, cell: &CellMeta) -> PyResult<Py<PyAny>> {
+fn cell_meta_to_py(py: Python<'_>, cell: &HarnessCell) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item(
         "key_hash",
@@ -155,29 +148,18 @@ fn cell_meta_to_py(py: Python<'_>, cell: &CellMeta) -> PyResult<Py<PyAny>> {
             .to_hex(),
     )?;
     dict.set_item("key_bytes", PyBytes::new(py, &cell.key_bytes))?;
-    dict.set_item(
-        "state_hash",
-        Hash::from_bytes(&cell.state_hash)
-            .expect("cell state hash")
-            .to_hex(),
-    )?;
+    dict.set_item("state_hash", &cell.state_hash)?;
     dict.set_item("size", cell.size)?;
     dict.set_item("last_active_ns", cell.last_active_ns)?;
     Ok(dict.into_any().unbind())
 }
 
-fn cell_list_to_py(py: Python<'_>, cells: &[CellMeta]) -> PyResult<Py<PyAny>> {
+fn cell_list_to_py(py: Python<'_>, cells: &[HarnessCell]) -> PyResult<Py<PyAny>> {
     let list = pyo3::types::PyList::empty(py);
     for cell in cells {
         list.append(cell_meta_to_py(py, cell)?)?;
     }
     Ok(list.into_any().unbind())
-}
-
-fn load_blob_bytes<S: Store + 'static>(store: Arc<S>, blob_ref: &str) -> PyResult<Vec<u8>> {
-    store
-        .get_blob(parse_blob_ref(blob_ref)?)
-        .map_err(|err| py_runtime_error(err.to_string()))
 }
 
 #[pyfunction]
@@ -325,7 +307,6 @@ impl CommonHarnessOps for EmbeddedWorldHarness {
 
     fn quiescence_status(&self) -> QuiescenceStatus {
         self.quiescence_status()
-            .expect("embedded py world quiescence")
     }
 
     fn pull_effects(&mut self) -> Result<Vec<EffectIntent>, HostError> {
@@ -345,16 +326,15 @@ impl CommonHarnessOps for EmbeddedWorldHarness {
     }
 
     fn time_get(&self) -> u64 {
-        self.time_get().expect("embedded py world time_get")
+        self.time_get()
     }
 
     fn time_set(&mut self, now_ns: u64) -> u64 {
-        self.time_set(now_ns).expect("embedded py world time_set")
+        self.time_set(now_ns)
     }
 
     fn time_advance(&mut self, delta_ns: u64) -> u64 {
         self.time_advance(delta_ns)
-            .expect("embedded py world time_advance")
     }
 
     fn time_jump_next_due(&mut self) -> Result<Option<u64>, HostError> {
@@ -493,7 +473,7 @@ impl CommonHarnessOps for RuntimeWorkflowHarness<MemStore> {
         adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError> {
-        self.core().receipt_ok(intent_hash, adapter_id, payload)
+        self.receipt_ok(intent_hash, adapter_id, payload)
     }
 
     fn receipt_error(
@@ -502,7 +482,7 @@ impl CommonHarnessOps for RuntimeWorkflowHarness<MemStore> {
         adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError> {
-        self.core().receipt_error(intent_hash, adapter_id, payload)
+        self.receipt_error(intent_hash, adapter_id, payload)
     }
 
     fn receipt_timeout(
@@ -511,8 +491,7 @@ impl CommonHarnessOps for RuntimeWorkflowHarness<MemStore> {
         adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError> {
-        self.core()
-            .receipt_timeout(intent_hash, adapter_id, payload)
+        self.receipt_timeout(intent_hash, adapter_id, payload)
     }
 
     fn receipt_timer_set_ok(
@@ -521,8 +500,7 @@ impl CommonHarnessOps for RuntimeWorkflowHarness<MemStore> {
         delivered_at_ns: u64,
         key: Option<String>,
     ) -> Result<EffectReceipt, HostError> {
-        self.core()
-            .receipt_timer_set_ok(intent_hash, delivered_at_ns, key)
+        self.receipt_timer_set_ok(intent_hash, delivered_at_ns, key)
     }
 
     fn receipt_blob_put_ok(
@@ -530,7 +508,7 @@ impl CommonHarnessOps for RuntimeWorkflowHarness<MemStore> {
         intent_hash: [u8; 32],
         payload: &BlobPutReceipt,
     ) -> Result<EffectReceipt, HostError> {
-        self.core().receipt_blob_put_ok(intent_hash, payload)
+        self.receipt_blob_put_ok(intent_hash, payload)
     }
 
     fn receipt_blob_get_ok(
@@ -538,7 +516,7 @@ impl CommonHarnessOps for RuntimeWorkflowHarness<MemStore> {
         intent_hash: [u8; 32],
         payload: &BlobGetReceipt,
     ) -> Result<EffectReceipt, HostError> {
-        self.core().receipt_blob_get_ok(intent_hash, payload)
+        self.receipt_blob_get_ok(intent_hash, payload)
     }
 
     fn receipt_llm_generate_ok(
@@ -546,7 +524,7 @@ impl CommonHarnessOps for RuntimeWorkflowHarness<MemStore> {
         intent_hash: [u8; 32],
         payload: &LlmGenerateReceipt,
     ) -> Result<EffectReceipt, HostError> {
-        self.core().receipt_llm_generate_ok(intent_hash, payload)
+        self.receipt_llm_generate_ok(intent_hash, payload)
     }
 }
 
@@ -942,9 +920,6 @@ impl PyWorldHarness {
             reset,
             force_build,
             sync_secrets,
-            WorldConfig::default(),
-            EffectAdapterConfig::default(),
-            local_kernel_config(world_root).map_err(|err| py_runtime_error(err.to_string()))?,
             effect_mode,
         )
         .map_err(|err| py_runtime_error(err.to_string()))?;
@@ -1309,7 +1284,10 @@ impl PyWorldHarness {
         workflow: &str,
         key: Option<Vec<u8>>,
     ) -> PyResult<Option<Py<PyBytes>>> {
-        let bytes = self.lock()?.state_bytes(workflow, key.as_deref());
+        let bytes = self
+            .lock()?
+            .state_bytes(workflow, key.as_deref())
+            .map_err(host_to_py_error)?;
         Ok(bytes.map(|bytes| PyBytes::new(py, &bytes).unbind()))
     }
 
@@ -1322,17 +1300,27 @@ impl PyWorldHarness {
     }
 
     fn blob_get_bytes(&self, py: Python<'_>, blob_ref: &str) -> PyResult<Py<PyBytes>> {
-        let bytes = load_blob_bytes(self.lock()?.store(), blob_ref)?;
+        let bytes = self
+            .lock()?
+            .blob_bytes(blob_ref)
+            .map_err(host_to_py_error)?;
         Ok(PyBytes::new(py, &bytes).unbind())
     }
 
     fn blob_get_text(&self, blob_ref: &str) -> PyResult<String> {
-        String::from_utf8(load_blob_bytes(self.lock()?.store(), blob_ref)?)
-            .map_err(|err| py_runtime_error(format!("blob '{blob_ref}' is not valid UTF-8: {err}")))
+        String::from_utf8(
+            self.lock()?
+                .blob_bytes(blob_ref)
+                .map_err(host_to_py_error)?,
+        )
+        .map_err(|err| py_runtime_error(format!("blob '{blob_ref}' is not valid UTF-8: {err}")))
     }
 
     fn blob_get_json(&self, py: Python<'_>, blob_ref: &str) -> PyResult<Py<PyAny>> {
-        let bytes = load_blob_bytes(self.lock()?.store(), blob_ref)?;
+        let bytes = self
+            .lock()?
+            .blob_bytes(blob_ref)
+            .map_err(host_to_py_error)?;
         let value: JsonValue = serde_json::from_slice(&bytes)
             .map_err(|err| py_runtime_error(format!("decode blob json '{blob_ref}': {err}")))?;
         json_to_py(py, &value)
@@ -1404,8 +1392,6 @@ impl PyWorkflowHarness {
     ) -> PyResult<Self> {
         let scratch_root =
             Arc::new(TempDir::new().map_err(|err| py_runtime_error(err.to_string()))?);
-        let mut world_config = WorldConfig::default();
-        world_config.module_cache_dir = WorldConfig::from_env().module_cache_dir;
         let sync_root = if sync_secrets {
             Some(air_dir.parent().ok_or_else(|| {
                 PyValueError::new_err(
@@ -1424,9 +1410,6 @@ impl PyWorkflowHarness {
             force_build,
             build_profile,
             effect_mode,
-            world_config,
-            EffectAdapterConfig::default(),
-            KernelConfig::default(),
             sync_root,
             None,
             secret_bindings,
@@ -1768,17 +1751,27 @@ impl PyWorkflowHarness {
     }
 
     fn blob_get_bytes(&self, py: Python<'_>, blob_ref: &str) -> PyResult<Py<PyBytes>> {
-        let bytes = load_blob_bytes(self.lock()?.core().store(), blob_ref)?;
+        let bytes = self
+            .lock()?
+            .blob_bytes(blob_ref)
+            .map_err(host_to_py_error)?;
         Ok(PyBytes::new(py, &bytes).unbind())
     }
 
     fn blob_get_text(&self, blob_ref: &str) -> PyResult<String> {
-        String::from_utf8(load_blob_bytes(self.lock()?.core().store(), blob_ref)?)
-            .map_err(|err| py_runtime_error(format!("blob '{blob_ref}' is not valid UTF-8: {err}")))
+        String::from_utf8(
+            self.lock()?
+                .blob_bytes(blob_ref)
+                .map_err(host_to_py_error)?,
+        )
+        .map_err(|err| py_runtime_error(format!("blob '{blob_ref}' is not valid UTF-8: {err}")))
     }
 
     fn blob_get_json(&self, py: Python<'_>, blob_ref: &str) -> PyResult<Py<PyAny>> {
-        let bytes = load_blob_bytes(self.lock()?.core().store(), blob_ref)?;
+        let bytes = self
+            .lock()?
+            .blob_bytes(blob_ref)
+            .map_err(host_to_py_error)?;
         let value: JsonValue = serde_json::from_slice(&bytes)
             .map_err(|err| py_runtime_error(format!("decode blob json '{blob_ref}': {err}")))?;
         json_to_py(py, &value)

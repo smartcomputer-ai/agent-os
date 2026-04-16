@@ -1,55 +1,32 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use std::time::Duration;
 
-use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
+use aos_effects::EffectIntent;
 use log::warn;
-use tokio::task::JoinHandle;
-use tokio::time::timeout;
 
-use super::traits::AsyncEffectAdapter;
-
-#[derive(Clone)]
-pub struct AdapterRegistryConfig {
-    pub effect_timeout: Duration,
-}
-
-impl Default for AdapterRegistryConfig {
-    fn default() -> Self {
-        Self {
-            effect_timeout: Duration::from_secs(30),
-        }
-    }
-}
+use super::traits::{AsyncEffectAdapter, EffectUpdateSender};
 
 pub struct AdapterRegistry {
     adapters: HashMap<String, Arc<dyn AsyncEffectAdapter>>,
     routes: HashMap<String, String>,
-    config: AdapterRegistryConfig,
 }
 
-fn normalize_receipt_intent_hash(
-    mut receipt: EffectReceipt,
-    expected_intent_hash: [u8; 32],
-    adapter_id: &str,
-) -> EffectReceipt {
-    if receipt.intent_hash != expected_intent_hash {
-        warn!(
-            "adapter '{adapter_id}' returned receipt intent_hash {} but dispatch expected {}; rewriting receipt to claimed intent",
-            hex::encode(receipt.intent_hash),
-            hex::encode(expected_intent_hash),
-        );
-        receipt.intent_hash = expected_intent_hash;
-    }
-    receipt
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdapterStartError {
+    MissingRoute {
+        adapter_id: String,
+    },
+    MissingAdapter {
+        adapter_id: String,
+        adapter_kind: String,
+    },
 }
 
 impl AdapterRegistry {
-    pub fn new(config: AdapterRegistryConfig) -> Self {
+    pub fn new() -> Self {
         Self {
             adapters: HashMap::new(),
             routes: HashMap::new(),
-            config,
         }
     }
 
@@ -95,108 +72,47 @@ impl AdapterRegistry {
             .collect()
     }
 
-    pub async fn execute_batch(&self, intents: Vec<EffectIntent>) -> Vec<EffectReceipt> {
-        let routed: Vec<(EffectIntent, String)> = intents
-            .into_iter()
-            .map(|intent| {
-                let route = intent.kind.as_str().to_string();
-                (intent, route)
-            })
-            .collect();
-        self.execute_batch_routed(routed).await
+    pub fn ensure_started(
+        &self,
+        intent: EffectIntent,
+        updates: EffectUpdateSender,
+    ) -> Result<(), AdapterStartError> {
+        let route_id = intent.kind.as_str().to_string();
+        self.ensure_started_routed(intent, route_id, updates)
     }
 
-    pub async fn execute_batch_routed(
+    pub fn ensure_started_routed(
         &self,
-        intents: Vec<(EffectIntent, String)>,
-    ) -> Vec<EffectReceipt> {
-        if intents.is_empty() {
-            return Vec::new();
-        }
-
-        let mut receipts = vec![None; intents.len()];
-        let mut handles: Vec<(usize, [u8; 32], String, JoinHandle<EffectReceipt>)> = Vec::new();
-
-        for (idx, (intent, adapter_id)) in intents.into_iter().enumerate() {
-            let Some(adapter_kind) = self.routes.get(&adapter_id).cloned() else {
-                receipts[idx] = Some(EffectReceipt {
-                    intent_hash: intent.intent_hash,
-                    adapter_id: "adapter.missing".into(),
-                    status: ReceiptStatus::Error,
-                    payload_cbor: vec![],
-                    cost_cents: None,
-                    signature: vec![],
-                });
-                continue;
-            };
-            let Some(adapter) = self.adapters.get(&adapter_kind).cloned() else {
-                receipts[idx] = Some(EffectReceipt {
-                    intent_hash: intent.intent_hash,
-                    adapter_id: "adapter.missing".into(),
-                    status: ReceiptStatus::Error,
-                    payload_cbor: vec![],
-                    cost_cents: None,
-                    signature: vec![],
-                });
-                continue;
-            };
-            let effect_timeout = self.config.effect_timeout;
-            handles.push((
-                idx,
-                intent.intent_hash,
-                adapter_id.clone(),
-                tokio::spawn(async move {
-                    match timeout(effect_timeout, adapter.execute(&intent)).await {
-                        Ok(Ok(receipt)) => receipt,
-                        Ok(Err(_err)) => EffectReceipt {
-                            intent_hash: intent.intent_hash,
-                            adapter_id: adapter_id.clone(),
-                            status: ReceiptStatus::Error,
-                            payload_cbor: vec![],
-                            cost_cents: None,
-                            signature: vec![],
-                        },
-                        Err(_) => EffectReceipt {
-                            intent_hash: intent.intent_hash,
-                            adapter_id: adapter_id.clone(),
-                            status: ReceiptStatus::Timeout,
-                            payload_cbor: vec![],
-                            cost_cents: None,
-                            signature: vec![],
-                        },
-                    }
-                }),
-            ));
-        }
-
-        for (idx, expected_intent_hash, adapter_id, handle) in handles {
-            let receipt = match handle.await {
-                Ok(receipt) => {
-                    normalize_receipt_intent_hash(receipt, expected_intent_hash, &adapter_id)
-                }
-                Err(_) => EffectReceipt {
-                    intent_hash: expected_intent_hash,
-                    adapter_id: "adapter.join.error".into(),
-                    status: ReceiptStatus::Error,
-                    payload_cbor: vec![],
-                    cost_cents: None,
-                    signature: vec![],
-                },
-            };
-            receipts[idx] = Some(receipt);
-        }
-
-        receipts
-            .into_iter()
-            .map(|receipt| receipt.expect("receipt for each routed effect"))
-            .collect()
+        intent: EffectIntent,
+        adapter_id: String,
+        updates: EffectUpdateSender,
+    ) -> Result<(), AdapterStartError> {
+        let adapter_kind = self.routes.get(&adapter_id).cloned().ok_or_else(|| {
+            AdapterStartError::MissingRoute {
+                adapter_id: adapter_id.clone(),
+            }
+        })?;
+        let adapter = self.adapters.get(&adapter_kind).cloned().ok_or_else(|| {
+            AdapterStartError::MissingAdapter {
+                adapter_id: adapter_id.clone(),
+                adapter_kind: adapter_kind.clone(),
+            }
+        })?;
+        tokio::spawn(async move {
+            if let Err(err) = adapter.ensure_started(intent, updates).await {
+                warn!("adapter '{adapter_id}' failed after start: {err:#}");
+            }
+        });
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aos_effects::{EffectReceipt, ReceiptStatus};
     use async_trait::async_trait;
+    use tokio::sync::mpsc;
 
     struct MismatchedHashAdapter;
 
@@ -206,7 +122,10 @@ mod tests {
             "mismatched"
         }
 
-        async fn execute(&self, _intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+        async fn run_terminal(
+            &self,
+            _intent: &EffectIntent,
+        ) -> anyhow::Result<aos_effects::EffectReceipt> {
             Ok(EffectReceipt {
                 intent_hash: [9; 32],
                 adapter_id: "adapter.mismatched".into(),
@@ -226,7 +145,10 @@ mod tests {
             "panic"
         }
 
-        async fn execute(&self, _intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+        async fn run_terminal(
+            &self,
+            _intent: &EffectIntent,
+        ) -> anyhow::Result<aos_effects::EffectReceipt> {
             panic!("boom");
         }
     }
@@ -242,38 +164,43 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn execute_batch_routed_rewrites_mismatched_adapter_receipt_hash() {
-        let mut registry = AdapterRegistry::new(AdapterRegistryConfig::default());
+    async fn ensure_started_routed_emits_adapter_updates() {
+        let mut registry = AdapterRegistry::new();
         registry.register(Box::new(MismatchedHashAdapter));
         assert!(registry.register_route("host.llm.test", "mismatched"));
         let intent = test_intent("llm.generate");
+        let (tx, mut rx) = mpsc::channel(4);
 
-        let receipts = registry
-            .execute_batch_routed(vec![(intent.clone(), "host.llm.test".into())])
-            .await;
+        registry
+            .ensure_started_routed(intent, "host.llm.test".into(), tx)
+            .expect("start adapter");
 
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(receipts[0].intent_hash, intent.intent_hash);
-        assert_eq!(receipts[0].adapter_id, "adapter.mismatched");
-        assert_eq!(receipts[0].status, ReceiptStatus::Ok);
-        assert_eq!(receipts[0].payload_cbor, vec![1, 2, 3]);
-        assert_eq!(receipts[0].cost_cents, Some(7));
+        let update = rx.recv().await.expect("receipt update");
+        let super::super::traits::EffectUpdate::Receipt(receipt) = update else {
+            panic!("expected terminal receipt");
+        };
+        assert_eq!(receipt.intent_hash, [9; 32]);
+        assert_eq!(receipt.adapter_id, "adapter.mismatched");
+        assert_eq!(receipt.status, ReceiptStatus::Ok);
+        assert_eq!(receipt.payload_cbor, vec![1, 2, 3]);
+        assert_eq!(receipt.cost_cents, Some(7));
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn execute_batch_routed_preserves_claimed_hash_on_join_error() {
-        let mut registry = AdapterRegistry::new(AdapterRegistryConfig::default());
+    async fn ensure_started_routed_accepts_panicking_adapter_start() {
+        let mut registry = AdapterRegistry::new();
         registry.register(Box::new(PanicAdapter));
         assert!(registry.register_route("host.llm.test", "panic"));
         let intent = test_intent("llm.generate");
+        let (tx, mut rx) = mpsc::channel(4);
 
-        let receipts = registry
-            .execute_batch_routed(vec![(intent.clone(), "host.llm.test".into())])
-            .await;
+        registry
+            .ensure_started_routed(intent, "host.llm.test".into(), tx)
+            .expect("start adapter");
 
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(receipts[0].intent_hash, intent.intent_hash);
-        assert_eq!(receipts[0].adapter_id, "adapter.join.error");
-        assert_eq!(receipts[0].status, ReceiptStatus::Error);
+        assert!(
+            rx.recv().await.is_none(),
+            "panic should close update channel"
+        );
     }
 }

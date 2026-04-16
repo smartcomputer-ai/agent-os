@@ -13,7 +13,7 @@ use aos_air_types::{
     value_normalize::normalize_cbor_by_name,
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
+use aos_effects::{EffectIntent, EffectKind, EffectReceipt, EffectStreamFrame};
 use aos_wasm_abi::{
     ABI_VERSION, DomainEvent, PureInput, PureOutput, WorkflowInput, WorkflowOutput,
 };
@@ -186,6 +186,7 @@ pub struct Kernel<S: Store> {
     workflow_index_roots: HashMap<Name, Hash>,
     snapshot_index: HashMap<JournalSeq, (Hash, Option<Hash>)>,
     journal: Journal,
+    compat_drain_cursor: JournalSeq,
     suppress_journal: bool,
     replay_applying_domain_record: bool,
     replay_generated_domain_event_hashes: HashMap<String, u64>,
@@ -250,6 +251,55 @@ pub struct KernelQuiescence {
     pub non_terminal_workflow_instances: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorldInput {
+    DomainEvent(DomainEvent),
+    Receipt(EffectReceipt),
+    StreamFrame(EffectStreamFrame),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WorldControl {
+    SubmitProposal {
+        patch: ManifestPatch,
+        description: Option<String>,
+    },
+    RunShadow {
+        proposal_id: u64,
+    },
+    DecideProposal {
+        proposal_id: u64,
+        approver: String,
+        decision: ApprovalDecisionRecord,
+    },
+    ApplyProposal {
+        proposal_id: u64,
+    },
+    ApplyPatchDirect {
+        patch: ManifestPatch,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorldControlOutcome {
+    ProposalSubmitted {
+        proposal_id: u64,
+    },
+    ShadowRun {
+        proposal_id: u64,
+    },
+    ProposalDecided {
+        proposal_id: u64,
+        decision: ApprovalDecisionRecord,
+    },
+    ProposalApplied {
+        proposal_id: u64,
+    },
+    PatchApplied {
+        manifest_hash: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DefListing {
     pub kind: String,
@@ -293,6 +343,22 @@ pub struct TailScan {
     pub entries: Vec<TailEntry>,
     pub intents: Vec<TailIntent>,
     pub receipts: Vec<TailReceipt>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenedEffect {
+    pub seq: JournalSeq,
+    pub record: EffectIntentRecord,
+    pub intent: EffectIntent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelDrain {
+    pub tail_start: JournalSeq,
+    pub tail: TailScan,
+    pub opened_effects: Vec<OpenedEffect>,
+    pub kernel_idle: bool,
+    pub quiescence: KernelQuiescence,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1594,11 +1660,19 @@ impl<S: Store + 'static> Kernel<S> {
         }
     }
 
-    pub fn queued_effects_snapshot(&self) -> Vec<EffectIntentSnapshot> {
-        self.effect_manager
-            .queued()
-            .iter()
-            .map(EffectIntentSnapshot::from_intent)
+    fn snapshot_queued_effects(&self) -> Vec<EffectIntentSnapshot> {
+        self.pending_workflow_receipts_snapshot()
+            .into_iter()
+            .filter_map(|effect| {
+                aos_effects::EffectIntent::from_raw_params(
+                    effect.effect_kind.into(),
+                    effect.cap_name,
+                    effect.params_cbor,
+                    effect.idempotency_key,
+                )
+                .ok()
+                .map(|intent| EffectIntentSnapshot::from_intent(&intent))
+            })
             .collect()
     }
 

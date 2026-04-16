@@ -2,18 +2,18 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
-use aos_kernel::Store;
+use aos_authoring::{load_from_assets, patch_modules};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::shadow::ShadowHarness;
 use aos_kernel::snapshot::WorkflowStatusSnapshot;
+use aos_kernel::{Store, manifest_patch_from_loaded};
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 use crate::util;
 use aos_effect_adapters::adapters::mock::{MockHttpHarness, MockHttpResponse};
-use aos_runtime::manifest_loader;
 
 const WORKFLOW_NAME_V1: &str = "demo/SafeUpgrade@1";
 const WORKFLOW_NAME_V2: &str = "demo/SafeUpgrade@2";
@@ -244,7 +244,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
 fn load_upgrade_patch(example_root: &Path, host: &ExampleHost) -> Result<ManifestPatch> {
     let upgrade_root = example_root.join("air.v2");
-    let mut loaded = manifest_loader::load_from_assets(host.store(), &upgrade_root)?
+    let mut loaded = load_from_assets(host.store(), &upgrade_root)?
         .ok_or_else(|| anyhow!("upgrade manifest missing at {}", upgrade_root.display()))?;
 
     let wasm_bytes = util::compile_workflow(MODULE_PATH_V2)?;
@@ -253,7 +253,7 @@ fn load_upgrade_patch(example_root: &Path, host: &ExampleHost) -> Result<Manifes
         .put_blob(&wasm_bytes)
         .context("store v2 workflow wasm blob")?;
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash v2 workflow wasm")?;
-    let patched = aos_runtime::util::patch_modules(&mut loaded, &wasm_hash_ref, |name, _| {
+    let patched = patch_modules(&mut loaded, &wasm_hash_ref, |name, _| {
         name == WORKFLOW_NAME_V2
     });
     if patched == 0 {
@@ -262,7 +262,7 @@ fn load_upgrade_patch(example_root: &Path, host: &ExampleHost) -> Result<Manifes
         ));
     }
 
-    Ok(manifest_loader::manifest_patch_from_loaded(&loaded))
+    Ok(manifest_patch_from_loaded(&loaded))
 }
 
 fn url_for(event: &UpgradeEventEnvelope) -> &str {

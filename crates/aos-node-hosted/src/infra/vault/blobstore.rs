@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use aos_node::{PersistError, PlaneError, SecretBindingRecord, SecretVersionRecord, UniverseId};
+use aos_node::{BackendError, PersistError, SecretBindingRecord, SecretVersionRecord, UniverseId};
 use object_store::ObjectStore;
 use object_store::ObjectStoreExt;
 use object_store::PutPayload;
@@ -16,7 +16,7 @@ pub enum VaultStoreError {
     #[error(transparent)]
     Cbor(#[from] serde_cbor::Error),
     #[error(transparent)]
-    LogFirst(#[from] PlaneError),
+    LogFirst(#[from] BackendError),
 }
 
 #[derive(Debug, Default)]

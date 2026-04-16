@@ -1,0 +1,280 @@
+#[path = "../tests/common/mod.rs"]
+mod common;
+
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+use aos_cbor::to_canonical_cbor;
+use aos_kernel::journal::{CustomRecord, JournalRecord};
+use aos_node::{SubmissionEnvelope, UniverseId, WorldId, WorldLogFrame};
+use aos_node_hosted::kafka::{BrokerKafkaIngress, FlushCommit, HostedKafkaBackend, IngressRecord};
+use serial_test::serial;
+
+use common::{
+    blobstore_bucket_enabled, broker_kafka_config, ensure_kafka_topics, kafka_broker_enabled,
+    wait_for_kafka_assignment, wait_for_kafka_pending_submissions,
+};
+
+const TEST_WAIT_SLEEP: Duration = Duration::from_millis(5);
+
+fn test_frame(
+    universe_id: UniverseId,
+    world_id: WorldId,
+    world_epoch: u64,
+    world_seq: u64,
+    tag: &str,
+    data: &[u8],
+) -> WorldLogFrame {
+    WorldLogFrame {
+        format_version: 1,
+        universe_id,
+        world_id,
+        world_epoch,
+        world_seq_start: world_seq,
+        world_seq_end: world_seq,
+        records: vec![JournalRecord::Custom(CustomRecord {
+            tag: tag.into(),
+            data: data.to_vec(),
+        })],
+    }
+}
+
+async fn wait_for_world_frames(
+    kafka: &mut HostedKafkaBackend,
+    partition: u32,
+    _universe_id: UniverseId,
+    world_id: WorldId,
+    expected_len: usize,
+) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        kafka.recover_partition_from_broker(partition).unwrap();
+        if kafka.world_frames(world_id).len() == expected_len {
+            return;
+        }
+        tokio::time::sleep(TEST_WAIT_SLEEP).await;
+    }
+    assert_eq!(kafka.world_frames(world_id).len(), expected_len);
+}
+
+async fn wait_for_nonempty_batch(ingress: &mut BrokerKafkaIngress) -> Vec<IngressRecord> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        let batch = wait_for_kafka_pending_submissions(ingress, 1)
+            .await
+            .unwrap();
+        if !batch.is_empty() {
+            return batch;
+        }
+        tokio::time::sleep(TEST_WAIT_SLEEP).await;
+    }
+    let batch = ingress.poll(&Default::default()).unwrap().records;
+    assert!(
+        !batch.is_empty(),
+        "timed out waiting for a non-empty Kafka submission batch"
+    );
+    batch
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn kafka_submit_poll_commit_and_recover_committed_frame() {
+    if !kafka_broker_enabled() {
+        return;
+    }
+
+    let Some(config) = broker_kafka_config("submit-commit-recover", 1) else {
+        return;
+    };
+    ensure_kafka_topics(&config, 1).await.unwrap();
+    let mut worker = HostedKafkaBackend::new(1, config.clone()).unwrap();
+    let mut ingress = worker.broker_ingress_driver().unwrap();
+    let assigned = wait_for_kafka_assignment(&mut ingress).await.unwrap();
+    assert_eq!(assigned, vec![0]);
+
+    let mut reader_config = config.clone();
+    reader_config.submission_group_prefix = format!("{}-reader", config.submission_group_prefix);
+    reader_config.transactional_id = format!("{}-reader", config.transactional_id);
+    let mut reader = HostedKafkaBackend::new(1, reader_config).unwrap();
+
+    let universe_id = UniverseId::from(uuid::Uuid::new_v4());
+    let world_id = WorldId::from(uuid::Uuid::new_v4());
+    let submission_id = format!("submission-{}", uuid::Uuid::new_v4());
+    worker
+        .submit(SubmissionEnvelope::domain_event(
+            submission_id.clone(),
+            universe_id,
+            world_id,
+            1,
+            "demo/Test@1",
+            to_canonical_cbor(&42u64).unwrap(),
+        ))
+        .unwrap();
+
+    let batch = wait_for_nonempty_batch(&mut ingress).await;
+    assert_eq!(batch.len(), 1);
+    assert_eq!(batch[0].envelope.submission_id, submission_id);
+    assert_eq!(batch[0].envelope.universe_id, universe_id);
+    assert_eq!(batch[0].envelope.world_id, world_id);
+
+    let frame = test_frame(universe_id, world_id, 1, 0, "committed", b"ok");
+    worker
+        .commit_flush_batch(FlushCommit {
+            frames: vec![frame.clone()],
+            dispositions: Vec::new(),
+            offset_commits: BTreeMap::from([(0, batch[0].offset)]),
+        })
+        .unwrap();
+
+    wait_for_world_frames(&mut reader, 0, universe_id, world_id, 1).await;
+    let journal_topic = reader.config().journal_topic.clone();
+    assert_eq!(reader.partition_entries(&journal_topic, 0).len(), 1);
+    assert_eq!(reader.world_frames(world_id), &[frame]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn kafka_journal_recovery_replays_only_new_frames() {
+    if !kafka_broker_enabled() {
+        return;
+    }
+
+    let Some(writer_config) = broker_kafka_config("journal-writer", 1) else {
+        return;
+    };
+    ensure_kafka_topics(&writer_config, 1).await.unwrap();
+    let mut reader_config = writer_config.clone();
+    reader_config.submission_group_prefix =
+        format!("{}-reader", writer_config.submission_group_prefix);
+    reader_config.transactional_id = format!("{}-reader", writer_config.transactional_id);
+    let mut writer = HostedKafkaBackend::new(1, writer_config).unwrap();
+    let mut reader = HostedKafkaBackend::new(1, reader_config).unwrap();
+    let universe_id = UniverseId::from(uuid::Uuid::new_v4());
+    let world_id = WorldId::from(uuid::Uuid::new_v4());
+    writer
+        .append_frame(test_frame(universe_id, world_id, 1, 0, "frame-0", b"a"))
+        .unwrap();
+    writer
+        .append_frame(test_frame(universe_id, world_id, 1, 1, "frame-1", b"b"))
+        .unwrap();
+
+    wait_for_world_frames(&mut reader, 0, universe_id, world_id, 2).await;
+    let journal_topic = reader.config().journal_topic.clone();
+    assert_eq!(reader.partition_entries(&journal_topic, 0).len(), 2);
+
+    writer
+        .append_frame(test_frame(universe_id, world_id, 1, 2, "frame-2", b"c"))
+        .unwrap();
+    wait_for_world_frames(&mut reader, 0, universe_id, world_id, 3).await;
+    assert_eq!(reader.partition_entries(&journal_topic, 0).len(), 3);
+
+    reader.recover_partition_from_broker(0).unwrap();
+    assert_eq!(reader.world_frames(world_id).len(), 3);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn kafka_allows_forward_world_sequence_gaps() {
+    if !kafka_broker_enabled() {
+        return;
+    }
+
+    let Some(writer_config) = broker_kafka_config("journal-gap-writer", 1) else {
+        return;
+    };
+    ensure_kafka_topics(&writer_config, 1).await.unwrap();
+    let mut reader_config = writer_config.clone();
+    reader_config.submission_group_prefix =
+        format!("{}-reader", writer_config.submission_group_prefix);
+    reader_config.transactional_id = format!("{}-reader", writer_config.transactional_id);
+    let mut writer = HostedKafkaBackend::new(1, writer_config).unwrap();
+    let mut reader = HostedKafkaBackend::new(1, reader_config).unwrap();
+    let universe_id = UniverseId::from(uuid::Uuid::new_v4());
+    let world_id = WorldId::from(uuid::Uuid::new_v4());
+    let frame_0 = test_frame(universe_id, world_id, 1, 0, "frame-0", b"a");
+    let frame_3 = test_frame(universe_id, world_id, 1, 3, "frame-3", b"d");
+
+    writer.append_frame(frame_0.clone()).unwrap();
+    writer.append_frame(frame_3.clone()).unwrap();
+
+    wait_for_world_frames(&mut reader, 0, universe_id, world_id, 2).await;
+    assert_eq!(reader.world_frames(world_id), &[frame_0, frame_3]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn kafka_aborted_transaction_stays_hidden_until_replayed() {
+    if !kafka_broker_enabled() || !blobstore_bucket_enabled() {
+        return;
+    }
+
+    let Some(config) = broker_kafka_config("abort-replay", 1) else {
+        return;
+    };
+    ensure_kafka_topics(&config, 1).await.unwrap();
+    let mut worker = HostedKafkaBackend::new(1, config.clone()).unwrap();
+    let mut ingress = worker.broker_ingress_driver().unwrap();
+    let assigned = wait_for_kafka_assignment(&mut ingress).await.unwrap();
+    assert!(assigned.contains(&0));
+
+    let universe_id = UniverseId::from(uuid::Uuid::new_v4());
+    let world_id = WorldId::from(uuid::Uuid::new_v4());
+    worker
+        .submit(SubmissionEnvelope::domain_event(
+            format!("submission-{}", uuid::Uuid::new_v4()),
+            universe_id,
+            world_id,
+            1,
+            "demo/Test@1",
+            to_canonical_cbor(&1u64).unwrap(),
+        ))
+        .unwrap();
+    let batch = wait_for_kafka_pending_submissions(&mut ingress, 1)
+        .await
+        .unwrap();
+    assert!(!batch.is_empty());
+
+    worker.debug_fail_next_batch_commit();
+    let frame = test_frame(universe_id, world_id, 1, 0, "aborted", b"x");
+    assert!(
+        worker
+            .commit_flush_batch(FlushCommit {
+                frames: vec![frame.clone()],
+                dispositions: Vec::new(),
+                offset_commits: BTreeMap::from([(0, batch[0].offset)]),
+            })
+            .is_err()
+    );
+    drop(ingress);
+    drop(worker);
+
+    let mut reader_config = config.clone();
+    reader_config.submission_group_prefix = format!("{}-reader", config.submission_group_prefix);
+    reader_config.transactional_id = format!("{}-reader", config.transactional_id);
+    let mut reader = HostedKafkaBackend::new(1, reader_config).unwrap();
+    reader.recover_partition_from_broker(0).unwrap();
+    assert!(reader.world_frames(world_id).is_empty());
+
+    let mut recovered_worker = HostedKafkaBackend::new(1, config).unwrap();
+    let mut recovered_ingress = recovered_worker.broker_ingress_driver().unwrap();
+    let assigned = wait_for_kafka_assignment(&mut recovered_ingress)
+        .await
+        .unwrap();
+    assert!(assigned.contains(&0));
+    let batch = wait_for_kafka_pending_submissions(&mut recovered_ingress, 1)
+        .await
+        .unwrap();
+    assert!(!batch.is_empty());
+    recovered_worker
+        .commit_flush_batch(FlushCommit {
+            frames: vec![frame],
+            dispositions: Vec::new(),
+            offset_commits: BTreeMap::from([(0, batch[0].offset)]),
+        })
+        .unwrap();
+
+    wait_for_world_frames(&mut reader, 0, universe_id, world_id, 1).await;
+    let frame = &reader.world_frames(world_id)[0];
+    assert_eq!(frame.world_seq_start, 0);
+    assert_eq!(frame.world_seq_end, 0);
+}

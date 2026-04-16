@@ -16,6 +16,7 @@ This file provides guidance to coding agents when working with code in this repo
 4. **spec/04-workflows.md** — Workflow module semantics on workflow ABI.
 5. **spec/05-workflows.md** — Workflow patterns in the workflow-only architecture.
 6. **spec/06-cells.md** — Keyed workflow instances.
+7. **spec/07-external-execution.md** — Open external work, owner/executor seam, and continuation admission.
 
 Reference shelves:
 - **spec/schemas/** (JSON Schemas)
@@ -31,7 +32,7 @@ Reference shelves:
 **Active layers**:
 - **Workflow modules** (WASM, `module_kind: workflow`): deterministic state machines on workflow ABI; own orchestration/state transitions.
 - **Pure modules** (`module_kind: pure`): side-effect-free compute helpers.
-- **Effects/Adapters**: execute external actions and return signed receipts.
+- **Executors/Adapters**: reconcile and run external work; continuations re-enter through owner admission.
 
 **Governance path**:
 - propose -> shadow -> approve -> apply -> execute -> receipt -> audit
@@ -42,6 +43,8 @@ Shadow reports bounded observed effects/in-flight state and ledger deltas. Prima
 - Only workflow modules may emit effects.
 - Emitted effects must be declared in `abi.workflow.effects_emitted`.
 - Capability + policy must both pass before dispatch.
+- Open external work is recorded before execution starts.
+- Executors never mutate world state directly; stream frames and receipts re-enter through owner admission.
 - Domain ingress wiring is `routing.subscriptions`.
 - Receipt continuation routing is manifest-independent and uses pending intent identity.
 - Strict quiescence blocks apply while in-flight runtime work exists.
@@ -61,7 +64,7 @@ Shadow reports bounded observed effects/in-flight state and ledger deltas. Prima
 **Key implementation notes**:
 - Loader accepts authoring sugar + canonical JSON, validates against schemas, emits canonical CBOR.
 - Validator enforces module ABI contracts, routing semantics, capability bindings, and effect allowlists.
-- Effect manager canonicalizes params, runs cap/policy gates, dispatches adapters, validates receipts.
+- Effect manager canonicalizes params, runs cap/policy gates, records open work, and validates admitted continuations/receipts.
 - Event and receipt ingress are schema-validated and canonicalized once; journal stores canonical CBOR.
 - Manifest changes are journaled as `Manifest` records; replay applies them in order.
 - Module build/cache: workflows/workflows compiled via `aos-wasm-build`, cached under `.aos/cache/{modules|wasmtime}`.

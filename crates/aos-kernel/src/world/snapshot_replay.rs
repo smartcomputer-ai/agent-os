@@ -16,12 +16,7 @@ impl<S: Store + 'static> Kernel<S> {
         let height = self.journal.next_seq();
         let workflow_state: Vec<WorkflowStateEntry> = Vec::new();
         let recent_receipts: Vec<[u8; 32]> = self.recent_receipts.iter().cloned().collect();
-        let queued_effects = self
-            .effect_manager
-            .queued()
-            .iter()
-            .map(EffectIntentSnapshot::from_intent)
-            .collect();
+        let queued_effects = self.snapshot_queued_effects();
         let workflow_index_roots = self
             .workflow_index_roots
             .iter()
@@ -815,14 +810,6 @@ impl<S: Store + 'static> Kernel<S> {
             })
             .collect();
 
-        self.effect_manager.restore_queue(
-            snapshot
-                .queued_effects()
-                .iter()
-                .cloned()
-                .map(|snap| snap.into_intent())
-                .collect(),
-        );
         self.effect_manager
             .update_logical_now_ns(snapshot.logical_now_ns());
         self.clock
@@ -841,9 +828,23 @@ impl<S: Store + 'static> Kernel<S> {
     pub fn tail_scan_after(&self, height: JournalSeq) -> Result<TailScan, KernelError> {
         let head = self.journal.next_seq();
         let from_seq = self.tail_scan_start_seq(height);
+        self.build_tail_scan(height, head, from_seq)
+    }
+
+    pub(crate) fn tail_scan_from(&self, from_seq: JournalSeq) -> Result<TailScan, KernelError> {
+        let head = self.journal.next_seq();
+        self.build_tail_scan(from_seq, head, from_seq)
+    }
+
+    fn build_tail_scan(
+        &self,
+        reported_from: JournalSeq,
+        head: JournalSeq,
+        from_seq: JournalSeq,
+    ) -> Result<TailScan, KernelError> {
         if from_seq >= head {
             return Ok(TailScan {
-                from: height,
+                from: reported_from,
                 to: head,
                 entries: Vec::new(),
                 intents: Vec::new(),
@@ -853,7 +854,7 @@ impl<S: Store + 'static> Kernel<S> {
 
         let entries = self.journal.load_from(from_seq)?;
         let mut scan = TailScan {
-            from: height,
+            from: reported_from,
             to: head,
             entries: Vec::new(),
             intents: Vec::new(),
@@ -1457,7 +1458,7 @@ mod tests {
             signature: vec![],
         };
         kernel
-            .handle_stream_frame(duplicate)
+            .accept(WorldInput::StreamFrame(duplicate))
             .expect("duplicate stream frame should be dropped");
         assert!(kernel.workflow_queue.is_empty());
 
@@ -1475,7 +1476,7 @@ mod tests {
             signature: vec![],
         };
         kernel
-            .handle_stream_frame(next)
+            .accept(WorldInput::StreamFrame(next))
             .expect("next stream frame should be accepted");
         assert_eq!(kernel.workflow_queue.len(), 1);
         let instances = kernel.workflow_instances_snapshot();
@@ -1551,22 +1552,22 @@ mod tests {
         let mut kernel_full =
             Kernel::from_loaded_manifest(store_full.clone(), loaded_full, Journal::new()).unwrap();
         kernel_full
-            .submit_domain_event_result(
+            .accept(WorldInput::DomainEvent(DomainEvent::new(
                 "com.acme/EventA@1",
                 serde_cbor::to_vec(&json!({ "id": "1" })).unwrap(),
-            )
+            )))
             .unwrap();
         kernel_full
-            .submit_domain_event_result(
+            .accept(WorldInput::DomainEvent(DomainEvent::new(
                 "com.acme/EventA@1",
                 serde_cbor::to_vec(&json!({ "id": "2" })).unwrap(),
-            )
+            )))
             .unwrap();
         kernel_full
-            .submit_domain_event_result(
+            .accept(WorldInput::DomainEvent(DomainEvent::new(
                 "com.acme/EventA@1",
                 serde_cbor::to_vec(&json!({ "id": "3" })).unwrap(),
-            )
+            )))
             .unwrap();
         kernel_full.create_snapshot().unwrap();
 
@@ -1577,23 +1578,23 @@ mod tests {
             Kernel::from_loaded_manifest(store_baseline.clone(), loaded_baseline, Journal::new())
                 .unwrap();
         kernel_baseline
-            .submit_domain_event_result(
+            .accept(WorldInput::DomainEvent(DomainEvent::new(
                 "com.acme/EventA@1",
                 serde_cbor::to_vec(&json!({ "id": "1" })).unwrap(),
-            )
+            )))
             .unwrap();
         kernel_baseline.create_snapshot().unwrap();
         kernel_baseline
-            .submit_domain_event_result(
+            .accept(WorldInput::DomainEvent(DomainEvent::new(
                 "com.acme/EventA@1",
                 serde_cbor::to_vec(&json!({ "id": "2" })).unwrap(),
-            )
+            )))
             .unwrap();
         kernel_baseline
-            .submit_domain_event_result(
+            .accept(WorldInput::DomainEvent(DomainEvent::new(
                 "com.acme/EventA@1",
                 serde_cbor::to_vec(&json!({ "id": "3" })).unwrap(),
-            )
+            )))
             .unwrap();
         kernel_baseline.create_snapshot().unwrap();
 

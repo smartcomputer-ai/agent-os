@@ -1,4 +1,4 @@
-use aos_node::{PlaneError, WorldId, WorldLogAppendResult, WorldLogFrame, partition_for_world};
+use aos_node::{BackendError, WorldId, WorldLogAppendResult, WorldLogFrame, partition_for_world};
 use std::collections::BTreeMap;
 
 use super::types::{PartitionLogEntry, ProjectionTopicEntry};
@@ -10,7 +10,7 @@ pub(super) fn append_frame_locally(
     partition_count: u32,
     frame: WorldLogFrame,
     broker_offset: Option<u64>,
-) -> Result<WorldLogAppendResult, PlaneError> {
+) -> Result<WorldLogAppendResult, BackendError> {
     let partition = partition_for_world(frame.world_id, partition_count);
     let frames = world_frames.entry(frame.world_id).or_default();
     let expected = frames
@@ -18,7 +18,7 @@ pub(super) fn append_frame_locally(
         .map(|last| last.world_seq_end.saturating_add(1))
         .unwrap_or(0);
     if frame.world_seq_start < expected {
-        return Err(PlaneError::NonContiguousWorldSeq {
+        return Err(BackendError::NonContiguousWorldSeq {
             universe_id: frame.universe_id,
             world_id: frame.world_id,
             expected,

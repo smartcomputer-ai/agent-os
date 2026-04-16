@@ -1349,6 +1349,102 @@ mod tests {
     }
 
     #[test]
+    fn llm_receipt_settles_by_issuer_ref_when_params_hash_differs() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                0,
+                SessionIngressKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )
+        .expect("host session ready");
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let blob_put_hashes = out
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. }))
+            .map(|effect| effect.params_hash().to_string())
+            .collect::<Vec<_>>();
+
+        let mut llm_pending = None;
+        for (idx, hash) in blob_put_hashes.iter().enumerate() {
+            let out = apply_session_workflow_event(
+                &mut state,
+                &receipt_event(
+                    2 + idx as u64,
+                    "blob.put",
+                    Some(hash.clone()),
+                    "ok",
+                    &BlobPutReceipt {
+                        blob_ref: hash_ref_for_index(idx),
+                        edge_ref: hash_ref_for_index(idx + 1),
+                        size: 42,
+                    },
+                ),
+            )
+            .expect("blob.put receipt");
+            llm_pending = out.effects.iter().find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { pending, .. } => Some(pending.clone()),
+                _ => None,
+            });
+        }
+
+        let llm_pending = llm_pending.expect("expected llm.generate");
+        let issuer_ref = llm_pending
+            .issuer_ref
+            .clone()
+            .expect("llm pending issuer_ref");
+        assert_eq!(state.pending_effects.len(), 1);
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                3,
+                "llm.generate",
+                Some(fake_hash('z')),
+                Some(issuer_ref),
+                "ok",
+                &LlmGenerateReceipt {
+                    output_ref: hash_ref('e'),
+                    raw_output_ref: None,
+                    provider_response_id: None,
+                    finish_reason: LlmFinishReason {
+                        reason: "stop".into(),
+                        raw: None,
+                    },
+                    token_usage: TokenUsage {
+                        prompt: 0,
+                        completion: 0,
+                        total: Some(0),
+                    },
+                    usage_details: None,
+                    warnings_ref: None,
+                    rate_limit_ref: None,
+                    cost_cents: None,
+                    provider_id: "openai-responses".into(),
+                },
+            ),
+        )
+        .expect("llm receipt");
+
+        assert!(state.pending_effects.is_empty());
+        assert_eq!(
+            state.last_output_ref.as_deref(),
+            Some(hash_ref('e').as_str())
+        );
+        assert!(matches!(
+            out.effects.first(),
+            Some(SessionEffectCommand::BlobGet { .. })
+        ));
+    }
+
+    #[test]
     fn llm_tool_calls_are_resolved_executed_and_queued_for_follow_up() {
         let mut state = SessionState::default();
         state.session_id = SessionId("s-1".into());

@@ -1,16 +1,17 @@
 use std::sync::Arc;
 
 use aos_air_types::builtins;
-use aos_effect_adapters::config::EffectAdapterConfig;
-use aos_kernel::{KernelConfig, LoadedManifest, ManifestLoader};
+use aos_cbor::{HASH_PREFIX, Hash};
+use aos_kernel::journal::{Journal, OwnedJournalEntry, SnapshotRecord as KernelSnapshotRecord};
+use aos_kernel::{
+    Kernel, KernelConfig, LoadedManifest, ManifestLoader, TraceQuery, trace_get,
+    workflow_trace_summary_with_routes,
+};
 use aos_node::{
-    CreateWorldRequest, ForkWorldRequest, ImportedSeedSource, PlaneError, SeedKind, SnapshotRecord,
-    SnapshotSelector, UniverseId, WorldId, open_plane_world_from_checkpoint,
-    open_plane_world_from_frames, parse_plane_hash_like, partition_for_world,
+    BackendError, CreateWorldRequest, ForkWorldRequest, ImportedSeedSource, SeedKind,
+    SnapshotRecord, SnapshotSelector, UniverseId, WorldConfig, WorldId, partition_for_world,
     rewrite_snapshot_for_fork_policy,
 };
-use aos_runtime::trace::{TraceQuery as RuntimeTraceQuery, trace_get};
-use aos_runtime::{WorldConfig, WorldHost};
 use serde_json::Value as JsonValue;
 
 use crate::blobstore::HostedCas;
@@ -20,8 +21,6 @@ use crate::worker::WorkerError;
 
 #[derive(Clone)]
 pub struct HostedReplayService {
-    paths: aos_node::LocalStatePaths,
-    world_config: WorldConfig,
     journal: HostedJournalService,
     stores: HostedCasService,
     meta: HostedMetaService,
@@ -30,15 +29,12 @@ pub struct HostedReplayService {
 
 impl HostedReplayService {
     pub fn new(
-        paths: aos_node::LocalStatePaths,
         journal: HostedJournalService,
         stores: HostedCasService,
         meta: HostedMetaService,
         vault: HostedVault,
     ) -> Self {
         Self {
-            paths,
-            world_config: WorldConfig::from_env_with_fallback_module_cache_dir(None),
             journal,
             stores,
             meta,
@@ -60,19 +56,18 @@ impl HostedReplayService {
         universe_id: UniverseId,
         world_id: WorldId,
     ) -> Result<JsonValue, WorkerError> {
-        Ok(self
-            .open_world_host(universe_id, world_id)?
-            .trace_summary()?)
+        let kernel = self.open_world_kernel(universe_id, world_id)?;
+        workflow_trace_summary_with_routes(&kernel, None).map_err(WorkerError::Kernel)
     }
 
     pub fn trace(
         &self,
         universe_id: UniverseId,
         world_id: WorldId,
-        query: RuntimeTraceQuery,
+        query: TraceQuery,
     ) -> Result<JsonValue, WorkerError> {
-        let host = self.open_world_host(universe_id, world_id)?;
-        Ok(trace_get(host.kernel(), query)?)
+        let kernel = self.open_world_kernel(universe_id, world_id)?;
+        Ok(trace_get(&kernel, query)?)
     }
 
     pub fn state_json(
@@ -82,12 +77,15 @@ impl HostedReplayService {
         workflow: &str,
         key: Option<&str>,
     ) -> Result<Option<JsonValue>, WorkerError> {
-        let host = self.open_world_host(universe_id, world_id)?;
+        let kernel = self.open_world_kernel(universe_id, world_id)?;
         let key_cbor = key
             .map(|value| aos_cbor::to_canonical_cbor(&value))
             .transpose()
             .map_err(WorkerError::from)?;
-        let Some(bytes) = host.state(workflow, key_cbor.as_deref()) else {
+        let Some(bytes) = kernel
+            .workflow_state_bytes(workflow, key_cbor.as_deref())
+            .map_err(WorkerError::Kernel)?
+        else {
             return Ok(None);
         };
         let cbor_value: serde_cbor::Value = serde_cbor::from_slice(&bytes)?;
@@ -96,27 +94,18 @@ impl HostedReplayService {
 }
 
 impl HostedReplayService {
-    fn kernel_config_for_world(&self, universe_id: UniverseId) -> KernelConfig {
-        KernelConfig {
+    fn kernel_config_for_world(
+        &self,
+        universe_id: UniverseId,
+    ) -> Result<KernelConfig, WorkerError> {
+        let fallback_module_cache_dir = self.stores.module_cache_dir_for_domain(universe_id)?;
+        let world_config =
+            WorldConfig::from_env_with_fallback_module_cache_dir(fallback_module_cache_dir);
+        Ok(world_config.apply_kernel_defaults(KernelConfig {
             universe_id: universe_id.as_uuid(),
             secret_resolver: Some(Arc::new(self.vault.resolver_for_universe(universe_id))),
             ..KernelConfig::default()
-        }
-    }
-
-    fn world_config_for_domain(&self, universe_id: UniverseId) -> Result<WorldConfig, WorkerError> {
-        let mut config = self.world_config.clone();
-        let domain_paths = self.paths.for_universe(universe_id);
-        domain_paths.ensure_root().map_err(|err| {
-            WorkerError::Persist(aos_node::PersistError::backend(err.to_string()))
-        })?;
-        std::fs::create_dir_all(domain_paths.cache_root()).map_err(|err| {
-            WorkerError::Persist(aos_node::PersistError::backend(format!(
-                "create hosted domain cache dir: {err}"
-            )))
-        })?;
-        config.module_cache_dir = Some(domain_paths.wasmtime_cache_dir());
-        Ok(config)
+        }))
     }
 
     fn load_manifest_into_local_cas(
@@ -156,7 +145,9 @@ impl HostedReplayService {
             }
             let wasm_hash =
                 aos_cbor::Hash::from_hex_str(module.wasm_hash.as_str()).map_err(|_| {
-                    WorkerError::LogFirst(PlaneError::InvalidHashRef(module.wasm_hash.to_string()))
+                    WorkerError::LogFirst(BackendError::InvalidHashRef(
+                        module.wasm_hash.to_string(),
+                    ))
                 })?;
             let _ = store.get(wasm_hash).map_err(WorkerError::Persist)?;
         }
@@ -281,11 +272,11 @@ impl HostedReplayService {
             }))
     }
 
-    fn open_world_host(
+    fn open_world_kernel(
         &self,
         universe_id_hint: UniverseId,
         world_id: WorldId,
-    ) -> Result<WorldHost<HostedCas>, WorkerError> {
+    ) -> Result<Kernel<HostedCas>, WorkerError> {
         self.journal.refresh()?;
         let frames = self.journal.world_frames(world_id)?;
         let universe_id = resolved_universe_from_frames(&frames).unwrap_or(universe_id_hint);
@@ -302,49 +293,55 @@ impl HostedReplayService {
             })?;
         let loaded = self.load_manifest_into_local_cas(universe_id, &manifest_hash)?;
         let store = self.stores.store_for_domain(universe_id)?;
-        let mut host = match checkpoint {
-            Some((_checkpoint, checkpoint_world)) => self.open_world_host_with_checkpoint(
+        match checkpoint {
+            Some((_checkpoint, checkpoint_world)) => self.open_world_kernel_with_checkpoint(
                 universe_id,
                 world_id,
                 &store,
-                loaded.clone(),
+                loaded,
                 &checkpoint_world.baseline,
-            )?,
-            None => self.open_world_host_with_frames(universe_id, &store, loaded, &frames)?,
-        };
-        let _ = host
-            .kernel_mut()
-            .drain_effects()
-            .map_err(WorkerError::Kernel)?;
-        Ok(host)
+            ),
+            None => {
+                self.open_world_kernel_with_frames(universe_id, world_id, &store, loaded, &frames)
+            }
+        }
     }
 
-    fn open_world_host_with_frames(
+    fn open_world_kernel_with_frames(
         &self,
         universe_id: UniverseId,
+        world_id: WorldId,
         store: &Arc<HostedCas>,
         loaded: LoadedManifest,
         frames: &[aos_node::WorldLogFrame],
-    ) -> Result<WorldHost<HostedCas>, WorkerError> {
-        open_plane_world_from_frames(
+    ) -> Result<Kernel<HostedCas>, WorkerError> {
+        let active_baseline =
+            snapshot_record_from_frames(frames, |_| true).ok_or(WorkerError::UnknownWorld {
+                universe_id,
+                world_id,
+            })?;
+        let tail_frames = frames
+            .iter()
+            .filter(|frame| frame.world_seq_end > active_baseline.height)
+            .cloned()
+            .collect::<Vec<_>>();
+        reopen_kernel_from_frame_log(
             Arc::clone(store),
             loaded,
-            frames,
-            self.world_config_for_domain(universe_id)?,
-            EffectAdapterConfig::default(),
-            self.kernel_config_for_world(universe_id),
+            &active_baseline,
+            &tail_frames,
+            self.kernel_config_for_world(universe_id)?,
         )
-        .map_err(WorkerError::LogFirst)
     }
 
-    fn open_world_host_with_checkpoint(
+    fn open_world_kernel_with_checkpoint(
         &self,
         universe_id: UniverseId,
         world_id: WorldId,
         store: &Arc<HostedCas>,
         loaded: LoadedManifest,
         baseline: &aos_node::PromotableBaselineRef,
-    ) -> Result<WorldHost<HostedCas>, WorkerError> {
+    ) -> Result<Kernel<HostedCas>, WorkerError> {
         let tail_frames = self
             .journal
             .world_frames(world_id)?
@@ -353,16 +350,13 @@ impl HostedReplayService {
                 frame.universe_id == universe_id && frame.world_seq_end > baseline.height
             })
             .collect::<Vec<_>>();
-        open_plane_world_from_checkpoint(
+        reopen_kernel_from_frame_log(
             Arc::clone(store),
             loaded,
-            baseline,
+            &snapshot_record_from_checkpoint(baseline),
             &tail_frames,
-            self.world_config_for_domain(universe_id)?,
-            EffectAdapterConfig::default(),
-            self.kernel_config_for_world(universe_id),
+            self.kernel_config_for_world(universe_id)?,
         )
-        .map_err(WorkerError::LogFirst)
     }
 }
 
@@ -443,4 +437,80 @@ fn is_builtin_module(name: &str) -> bool {
 fn is_zero_hash(value: &str) -> bool {
     let trimmed = value.strip_prefix("sha256:").unwrap_or(value);
     trimmed.len() == 64 && trimmed.bytes().all(|byte| byte == b'0')
+}
+
+fn parse_plane_hash_like(value: &str, field: &str) -> Result<Hash, WorkerError> {
+    let trimmed = value.trim();
+    let normalized = if trimmed.starts_with(HASH_PREFIX) {
+        trimmed.to_string()
+    } else {
+        format!("{HASH_PREFIX}{trimmed}")
+    };
+    Hash::from_hex_str(&normalized).map_err(|_| {
+        WorkerError::LogFirst(BackendError::InvalidHashRef(format!(
+            "invalid {field} '{value}'"
+        )))
+    })
+}
+
+fn journal_entries_from_world_frames(
+    frames: &[aos_node::WorldLogFrame],
+) -> Result<Vec<OwnedJournalEntry>, WorkerError> {
+    let mut entries = Vec::new();
+    for frame in frames {
+        for (offset, record) in frame.records.iter().enumerate() {
+            entries.push(OwnedJournalEntry {
+                seq: frame.world_seq_start + offset as u64,
+                kind: record.kind(),
+                payload: serde_cbor::to_vec(record)?,
+            });
+        }
+    }
+    Ok(entries)
+}
+
+fn kernel_snapshot_record(snapshot: &SnapshotRecord) -> KernelSnapshotRecord {
+    KernelSnapshotRecord {
+        snapshot_ref: snapshot.snapshot_ref.clone(),
+        height: snapshot.height,
+        universe_id: snapshot.universe_id.as_uuid(),
+        logical_time_ns: snapshot.logical_time_ns,
+        receipt_horizon_height: snapshot.receipt_horizon_height,
+        manifest_hash: snapshot.manifest_hash.clone(),
+    }
+}
+
+fn reopen_kernel_from_frame_log(
+    store: Arc<HostedCas>,
+    loaded: LoadedManifest,
+    active_baseline: &SnapshotRecord,
+    frames: &[aos_node::WorldLogFrame],
+    kernel_config: KernelConfig,
+) -> Result<Kernel<HostedCas>, WorkerError> {
+    if frames.is_empty() {
+        let mut kernel = Kernel::from_loaded_manifest_without_replay_with_config(
+            store,
+            loaded,
+            Journal::new(),
+            kernel_config,
+        )?;
+        kernel.restore_snapshot_record(&kernel_snapshot_record(active_baseline))?;
+        kernel.compact_journal_through(active_baseline.height)?;
+        return Ok(kernel);
+    }
+
+    let replay_entries = journal_entries_from_world_frames(frames)?;
+    let replay_from = replay_entries.first().map(|entry| entry.seq).unwrap_or(0);
+    let journal =
+        Journal::from_entries(&replay_entries).map_err(|err| WorkerError::Build(err.into()))?;
+    let mut kernel = Kernel::from_loaded_manifest_without_replay_with_config(
+        store,
+        loaded,
+        journal,
+        kernel_config,
+    )?;
+    kernel.restore_snapshot_record(&kernel_snapshot_record(active_baseline))?;
+    kernel.replay_entries_from(replay_from)?;
+    kernel.compact_journal_through(active_baseline.height)?;
+    Ok(kernel)
 }

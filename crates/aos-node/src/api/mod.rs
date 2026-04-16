@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub mod http;
 pub mod openapi;
 
@@ -89,6 +91,10 @@ impl IntoResponse for ControlError {
 pub struct ServiceInfoResponse {
     pub service: &'static str,
     pub version: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]

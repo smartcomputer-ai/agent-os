@@ -5,7 +5,7 @@ use aos_effect_types::{
     WorkspaceAnnotationsGetReceipt, WorkspaceDiffReceipt, WorkspaceListReceipt,
     WorkspaceReadRefReceipt, WorkspaceResolveReceipt,
 };
-use aos_kernel::{DefListing, LoadedManifest};
+use aos_kernel::{DefListing, LoadedManifest, TraceQuery};
 use aos_node::api::http::HttpBackend;
 use aos_node::api::{
     BlobPutResponse, CasBlobMetadata, CommandSubmitBody, CommandSubmitResponse, ControlError,
@@ -22,7 +22,6 @@ use aos_node::{
     ReceiptIngress, SecretBindingRecord, SecretVersionRecord, SnapshotRecord, UniverseId, WorldId,
     WorldRuntimeInfo,
 };
-use aos_runtime::trace::TraceQuery as RuntimeTraceQuery;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde::Serialize;
@@ -73,6 +72,8 @@ impl ControlFacade {
         Ok(ServiceInfoResponse {
             service: "aos-node-hosted",
             version: env!("CARGO_PKG_VERSION"),
+            pid: Some(std::process::id()),
+            state_root: Some(self.deps.state_root.clone()),
         })
     }
 
@@ -283,7 +284,7 @@ impl ControlFacade {
             .trace(
                 universe_id,
                 world_id,
-                RuntimeTraceQuery {
+                TraceQuery {
                     event_hash: event_hash.map(str::to_owned),
                     schema: schema.map(str::to_owned),
                     correlate_by: correlate_by.map(str::to_owned),
@@ -484,7 +485,7 @@ impl ControlFacade {
         let loaded = self.load_materialized_manifest(universe_id, world_id, &head.manifest_hash)?;
         let def = get_def_from_manifest(&loaded, name)
             .ok_or_else(|| ControlError::not_found(format!("definition '{name}'")))?;
-        if !aos_node::def_matches_kind(&def, kind) {
+        if !def_matches_kind(&def, kind) {
             return Err(ControlError::not_found(format!(
                 "definition '{name}' with kind '{kind}'"
             )));
@@ -926,6 +927,17 @@ impl HttpBackend for ControlFacade {
         world_id: WorldId,
     ) -> Result<aos_node::api::WorldSummaryResponse, ControlError> {
         let summary = ControlFacade::get_world(self, world_id)?;
+        Ok(aos_node::api::WorldSummaryResponse {
+            runtime: map_hosted_runtime_to_world_runtime(summary.runtime),
+            active_baseline: summary.active_baseline,
+        })
+    }
+
+    fn checkpoint_world(
+        &self,
+        world_id: WorldId,
+    ) -> Result<aos_node::api::WorldSummaryResponse, ControlError> {
+        let summary = self.get_world(world_id)?;
         Ok(aos_node::api::WorldSummaryResponse {
             runtime: map_hosted_runtime_to_world_runtime(summary.runtime),
             active_baseline: summary.active_baseline,
@@ -1469,6 +1481,19 @@ fn require_latest_durable(consistency: Option<&str>) -> Result<(), ControlError>
             "unsupported consistency '{other}'"
         ))),
     }
+}
+
+fn def_matches_kind(def: &AirNode, kind: &str) -> bool {
+    matches!(
+        (def, kind),
+        (AirNode::Defschema(_), "defschema")
+            | (AirNode::Defmodule(_), "defmodule")
+            | (AirNode::Defcap(_), "defcap")
+            | (AirNode::Defpolicy(_), "defpolicy")
+            | (AirNode::Defsecret(_), "defsecret")
+            | (AirNode::Defeffect(_), "defeffect")
+            | (AirNode::Manifest(_), "manifest")
+    )
 }
 
 pub(crate) fn control_error_from_worker(error: WorkerError) -> ControlError {

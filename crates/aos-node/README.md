@@ -6,7 +6,7 @@ For the v0.17 Kafka cutover, that seam is now split into:
 
 - `src/model/` for shared node identities and domain types
 - `src/api/` for control-facing request/response DTOs
-- `src/planes/` for internal distributed runtime and plane contracts
+- `src/model/backends.rs` for internal distributed runtime backend contracts
 
 ## What belongs here
 
@@ -15,7 +15,7 @@ These concerns need to be shared by local and hosted node backends:
 - world/storage identity types and validation helpers
 - shared DTOs for world creation, ingress, commands, receipts, checkpoints, snapshots, and runtime views
 - shared control-facing API DTOs
-- internal plane/runtime helpers and contracts
+- internal backend/runtime helpers and contracts
 - secret binding/version contracts needed by local and hosted control flows
 
 ## What stays out
@@ -29,7 +29,7 @@ These concerns should not enter the shared node protocol crate:
 - hosted-only operational config
 - local-node runtime home layout
 - authored-world filesystem UX
-- `aos-runtime` single-world execution internals
+- shared execution primitives in `src/execution/`
 
 ## Current scope
 
@@ -37,4 +37,5 @@ This crate now owns:
 
 - the surviving shared node models used by local and hosted runtimes
 - the shared `/v1` control-facing DTO surface in `src/api/`
-- the internal plane/runtime seam in `src/planes/`
+- the internal backend/runtime seam in `src/model/backends.rs`
+- the shared execution/runtime primitives in `src/execution/`

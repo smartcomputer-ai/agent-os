@@ -4,6 +4,10 @@ use std::time::Duration;
 pub enum ConfigError {
     #[error("AOS_PARTITION_COUNT must be greater than zero")]
     InvalidPartitionCount,
+    #[error("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD must be greater than zero")]
+    InvalidMaxUncommittedSlicesPerWorld,
+    #[error("invalid AOS_PROJECTION_COMMIT_MODE value '{0}': expected 'inline' or 'background'")]
+    InvalidProjectionCommitMode(String),
     #[error("invalid {field} value '{value}': {source}")]
     InvalidNumber {
         field: &'static str,
@@ -11,18 +15,41 @@ pub enum ConfigError {
         #[source]
         source: std::num::ParseIntError,
     },
-    #[error("invalid {field} value '{value}': expected true or false")]
-    InvalidBool { field: &'static str, value: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectionCommitMode {
+    Inline,
+    #[default]
+    Background,
+}
+
+impl ProjectionCommitMode {
+    pub fn parse(raw: &str) -> Result<Self, ConfigError> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "inline" => Ok(Self::Inline),
+            "background" => Ok(Self::Background),
+            _ => Err(ConfigError::InvalidProjectionCommitMode(raw.to_owned())),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Inline => "inline",
+            Self::Background => "background",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct HostedWorkerConfig {
     pub worker_id: String,
     pub partition_count: u32,
-    pub supervisor_poll_interval: Duration,
     pub checkpoint_interval: Duration,
     pub checkpoint_every_events: Option<u32>,
-    pub checkpoint_on_create: bool,
+    pub max_local_continuation_slices_per_flush: usize,
+    pub projection_commit_mode: ProjectionCommitMode,
+    pub max_uncommitted_slices_per_world: usize,
 }
 
 impl Default for HostedWorkerConfig {
@@ -30,10 +57,11 @@ impl Default for HostedWorkerConfig {
         Self {
             worker_id: format!("worker-{}", uuid::Uuid::new_v4()),
             partition_count: 1,
-            supervisor_poll_interval: Duration::from_millis(100),
             checkpoint_interval: Duration::from_secs(60 * 2),
             checkpoint_every_events: Some(2000),
-            checkpoint_on_create: true,
+            max_local_continuation_slices_per_flush: 64,
+            projection_commit_mode: ProjectionCommitMode::Background,
+            max_uncommitted_slices_per_world: 256,
         }
     }
 }
@@ -54,12 +82,6 @@ impl HostedWorkerConfig {
             }
             cfg.partition_count = parsed;
         }
-        if let Ok(raw) = std::env::var("AOS_WORKER_POLL_INTERVAL_MS") {
-            cfg.supervisor_poll_interval = Duration::from_millis(u64::from(parse_u32_env(
-                "AOS_WORKER_POLL_INTERVAL_MS",
-                &raw,
-            )?));
-        }
         if let Ok(raw) = std::env::var("AOS_CHECKPOINT_INTERVAL_MS") {
             cfg.checkpoint_interval = Duration::from_millis(u64::from(parse_u32_env(
                 "AOS_CHECKPOINT_INTERVAL_MS",
@@ -70,14 +92,19 @@ impl HostedWorkerConfig {
             let parsed = parse_u32_env("AOS_CHECKPOINT_EVERY_EVENTS", &raw)?;
             cfg.checkpoint_every_events = (parsed > 0).then_some(parsed);
         }
-        if let Ok(raw) = std::env::var("AOS_CHECKPOINT_ON_CREATE") {
-            cfg.checkpoint_on_create =
-                raw.trim()
-                    .parse::<bool>()
-                    .map_err(|_| ConfigError::InvalidBool {
-                        field: "AOS_CHECKPOINT_ON_CREATE",
-                        value: raw.clone(),
-                    })?;
+        if let Ok(raw) = std::env::var("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH") {
+            cfg.max_local_continuation_slices_per_flush =
+                parse_u32_env("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", &raw)? as usize;
+        }
+        if let Ok(raw) = std::env::var("AOS_PROJECTION_COMMIT_MODE") {
+            cfg.projection_commit_mode = ProjectionCommitMode::parse(&raw)?;
+        }
+        if let Ok(raw) = std::env::var("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD") {
+            let parsed = parse_u32_env("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", &raw)?;
+            if parsed == 0 {
+                return Err(ConfigError::InvalidMaxUncommittedSlicesPerWorld);
+            }
+            cfg.max_uncommitted_slices_per_world = parsed as usize;
         }
         Ok(cfg)
     }
@@ -105,14 +132,20 @@ mod tests {
         let _guard = EnvGuard::set(&[
             ("AOS_WORKER_ID", None),
             ("AOS_PARTITION_COUNT", None),
-            ("AOS_WORKER_POLL_INTERVAL_MS", None),
             ("AOS_CHECKPOINT_INTERVAL_MS", None),
             ("AOS_CHECKPOINT_EVERY_EVENTS", None),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", None),
+            ("AOS_PROJECTION_COMMIT_MODE", None),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", None),
         ]);
 
         let cfg = HostedWorkerConfig::from_env().unwrap();
         assert_eq!(cfg.partition_count, 1);
+        assert_eq!(cfg.checkpoint_interval, Duration::from_secs(120));
         assert_eq!(cfg.checkpoint_every_events, Some(2000));
+        assert_eq!(cfg.max_local_continuation_slices_per_flush, 64);
+        assert_eq!(cfg.projection_commit_mode, ProjectionCommitMode::Background);
+        assert_eq!(cfg.max_uncommitted_slices_per_world, 256);
     }
 
     #[test]
@@ -120,9 +153,11 @@ mod tests {
         let _guard = EnvGuard::set(&[
             ("AOS_WORKER_ID", None),
             ("AOS_PARTITION_COUNT", Some("4")),
-            ("AOS_WORKER_POLL_INTERVAL_MS", None),
             ("AOS_CHECKPOINT_INTERVAL_MS", None),
             ("AOS_CHECKPOINT_EVERY_EVENTS", None),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", None),
+            ("AOS_PROJECTION_COMMIT_MODE", None),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", None),
         ]);
 
         let cfg = HostedWorkerConfig::from_env().unwrap();
@@ -130,17 +165,19 @@ mod tests {
     }
 
     #[test]
-    fn from_env_reads_poll_interval() {
+    fn from_env_reads_checkpoint_interval() {
         let _guard = EnvGuard::set(&[
             ("AOS_WORKER_ID", None),
             ("AOS_PARTITION_COUNT", None),
-            ("AOS_WORKER_POLL_INTERVAL_MS", Some("250")),
-            ("AOS_CHECKPOINT_INTERVAL_MS", None),
+            ("AOS_CHECKPOINT_INTERVAL_MS", Some("250")),
             ("AOS_CHECKPOINT_EVERY_EVENTS", None),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", None),
+            ("AOS_PROJECTION_COMMIT_MODE", None),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", None),
         ]);
 
         let cfg = HostedWorkerConfig::from_env().unwrap();
-        assert_eq!(cfg.supervisor_poll_interval, Duration::from_millis(250));
+        assert_eq!(cfg.checkpoint_interval, Duration::from_millis(250));
     }
 
     #[test]
@@ -148,9 +185,11 @@ mod tests {
         let _guard = EnvGuard::set(&[
             ("AOS_PARTITION_COUNT", Some("0")),
             ("AOS_WORKER_ID", None),
-            ("AOS_WORKER_POLL_INTERVAL_MS", None),
             ("AOS_CHECKPOINT_INTERVAL_MS", None),
             ("AOS_CHECKPOINT_EVERY_EVENTS", None),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", None),
+            ("AOS_PROJECTION_COMMIT_MODE", None),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", None),
         ]);
 
         assert!(matches!(
@@ -164,13 +203,99 @@ mod tests {
         let _guard = EnvGuard::set(&[
             ("AOS_WORKER_ID", None),
             ("AOS_PARTITION_COUNT", None),
-            ("AOS_WORKER_POLL_INTERVAL_MS", None),
             ("AOS_CHECKPOINT_INTERVAL_MS", None),
             ("AOS_CHECKPOINT_EVERY_EVENTS", Some("7")),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", None),
+            ("AOS_PROJECTION_COMMIT_MODE", None),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", None),
         ]);
 
         let cfg = HostedWorkerConfig::from_env().unwrap();
         assert_eq!(cfg.checkpoint_every_events, Some(7));
+    }
+
+    #[test]
+    fn from_env_reads_projection_commit_mode() {
+        let _guard = EnvGuard::set(&[
+            ("AOS_WORKER_ID", None),
+            ("AOS_PARTITION_COUNT", None),
+            ("AOS_CHECKPOINT_INTERVAL_MS", None),
+            ("AOS_CHECKPOINT_EVERY_EVENTS", None),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", None),
+            ("AOS_PROJECTION_COMMIT_MODE", Some("inline")),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", None),
+        ]);
+
+        let cfg = HostedWorkerConfig::from_env().unwrap();
+        assert_eq!(cfg.projection_commit_mode, ProjectionCommitMode::Inline);
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_projection_commit_mode() {
+        let _guard = EnvGuard::set(&[
+            ("AOS_WORKER_ID", None),
+            ("AOS_PARTITION_COUNT", None),
+            ("AOS_CHECKPOINT_INTERVAL_MS", None),
+            ("AOS_CHECKPOINT_EVERY_EVENTS", None),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", None),
+            ("AOS_PROJECTION_COMMIT_MODE", Some("fast")),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", None),
+        ]);
+
+        assert!(matches!(
+            HostedWorkerConfig::from_env(),
+            Err(ConfigError::InvalidProjectionCommitMode(value)) if value == "fast"
+        ));
+    }
+
+    #[test]
+    fn from_env_reads_max_uncommitted_slices_per_world() {
+        let _guard = EnvGuard::set(&[
+            ("AOS_WORKER_ID", None),
+            ("AOS_PARTITION_COUNT", None),
+            ("AOS_CHECKPOINT_INTERVAL_MS", None),
+            ("AOS_CHECKPOINT_EVERY_EVENTS", None),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", None),
+            ("AOS_PROJECTION_COMMIT_MODE", None),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", Some("4")),
+        ]);
+
+        let cfg = HostedWorkerConfig::from_env().unwrap();
+        assert_eq!(cfg.max_uncommitted_slices_per_world, 4);
+    }
+
+    #[test]
+    fn from_env_rejects_zero_max_uncommitted_slices_per_world() {
+        let _guard = EnvGuard::set(&[
+            ("AOS_WORKER_ID", None),
+            ("AOS_PARTITION_COUNT", None),
+            ("AOS_CHECKPOINT_INTERVAL_MS", None),
+            ("AOS_CHECKPOINT_EVERY_EVENTS", None),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", None),
+            ("AOS_PROJECTION_COMMIT_MODE", None),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", Some("0")),
+        ]);
+
+        assert!(matches!(
+            HostedWorkerConfig::from_env(),
+            Err(ConfigError::InvalidMaxUncommittedSlicesPerWorld)
+        ));
+    }
+
+    #[test]
+    fn from_env_reads_max_local_continuation_slices_per_flush() {
+        let _guard = EnvGuard::set(&[
+            ("AOS_WORKER_ID", None),
+            ("AOS_PARTITION_COUNT", None),
+            ("AOS_CHECKPOINT_INTERVAL_MS", None),
+            ("AOS_CHECKPOINT_EVERY_EVENTS", None),
+            ("AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH", Some("7")),
+            ("AOS_PROJECTION_COMMIT_MODE", None),
+            ("AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD", None),
+        ]);
+
+        let cfg = HostedWorkerConfig::from_env().unwrap();
+        assert_eq!(cfg.max_local_continuation_slices_per_flush, 7);
     }
 
     struct EnvGuard {

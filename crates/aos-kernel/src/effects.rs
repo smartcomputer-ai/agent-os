@@ -338,7 +338,6 @@ impl EffectManager {
                     enforcer_module,
                     grant.expiry_ns,
                 );
-                self.queue.push(intent.clone());
                 Ok(intent)
             }
             aos_effects::traits::PolicyDecision::Deny => Err(KernelError::PolicyDenied {
@@ -352,18 +351,8 @@ impl EffectManager {
 
     pub fn drain(&mut self) -> Result<Vec<EffectIntent>, KernelError> {
         let mut intents = self.queue.drain();
-        if let (Some(catalog), Some(resolver)) =
-            (self.secret_catalog.as_ref(), self.secret_resolver.as_ref())
-        {
-            for intent in intents.iter_mut() {
-                let injected = crate::secret::inject_secrets_in_params(
-                    &intent.params_cbor,
-                    catalog,
-                    resolver.as_ref(),
-                )
-                .map_err(|err| KernelError::SecretResolution(err.to_string()))?;
-                intent.params_cbor = injected;
-            }
+        for intent in intents.iter_mut() {
+            self.prepare_intent_for_execution(intent)?;
         }
         Ok(intents)
     }
@@ -402,6 +391,24 @@ impl EffectManager {
 
     pub fn clear_cap_context(&mut self) {
         self.cap_context = None;
+    }
+
+    pub fn prepare_intent_for_execution(
+        &self,
+        intent: &mut EffectIntent,
+    ) -> Result<(), KernelError> {
+        if let (Some(catalog), Some(resolver)) =
+            (self.secret_catalog.as_ref(), self.secret_resolver.as_ref())
+        {
+            let injected = crate::secret::inject_secrets_in_params(
+                &intent.params_cbor,
+                catalog,
+                resolver.as_ref(),
+            )
+            .map_err(|err| KernelError::SecretResolution(err.to_string()))?;
+            intent.params_cbor = injected;
+        }
+        Ok(())
     }
 
     fn record_cap_deny(

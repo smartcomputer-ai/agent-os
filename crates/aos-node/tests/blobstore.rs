@@ -1,6 +1,6 @@
 use aos_cbor::Hash;
 use aos_kernel::Store;
-use aos_node::{FsCas, LocalBlobPlanes, LocalStatePaths, PersistError};
+use aos_node::{FsCas, LocalBlobBackend, LocalStatePaths, PersistError};
 use tempfile::{TempDir, tempdir};
 
 fn multi_chunk_payload() -> Vec<u8> {
@@ -101,15 +101,15 @@ fn fs_cas_shards_by_digest_hex_without_hash_prefix() -> Result<(), Box<dyn std::
 }
 
 #[test]
-fn local_blob_planes_from_paths_uses_local_cas_root() -> Result<(), Box<dyn std::error::Error>> {
+fn local_blob_backend_from_paths_uses_local_cas_root() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempdir()?;
     let paths = LocalStatePaths::new(temp.path());
-    let planes = LocalBlobPlanes::from_paths(&paths)?;
-    let payload = b"plane-cas";
-    let hash = planes.cas().put_verified(payload)?;
+    let backend = LocalBlobBackend::from_paths(&paths)?;
+    let payload = b"backend-cas";
+    let hash = backend.cas().put_verified(payload)?;
 
-    assert_eq!(planes.config().root, paths.cas_root());
-    assert_eq!(planes.cas().get(hash)?, payload);
+    assert_eq!(backend.config().root, paths.cas_root());
+    assert_eq!(backend.cas().get(hash)?, payload);
     assert!(paths.cas_root().join(&hash.to_hex()[7..9]).exists());
     Ok(())
 }

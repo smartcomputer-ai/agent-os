@@ -1,6 +1,12 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
-use aos_node::{DEFAULT_INGRESS_TOPIC, DEFAULT_JOURNAL_TOPIC, SubmissionEnvelope, WorldLogFrame};
+use aos_node::{
+    DEFAULT_INGRESS_TOPIC, DEFAULT_JOURNAL_TOPIC, SubmissionEnvelope, SubmissionRejection, WorldId,
+    WorldLogFrame,
+};
+use rdkafka::consumer::ConsumerGroupMetadata;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KafkaConfig {
@@ -19,6 +25,7 @@ pub struct KafkaConfig {
     pub group_session_timeout_ms: u32,
     pub group_heartbeat_interval_ms: u32,
     pub group_poll_wait_ms: u32,
+    pub max_pending_ingress_per_partition: usize,
     pub recovery_fetch_wait_ms: u32,
     pub recovery_poll_interval_ms: u32,
     pub recovery_idle_timeout_ms: u32,
@@ -68,6 +75,12 @@ impl Default for KafkaConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(5),
+            max_pending_ingress_per_partition: std::env::var(
+                "AOS_KAFKA_MAX_PENDING_INGRESS_PER_PARTITION",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1024),
             recovery_fetch_wait_ms: std::env::var("AOS_KAFKA_RECOVERY_FETCH_WAIT_MS")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -97,25 +110,54 @@ pub struct ProjectionTopicEntry {
     pub value: Option<Vec<u8>>,
 }
 
-#[derive(Debug)]
-pub struct SubmissionBatch {
-    pub submissions: Vec<SubmissionEnvelope>,
-    pub(super) commit: SubmissionCommit,
+#[derive(Debug, Clone)]
+pub struct IngressRecord {
+    pub partition: u32,
+    pub offset: i64,
+    pub envelope: SubmissionEnvelope,
 }
 
-#[derive(Debug)]
-pub(super) enum SubmissionCommit {
-    Embedded {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AssignmentSync {
+    pub assigned: Vec<u32>,
+    pub newly_assigned: Vec<u32>,
+    pub revoked: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct IngressPollBatch {
+    pub assignment: AssignmentSync,
+    pub records: Vec<IngressRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DurableDisposition {
+    RejectedSubmission {
         partition: u32,
+        offset: i64,
+        world_id: WorldId,
+        reason: SubmissionRejection,
     },
-    Kafka {
-        topic: String,
+    CommandFailure {
         partition: u32,
-        last_offset: Option<i64>,
+        offset: i64,
+        world_id: WorldId,
+        command_id: String,
+        error_code: String,
     },
-    DirectKafka {
-        partition: u32,
-    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HostedJournalRecord {
+    Frame(WorldLogFrame),
+    Disposition(DurableDisposition),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FlushCommit {
+    pub frames: Vec<WorldLogFrame>,
+    pub dispositions: Vec<DurableDisposition>,
+    pub offset_commits: BTreeMap<u32, i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,8 +171,10 @@ pub(super) struct QueuedSubmission {
     pub submission: SubmissionEnvelope,
 }
 
+pub(super) type SharedConsumerGroupMetadata = Arc<Mutex<Option<ConsumerGroupMetadata>>>;
+
 #[derive(Debug)]
-pub(crate) struct FetchedRecord {
+pub struct FetchedRecord {
     pub offset: i64,
     pub key: Option<Vec<u8>>,
     pub value: Option<Vec<u8>>,

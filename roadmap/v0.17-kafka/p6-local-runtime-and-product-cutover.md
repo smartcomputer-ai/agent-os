@@ -29,7 +29,7 @@ Implemented on the experimental branch:
    planes and a real durable blobstore-backed checkpoint/blob plane.
 6. Hosted restart recovery now rebuilds from blobstore checkpoints plus Kafka route/journal replay.
 7. Phase 3 local cutover now exists for the core local path: `aos-node-local` owns an embedded
-   `LocalLogRuntime` backed by local SQLite plus filesystem CAS rather than the old `aos-sqlite`
+   `LocalRuntime` backed by local SQLite plus filesystem CAS rather than the old `aos-sqlite`
    node-store seam.
 8. Local world creation, command submission, domain ingress, and receipt ingress now enter through
    the log-first submission path and normalize into authoritative `WorldLogFrame`s.

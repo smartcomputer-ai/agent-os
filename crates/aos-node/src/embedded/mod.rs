@@ -1,24 +1,21 @@
 mod blobstore;
 mod control;
 mod harness;
-mod ingress;
 mod paths;
-mod runner;
 mod runtime;
 mod secrets;
 mod sqlite;
 mod store_error;
-mod supervisor;
 mod workspace;
 
-pub use blobstore::{FsCas, LocalBlobPlanes, LocalBlobStoreConfig};
+pub use blobstore::{FsBlobBackend, FsCas, LocalBlobBackend, LocalBlobStoreConfig};
 pub use control::LocalControl;
-pub use harness::EmbeddedWorldHarness;
-pub use harness::local_universe_id;
-pub use ingress::LocalIngressQueue;
+pub use harness::{EmbeddedHarnessError, EmbeddedWorldHarness};
 pub use paths::LocalStatePaths;
-pub use runner::{LocalWorker, LocalWorkerOutcome};
-pub use runtime::{LocalKernelGuard, LocalLogRuntime, LocalRuntimeError};
-pub use sqlite::{LocalSqliteConfig, LocalSqlitePlanes};
+pub use runtime::{LocalRuntime, LocalRuntimeError};
+pub use sqlite::{LocalSqliteBackend, LocalSqliteConfig};
 pub use store_error::LocalStoreError;
-pub use supervisor::{LocalSupervisor, LocalSupervisorConfig, def_matches_kind};
+
+pub fn local_universe_id() -> crate::UniverseId {
+    crate::UniverseId::nil()
+}

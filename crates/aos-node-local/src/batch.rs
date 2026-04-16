@@ -27,6 +27,8 @@ pub enum BatchCommand {
     Worlds,
     /// Show the current runtime/admin summary for one local world.
     Status(WorldTargetArgs),
+    /// Create a fresh local checkpoint for one world and print the updated summary.
+    Checkpoint(WorldTargetArgs),
     /// Pump one local world until quiescent and print the updated summary.
     Step(WorldTargetArgs),
     /// Load and print the live manifest for one local world.
@@ -147,6 +149,10 @@ pub fn run_batch(args: BatchArgs) -> Result<()> {
         BatchCommand::Status(target) => {
             let world = resolve_world_id(&control, &target.world)?;
             print_json(&control.get_world(world)?)
+        }
+        BatchCommand::Checkpoint(target) => {
+            let world = resolve_world_id(&control, &target.world)?;
+            print_json(&control.checkpoint_world(world)?)
         }
         BatchCommand::Step(target) => {
             let world = resolve_world_id(&control, &target.world)?;

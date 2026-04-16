@@ -30,7 +30,7 @@ use aos_effects::builtins::{
 };
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Store;
-use aos_runtime::WorldConfig;
+use aos_node::WorldConfig;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -229,7 +229,9 @@ pub fn run(example_root: &Path) -> Result<()> {
                 batch.call_status.get(call_id),
                 Some(ToolCallStatus::Succeeded)
             ),
-            "expected call {call_id} status Succeeded"
+            "expected call {call_id} status Succeeded, got {:?}; llm_result={:?}",
+            batch.call_status.get(call_id),
+            batch.llm_results.get(call_id)
         );
     }
     let expected_groups = vec![
@@ -537,19 +539,16 @@ impl AgentToolsScript {
         self.seen_tool_effect_kinds.insert(TOOL_FS_READ.into());
         ok_receipt(
             intent,
-            &HostFsReadFileReceipt {
-                status: "ok".into(),
-                content: Some(HostOutput::InlineText {
-                    inline_text: HostInlineText {
-                        text: TEST_FILE_TEXT.into(),
-                    },
-                }),
-                truncated: Some(false),
-                size_bytes: Some(TEST_FILE_TEXT.len() as u64),
-                mtime_ns: None,
-                error_code: None,
-                error_message: None,
-            },
+            &json!({
+                "status": "ok",
+                "content": {
+                    "inline_text": {
+                        "text": TEST_FILE_TEXT,
+                    }
+                },
+                "truncated": false,
+                "size_bytes": TEST_FILE_TEXT.len() as u64,
+            }),
             "adapter.host.fake",
         )
     }

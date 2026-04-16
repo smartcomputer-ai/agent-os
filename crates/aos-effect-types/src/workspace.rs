@@ -12,29 +12,29 @@ pub type WorkspaceAnnotationsPatch = BTreeMap<String, Option<HashRef>>;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceResolveParams {
     pub workspace: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub version: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceResolveReceipt {
     pub exists: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub resolved_version: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub head: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub root_hash: Option<HashRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceListParams {
     pub root_hash: HashRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub scope: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cursor: Option<String>,
     pub limit: u64,
 }
@@ -43,18 +43,18 @@ pub struct WorkspaceListParams {
 pub struct WorkspaceListEntry {
     pub path: String,
     pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub hash: Option<HashRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub size: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub mode: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceListReceipt {
     pub entries: Vec<WorkspaceListEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub next_cursor: Option<String>,
 }
 
@@ -84,7 +84,7 @@ pub struct WorkspaceReadBytesRange {
 pub struct WorkspaceReadBytesParams {
     pub root_hash: HashRef,
     pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub range: Option<WorkspaceReadBytesRange>,
 }
 
@@ -96,7 +96,7 @@ pub struct WorkspaceWriteBytesParams {
     pub path: String,
     #[serde(with = "serde_helpers::bytes")]
     pub bytes: Vec<u8>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub mode: Option<u64>,
 }
 
@@ -111,7 +111,7 @@ pub struct WorkspaceWriteRefParams {
     pub root_hash: HashRef,
     pub path: String,
     pub blob_hash: HashRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub mode: Option<u64>,
 }
 
@@ -136,7 +136,7 @@ pub struct WorkspaceRemoveReceipt {
 pub struct WorkspaceDiffParams {
     pub root_a: HashRef,
     pub root_b: HashRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub prefix: Option<String>,
 }
 
@@ -144,9 +144,9 @@ pub struct WorkspaceDiffParams {
 pub struct WorkspaceDiffChange {
     pub path: String,
     pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub old_hash: Option<HashRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub new_hash: Option<HashRef>,
 }
 
@@ -158,20 +158,20 @@ pub struct WorkspaceDiffReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceAnnotationsGetParams {
     pub root_hash: HashRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceAnnotationsGetReceipt {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub annotations: Option<WorkspaceAnnotations>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceAnnotationsSetParams {
     pub root_hash: HashRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub path: Option<String>,
     pub annotations_patch: WorkspaceAnnotationsPatch,
 }

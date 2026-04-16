@@ -7,9 +7,9 @@ use crate::HashRef;
 pub struct BlobPutParams {
     #[serde(with = "serde_bytes")]
     pub bytes: Vec<u8>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub blob_ref: Option<HashRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub refs: Option<Vec<HashRef>>,
 }
 

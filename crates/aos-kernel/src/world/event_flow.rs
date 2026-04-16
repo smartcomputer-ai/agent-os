@@ -36,34 +36,6 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
-    pub fn submit_domain_event(
-        &mut self,
-        schema: impl Into<String>,
-        value: Vec<u8>,
-    ) -> Result<(), KernelError> {
-        let event = DomainEvent::new(schema.into(), value);
-        self.process_domain_event(event)
-    }
-
-    pub fn submit_domain_event_with_key(
-        &mut self,
-        schema: impl Into<String>,
-        value: Vec<u8>,
-        key: Vec<u8>,
-    ) -> Result<(), KernelError> {
-        let event = DomainEvent::with_key(schema.into(), value, key);
-        self.process_domain_event(event)
-    }
-
-    /// Submit a domain event and surface routing/validation errors (tests/fixtures helper).
-    pub fn submit_domain_event_result(
-        &mut self,
-        schema: impl Into<String>,
-        value: Vec<u8>,
-    ) -> Result<(), KernelError> {
-        self.submit_domain_event(schema, value)
-    }
-
     pub(super) fn process_domain_event(&mut self, event: DomainEvent) -> Result<(), KernelError> {
         let journal_height = self.journal.next_seq();
         let stamp = self.sample_ingress(journal_height)?;
@@ -619,7 +591,7 @@ impl<S: Store + 'static> Kernel<S> {
                     key.clone(),
                     effect.kind.clone(),
                     intent.cap_name.clone(),
-                    effect.params_cbor.clone(),
+                    intent.params_cbor.clone(),
                     intent.idempotency_key,
                     effect.issuer_ref.clone(),
                     intent.intent_hash,
@@ -634,7 +606,7 @@ impl<S: Store + 'static> Kernel<S> {
                 key.as_deref(),
                 intent.intent_hash,
                 effect.kind.as_str(),
-                &effect.params_cbor,
+                &intent.params_cbor,
                 emitted_at_seq,
             );
         }
@@ -785,7 +757,10 @@ mod tests {
         let mut kernel = minimal_kernel_with_router();
         let payload = serde_cbor::to_vec(&CborValue::Integer(5.into())).unwrap();
         let err = kernel
-            .submit_domain_event_result("com.acme/Event@1", payload)
+            .accept(WorldInput::DomainEvent(DomainEvent::new(
+                "com.acme/Event@1",
+                payload,
+            )))
             .unwrap_err();
         assert!(
             matches!(err, KernelError::Manifest(msg) if msg.contains("payload failed validation"))

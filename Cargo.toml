@@ -14,7 +14,6 @@ members = [
   "crates/aos-llm",
   "crates/aos-agent",
   "crates/aos-kernel",
-  "crates/aos-runtime",
   "crates/aos-harness-py",
   "crates/aos-node-hosted",
   "crates/aos-cli",

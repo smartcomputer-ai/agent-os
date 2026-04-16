@@ -1,47 +1,39 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
-use aos_cbor::Hash;
-use aos_effect_types::HashRef;
-use aos_kernel::SharedSecretResolver;
-use aos_kernel::{ManifestLoader, Store};
-use aos_node::api::{
-    DefGetResponse, DefsListResponse, ManifestResponse, StateCellSummary, StateGetResponse,
-    StateListResponse, WorkspaceResolveResponse, WorldSummaryResponse,
-};
+use aos_cbor::{Hash, to_canonical_cbor};
+use aos_kernel::{Store, WorldInput};
 use aos_node::{
-    BlobPlane, CborPayload, CheckpointPlane, CommandIngress, CommandRecord, CommandStatus,
-    CreateWorldRequest, ForkWorldRequest, FsCas, LocalStatePaths, ReceiptIngress,
-    SubmissionEnvelope, SubmissionPayload, UniverseId, WorldId, WorldRuntimeInfo,
-    partition_for_world,
+    BlobBackend, CborPayload, CheckpointBackend, CommandIngress, CommandRecord, CreateWorldRequest,
+    EffectRuntimeEvent, LocalStatePaths, PartitionCheckpoint, ReceiptIngress, SubmissionEnvelope,
+    SubmissionPayload, UniverseId, WorldConfig, WorldId, partition_for_world,
 };
-use aos_runtime::trace::{TraceQuery as RuntimeTraceQuery, trace_get};
-use aos_runtime::{WorldConfig, WorldHost};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use serde::Deserialize;
-use serde::Serialize;
-use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
-use crate::blobstore::{
-    BlobStoreConfig, HostedBlobMetaStore, HostedCas, RemoteCasStore, scoped_blobstore_config,
+use crate::blobstore::{BlobStoreConfig, HostedCas};
+use crate::config::ProjectionCommitMode;
+use crate::kafka::{
+    BrokerKafkaIngress, HostedKafkaBackend, KafkaConfig, PartitionLogEntry, ProjectionTopicEntry,
 };
-use crate::kafka::{HostedKafkaBackend, KafkaConfig};
-use crate::vault::HostedVault;
 
-use super::commands::command_submit_response;
-use super::types::{
-    CreateWorldAccepted, HostedWorkerInfra, HostedWorkerRuntimeInner, HostedWorldSummary,
-    SubmissionAccepted, SubmitEventRequest, WorkerError,
+use super::commands::{
+    command_submit_response, synthesize_queued_command_record, world_control_from_command_payload,
 };
-use super::util::{default_state_root, temp_embedded_state_root, unix_time_ns};
+use super::core::SchedulerMsg;
+use super::types::{
+    CreateWorldAccepted, HostedWorkerCore, HostedWorkerInfra, HostedWorldSummary, WorkerError,
+};
+use super::util::{
+    default_state_root, resolve_cbor_payload, temp_embedded_state_root, unix_time_ns,
+};
 
 #[derive(Clone)]
 pub struct HostedWorkerRuntime {
-    inner: Arc<Mutex<HostedWorkerRuntimeInner>>,
+    core: Arc<Mutex<HostedWorkerCore>>,
     paths: Arc<LocalStatePaths>,
+    embedded_ingress_notify: Option<Arc<tokio::sync::Notify>>,
+    broker_ingress: Option<Arc<Mutex<BrokerKafkaIngress>>>,
 }
 
 impl std::fmt::Debug for HostedWorkerRuntime {
@@ -52,11 +44,45 @@ impl std::fmt::Debug for HostedWorkerRuntime {
 }
 
 impl HostedWorkerRuntime {
+    fn submit_envelope_locked(
+        core: &mut HostedWorkerCore,
+        submission: SubmissionEnvelope,
+    ) -> Result<u64, WorkerError> {
+        let submission_offset = core.infra.kafka.submit(submission)?;
+        core.dispatch_embedded_ingress_messages()?;
+        Ok(submission_offset)
+    }
+
     pub fn new(partition_count: u32) -> Result<Self, WorkerError> {
         Self::new_with_state_root_and_universe(
             partition_count,
             default_state_root()?,
             aos_node::local_universe_id(),
+        )
+    }
+
+    pub fn new_with_state_root(
+        partition_count: u32,
+        state_root: impl Into<PathBuf>,
+    ) -> Result<Self, WorkerError> {
+        Self::new_with_state_root_and_universe(
+            partition_count,
+            state_root,
+            aos_node::local_universe_id(),
+        )
+    }
+
+    pub fn new_with_state_root_and_universe(
+        partition_count: u32,
+        state_root: impl Into<PathBuf>,
+        default_universe_id: UniverseId,
+    ) -> Result<Self, WorkerError> {
+        Self::new_broker_with_state_root_and_universe(
+            partition_count,
+            state_root,
+            default_universe_id,
+            KafkaConfig::default(),
+            BlobStoreConfig::default(),
         )
     }
 
@@ -86,23 +112,45 @@ impl HostedWorkerRuntime {
         paths.ensure_root().map_err(|err| {
             WorkerError::Persist(aos_node::PersistError::backend(err.to_string()))
         })?;
+
+        let (effect_event_tx, effect_event_rx) = tokio::sync::mpsc::channel(1024);
         let world_config = WorldConfig::from_env_with_fallback_module_cache_dir(None);
-        let mut inner = HostedWorkerRuntimeInner {
-            infra: super::types::HostedWorkerInfra {
+        let kafka = HostedKafkaBackend::new(partition_count, kafka_config)?;
+        let embedded_ingress_notify = kafka.embedded_ingress_notify();
+        let broker_ingress = kafka
+            .broker_ingress_driver()
+            .map(|driver| Arc::new(Mutex::new(driver)));
+        let mut core = HostedWorkerCore {
+            infra: HostedWorkerInfra {
                 default_universe_id,
                 paths: paths.clone(),
                 blobstore_config: blobstore_config.clone(),
-                vault: HostedVault::new(blobstore_config.clone()).map_err(|err| {
+                vault: crate::vault::HostedVault::new(blobstore_config.clone()).map_err(|err| {
                     WorkerError::Build(anyhow::anyhow!("initialize hosted vault: {err}"))
                 })?,
                 world_config,
-                kafka: HostedKafkaBackend::new(partition_count, kafka_config)?,
-                stores_by_domain: BTreeMap::new(),
-                blob_meta_by_domain: BTreeMap::new(),
+                kafka,
+                stores_by_domain: Default::default(),
+                blob_meta_by_domain: Default::default(),
             },
-            state: super::types::HostedWorkerState::default(),
+            state: Default::default(),
+            effect_event_tx,
+            effect_event_rx: Some(effect_event_rx),
+            shared_effect_runtimes: Default::default(),
+            scheduler_tx: None,
+            flush_limits: super::core::FlushLimits {
+                max_slices: 256,
+                max_bytes: 1 << 20,
+                max_delay: Duration::from_millis(5),
+            },
+            max_local_continuation_slices_per_flush: 64,
+            projection_commit_mode: ProjectionCommitMode::Background,
+            max_uncommitted_slices_per_world: 256,
+            debug_skip_flush_commit: false,
+            debug_fail_after_next_flush_commit: false,
         };
-        if inner.infra.kafka.is_broker()
+
+        if core.infra.kafka.is_broker()
             && !blobstore_config
                 .bucket
                 .as_ref()
@@ -112,45 +160,15 @@ impl HostedWorkerRuntime {
                 "broker-backed hosted runtime requires AOS_BLOBSTORE_BUCKET or legacy AOS_S3_BUCKET",
             )));
         }
-        inner.bootstrap_recovery()?;
-        if !inner
-            .infra
-            .kafka
-            .config()
-            .direct_assigned_partitions
-            .is_empty()
-        {
-            let _ = inner.infra.kafka.sync_assignments_and_poll()?;
-        }
+
+        core.bootstrap_recovery()?;
+
         Ok(Self {
-            inner: Arc::new(Mutex::new(inner)),
+            core: Arc::new(Mutex::new(core)),
             paths: Arc::new(paths),
+            embedded_ingress_notify,
+            broker_ingress,
         })
-    }
-
-    pub fn new_with_state_root(
-        partition_count: u32,
-        state_root: impl Into<PathBuf>,
-    ) -> Result<Self, WorkerError> {
-        Self::new_with_state_root_and_universe(
-            partition_count,
-            state_root,
-            aos_node::local_universe_id(),
-        )
-    }
-
-    pub fn new_with_state_root_and_universe(
-        partition_count: u32,
-        state_root: impl Into<PathBuf>,
-        default_universe_id: UniverseId,
-    ) -> Result<Self, WorkerError> {
-        Self::new_broker_with_state_root_and_universe(
-            partition_count,
-            state_root,
-            default_universe_id,
-            KafkaConfig::default(),
-            BlobStoreConfig::default(),
-        )
     }
 
     pub fn new_embedded(partition_count: u32) -> Result<Self, WorkerError> {
@@ -181,26 +199,47 @@ impl HostedWorkerRuntime {
         paths.ensure_root().map_err(|err| {
             WorkerError::Persist(aos_node::PersistError::backend(err.to_string()))
         })?;
+
+        let (effect_event_tx, effect_event_rx) = tokio::sync::mpsc::channel(1024);
         let world_config = WorldConfig::from_env_with_fallback_module_cache_dir(None);
-        let mut inner = HostedWorkerRuntimeInner {
-            infra: super::types::HostedWorkerInfra {
+        let kafka = HostedKafkaBackend::new_embedded(partition_count, KafkaConfig::default())?;
+        let embedded_ingress_notify = kafka.embedded_ingress_notify();
+        let mut core = HostedWorkerCore {
+            infra: HostedWorkerInfra {
                 default_universe_id,
                 paths: paths.clone(),
                 blobstore_config: BlobStoreConfig::default(),
-                vault: HostedVault::new(BlobStoreConfig::default()).map_err(|err| {
-                    WorkerError::Build(anyhow::anyhow!("initialize hosted vault: {err}"))
-                })?,
+                vault: crate::vault::HostedVault::new(BlobStoreConfig::default()).map_err(
+                    |err| WorkerError::Build(anyhow::anyhow!("initialize hosted vault: {err}")),
+                )?,
                 world_config,
-                kafka: HostedKafkaBackend::new_embedded(partition_count, KafkaConfig::default())?,
-                stores_by_domain: BTreeMap::new(),
-                blob_meta_by_domain: BTreeMap::new(),
+                kafka,
+                stores_by_domain: Default::default(),
+                blob_meta_by_domain: Default::default(),
             },
-            state: super::types::HostedWorkerState::default(),
+            state: Default::default(),
+            effect_event_tx,
+            effect_event_rx: Some(effect_event_rx),
+            shared_effect_runtimes: Default::default(),
+            scheduler_tx: None,
+            flush_limits: super::core::FlushLimits {
+                max_slices: 256,
+                max_bytes: 1 << 20,
+                max_delay: Duration::from_millis(5),
+            },
+            max_local_continuation_slices_per_flush: 64,
+            projection_commit_mode: ProjectionCommitMode::Background,
+            max_uncommitted_slices_per_world: 256,
+            debug_skip_flush_commit: false,
+            debug_fail_after_next_flush_commit: false,
         };
-        inner.bootstrap_recovery()?;
+        core.bootstrap_recovery()?;
+
         Ok(Self {
-            inner: Arc::new(Mutex::new(inner)),
+            core: Arc::new(Mutex::new(core)),
             paths: Arc::new(paths),
+            embedded_ingress_notify,
+            broker_ingress: None,
         })
     }
 
@@ -209,22 +248,40 @@ impl HostedWorkerRuntime {
     }
 
     pub fn default_universe_id(&self) -> Result<UniverseId, WorkerError> {
-        Ok(self.lock_inner()?.infra.default_universe_id)
+        Ok(self.lock_core()?.infra.default_universe_id)
     }
 
-    pub fn vault(&self) -> Result<HostedVault, WorkerError> {
-        Ok(self.lock_inner()?.infra.vault.clone())
-    }
-
-    pub fn secret_resolver(
+    pub fn cas_store_for_domain(
         &self,
         universe_id: UniverseId,
-    ) -> Result<SharedSecretResolver, WorkerError> {
-        let inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        Ok(Arc::new(
-            inner.infra.vault.resolver_for_universe(universe_id),
-        ))
+    ) -> Result<Arc<HostedCas>, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.infra.store_for_domain(universe_id)
+    }
+
+    pub fn put_blob(&self, universe_id: UniverseId, bytes: &[u8]) -> Result<Hash, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.infra
+            .store_for_domain(universe_id)?
+            .put_verified(bytes)
+            .map_err(WorkerError::Persist)
+    }
+
+    pub fn get_blob(&self, universe_id: UniverseId, hash: Hash) -> Result<Vec<u8>, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.infra
+            .store_for_domain(universe_id)?
+            .get(hash)
+            .map_err(WorkerError::Persist)
+    }
+
+    pub fn blob_metadata(&self, universe_id: UniverseId, hash: Hash) -> Result<bool, WorkerError> {
+        let core = self.lock_core()?;
+        core.infra
+            .stores_by_domain
+            .get(&universe_id)
+            .map(|store| store.has_blob(hash).map_err(WorkerError::Store))
+            .unwrap_or(Ok(false))
     }
 
     pub fn create_world(
@@ -232,313 +289,78 @@ impl HostedWorkerRuntime {
         universe_id: UniverseId,
         request: CreateWorldRequest,
     ) -> Result<CreateWorldAccepted, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
         let world_id = request
             .world_id
             .unwrap_or_else(|| WorldId::from(Uuid::new_v4()));
-        inner.submit_create_world(universe_id, world_id, request)
+        core.seed_world_direct(universe_id, world_id, request)?;
+        let effective_partition = partition_for_world(world_id, core.infra.kafka.partition_count());
+        Ok(CreateWorldAccepted {
+            submission_id: format!("seed-{world_id}"),
+            submission_offset: 0,
+            world_id,
+            effective_partition,
+        })
     }
 
     pub fn submit_submission(&self, submission: SubmissionEnvelope) -> Result<u64, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner
-            .infra
-            .kafka
-            .submit(submission)
-            .map_err(WorkerError::from)
-    }
-
-    pub fn seed_world(
-        &self,
-        universe_id: UniverseId,
-        request: CreateWorldRequest,
-        publish_checkpoint: bool,
-    ) -> Result<HostedWorldSummary, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        let world_id = request
-            .world_id
-            .unwrap_or_else(|| WorldId::from(Uuid::new_v4()));
-        inner.seed_world_direct(universe_id, world_id, request, publish_checkpoint)?;
-        inner
-            .world_summary(universe_id, world_id)
-            .ok_or(WorkerError::UnknownWorld {
-                universe_id,
-                world_id,
-            })
-    }
-
-    pub fn fork_world(
-        &self,
-        universe_id: UniverseId,
-        request: ForkWorldRequest,
-    ) -> Result<CreateWorldAccepted, WorkerError> {
-        aos_node::validate_fork_world_request(&request)?;
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        let world_id = request
-            .new_world_id
-            .unwrap_or_else(|| WorldId::from(Uuid::new_v4()));
-        let create_request = inner.create_fork_seed_request(universe_id, world_id, &request)?;
-        inner.submit_create_world(universe_id, world_id, create_request)
-    }
-
-    pub fn fork_create_request(
-        &self,
-        universe_id: UniverseId,
-        new_world_id: WorldId,
-        request: &ForkWorldRequest,
-    ) -> Result<CreateWorldRequest, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.create_fork_seed_request(universe_id, new_world_id, request)
-    }
-
-    pub fn list_worlds(&self) -> Result<Vec<HostedWorldSummary>, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        let universe_id = inner.infra.default_universe_id;
-        let world_ids = inner
-            .infra
-            .kafka
-            .world_ids()
-            .into_iter()
-            .collect::<Vec<_>>();
-        for world_id in &world_ids {
-            let _ = inner.ensure_registered_world(universe_id, *world_id);
-        }
-        let mut worlds = world_ids
-            .into_iter()
-            .filter_map(|world_id| inner.world_summary(universe_id, world_id))
-            .collect::<Vec<_>>();
-        worlds.sort_by_key(|world| world.world_id);
-        Ok(worlds)
-    }
-
-    pub fn get_world(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-    ) -> Result<HostedWorldSummary, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.ensure_registered_world(universe_id, world_id)?;
-        inner
-            .world_summary(universe_id, world_id)
-            .ok_or(WorkerError::UnknownWorld {
-                universe_id,
-                world_id,
-            })
-    }
-
-    pub fn get_command(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        command_id: &str,
-    ) -> Result<CommandRecord, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.ensure_registered_world(universe_id, world_id)?;
-        let universe_id = inner
-            .state
-            .registered_worlds
-            .get(&world_id)
-            .map(|world| world.universe_id)
-            .ok_or_else(|| WorkerError::UnknownCommand {
-                universe_id,
-                world_id,
-                command_id: command_id.to_owned(),
-            })?;
-        inner
-            .infra
-            .blob_meta_for_domain_mut(universe_id)?
-            .get_command_record(world_id, command_id)?
-            .ok_or_else(|| WorkerError::UnknownCommand {
-                universe_id,
-                world_id,
-                command_id: command_id.to_owned(),
-            })
-    }
-
-    pub fn get_command_record(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        command_id: &str,
-    ) -> Result<Option<CommandRecord>, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner
-            .infra
-            .blob_meta_for_domain_mut(universe_id)?
-            .get_command_record(world_id, command_id)
-            .map_err(WorkerError::from)
-    }
-
-    pub fn put_command_record(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        record: CommandRecord,
-    ) -> Result<(), WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner
-            .infra
-            .blob_meta_for_domain_mut(universe_id)?
-            .put_command_record(world_id, record)
-            .map_err(WorkerError::from)
-    }
-
-    pub fn latest_checkpoint(
-        &self,
-        universe_id: UniverseId,
-        partition: u32,
-    ) -> Result<Option<aos_node::PartitionCheckpoint>, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        let journal_topic = inner.infra.kafka.config().journal_topic.clone();
-        Ok(inner
-            .infra
-            .blob_meta_for_domain_mut(universe_id)?
-            .latest_checkpoint(&journal_topic, partition)
-            .cloned())
-    }
-
-    pub fn submit_command<T: Serialize>(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        command: &str,
-        command_id: Option<String>,
-        actor: Option<String>,
-        payload: &T,
-    ) -> Result<aos_node::api::CommandSubmitResponse, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.ensure_registered_world(universe_id, world_id)?;
-        let universe_id = inner
-            .state
-            .registered_worlds
-            .get(&world_id)
-            .map(|world| world.universe_id)
-            .ok_or(WorkerError::UnknownWorld {
-                universe_id,
-                world_id,
-            })?;
-        if let Some(existing_id) = command_id.as_deref()
-            && let Some(existing) = inner
-                .infra
-                .blob_meta_for_domain_mut(universe_id)?
-                .get_command_record(world_id, existing_id)?
-        {
-            return Ok(command_submit_response(world_id, existing));
-        }
-
-        let world_epoch = inner
-            .state
-            .registered_worlds
-            .get(&world_id)
-            .map(|world| world.world_epoch)
-            .ok_or(WorkerError::UnknownWorld {
-                universe_id,
-                world_id,
-            })?;
-        let command_id = command_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        let submitted_at_ns = unix_time_ns();
-        let ingress = CommandIngress {
-            command_id: command_id.clone(),
-            command: command.to_owned(),
-            actor,
-            payload: CborPayload::inline(aos_cbor::to_canonical_cbor(payload)?),
-            submitted_at_ns,
-        };
-        let submission = SubmissionEnvelope::command(
-            command_id.clone(),
-            universe_id,
-            world_id,
-            world_epoch,
-            ingress,
-        );
-        inner.infra.kafka.submit(submission)?;
-
-        let queued = CommandRecord {
-            command_id: command_id.clone(),
-            command: command.to_owned(),
-            status: CommandStatus::Queued,
-            submitted_at_ns,
-            started_at_ns: None,
-            finished_at_ns: None,
-            journal_height: None,
-            manifest_hash: None,
-            result_payload: None,
-            error: None,
-        };
-        let record = match inner
-            .infra
-            .blob_meta_for_domain_mut(universe_id)?
-            .get_command_record(world_id, &command_id)?
-        {
-            Some(existing) if existing.status != CommandStatus::Queued => existing,
-            _ => {
-                inner
-                    .infra
-                    .blob_meta_for_domain_mut(universe_id)?
-                    .put_command_record(world_id, queued.clone())?;
-                queued
-            }
-        };
-        Ok(command_submit_response(world_id, record))
+        let mut core = self.lock_core()?;
+        Self::submit_envelope_locked(&mut core, submission)
     }
 
     pub fn submit_event(
         &self,
-        request: SubmitEventRequest,
-    ) -> Result<SubmissionAccepted, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(request.universe_id)?;
-        inner.ensure_registered_world(request.universe_id, request.world_id)?;
-        let (registered_universe_id, world_epoch) = inner
-            .state
-            .registered_worlds
-            .get(&request.world_id)
-            .map(|world| (world.universe_id, world.world_epoch))
-            .ok_or(WorkerError::UnknownWorld {
+        request: super::types::SubmitEventRequest,
+    ) -> Result<super::types::SubmissionAccepted, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(request.universe_id)?;
+        core.ensure_registered_world(request.universe_id, request.world_id)?;
+        let registered = core.state.registered_worlds.get(&request.world_id).ok_or(
+            WorkerError::UnknownWorld {
                 universe_id: request.universe_id,
                 world_id: request.world_id,
-            })?;
+            },
+        )?;
+        let registered_universe = registered.universe_id;
+        let registered_world_epoch = registered.world_epoch;
         if let Some(expected_world_epoch) = request.expected_world_epoch
-            && expected_world_epoch != world_epoch
+            && expected_world_epoch != registered_world_epoch
         {
             return Err(WorkerError::WorldEpochMismatch {
-                universe_id: request.universe_id,
+                universe_id: registered_universe,
                 world_id: request.world_id,
-                expected: world_epoch,
+                expected: registered_world_epoch,
                 got: expected_world_epoch,
             });
         }
 
-        let payload = SubmissionPayload::DomainEvent {
-            schema: request.schema,
-            value: aos_node::CborPayload::inline(serde_cbor::to_vec(&request.value)?),
-            key: None,
-        };
         let submission_id = request
             .submission_id
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let submission = SubmissionEnvelope {
             submission_id: submission_id.clone(),
-            universe_id: registered_universe_id,
+            universe_id: registered_universe,
             world_id: request.world_id,
-            world_epoch,
-            payload,
+            world_epoch: registered_world_epoch,
+            command: None,
+            payload: SubmissionPayload::WorldInput {
+                input: WorldInput::DomainEvent(aos_wasm_abi::DomainEvent {
+                    schema: request.schema,
+                    value: serde_cbor::to_vec(&request.value)?,
+                    key: None,
+                }),
+            },
         };
-        let submission_offset = inner.infra.kafka.submit(submission)?;
-        let effective_partition =
-            partition_for_world(request.world_id, inner.infra.kafka.partition_count());
-
-        Ok(SubmissionAccepted {
+        let submission_offset = Self::submit_envelope_locked(&mut core, submission)?;
+        Ok(super::types::SubmissionAccepted {
             submission_id,
             submission_offset,
-            world_epoch,
-            effective_partition,
+            world_epoch: registered_world_epoch,
+            effective_partition: partition_for_world(
+                request.world_id,
+                core.infra.kafka.partition_count(),
+            ),
         })
     }
 
@@ -547,54 +369,374 @@ impl HostedWorkerRuntime {
         universe_id: UniverseId,
         world_id: WorldId,
         ingress: ReceiptIngress,
-    ) -> Result<SubmissionAccepted, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.ensure_registered_world(universe_id, world_id)?;
-        let (universe_id, world_epoch) = inner
-            .state
-            .registered_worlds
-            .get(&world_id)
-            .map(|world| (world.universe_id, world.world_epoch))
-            .ok_or(WorkerError::UnknownWorld {
-                universe_id,
-                world_id,
-            })?;
+    ) -> Result<super::types::SubmissionAccepted, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        core.ensure_registered_world(universe_id, world_id)?;
+        let registered =
+            core.state
+                .registered_worlds
+                .get(&world_id)
+                .ok_or(WorkerError::UnknownWorld {
+                    universe_id,
+                    world_id,
+                })?;
+        let registered_universe = registered.universe_id;
+        let registered_world_epoch = registered.world_epoch;
         let submission_id = ingress
             .correlation_id
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let store = core.infra.store_for_domain(registered_universe)?;
         let submission = SubmissionEnvelope {
             submission_id: submission_id.clone(),
-            universe_id,
+            universe_id: registered_universe,
             world_id,
-            world_epoch,
-            payload: SubmissionPayload::EffectReceipt {
-                intent_hash: ingress.intent_hash,
-                adapter_id: ingress.adapter_id,
-                status: ingress.status,
-                payload: ingress.payload,
-                cost_cents: ingress.cost_cents,
-                signature: ingress.signature,
+            world_epoch: registered_world_epoch,
+            command: None,
+            payload: SubmissionPayload::WorldInput {
+                input: WorldInput::Receipt(aos_effects::EffectReceipt {
+                    intent_hash: ingress.intent_hash.clone().try_into().map_err(|_| {
+                        WorkerError::LogFirst(aos_node::BackendError::InvalidIntentHashLen(
+                            ingress.intent_hash.len(),
+                        ))
+                    })?,
+                    adapter_id: ingress.adapter_id,
+                    status: ingress.status,
+                    payload_cbor: resolve_cbor_payload(store.as_ref(), &ingress.payload)?,
+                    cost_cents: ingress.cost_cents,
+                    signature: ingress.signature,
+                }),
             },
         };
-        let submission_offset = inner.infra.kafka.submit(submission)?;
-        let effective_partition =
-            partition_for_world(world_id, inner.infra.kafka.partition_count());
-        Ok(SubmissionAccepted {
+        let submission_offset = Self::submit_envelope_locked(&mut core, submission)?;
+        Ok(super::types::SubmissionAccepted {
             submission_id,
             submission_offset,
-            world_epoch,
-            effective_partition,
+            world_epoch: registered_world_epoch,
+            effective_partition: partition_for_world(world_id, core.infra.kafka.partition_count()),
         })
     }
 
-    pub fn checkpoint_partition(
+    pub fn get_command_record(
+        &self,
+        universe_id: UniverseId,
+        world_id: WorldId,
+        command_id: &str,
+    ) -> Result<CommandRecord, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        core.ensure_registered_world(universe_id, world_id)?;
+        let registered_universe = core
+            .state
+            .registered_worlds
+            .get(&world_id)
+            .map(|world| world.universe_id)
+            .ok_or(WorkerError::UnknownWorld {
+                universe_id,
+                world_id,
+            })?;
+        core.infra
+            .blob_meta_for_domain_mut(registered_universe)?
+            .get_command_record(world_id, command_id)?
+            .ok_or_else(|| WorkerError::UnknownCommand {
+                universe_id: registered_universe,
+                world_id,
+                command_id: command_id.to_owned(),
+            })
+    }
+
+    pub fn put_command_record(
+        &self,
+        universe_id: UniverseId,
+        world_id: WorldId,
+        record: CommandRecord,
+    ) -> Result<(), WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        core.infra
+            .blob_meta_for_domain_mut(universe_id)?
+            .put_command_record(world_id, record)?;
+        Ok(())
+    }
+
+    pub fn submit_command<T: serde::Serialize>(
+        &self,
+        universe_id: UniverseId,
+        world_id: WorldId,
+        command: &str,
+        command_id: Option<String>,
+        actor: Option<String>,
+        payload: &T,
+    ) -> Result<aos_node::api::CommandSubmitResponse, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        core.ensure_registered_world(universe_id, world_id)?;
+        let registered =
+            core.state
+                .registered_worlds
+                .get(&world_id)
+                .ok_or(WorkerError::UnknownWorld {
+                    universe_id,
+                    world_id,
+                })?;
+        let registered_universe = registered.universe_id;
+        let registered_world_epoch = registered.world_epoch;
+        let registered_store = Arc::clone(&registered.store);
+
+        if let Some(existing_id) = command_id.as_deref()
+            && let Some(existing) = core
+                .infra
+                .blob_meta_for_domain_mut(registered_universe)?
+                .get_command_record(world_id, existing_id)?
+        {
+            return Ok(command_submit_response(world_id, existing));
+        }
+
+        let payload_bytes = to_canonical_cbor(payload)?;
+        let world_control =
+            world_control_from_command_payload(registered_store.as_ref(), command, &payload_bytes)?;
+        let command_id = command_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let submitted_at_ns = unix_time_ns();
+        let ingress = CommandIngress {
+            command_id: command_id.clone(),
+            command: command.to_owned(),
+            actor,
+            payload: CborPayload::inline(payload_bytes),
+            submitted_at_ns,
+        };
+        let queued = synthesize_queued_command_record(&ingress);
+        let submission = SubmissionEnvelope::world_control(
+            format!("cmd-{command_id}"),
+            registered_universe,
+            world_id,
+            registered_world_epoch,
+            ingress,
+            world_control,
+        );
+        let _ = Self::submit_envelope_locked(&mut core, submission)?;
+        core.infra
+            .blob_meta_for_domain_mut(registered_universe)?
+            .put_command_record(world_id, queued.clone())?;
+        Ok(command_submit_response(world_id, queued))
+    }
+
+    pub fn effective_partition(&self, world_id: WorldId) -> Result<u32, WorkerError> {
+        let core = self.lock_core()?;
+        Ok(partition_for_world(
+            world_id,
+            core.infra.kafka.partition_count(),
+        ))
+    }
+
+    pub fn assigned_partitions(&self) -> Result<Vec<u32>, WorkerError> {
+        Ok(self
+            .lock_core()?
+            .state
+            .assigned_partitions
+            .iter()
+            .copied()
+            .collect())
+    }
+
+    pub fn kafka_config(&self) -> Result<KafkaConfig, WorkerError> {
+        Ok(self.lock_core()?.infra.kafka.config().clone())
+    }
+
+    pub fn partition_count(&self) -> Result<u32, WorkerError> {
+        Ok(self.lock_core()?.infra.kafka.partition_count())
+    }
+
+    pub fn journal_topic(&self) -> Result<String, WorkerError> {
+        Ok(self.lock_core()?.infra.kafka.config().journal_topic.clone())
+    }
+
+    pub fn partition_entries(&self, partition: u32) -> Result<Vec<PartitionLogEntry>, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.infra.kafka.recover_partition_from_broker(partition)?;
+        let journal_topic = core.infra.kafka.config().journal_topic.clone();
+        Ok(core
+            .infra
+            .kafka
+            .partition_entries(&journal_topic, partition)
+            .to_vec())
+    }
+
+    pub fn projection_entries(
         &self,
         partition: u32,
-    ) -> Result<aos_node::PartitionCheckpoint, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.create_partition_checkpoint(partition, unix_time_ns(), "manual")
+    ) -> Result<Vec<ProjectionTopicEntry>, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.infra.kafka.recover_partition_from_broker(partition)?;
+        let projection_topic = core.infra.kafka.config().projection_topic.clone();
+        Ok(core
+            .infra
+            .kafka
+            .projection_entries(&projection_topic, partition)
+            .to_vec())
+    }
+
+    pub fn refresh_materializer_source(&self) -> Result<(), WorkerError> {
+        self.lock_core()?.infra.kafka.recover_from_broker()?;
+        Ok(())
+    }
+
+    pub fn latest_checkpoint(
+        &self,
+        universe_id: UniverseId,
+        partition: u32,
+    ) -> Result<Option<PartitionCheckpoint>, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        let journal_topic = core.infra.kafka.config().journal_topic.clone();
+        Ok(core
+            .infra
+            .blob_meta_for_domain_mut(universe_id)?
+            .latest_checkpoint(&journal_topic, partition)
+            .cloned())
+    }
+
+    pub fn checkpoint_partition(&self, partition: u32) -> Result<PartitionCheckpoint, WorkerError> {
+        let mut core = self.lock_core()?;
+        let mut profile = super::types::SupervisorRunProfile::default();
+        let _ = core.drive_scheduler_until_quiescent(true, &mut profile)?;
+        core.create_partition_checkpoint(partition, unix_time_ns(), 0, None, "manual")?
+            .ok_or_else(|| {
+                WorkerError::Persist(aos_node::PersistError::validation(format!(
+                    "partition {partition} had no checkpointable changes"
+                )))
+            })
+    }
+
+    pub fn blobstore_config(&self) -> Result<BlobStoreConfig, WorkerError> {
+        Ok(self.lock_core()?.infra.blobstore_config.clone())
+    }
+
+    pub fn vault(&self) -> Result<crate::vault::HostedVault, WorkerError> {
+        Ok(self.lock_core()?.infra.vault.clone())
+    }
+
+    pub fn flush_max_delay(&self) -> Result<Duration, WorkerError> {
+        Ok(self.lock_core()?.flush_limits.max_delay)
+    }
+
+    pub fn projection_commit_mode(&self) -> Result<ProjectionCommitMode, WorkerError> {
+        Ok(self.lock_core()?.projection_commit_mode)
+    }
+
+    pub fn max_local_continuation_slices_per_flush(&self) -> Result<usize, WorkerError> {
+        Ok(self.lock_core()?.max_local_continuation_slices_per_flush)
+    }
+
+    pub fn set_max_local_continuation_slices_per_flush(
+        &self,
+        max: usize,
+    ) -> Result<(), WorkerError> {
+        self.lock_core()?.max_local_continuation_slices_per_flush = max;
+        Ok(())
+    }
+
+    pub fn set_projection_commit_mode(
+        &self,
+        mode: ProjectionCommitMode,
+    ) -> Result<(), WorkerError> {
+        self.lock_core()?.projection_commit_mode = mode;
+        Ok(())
+    }
+
+    pub fn max_uncommitted_slices_per_world(&self) -> Result<usize, WorkerError> {
+        Ok(self.lock_core()?.max_uncommitted_slices_per_world)
+    }
+
+    pub fn set_max_uncommitted_slices_per_world(&self, max: usize) -> Result<(), WorkerError> {
+        if max == 0 {
+            return Err(WorkerError::Persist(aos_node::PersistError::validation(
+                "max_uncommitted_slices_per_world must be greater than zero",
+            )));
+        }
+        self.lock_core()?.max_uncommitted_slices_per_world = max;
+        Ok(())
+    }
+
+    pub fn uses_broker_kafka(&self) -> Result<bool, WorkerError> {
+        Ok(self.lock_core()?.infra.kafka.is_broker())
+    }
+
+    pub(super) fn take_effect_event_rx(
+        &self,
+    ) -> Result<Option<tokio::sync::mpsc::Receiver<EffectRuntimeEvent<WorldId>>>, WorkerError> {
+        Ok(self.lock_core()?.effect_event_rx.take())
+    }
+
+    pub(super) fn set_scheduler_tx(
+        &self,
+        tx: tokio::sync::mpsc::UnboundedSender<SchedulerMsg>,
+    ) -> Result<(), WorkerError> {
+        self.lock_core()?.scheduler_tx = Some(tx);
+        Ok(())
+    }
+
+    pub(super) fn clear_scheduler_tx(&self) -> Result<(), WorkerError> {
+        self.lock_core()?.scheduler_tx = None;
+        Ok(())
+    }
+
+    pub(super) fn embedded_ingress_notify(&self) -> Option<Arc<tokio::sync::Notify>> {
+        self.embedded_ingress_notify.clone()
+    }
+
+    pub(super) fn collect_ingress_bridge_messages(&self) -> Result<Vec<SchedulerMsg>, WorkerError> {
+        let backlog_by_partition = self.lock_core()?.ingress_backlog_by_partition();
+        let Some(bridge) = self.broker_ingress.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let mut ingress = bridge.lock().map_err(|_| WorkerError::RuntimePoisoned)?;
+        let batch = ingress.poll(&backlog_by_partition)?;
+        let mut messages = Vec::new();
+        if !batch.assignment.newly_assigned.is_empty() || !batch.assignment.revoked.is_empty() {
+            messages.push(SchedulerMsg::Assignment(super::core::AssignmentDelta {
+                assigned: batch.assignment.assigned,
+                newly_assigned: batch.assignment.newly_assigned,
+                revoked: batch.assignment.revoked,
+            }));
+        }
+        messages.extend(batch.records.into_iter().map(SchedulerMsg::Ingress));
+        Ok(messages)
+    }
+
+    pub fn debug_fail_next_batch_commit(&self) -> Result<(), WorkerError> {
+        let mut core = self.lock_core()?;
+        core.infra.kafka.debug_fail_next_batch_commit();
+        Ok(())
+    }
+
+    pub fn debug_fail_after_next_flush_commit(&self) -> Result<(), WorkerError> {
+        self.lock_core()?.debug_fail_after_next_flush_commit = true;
+        Ok(())
+    }
+
+    pub fn debug_skip_flush_commit(&self) -> Result<(), WorkerError> {
+        self.lock_core()?.debug_skip_flush_commit = true;
+        Ok(())
+    }
+
+    pub fn request_shutdown(&self) -> Result<bool, WorkerError> {
+        let scheduler_tx = self.lock_core()?.scheduler_tx.clone();
+        let Some(scheduler_tx) = scheduler_tx else {
+            return Ok(false);
+        };
+        Ok(scheduler_tx.send(SchedulerMsg::Shutdown).is_ok())
+    }
+
+    pub fn get_world(
+        &self,
+        universe_id: UniverseId,
+        world_id: WorldId,
+    ) -> Result<HostedWorldSummary, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        core.ensure_registered_world(universe_id, world_id)?;
+        core.world_summary(world_id)
     }
 
     pub fn state_json(
@@ -603,30 +745,22 @@ impl HostedWorkerRuntime {
         world_id: WorldId,
         workflow: &str,
         key: Option<&str>,
-    ) -> Result<Option<JsonValue>, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.ensure_registered_world(universe_id, world_id)?;
-        if let Some(world) = inner.state.active_worlds.get(&world_id) {
-            let key_cbor = key
-                .map(|value| aos_cbor::to_canonical_cbor(&value))
-                .transpose()
-                .map_err(WorkerError::from)?;
-            let bytes = match world.host.state(workflow, key_cbor.as_deref()) {
-                Some(bytes) => bytes,
-                None => return Ok(None),
-            };
-            let cbor_value: serde_cbor::Value = serde_cbor::from_slice(&bytes)?;
-            return Ok(Some(serde_json::to_value(cbor_value)?));
+    ) -> Result<Option<serde_json::Value>, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        core.ensure_registered_world(universe_id, world_id)?;
+        if !core.state.active_worlds.contains_key(&world_id) {
+            core.activate_world(world_id)?;
         }
         let key_cbor = key
             .map(|value| aos_cbor::to_canonical_cbor(&value))
             .transpose()
             .map_err(WorkerError::from)?;
-        let reopened = inner.reopen_registered_world_host(universe_id, world_id)?;
-        let bytes = match reopened.state(workflow, key_cbor.as_deref()) {
-            Some(bytes) => bytes,
-            None => return Ok(None),
+        let Some(world) = core.state.active_worlds.get(&world_id) else {
+            return Ok(None);
+        };
+        let Some(bytes) = world.state(workflow, key_cbor.as_deref()) else {
+            return Ok(None);
         };
         let cbor_value: serde_cbor::Value = serde_cbor::from_slice(&bytes)?;
         Ok(Some(serde_json::to_value(cbor_value)?))
@@ -638,490 +772,99 @@ impl HostedWorkerRuntime {
         world_id: WorldId,
         workflow: &str,
         key: Option<&str>,
-    ) -> Result<Option<JsonValue>, WorkerError> {
-        let inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        let Some(world) = inner.state.active_worlds.get(&world_id) else {
-            return Ok(None);
-        };
-        let key_cbor = key
-            .map(|value| aos_cbor::to_canonical_cbor(&value))
-            .transpose()
-            .map_err(WorkerError::from)?;
-        let bytes = match world.host.state(workflow, key_cbor.as_deref()) {
-            Some(bytes) => bytes,
-            None => return Ok(None),
-        };
-        let cbor_value: serde_cbor::Value = serde_cbor::from_slice(&bytes)?;
-        Ok(Some(serde_json::to_value(cbor_value)?))
-    }
-
-    pub fn is_world_active(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-    ) -> Result<bool, WorkerError> {
-        let inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        Ok(inner.state.active_worlds.contains_key(&world_id))
-    }
-
-    pub fn manifest(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-    ) -> Result<ManifestResponse, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.with_world_host_for_read(
-            universe_id,
-            world_id,
-            |host: &WorldHost<crate::blobstore::HostedCas>| {
-                let manifest_hash = host.kernel().manifest_hash();
-                let loaded = ManifestLoader::load_from_hash(host.store(), manifest_hash)?;
-                Ok(ManifestResponse {
-                    journal_head: host.heights().head,
-                    manifest_hash: manifest_hash.to_hex(),
-                    manifest: loaded.manifest,
-                })
-            },
-        )
-    }
-
-    pub fn defs_list(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        kinds: Option<Vec<String>>,
-        prefix: Option<String>,
-    ) -> Result<DefsListResponse, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.with_world_host_for_read(
-            universe_id,
-            world_id,
-            |host: &WorldHost<crate::blobstore::HostedCas>| {
-                Ok(DefsListResponse {
-                    journal_head: host.heights().head,
-                    manifest_hash: host.kernel().manifest_hash().to_hex(),
-                    defs: host.list_defs(kinds.as_deref(), prefix.as_deref())?,
-                })
-            },
-        )
-    }
-
-    pub fn def_get(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        name: &str,
-    ) -> Result<DefGetResponse, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.with_world_host_for_read(
-            universe_id,
-            world_id,
-            |host: &WorldHost<crate::blobstore::HostedCas>| {
-                Ok(DefGetResponse {
-                    journal_head: host.heights().head,
-                    manifest_hash: host.kernel().manifest_hash().to_hex(),
-                    def: host.get_def(name)?,
-                })
-            },
-        )
-    }
-
-    pub fn state_get(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        workflow: &str,
-        key: Option<Vec<u8>>,
-    ) -> Result<StateGetResponse, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.with_world_host_for_read(
-            universe_id,
-            world_id,
-            |host: &WorldHost<crate::blobstore::HostedCas>| {
-                let key_bytes = key.unwrap_or_default();
-                let state = host.state(workflow, Some(&key_bytes));
-                let state_hash = state
-                    .as_ref()
-                    .map(|bytes: &Vec<u8>| Hash::of_bytes(bytes).to_hex());
-                let size = state
-                    .as_ref()
-                    .map(|bytes: &Vec<u8>| bytes.len() as u64)
-                    .unwrap_or(0);
-                let cell = state_hash.map(|state_hash| StateCellSummary {
-                    journal_head: host.heights().head,
-                    workflow: workflow.to_owned(),
-                    key_hash: Hash::of_bytes(&key_bytes).as_bytes().to_vec(),
-                    key_bytes: key_bytes.clone(),
-                    state_hash,
-                    size,
-                    last_active_ns: 0,
-                });
-                Ok(StateGetResponse {
-                    journal_head: host.heights().head,
-                    workflow: workflow.to_owned(),
-                    key_b64: Some(BASE64_STANDARD.encode(&key_bytes)),
-                    cell,
-                    state_b64: state.map(|bytes| BASE64_STANDARD.encode(bytes)),
-                })
-            },
-        )
-    }
-
-    pub fn state_list(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        workflow: &str,
-        limit: u32,
-    ) -> Result<StateListResponse, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.with_world_host_for_read(
-            universe_id,
-            world_id,
-            |host: &WorldHost<crate::blobstore::HostedCas>| {
-                let mut cells = host
-                    .list_cells(workflow)?
-                    .into_iter()
-                    .map(|cell| StateCellSummary {
-                        journal_head: host.heights().head,
-                        workflow: workflow.to_owned(),
-                        key_hash: cell.key_hash.to_vec(),
-                        key_bytes: cell.key_bytes,
-                        state_hash: Hash::from(cell.state_hash).to_hex(),
-                        size: cell.size,
-                        last_active_ns: cell.last_active_ns,
-                    })
-                    .collect::<Vec<_>>();
-                cells.truncate(limit as usize);
-                Ok(StateListResponse {
-                    journal_head: host.heights().head,
-                    workflow: workflow.to_owned(),
-                    cells,
-                })
-            },
-        )
+    ) -> Result<Option<serde_json::Value>, WorkerError> {
+        self.state_json(universe_id, world_id, workflow, key)
     }
 
     pub fn trace_summary(
         &self,
         universe_id: UniverseId,
         world_id: WorldId,
-    ) -> Result<JsonValue, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.with_world_host_for_read(
-            universe_id,
-            world_id,
-            |host: &WorldHost<crate::blobstore::HostedCas>| Ok(host.trace_summary()?),
-        )
-    }
-
-    pub fn trace(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        query: RuntimeTraceQuery,
-    ) -> Result<JsonValue, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.with_world_host_for_read(
-            universe_id,
-            world_id,
-            |host: &WorldHost<crate::blobstore::HostedCas>| Ok(trace_get(host.kernel(), query)?),
-        )
-    }
-
-    pub fn load_manifest(
-        &self,
-        universe_id: UniverseId,
-        manifest_hash: &str,
-    ) -> Result<aos_kernel::LoadedManifest, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.load_manifest_into_local_cas(universe_id, manifest_hash)
-    }
-
-    pub fn universe_id_for_world(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-    ) -> Result<UniverseId, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.ensure_registered_world(universe_id, world_id)?;
-        inner
+    ) -> Result<serde_json::Value, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        core.ensure_registered_world(universe_id, world_id)?;
+        if !core.state.active_worlds.contains_key(&world_id) {
+            core.activate_world(world_id)?;
+        }
+        let world = core
             .state
-            .registered_worlds
+            .active_worlds
             .get(&world_id)
-            .map(|world| world.universe_id)
             .ok_or(WorkerError::UnknownWorld {
                 universe_id,
                 world_id,
-            })
+            })?;
+        let route_diagnostics = core
+            .state
+            .registered_worlds
+            .get(&world_id)
+            .map(|registered| {
+                aos_kernel::TraceRouteDiagnostics::from(
+                    registered.effect_runtime.route_diagnostics(),
+                )
+            });
+        aos_kernel::workflow_trace_summary_with_routes(&world.kernel, route_diagnostics.as_ref())
+            .map_err(WorkerError::Kernel)
     }
 
-    pub fn cas_store(&self) -> Result<Arc<HostedCas>, WorkerError> {
-        let universe_id = self.default_universe_id()?;
-        self.cas_store_for_domain(universe_id)
-    }
-
-    pub fn cas_store_for_domain(
+    pub fn runtime_info(
         &self,
         universe_id: UniverseId,
-    ) -> Result<Arc<HostedCas>, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.infra.store_for_domain(universe_id)
-    }
-
-    pub fn blob_metadata(&self, universe_id: UniverseId, hash: Hash) -> Result<bool, WorkerError> {
-        let inner = self.lock_inner()?;
-        inner
-            .infra
-            .stores_by_domain
-            .get(&universe_id)
-            .map(|store: &Arc<HostedCas>| store.has_blob(hash).map_err(WorkerError::Store))
-            .unwrap_or(Ok(false))
-    }
-
-    pub fn get_blob(&self, universe_id: UniverseId, hash: Hash) -> Result<Vec<u8>, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner
-            .infra
-            .store_for_domain(universe_id)?
-            .get(hash)
-            .map_err(WorkerError::Persist)
-    }
-
-    pub fn partition_entries(
-        &self,
-        partition: u32,
-    ) -> Result<Vec<crate::kafka::PartitionLogEntry>, WorkerError> {
-        let inner = self.lock_inner()?;
-        Ok(inner
-            .infra
-            .kafka
-            .partition_entries(&inner.infra.kafka.config().journal_topic, partition)
-            .to_vec())
-    }
-
-    pub fn projection_entries(
-        &self,
-        partition: u32,
-    ) -> Result<Vec<crate::kafka::ProjectionTopicEntry>, WorkerError> {
-        let inner = self.lock_inner()?;
-        Ok(inner
-            .infra
-            .kafka
-            .projection_entries(&inner.infra.kafka.config().projection_topic, partition)
-            .to_vec())
-    }
-
-    pub fn effective_partition(&self, world_id: WorldId) -> Result<u32, WorkerError> {
-        let inner = self.lock_inner()?;
-        Ok(partition_for_world(
-            world_id,
-            inner.infra.kafka.partition_count(),
+        world_id: WorldId,
+    ) -> Result<aos_node::WorldRuntimeInfo, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        core.ensure_registered_world(universe_id, world_id)?;
+        if !core.state.active_worlds.contains_key(&world_id) {
+            core.activate_world(world_id)?;
+        }
+        let world = core
+            .state
+            .active_worlds
+            .get(&world_id)
+            .ok_or(WorkerError::UnknownWorld {
+                universe_id,
+                world_id,
+            })?;
+        Ok(super::util::runtime_info_from_world(
+            world,
+            core.state.async_worlds.get(&world_id),
         ))
     }
 
-    pub fn journal_topic(&self) -> Result<String, WorkerError> {
-        Ok(self
-            .lock_inner()?
-            .infra
-            .kafka
-            .config()
-            .journal_topic
-            .clone())
-    }
-
-    pub fn projection_topic(&self) -> Result<String, WorkerError> {
-        Ok(self
-            .lock_inner()?
-            .infra
-            .kafka
-            .config()
-            .projection_topic
-            .clone())
-    }
-
-    pub fn refresh_materializer_source(&self) -> Result<(), WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.infra.kafka.recover_from_broker()?;
-        Ok(())
-    }
-
-    pub fn world_active_baseline(
+    pub fn list_worlds(
         &self,
         universe_id: UniverseId,
-        world_id: WorldId,
-    ) -> Result<aos_node::SnapshotRecord, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.select_source_snapshot(
-            universe_id,
-            world_id,
-            &aos_node::SnapshotSelector::ActiveBaseline,
-        )
-    }
-
-    pub fn workspace_resolve(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-        workspace: &str,
-        version: Option<u64>,
-    ) -> Result<WorkspaceResolveResponse, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.with_world_host_for_read(
-            universe_id,
-            world_id,
-            |host: &WorldHost<crate::blobstore::HostedCas>| {
-                #[derive(Debug, Default, Deserialize)]
-                struct WorkspaceHistoryState {
-                    latest: u64,
-                    versions: BTreeMap<u64, WorkspaceCommitMetaState>,
-                }
-                #[derive(Debug, Deserialize)]
-                struct WorkspaceCommitMetaState {
-                    root_hash: String,
-                }
-
-                let key = serde_cbor::to_vec(&workspace.to_string())?;
-                let history = host.state("sys/Workspace@1", Some(&key));
-                let receipt = if let Some(bytes) = history {
-                    let history: WorkspaceHistoryState = serde_cbor::from_slice(&bytes)?;
-                    let head = Some(history.latest);
-                    let target = version.unwrap_or(history.latest);
-                    if let Some(entry) = history.versions.get(&target) {
-                        aos_effect_types::WorkspaceResolveReceipt {
-                            exists: true,
-                            resolved_version: Some(target),
-                            head,
-                            root_hash: Some(HashRef::new(entry.root_hash.clone()).map_err(
-                                |err| {
-                                    WorkerError::Persist(aos_node::PersistError::validation(
-                                        err.to_string(),
-                                    ))
-                                },
-                            )?),
-                        }
-                    } else {
-                        aos_effect_types::WorkspaceResolveReceipt {
-                            exists: false,
-                            resolved_version: None,
-                            head,
-                            root_hash: None,
-                        }
-                    }
-                } else {
-                    aos_effect_types::WorkspaceResolveReceipt {
-                        exists: false,
-                        resolved_version: None,
-                        head: None,
-                        root_hash: None,
-                    }
-                };
-                Ok(WorkspaceResolveResponse {
-                    workspace: workspace.to_owned(),
-                    receipt,
-                })
-            },
-        )
-    }
-
-    pub fn partition_count(&self) -> Result<u32, WorkerError> {
-        Ok(self.lock_inner()?.infra.kafka.partition_count())
-    }
-
-    pub fn uses_broker_kafka(&self) -> Result<bool, WorkerError> {
-        Ok(self.lock_inner()?.infra.kafka.is_broker())
-    }
-
-    pub fn kafka_config(&self) -> Result<KafkaConfig, WorkerError> {
-        Ok(self.lock_inner()?.infra.kafka.config().clone())
-    }
-
-    pub fn blobstore_config(&self) -> Result<BlobStoreConfig, WorkerError> {
-        Ok(self.lock_inner()?.infra.blobstore_config.clone())
-    }
-
-    pub fn assigned_partitions(&self) -> Result<Vec<u32>, WorkerError> {
-        Ok(self.lock_inner()?.infra.kafka.assigned_partitions())
-    }
-
-    pub fn put_blob(&self, universe_id: UniverseId, bytes: &[u8]) -> Result<Hash, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner
-            .infra
-            .store_for_domain(universe_id)?
-            .put_verified(bytes)
-            .map_err(WorkerError::Persist)
-    }
-
-    pub fn debug_fail_next_batch_commit(&self) -> Result<(), WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.infra.kafka.debug_fail_next_batch_commit();
-        Ok(())
-    }
-
-    pub fn world_summary_response(
-        &self,
-        universe_id: UniverseId,
-        world_id: WorldId,
-    ) -> Result<WorldSummaryResponse, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        inner.require_default_universe(universe_id)?;
-        inner.world_summary_response(universe_id, world_id)
-    }
-
-    pub fn list_world_runtime_infos(
-        &self,
-        after: Option<WorldId>,
-        limit: u32,
-    ) -> Result<Vec<WorldRuntimeInfo>, WorkerError> {
-        let mut inner = self.lock_inner()?;
-        let universe_id = inner.infra.default_universe_id;
-        let world_ids = inner
-            .infra
-            .kafka
-            .world_ids()
-            .into_iter()
-            .filter(|world_id| after.is_none_or(|after| *world_id > after))
-            .collect::<Vec<_>>();
-        let mut infos = Vec::new();
+    ) -> Result<Vec<HostedWorldSummary>, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        let world_ids = core.infra.kafka.world_ids();
+        let mut worlds = Vec::new();
         for world_id in world_ids {
-            let _ = inner.ensure_registered_world(universe_id, world_id);
-            if let Ok(summary) = inner.world_summary_response(universe_id, world_id) {
-                infos.push(summary.runtime);
+            if core.ensure_registered_world(universe_id, world_id).is_ok()
+                && let Ok(summary) = core.world_summary(world_id)
+            {
+                worlds.push(summary);
             }
         }
-        infos.sort_by_key(|world| world.world_id);
-        infos.truncate(limit as usize);
-        Ok(infos)
+        worlds.sort_by_key(|world| world.world_id);
+        Ok(worlds)
     }
 
-    pub(super) fn lock_inner(
-        &self,
-    ) -> Result<MutexGuard<'_, HostedWorkerRuntimeInner>, WorkerError> {
-        self.inner.lock().map_err(|_| WorkerError::RuntimePoisoned)
+    pub(super) fn lock_core(&self) -> Result<MutexGuard<'_, HostedWorkerCore>, WorkerError> {
+        self.core.lock().map_err(|_| WorkerError::RuntimePoisoned)
     }
 }
 
-impl BlobPlane for HostedWorkerRuntime {
+impl BlobBackend for HostedWorkerRuntime {
     fn put_blob(
         &self,
         universe_id: UniverseId,
         bytes: &[u8],
-    ) -> Result<Hash, aos_node::PlaneError> {
+    ) -> Result<Hash, aos_node::BackendError> {
         HostedWorkerRuntime::put_blob(self, universe_id, bytes).map_err(|err| {
-            aos_node::PlaneError::Persist(aos_node::PersistError::backend(err.to_string()))
+            aos_node::BackendError::Persist(aos_node::PersistError::backend(err.to_string()))
         })
     }
 
@@ -1129,84 +872,33 @@ impl BlobPlane for HostedWorkerRuntime {
         &self,
         universe_id: UniverseId,
         hash: Hash,
-    ) -> Result<Vec<u8>, aos_node::PlaneError> {
+    ) -> Result<Vec<u8>, aos_node::BackendError> {
         HostedWorkerRuntime::get_blob(self, universe_id, hash).map_err(|err| {
-            aos_node::PlaneError::Persist(aos_node::PersistError::backend(err.to_string()))
+            aos_node::BackendError::Persist(aos_node::PersistError::backend(err.to_string()))
         })
     }
 
-    fn has_blob(&self, universe_id: UniverseId, hash: Hash) -> Result<bool, aos_node::PlaneError> {
+    fn has_blob(
+        &self,
+        universe_id: UniverseId,
+        hash: Hash,
+    ) -> Result<bool, aos_node::BackendError> {
         HostedWorkerRuntime::blob_metadata(self, universe_id, hash).map_err(|err| {
-            aos_node::PlaneError::Persist(aos_node::PersistError::backend(err.to_string()))
+            aos_node::BackendError::Persist(aos_node::PersistError::backend(err.to_string()))
         })
     }
 }
 
-impl HostedWorkerInfra {
-    pub(super) fn domain_paths(&self, universe_id: UniverseId) -> LocalStatePaths {
-        self.paths.for_universe(universe_id)
+impl HostedWorkerCore {
+    pub(super) fn bootstrap_recovery(&mut self) -> Result<(), WorkerError> {
+        self.infra.kafka.recover_from_broker()?;
+        Ok(())
     }
 
-    pub(super) fn world_config_for_domain(
+    pub(super) fn require_default_universe(
         &self,
-        universe_id: UniverseId,
-    ) -> Result<WorldConfig, WorkerError> {
-        let mut config = self.world_config.clone();
-        let domain_paths = self.domain_paths(universe_id);
-        domain_paths.ensure_root().map_err(|err| {
-            WorkerError::Persist(aos_node::PersistError::backend(err.to_string()))
-        })?;
-        std::fs::create_dir_all(domain_paths.cache_root()).map_err(|err| {
-            WorkerError::Persist(aos_node::PersistError::backend(format!(
-                "create hosted domain cache dir: {err}"
-            )))
-        })?;
-        config.module_cache_dir = Some(domain_paths.wasmtime_cache_dir());
-        Ok(config)
-    }
-
-    pub(super) fn store_for_domain(
-        &mut self,
-        universe_id: UniverseId,
-    ) -> Result<Arc<HostedCas>, WorkerError> {
-        if let Some(store) = self.stores_by_domain.get(&universe_id) {
-            return Ok(Arc::clone(store));
-        }
-        let domain_paths = self.domain_paths(universe_id);
-        domain_paths.ensure_root().map_err(|err| {
-            WorkerError::Persist(aos_node::PersistError::backend(err.to_string()))
-        })?;
-        std::fs::create_dir_all(domain_paths.cache_root()).map_err(|err| {
-            WorkerError::Persist(aos_node::PersistError::backend(format!(
-                "create hosted domain cache dir: {err}"
-            )))
-        })?;
-        let local_cas = Arc::new(FsCas::open_with_paths(&domain_paths)?);
-        let remote = Arc::new(RemoteCasStore::new(scoped_blobstore_config(
-            &self.blobstore_config,
-            universe_id,
-        ))?);
-        let hosted = Arc::new(HostedCas::new(local_cas, remote));
-        self.stores_by_domain
-            .insert(universe_id, Arc::clone(&hosted));
-        Ok(hosted)
-    }
-
-    pub(super) fn blob_meta_for_domain_mut(
-        &mut self,
-        universe_id: UniverseId,
-    ) -> Result<&mut HostedBlobMetaStore, WorkerError> {
-        if !self.blob_meta_by_domain.contains_key(&universe_id) {
-            let scoped = scoped_blobstore_config(&self.blobstore_config, universe_id);
-            let mut plane = HostedBlobMetaStore::new(scoped)?;
-            plane.prime_latest_checkpoints(
-                &self.kafka.config().journal_topic,
-                self.kafka.partition_count(),
-            )?;
-            self.blob_meta_by_domain.insert(universe_id, plane);
-        }
-        self.blob_meta_by_domain
-            .get_mut(&universe_id)
-            .ok_or(WorkerError::RuntimePoisoned)
+        _universe_id: UniverseId,
+    ) -> Result<(), WorkerError> {
+        Ok(())
     }
 }

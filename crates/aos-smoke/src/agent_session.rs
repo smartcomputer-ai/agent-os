@@ -6,7 +6,7 @@ use aos_agent::{
     SessionLifecycle, SessionState,
 };
 use aos_effect_adapters::config::EffectAdapterConfig;
-use aos_runtime::WorldConfig;
+use aos_node::WorldConfig;
 
 use crate::example_host::{ExampleHost, ExampleHostConfig, HarnessConfig};
 

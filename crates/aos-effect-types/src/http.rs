@@ -12,7 +12,7 @@ pub struct HttpRequestParams {
     pub url: String,
     #[serde(default)]
     pub headers: HeaderMap,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub body_ref: Option<HashRef>,
 }
 
@@ -21,7 +21,7 @@ pub struct HttpRequestReceipt {
     pub status: i32,
     #[serde(default)]
     pub headers: HeaderMap,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub body_ref: Option<HashRef>,
     pub timings: RequestTimings,
     pub adapter_id: String,

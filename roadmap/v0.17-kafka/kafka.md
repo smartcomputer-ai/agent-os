@@ -140,8 +140,9 @@ Not yet completed:
 - hosted timer execution and timer-specific hosted tests
 - broader blob GC / object-store lifecycle policy beyond retained checkpoint manifests
 
-Deferred to `roadmap/v0.18-fabric/`:
+Deferred to `roadmap/v0.18-execution/` and `roadmap/v0.19-fabric/`:
 
+- core owner/executor seam and detached execution lifecycle
 - dedicated fabric/effect lane cutover
 - hosted fabric/session/artifact/log control surfaces
 - fabric-side secret-provider cutover

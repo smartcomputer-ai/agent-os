@@ -51,6 +51,7 @@ pub trait HttpBackend: Send + Sync + 'static {
         body: CreateWorldBody,
     ) -> Result<Self::CreateWorldResponse, ControlError>;
     fn get_world(&self, world_id: WorldId) -> Result<WorldSummaryResponse, ControlError>;
+    fn checkpoint_world(&self, world_id: WorldId) -> Result<WorldSummaryResponse, ControlError>;
     fn fork_world(
         &self,
         src_world_id: WorldId,
@@ -246,6 +247,10 @@ pub fn router<B: HttpBackend>(backend: Arc<B>) -> Router {
         .route("/v1/health", get(health::<B>))
         .route("/v1/worlds", get(list_worlds::<B>).post(create_world::<B>))
         .route("/v1/worlds/{world_id}", get(get_world::<B>))
+        .route(
+            "/v1/worlds/{world_id}/checkpoint",
+            post(checkpoint_world::<B>),
+        )
         .route("/v1/worlds/{world_id}/fork", post(fork_world::<B>))
         .route("/v1/secrets/bindings", get(secret_bindings_list::<B>))
         .route(
@@ -373,6 +378,13 @@ async fn get_world<B: HttpBackend>(
     Path(world_id): Path<String>,
 ) -> Result<impl IntoResponse, ControlError> {
     Ok(Json(backend.get_world(parse_world_id(&world_id)?)?))
+}
+
+async fn checkpoint_world<B: HttpBackend>(
+    State(backend): State<Arc<B>>,
+    Path(world_id): Path<String>,
+) -> Result<impl IntoResponse, ControlError> {
+    Ok(Json(backend.checkpoint_world(parse_world_id(&world_id)?)?))
 }
 
 async fn fork_world<B: HttpBackend>(

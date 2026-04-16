@@ -402,11 +402,17 @@ An intent is a request to perform an external effect:
 }
 ```
 
-The `intent_hash` = `sha256(cbor(kind, params, cap, idempotency_key))` is computed by the kernel; adapters verify it.
+The `intent_hash` = `sha256(cbor(kind, params, cap, idempotency_key))` is computed by the kernel;
+adapters verify it.
 
 **Canonical params**: Before hashing or enqueue, the kernel **decodes → schema‑checks → canonicalizes → re‑encodes** `params` using the effect kind's parameter schema (same AIR canonical rules as the loader: `$tag/$value` variants, canonical map/set/option shapes, numeric normalization). The canonical CBOR bytes become `params_cbor` and are the **only** form stored, hashed, and dispatched; non‑conforming params are rejected. This path runs for *every* origin (workflow modules, system/governance flows, injected tooling) so authoring sugar or reducer ABI quirks cannot change intent identity.
 
-**Idempotency key**: workflow modules and system/governance flows may supply an explicit `idempotency_key`; when omitted, the kernel uses the all‑zero key. Re‑emitting an identical effect with the same key yields the same `intent_hash`.
+**Idempotency key**: system/governance flows may supply an explicit `idempotency_key`; when
+omitted, the kernel uses the all-zero key. For workflow-origin effects, the kernel derives the
+effective idempotency input from workflow origin identity and emission position, including the
+workflow/module identity, instance key, emitted sequence, effect index, and any workflow-requested
+idempotency value. This is why `intent_hash` already behaves as the per-emission open-work id in
+the active workflow runtime, rather than only as a pure content hash of effect params.
 
 ### Receipt
 

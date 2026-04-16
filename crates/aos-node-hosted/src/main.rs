@@ -9,7 +9,7 @@ use aos_node_hosted::blobstore::BlobStoreConfig;
 use aos_node_hosted::bootstrap::{
     build_control_deps_broker, build_materializer_deps, build_worker_runtime_broker,
 };
-use aos_node_hosted::config::HostedWorkerConfig;
+use aos_node_hosted::config::{HostedWorkerConfig, ProjectionCommitMode};
 use aos_node_hosted::control::{ControlFacade, ControlHttpConfig, serve as serve_control_http};
 use aos_node_hosted::kafka::KafkaConfig;
 use aos_node_hosted::load_dotenv_candidates;
@@ -80,18 +80,9 @@ struct WorkerArgs {
 
     #[arg(
         long,
-        env = "AOS_WORKER_POLL_INTERVAL_MS",
-        global = true,
-        default_value_t = 500,
-        help = "Shard worker poll interval in milliseconds"
-    )]
-    poll_interval_ms: u64,
-
-    #[arg(
-        long,
         env = "AOS_CHECKPOINT_INTERVAL_MS",
         global = true,
-        default_value_t = 30_000,
+        default_value_t = 120_000,
         help = "Background checkpoint cadence in milliseconds"
     )]
     checkpoint_interval_ms: u64,
@@ -100,10 +91,59 @@ struct WorkerArgs {
         long,
         env = "AOS_CHECKPOINT_EVERY_EVENTS",
         global = true,
-        default_value_t = 100,
+        default_value_t = 2_000,
         help = "Publish a checkpoint after this many committed ingress submissions per owned partition; set 0 to disable"
     )]
     checkpoint_every_events: u32,
+
+    #[arg(
+        long,
+        env = "AOS_MAX_LOCAL_CONTINUATION_SLICES_PER_FLUSH",
+        global = true,
+        default_value_t = 64,
+        help = "Maximum number of source-less local continuation slices allowed per flush"
+    )]
+    max_local_continuation_slices_per_flush: u32,
+
+    #[arg(
+        long,
+        env = "AOS_MAX_UNCOMMITTED_SLICES_PER_WORLD",
+        global = true,
+        default_value_t = 256,
+        help = "Maximum number of staged but not-yet-committed slices allowed per world"
+    )]
+    max_uncommitted_slices_per_world: u32,
+
+    #[arg(
+        long,
+        env = "AOS_PROJECTION_COMMIT_MODE",
+        global = true,
+        value_enum,
+        default_value_t = ProjectionCommitModeArg::Background,
+        help = "Publish projections inline with durable commit or in the background"
+    )]
+    projection_commit_mode: ProjectionCommitModeArg,
+
+    #[arg(
+        long = "direct-ingress-partitions",
+        env = "AOS_KAFKA_DIRECT_ASSIGNED_PARTITIONS",
+        global = true,
+        value_delimiter = ',',
+        num_args = 1..,
+        hide = true,
+        help = "Explicit ingress partitions for direct Kafka assignment; advanced debug-only mode"
+    )]
+    direct_ingress_partitions: Vec<u32>,
+
+    #[arg(
+        long = "direct-ingress-start-from-end",
+        env = "AOS_KAFKA_DIRECT_ASSIGNMENT_START_FROM_END",
+        global = true,
+        default_value_t = false,
+        hide = true,
+        help = "Start direct-assigned ingress consumers from the end of each partition"
+    )]
+    direct_ingress_start_from_end: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -141,6 +181,21 @@ struct RuntimeArgs {
     default_universe_id: UniverseId,
 }
 
+#[derive(clap::ValueEnum, Debug, Clone, Copy)]
+enum ProjectionCommitModeArg {
+    Inline,
+    Background,
+}
+
+impl From<ProjectionCommitModeArg> for ProjectionCommitMode {
+    fn from(value: ProjectionCommitModeArg) -> Self {
+        match value {
+            ProjectionCommitModeArg::Inline => ProjectionCommitMode::Inline,
+            ProjectionCommitModeArg::Background => ProjectionCommitMode::Background,
+        }
+    }
+}
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     if let Err(err) = run().await {
@@ -156,7 +211,7 @@ async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     load_dotenv_candidates()?;
     let cli = Cli::parse();
-    let kafka_config = require_broker_kafka_config(cli.worker.partition_count)?;
+    let kafka_config = require_broker_kafka_config(&cli.worker)?;
     let blobstore_config = require_blobstore_config()?;
 
     match cli.command.unwrap_or(Commands::All) {
@@ -301,7 +356,7 @@ async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn require_broker_kafka_config(partition_count: u32) -> anyhow::Result<KafkaConfig> {
+fn require_broker_kafka_config(worker: &WorkerArgs) -> anyhow::Result<KafkaConfig> {
     let mut config = KafkaConfig::default();
     let bootstrap_servers = config
         .bootstrap_servers
@@ -313,7 +368,21 @@ fn require_broker_kafka_config(partition_count: u32) -> anyhow::Result<KafkaConf
             "AOS_KAFKA_BOOTSTRAP_SERVERS must be set for aos-node-hosted; embedded Kafka is not supported in this binary"
         ));
     }
-    config.direct_assigned_partitions = (0..partition_count.max(1)).collect();
+    if worker.direct_ingress_start_from_end && worker.direct_ingress_partitions.is_empty() {
+        return Err(anyhow!(
+            "--direct-ingress-start-from-end requires --direct-ingress-partitions"
+        ));
+    }
+    let partition_count = worker.partition_count.max(1);
+    for partition in &worker.direct_ingress_partitions {
+        if *partition >= partition_count {
+            return Err(anyhow!(
+                "direct ingress partition {partition} is out of range for partition count {partition_count}"
+            ));
+        }
+    }
+    config.direct_assigned_partitions = worker.direct_ingress_partitions.iter().copied().collect();
+    config.direct_assignment_start_from_end = worker.direct_ingress_start_from_end;
     Ok(config)
 }
 
@@ -378,26 +447,15 @@ async fn serve_all(
     control_config: ControlHttpConfig,
     materializer_config: HostedMaterializerConfig,
 ) -> anyhow::Result<()> {
-    // Worker and materializer both use blocking Kafka poll loops; run them on
-    // dedicated blocking threads so the async control server can bind promptly.
-    let mut worker_task = tokio::task::spawn_blocking(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|err| anyhow!("build hosted worker runtime: {err}"))?;
-        runtime
-            .block_on(async move { serve_worker(worker_runtime, worker_config).await })
+    let mut worker_task = tokio::spawn(async move {
+        serve_worker(worker_runtime, worker_config)
+            .await
             .map_err(|err| anyhow!("hosted worker failed: {err}"))
     });
-    let mut materializer_task = tokio::task::spawn_blocking(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|err| anyhow!("build hosted materializer runtime: {err}"))?;
-        runtime.block_on(
+    let mut materializer_task =
+        tokio::spawn(
             async move { serve_materializer(materializer_deps, materializer_config).await },
-        )
-    });
+        );
     let mut control_task =
         tokio::spawn(async move { serve_control(control_deps, control_config).await });
     let mut worker_selected = false;
@@ -456,11 +514,13 @@ impl WorkerArgs {
         HostedWorkerConfig {
             worker_id: self.worker_id,
             partition_count: self.partition_count.max(1),
-            supervisor_poll_interval: Duration::from_millis(self.poll_interval_ms),
             checkpoint_interval: Duration::from_millis(self.checkpoint_interval_ms),
             checkpoint_every_events: (self.checkpoint_every_events > 0)
                 .then_some(self.checkpoint_every_events),
-            checkpoint_on_create: true,
+            max_local_continuation_slices_per_flush: self.max_local_continuation_slices_per_flush
+                as usize,
+            projection_commit_mode: self.projection_commit_mode.into(),
+            max_uncommitted_slices_per_world: self.max_uncommitted_slices_per_world.max(1) as usize,
         }
     }
 }
@@ -552,15 +612,36 @@ mod tests {
     }
 
     #[test]
-    fn broker_kafka_config_sets_direct_assigned_partitions_from_partition_count() {
+    fn broker_kafka_config_uses_group_assignment_by_default() {
         unsafe {
             std::env::set_var("AOS_KAFKA_BOOTSTRAP_SERVERS", "localhost:19092");
         }
-        let config = require_broker_kafka_config(3).expect("broker kafka config");
+        let cli = Cli::try_parse_from(["aos-node-hosted"]).expect("parse cli");
+        let config = require_broker_kafka_config(&cli.worker).expect("broker kafka config");
+        assert!(config.direct_assigned_partitions.is_empty());
+        assert!(!config.direct_assignment_start_from_end);
+    }
+
+    #[test]
+    fn broker_kafka_config_accepts_explicit_direct_assignment_override() {
+        unsafe {
+            std::env::set_var("AOS_KAFKA_BOOTSTRAP_SERVERS", "localhost:19092");
+        }
+        let cli = Cli::try_parse_from([
+            "aos-node-hosted",
+            "--partition-count",
+            "4",
+            "--direct-ingress-partitions",
+            "1,3",
+            "--direct-ingress-start-from-end",
+        ])
+        .expect("parse cli");
+        let config = require_broker_kafka_config(&cli.worker).expect("broker kafka config");
         assert_eq!(
             config.direct_assigned_partitions,
-            [0_u32, 1, 2].into_iter().collect()
+            [1_u32, 3].into_iter().collect()
         );
+        assert!(config.direct_assignment_start_from_end);
     }
 
     #[test]

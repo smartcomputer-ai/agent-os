@@ -1,91 +1,114 @@
 use super::*;
 use serde::Serialize;
+use std::collections::HashSet;
 
 impl<S: Store + 'static> Kernel<S> {
-    pub fn rehydrate_effect_queue_from_runtime_state(&mut self) -> Result<(), KernelError> {
-        let heights = self.heights();
-        let tail = self.tail_scan_after(heights.snapshot.unwrap_or(0))?;
-        let pending_receipts = self.pending_workflow_receipts_snapshot();
-        let receipts_seen: std::collections::HashSet<[u8; 32]> = tail
-            .receipts
-            .iter()
-            .map(|receipt| receipt.record.intent_hash)
-            .collect();
-        let active_intents: std::collections::HashSet<[u8; 32]> = pending_receipts
-            .iter()
-            .map(|receipt| receipt.intent_hash)
-            .chain(
-                self.workflow_instances_snapshot()
-                    .into_iter()
-                    .flat_map(|instance| {
-                        instance
-                            .inflight_intents
-                            .into_iter()
-                            .map(|intent| intent.intent_id)
-                    }),
-            )
-            .collect();
-
-        let mut to_dispatch: Vec<aos_effects::EffectIntent> = self
-            .queued_effects_snapshot()
-            .into_iter()
-            .map(|snapshot| snapshot.into_intent())
-            .collect();
-        let mut seen_intents: std::collections::HashSet<[u8; 32]> = to_dispatch
-            .iter()
-            .map(|intent| intent.intent_hash)
-            .collect();
-
-        for receipt in pending_receipts {
-            if receipts_seen.contains(&receipt.intent_hash)
-                || seen_intents.contains(&receipt.intent_hash)
-            {
-                continue;
-            }
-            let Some(intent) = aos_effects::EffectIntent::from_raw_params(
-                receipt.effect_kind.into(),
-                receipt.cap_name,
-                receipt.params_cbor,
-                receipt.idempotency_key,
-            )
-            .ok() else {
-                continue;
-            };
-            seen_intents.insert(intent.intent_hash);
-            to_dispatch.push(intent);
-        }
-
-        for tail_intent in tail.intents {
-            let record = tail_intent.record;
-            if receipts_seen.contains(&record.intent_hash) {
-                continue;
-            }
-            if !active_intents.is_empty() && !active_intents.contains(&record.intent_hash) {
-                continue;
-            }
-            if seen_intents.contains(&record.intent_hash) {
-                continue;
-            }
-            let Some(intent) = aos_effects::EffectIntent::from_raw_params(
-                record.kind.into(),
-                record.cap_name,
-                record.params_cbor,
-                record.idempotency_key,
-            )
-            .ok() else {
-                continue;
-            };
-            seen_intents.insert(intent.intent_hash);
-            to_dispatch.push(intent);
-        }
-
-        if !to_dispatch.is_empty() {
-            self.restore_effect_queue(to_dispatch);
-        }
-        Ok(())
+    pub fn submit_domain_event(
+        &mut self,
+        schema: String,
+        value: Vec<u8>,
+    ) -> Result<(), KernelError> {
+        self.submit_domain_event_result(schema, value)
     }
 
-    pub fn tick(&mut self) -> Result<(), KernelError> {
+    pub fn submit_domain_event_result(
+        &mut self,
+        schema: impl Into<String>,
+        value: Vec<u8>,
+    ) -> Result<(), KernelError> {
+        self.accept(WorldInput::DomainEvent(DomainEvent {
+            schema: schema.into(),
+            value,
+            key: None,
+        }))
+    }
+
+    /// Compatibility helper for scripted harnesses that expect a mutable effect outbox.
+    pub fn drain_effects(&mut self) -> Result<Vec<aos_effects::EffectIntent>, KernelError> {
+        self.tick_until_idle()?;
+
+        let mut intents = self.effect_manager.drain()?;
+        let mut seen: HashSet<[u8; 32]> = intents.iter().map(|intent| intent.intent_hash).collect();
+
+        let drain = self.drain_until_idle_from(self.compat_drain_cursor)?;
+        self.compat_drain_cursor = drain.tail.to;
+        intents.extend(
+            drain
+                .opened_effects
+                .into_iter()
+                .map(|opened| opened.intent)
+                .filter(|intent| {
+                    self.pending_workflow_receipts
+                        .contains_key(&intent.intent_hash)
+                })
+                .filter(|intent| seen.insert(intent.intent_hash)),
+        );
+        Ok(intents)
+    }
+
+    pub fn queued_effects_snapshot(&self) -> Vec<aos_effects::EffectIntent> {
+        let mut intents = self.effect_manager.queued().to_vec();
+        let mut seen: HashSet<[u8; 32]> = intents.iter().map(|intent| intent.intent_hash).collect();
+        intents.extend(
+            self.snapshot_queued_effects()
+                .into_iter()
+                .map(|snapshot| snapshot.into_intent())
+                .filter(|intent| seen.insert(intent.intent_hash)),
+        );
+        intents
+    }
+
+    pub fn accept(&mut self, input: WorldInput) -> Result<(), KernelError> {
+        match input {
+            WorldInput::DomainEvent(event) => self.process_domain_event(event),
+            WorldInput::Receipt(receipt) => self.handle_receipt(receipt),
+            WorldInput::StreamFrame(frame) => self.handle_stream_frame(frame),
+        }
+    }
+
+    pub fn apply_control(
+        &mut self,
+        control: WorldControl,
+    ) -> Result<WorldControlOutcome, KernelError> {
+        match control {
+            WorldControl::SubmitProposal { patch, description } => {
+                let proposal_id = self.submit_proposal(patch, description)?;
+                Ok(WorldControlOutcome::ProposalSubmitted { proposal_id })
+            }
+            WorldControl::RunShadow { proposal_id } => {
+                let _ = self.run_shadow(proposal_id, None)?;
+                Ok(WorldControlOutcome::ShadowRun { proposal_id })
+            }
+            WorldControl::DecideProposal {
+                proposal_id,
+                approver,
+                decision,
+            } => {
+                match decision {
+                    ApprovalDecisionRecord::Approve => {
+                        self.approve_proposal(proposal_id, approver)?
+                    }
+                    ApprovalDecisionRecord::Reject => {
+                        self.reject_proposal(proposal_id, approver)?
+                    }
+                }
+                Ok(WorldControlOutcome::ProposalDecided {
+                    proposal_id,
+                    decision,
+                })
+            }
+            WorldControl::ApplyProposal { proposal_id } => {
+                self.apply_proposal(proposal_id)?;
+                Ok(WorldControlOutcome::ProposalApplied { proposal_id })
+            }
+            WorldControl::ApplyPatchDirect { patch } => {
+                let manifest_hash = self.apply_patch_direct(patch)?;
+                Ok(WorldControlOutcome::PatchApplied { manifest_hash })
+            }
+        }
+    }
+
+    pub(crate) fn tick(&mut self) -> Result<(), KernelError> {
         if let Some(event) = self.workflow_queue.pop_front() {
             self.handle_workflow_event(event)?;
         }
@@ -99,16 +122,60 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
-    pub fn drain_effects(&mut self) -> Result<Vec<aos_effects::EffectIntent>, KernelError> {
-        self.effect_manager.drain()
+    pub fn drain_until_idle_from(
+        &mut self,
+        tail_start: JournalSeq,
+    ) -> Result<KernelDrain, KernelError> {
+        self.tick_until_idle()?;
+        let tail = self.tail_scan_from(tail_start)?;
+        let opened_effects = self.collect_opened_effects_from_tail(&tail)?;
+        let quiescence = self.quiescence_status();
+        Ok(KernelDrain {
+            tail_start,
+            tail,
+            opened_effects,
+            kernel_idle: quiescence.kernel_idle,
+            quiescence,
+        })
     }
 
-    pub fn has_pending_effects(&self) -> bool {
-        self.effect_manager.has_pending()
+    fn materialize_effect_record(
+        &mut self,
+        record: &EffectIntentRecord,
+    ) -> Result<aos_effects::EffectIntent, KernelError> {
+        let params_cbor = self.hydrate_externalized_cbor(
+            record.params_cbor.clone(),
+            record.params_ref.as_ref(),
+            record.params_size,
+            record.params_sha256.as_ref(),
+            "effect_intent.params",
+        )?;
+        let mut intent = aos_effects::EffectIntent::from_raw_params(
+            aos_effects::EffectKind::new(record.kind.clone()),
+            record.cap_name.clone(),
+            params_cbor,
+            record.idempotency_key,
+        )
+        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        self.effect_manager
+            .prepare_intent_for_execution(&mut intent)?;
+        Ok(intent)
     }
 
-    pub fn restore_effect_queue(&mut self, intents: Vec<aos_effects::EffectIntent>) {
-        self.effect_manager.restore_queue(intents);
+    fn collect_opened_effects_from_tail(
+        &mut self,
+        tail: &TailScan,
+    ) -> Result<Vec<OpenedEffect>, KernelError> {
+        tail.intents
+            .iter()
+            .map(|opened| {
+                Ok(OpenedEffect {
+                    seq: opened.seq,
+                    record: opened.record.clone(),
+                    intent: self.materialize_effect_record(&opened.record)?,
+                })
+            })
+            .collect()
     }
 
     pub fn handle_receipt(
@@ -120,7 +187,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.handle_receipt_with_ingress(receipt, stamp)
     }
 
-    pub fn handle_stream_frame(
+    fn handle_stream_frame(
         &mut self,
         frame: aos_effects::EffectStreamFrame,
     ) -> Result<(), KernelError> {
@@ -804,10 +871,18 @@ mod serde_bytes_opt {
 mod tests {
     use super::*;
     use crate::MemStore;
+    use crate::governance::ManifestPatch;
     use crate::journal::Journal;
     use crate::journal::JournalKind;
-    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
-    use aos_effects::{EffectStreamFrame, ReceiptStatus};
+    use crate::world::test_support::{hash, minimal_manifest, schema_event_record, schema_text};
+    use aos_air_types::{
+        CapGrant, DefModule, HashRef, ManifestDefaults, ModuleAbi, ModuleKind, NamedRef, SchemaRef,
+        ValueLiteral, ValueRecord, WorkflowAbi, builtins, catalog::EffectCatalog,
+    };
+    use aos_effects::{EffectStreamFrame, ReceiptStatus, builtins::TimerSetParams};
+    use aos_wasm_abi::WorkflowEffect;
+    use indexmap::IndexMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
 
     fn install_stream_module(kernel: &mut Kernel<MemStore>, module_name: &str) {
@@ -866,6 +941,104 @@ mod tests {
         kernel
     }
 
+    fn kernel_for_timer_effects() -> Kernel<MemStore> {
+        let store = Arc::new(MemStore::default());
+        let workflow = "com.acme/Workflow@1";
+        let module = DefModule {
+            name: workflow.into(),
+            module_kind: ModuleKind::Workflow,
+            wasm_hash: HashRef::new(format!("sha256:{}", "1".repeat(64))).unwrap(),
+            key_schema: None,
+            abi: ModuleAbi {
+                workflow: Some(WorkflowAbi {
+                    state: SchemaRef::new("com.acme/State@1").unwrap(),
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: None,
+                    annotations: None,
+                    effects_emitted: vec![aos_air_types::EffectKind::timer_set()],
+                    cap_slots: Default::default(),
+                }),
+                pure: None,
+            },
+        };
+        let timer_effect = builtins::find_builtin_effect("sys/timer.set@1")
+            .expect("builtin timer effect")
+            .effect
+            .clone();
+        let timer_cap = builtins::find_builtin_cap("sys/timer@1")
+            .expect("builtin timer cap")
+            .cap
+            .clone();
+
+        let mut manifest = minimal_manifest();
+        manifest.modules = vec![NamedRef {
+            name: workflow.into(),
+            hash: HashRef::new(hash(1)).unwrap(),
+        }];
+        manifest.effects = vec![NamedRef {
+            name: timer_effect.name.clone(),
+            hash: HashRef::new(hash(2)).unwrap(),
+        }];
+        manifest.caps = vec![NamedRef {
+            name: timer_cap.name.clone(),
+            hash: HashRef::new(hash(3)).unwrap(),
+        }];
+        manifest.defaults = Some(ManifestDefaults {
+            policy: None,
+            cap_grants: vec![CapGrant {
+                name: "timer_cap".into(),
+                cap: timer_cap.name.clone(),
+                params: ValueLiteral::Record(ValueRecord {
+                    record: IndexMap::new(),
+                }),
+                expiry_ns: None,
+            }],
+        });
+
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules: HashMap::from([(module.name.clone(), module)]),
+            effects: HashMap::from([(timer_effect.name.clone(), timer_effect.clone())]),
+            caps: HashMap::from([(timer_cap.name.clone(), timer_cap)]),
+            policies: HashMap::new(),
+            schemas: HashMap::from([
+                ("com.acme/State@1".into(), schema_text("com.acme/State@1")),
+                (
+                    "com.acme/Event@1".into(),
+                    schema_event_record("com.acme/Event@1"),
+                ),
+            ]),
+            effect_catalog: EffectCatalog::from_defs(vec![timer_effect]),
+        };
+
+        Kernel::from_loaded_manifest(store, loaded, Journal::new()).expect("timer kernel")
+    }
+
+    fn emit_timer_effect(kernel: &mut Kernel<MemStore>, deliver_at_ns: u64) {
+        let params = TimerSetParams {
+            deliver_at_ns,
+            key: Some(format!("t-{deliver_at_ns}")),
+        };
+        kernel
+            .handle_workflow_output(
+                "com.acme/Workflow@1".into(),
+                None,
+                false,
+                WorkflowOutput {
+                    effects: vec![WorkflowEffect {
+                        kind: aos_effects::EffectKind::TIMER_SET.into(),
+                        params_cbor: serde_cbor::to_vec(&params).expect("encode timer params"),
+                        cap_slot: None,
+                        issuer_ref: None,
+                        idempotency_key: None,
+                    }],
+                    ..Default::default()
+                },
+            )
+            .expect("emit timer effect");
+    }
+
     #[test]
     fn stream_frame_routes_and_advances_cursor() {
         let intent_hash = [7u8; 32];
@@ -884,7 +1057,7 @@ mod tests {
             signature: vec![],
         };
         kernel
-            .handle_stream_frame(frame.clone())
+            .accept(WorldInput::StreamFrame(frame.clone()))
             .expect("accept stream");
         assert_eq!(kernel.workflow_queue.len(), 1);
         let instances = kernel.workflow_instances_snapshot();
@@ -900,7 +1073,7 @@ mod tests {
 
         kernel.workflow_queue.clear();
         kernel
-            .handle_stream_frame(frame)
+            .accept(WorldInput::StreamFrame(frame))
             .expect("duplicate frame should be dropped");
         assert!(
             kernel.workflow_queue.is_empty(),
@@ -928,7 +1101,7 @@ mod tests {
             signature: vec![],
         };
         kernel
-            .handle_stream_frame(frame)
+            .accept(WorldInput::StreamFrame(frame))
             .expect("accept stream gap");
         let entries = kernel.dump_journal().expect("journal");
         let mut has_gap = false;
@@ -966,7 +1139,7 @@ mod tests {
         };
 
         kernel
-            .handle_receipt(receipt)
+            .accept(WorldInput::Receipt(receipt))
             .expect("duplicate receipt should be ignored and settle stale context");
 
         assert!(
@@ -980,5 +1153,160 @@ mod tests {
             0,
             "duplicate receipt should clear stale inflight intent"
         );
+    }
+
+    #[test]
+    fn drain_until_idle_from_returns_only_newly_opened_effects_from_tail_slice() {
+        let mut kernel = kernel_for_timer_effects();
+
+        emit_timer_effect(&mut kernel, 10);
+        let tail_start = kernel.journal_head();
+        emit_timer_effect(&mut kernel, 20);
+
+        let drain = kernel
+            .drain_until_idle_from(tail_start)
+            .expect("drain from recorded tail");
+
+        assert!(drain.kernel_idle, "expected empty workflow queue");
+        assert_eq!(drain.opened_effects.len(), 1, "only new suffix intents");
+        assert_eq!(
+            drain.tail.intents.len(),
+            1,
+            "tail scan should match service slice"
+        );
+
+        let opened = &drain.opened_effects[0];
+        assert_eq!(opened.record.kind, aos_effects::EffectKind::TIMER_SET);
+        let params: TimerSetParams = serde_cbor::from_slice(&opened.intent.params_cbor)
+            .expect("decode materialized timer params");
+        assert_eq!(params.deliver_at_ns, 20);
+        assert_eq!(params.key.as_deref(), Some("t-20"));
+    }
+
+    #[test]
+    fn accept_input_enqueues_domain_event_without_scanning_open_effects() {
+        let mut kernel = crate::world::test_support::minimal_kernel_with_router();
+        let payload = serde_cbor::to_vec(&serde_cbor::Value::Map(BTreeMap::from([(
+            serde_cbor::Value::Text("id".into()),
+            serde_cbor::Value::Text("evt-1".into()),
+        )])))
+        .expect("encode event");
+
+        kernel
+            .accept(WorldInput::DomainEvent(DomainEvent::new(
+                "com.acme/Event@1",
+                payload,
+            )))
+            .expect("accept domain event");
+
+        assert_eq!(
+            kernel.workflow_queue.len(),
+            1,
+            "event should route into workflow queue"
+        );
+        assert!(
+            !kernel.dump_journal().expect("journal").is_empty(),
+            "accepted input should append journal state"
+        );
+    }
+
+    #[test]
+    fn apply_control_and_drain_returns_control_outcome_and_tail() {
+        let store = Arc::new(MemStore::default());
+        let loaded = LoadedManifest {
+            manifest: minimal_manifest(),
+            secrets: vec![],
+            modules: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::new(),
+            effect_catalog: EffectCatalog::new(),
+        };
+        let mut kernel =
+            Kernel::from_loaded_manifest(store, loaded, Journal::new()).expect("empty kernel");
+
+        let tail_start = kernel.journal_head();
+        let control = kernel
+            .apply_control(WorldControl::ApplyPatchDirect {
+                patch: ManifestPatch {
+                    manifest: minimal_manifest(),
+                    nodes: Vec::new(),
+                },
+            })
+            .expect("apply empty patch directly");
+        let drain = kernel
+            .drain_until_idle_from(tail_start)
+            .expect("drain after control");
+
+        assert!(matches!(control, WorldControlOutcome::PatchApplied { .. }));
+        assert!(drain.kernel_idle, "control service should end idle");
+    }
+
+    #[test]
+    fn governance_world_controls_run_through_typed_kernel_boundary() {
+        let store = Arc::new(MemStore::default());
+        let loaded = LoadedManifest {
+            manifest: minimal_manifest(),
+            secrets: vec![],
+            modules: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::new(),
+            effect_catalog: EffectCatalog::new(),
+        };
+        let mut kernel =
+            Kernel::from_loaded_manifest(store, loaded, Journal::new()).expect("empty kernel");
+
+        let patch = ManifestPatch {
+            manifest: minimal_manifest(),
+            nodes: Vec::new(),
+        };
+        let submitted = kernel
+            .apply_control(WorldControl::SubmitProposal {
+                patch,
+                description: Some("typed proposal".into()),
+            })
+            .expect("submit proposal");
+        let proposal_id = match submitted {
+            WorldControlOutcome::ProposalSubmitted { proposal_id } => proposal_id,
+            other => panic!("unexpected outcome: {other:?}"),
+        };
+
+        let shadowed = kernel
+            .apply_control(WorldControl::RunShadow { proposal_id })
+            .expect("run shadow");
+        assert!(matches!(
+            shadowed,
+            WorldControlOutcome::ShadowRun {
+                proposal_id: returned_id
+            } if returned_id == proposal_id
+        ));
+
+        let decided = kernel
+            .apply_control(WorldControl::DecideProposal {
+                proposal_id,
+                approver: "tester".into(),
+                decision: ApprovalDecisionRecord::Approve,
+            })
+            .expect("approve proposal");
+        assert!(matches!(
+            decided,
+            WorldControlOutcome::ProposalDecided {
+                proposal_id: returned_id,
+                decision: ApprovalDecisionRecord::Approve,
+            } if returned_id == proposal_id
+        ));
+
+        let applied = kernel
+            .apply_control(WorldControl::ApplyProposal { proposal_id })
+            .expect("apply proposal");
+        assert!(matches!(
+            applied,
+            WorldControlOutcome::ProposalApplied {
+                proposal_id: returned_id
+            } if returned_id == proposal_id
+        ));
     }
 }

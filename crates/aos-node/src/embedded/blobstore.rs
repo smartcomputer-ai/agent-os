@@ -196,12 +196,12 @@ impl Store for FsCas {
 }
 
 #[derive(Debug, Clone)]
-pub struct FsBlobPlanes {
+pub struct FsBlobBackend {
     config: LocalBlobStoreConfig,
     cas: Arc<FsCas>,
 }
 
-impl FsBlobPlanes {
+impl FsBlobBackend {
     pub fn new(config: LocalBlobStoreConfig) -> Result<Self, LocalStoreError> {
         let cas = Arc::new(FsCas::open_cas_root(config.root.clone())?);
         Ok(Self { config, cas })
@@ -217,13 +217,13 @@ impl FsBlobPlanes {
 }
 
 #[derive(Debug, Clone)]
-pub enum LocalBlobPlanes {
-    Fs(FsBlobPlanes),
+pub enum LocalBlobBackend {
+    Fs(FsBlobBackend),
 }
 
-impl LocalBlobPlanes {
+impl LocalBlobBackend {
     pub fn new(config: LocalBlobStoreConfig) -> Result<Self, LocalStoreError> {
-        Ok(Self::Fs(FsBlobPlanes::new(config)?))
+        Ok(Self::Fs(FsBlobBackend::new(config)?))
     }
 
     pub fn from_paths(paths: &LocalStatePaths) -> Result<Self, LocalStoreError> {

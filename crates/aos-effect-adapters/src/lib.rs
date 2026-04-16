@@ -6,7 +6,7 @@ use std::sync::Arc;
 use adapters::blob_get::BlobGetAdapter;
 use adapters::blob_put::BlobPutAdapter;
 use adapters::host::make_host_adapter_set;
-use adapters::registry::{AdapterRegistry, AdapterRegistryConfig};
+use adapters::registry::AdapterRegistry;
 #[cfg(not(feature = "adapter-http"))]
 use adapters::stub::StubHttpAdapter;
 use adapters::stub::{
@@ -23,9 +23,7 @@ pub fn default_registry<S: Store + 'static>(
     store: Arc<S>,
     config: &EffectAdapterConfig,
 ) -> AdapterRegistry {
-    let mut registry = AdapterRegistry::new(AdapterRegistryConfig {
-        effect_timeout: config.effect_timeout,
-    });
+    let mut registry = AdapterRegistry::new();
     registry.register(Box::new(StubTimerAdapter));
     registry.register(Box::new(StubVaultPutAdapter));
     registry.register(Box::new(StubVaultRotateAdapter));

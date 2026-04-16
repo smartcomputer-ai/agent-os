@@ -24,7 +24,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for BlobGetAdapter<S> 
         aos_effects::EffectKind::BLOB_GET
     }
 
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         let params: BlobGetParams = serde_cbor::from_slice(&intent.params_cbor)?;
         let hash = Hash::from_hex_str(params.blob_ref.as_str())?;
         let bytes = self.store.get_blob(hash)?;

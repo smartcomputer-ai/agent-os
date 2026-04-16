@@ -460,6 +460,13 @@ impl Journal {
         }
     }
 
+    pub fn with_retained_from(retained_from: JournalSeq) -> Self {
+        Self {
+            retained_from,
+            entries: VecDeque::new(),
+        }
+    }
+
     pub fn from_entries(entries: &[OwnedJournalEntry]) -> Result<Self, JournalError> {
         if entries.is_empty() {
             return Ok(Self::new());
@@ -649,5 +656,12 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, JournalError::Corrupt(_)));
+    }
+
+    #[test]
+    fn with_retained_from_preserves_next_seq_for_empty_journal() {
+        let journal = Journal::with_retained_from(42);
+        assert_eq!(journal.bounds().retained_from, 42);
+        assert_eq!(journal.bounds().next_seq, 42);
     }
 }

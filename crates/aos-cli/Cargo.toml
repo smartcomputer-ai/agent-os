@@ -12,7 +12,6 @@ aos-cbor = { path = "../aos-cbor" }
 aos-kernel = { path = "../aos-kernel" }
 aos-node = { path = "../aos-node" }
 aos-sys = { path = "../aos-sys" }
-aos-runtime = { path = "../aos-runtime" }
 
 anyhow = "1"
 base64 = "0.22"

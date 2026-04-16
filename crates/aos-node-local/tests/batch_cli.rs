@@ -1,7 +1,5 @@
 mod common;
-
-#[path = "../../aos-runtime/tests/helpers.rs"]
-mod runtime_helpers;
+mod support;
 
 use std::process::Command;
 use std::sync::Arc;
@@ -10,49 +8,19 @@ use aos_cbor::Hash;
 use aos_effect_types::{GovPatchInput, GovProposeParams};
 use aos_kernel::Store;
 use aos_kernel::governance::ManifestPatch;
-use aos_node::{CommandRecord, CreateWorldRequest, CreateWorldSource};
-use aos_node_local::{FsCas, LocalControl, LocalStatePaths};
-use aos_runtime::manifest_loader::store_loaded_manifest;
+use aos_node::CommandRecord;
+use aos_node::{FsCas, LocalControl, LocalStatePaths};
 use base64::Engine;
-use runtime_helpers::{fixtures, simple_state_manifest};
 use serde_json::Value;
 
 use common::world;
-
-fn copy_manifest_module_blobs(
-    source: &std::sync::Arc<fixtures::TestStore>,
-    target: &FsCas,
-    loaded: &aos_kernel::LoadedManifest,
-) -> Result<(), Box<dyn std::error::Error>> {
-    for module in loaded.modules.values() {
-        let hash = aos_cbor::Hash::from_hex_str(module.wasm_hash.as_str())?;
-        let bytes = source.get_blob(hash)?;
-        let stored = target.put_blob(&bytes)?;
-        assert_eq!(stored, hash, "copied wasm blob hash mismatch");
-    }
-    Ok(())
-}
 
 fn bootstrap_real_world(
     state_root: &std::path::Path,
 ) -> Result<(Arc<LocalControl>, aos_node::WorldId), Box<dyn std::error::Error>> {
     let control = LocalControl::open_batch(state_root)?;
-
     let paths = LocalStatePaths::new(state_root.to_path_buf());
-    let cas = FsCas::open_with_paths(&paths)?;
-    let manifest_store = fixtures::new_mem_store();
-    let loaded = simple_state_manifest(&manifest_store);
-    copy_manifest_module_blobs(&manifest_store, &cas, &loaded)?;
-    let manifest_hash = store_loaded_manifest(&cas, &loaded)?;
-
-    let created = control.create_world(CreateWorldRequest {
-        world_id: Some(world()),
-        universe_id: aos_node::UniverseId::nil(),
-        created_at_ns: 42,
-        source: CreateWorldSource::Manifest {
-            manifest_hash: manifest_hash.to_hex(),
-        },
-    })?;
+    let created = support::create_simple_world(&control, &paths, world(), 42)?;
     Ok((control, created.record.world_id))
 }
 

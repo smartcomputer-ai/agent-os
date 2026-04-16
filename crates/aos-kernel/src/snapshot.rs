@@ -197,6 +197,8 @@ pub struct WorkflowReceiptSnapshot {
     pub module_version: Option<String>,
 }
 
+pub type OpenEffectSnapshot = WorkflowReceiptSnapshot;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum WorkflowStatusSnapshot {
     Running,

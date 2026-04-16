@@ -5,19 +5,18 @@ use aos_cbor::Hash;
 use aos_kernel::{
     CellProjectionDelta, Store, WorkspaceProjectionDelta, WorkspaceProjectionDeltaState,
 };
-use aos_node::{CborPayload, SnapshotRecord, SnapshotSelector, WorldId};
-use aos_runtime::WorldHost;
+use aos_node::{CborPayload, SnapshotRecord, WorldId};
 use serde::Deserialize;
+use uuid::Uuid;
 
+use crate::config::ProjectionCommitMode;
 use crate::kafka::{
-    CellProjectionUpsert, ProjectionKey, ProjectionRecord, ProjectionValue,
-    WorkspaceProjectionUpsert, WorldMetaProjection,
-};
-use crate::materializer::{
-    CellStateProjectionRecord, WorkspaceRegistryProjectionRecord, WorkspaceVersionProjectionRecord,
+    CellProjectionUpsert, CellStateProjectionRecord, ProjectionKey, ProjectionRecord,
+    ProjectionValue, WorkspaceProjectionUpsert, WorkspaceRegistryProjectionRecord,
+    WorkspaceVersionProjectionRecord, WorldMetaProjection,
 };
 
-use super::types::{HostedWorkerRuntimeInner, WorkerError};
+use super::types::{ActiveWorld, HostedWorkerCore, ProjectionContinuity, WorkerError};
 
 #[derive(Debug, Default, Deserialize)]
 struct WorkspaceHistoryState {
@@ -33,7 +32,45 @@ struct WorkspaceCommitMetaState {
     created_at: u64,
 }
 
-impl HostedWorkerRuntimeInner {
+impl HostedWorkerCore {
+    pub(super) fn schedule_projection_updates_for_worlds(
+        &mut self,
+        world_ids: &[WorldId],
+    ) -> Result<(), WorkerError> {
+        match self.projection_commit_mode {
+            ProjectionCommitMode::Inline => self.emit_projection_updates_for_worlds(world_ids),
+            ProjectionCommitMode::Background => {
+                self.mark_projection_dirty_worlds(world_ids);
+                if self.scheduler_tx.is_none() {
+                    while self.drain_background_projection_updates()? {}
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub(super) fn drain_background_projection_updates(&mut self) -> Result<bool, WorkerError> {
+        if self.projection_commit_mode != ProjectionCommitMode::Background {
+            return Ok(false);
+        }
+        let Some(world_id) = self.next_projection_dirty_world() else {
+            return Ok(false);
+        };
+
+        match self.emit_projection_updates_for_worlds(&[world_id]) {
+            Ok(()) => Ok(true),
+            Err(err) => {
+                self.mark_projection_dirty_world(world_id);
+                tracing::warn!(
+                    error = %err,
+                    world_id = %world_id,
+                    "background projection publish failed; world remains dirty"
+                );
+                Ok(false)
+            }
+        }
+    }
+
     pub(super) fn emit_projection_updates_for_worlds(
         &mut self,
         world_ids: &[WorldId],
@@ -68,6 +105,27 @@ impl HostedWorkerRuntimeInner {
         Ok(())
     }
 
+    fn mark_projection_dirty_worlds(&mut self, world_ids: &[WorldId]) {
+        for world_id in world_ids {
+            self.mark_projection_dirty_world(*world_id);
+        }
+    }
+
+    fn mark_projection_dirty_world(&mut self, world_id: WorldId) {
+        if self.state.projection_dirty_set.insert(world_id) {
+            self.state.projection_dirty_worlds.push_back(world_id);
+        }
+    }
+
+    fn next_projection_dirty_world(&mut self) -> Option<WorldId> {
+        while let Some(world_id) = self.state.projection_dirty_worlds.pop_front() {
+            if self.state.projection_dirty_set.remove(&world_id) {
+                return Some(world_id);
+            }
+        }
+        None
+    }
+
     fn build_projection_snapshot_for_world(
         &mut self,
         world_id: WorldId,
@@ -89,8 +147,6 @@ impl HostedWorkerRuntimeInner {
                 )
             };
         let workflow_modules = workflow_modules.into_iter().collect::<BTreeSet<_>>();
-        let active_baseline =
-            self.select_source_snapshot(universe_id, world_id, &SnapshotSelector::ActiveBaseline)?;
         let world =
             self.state
                 .active_worlds
@@ -99,8 +155,9 @@ impl HostedWorkerRuntimeInner {
                     universe_id,
                     world_id,
                 })?;
-        let journal_head = world.host.heights().head;
-        let manifest_hash = world.host.kernel().manifest_hash().to_hex();
+        let active_baseline = world.active_baseline.clone();
+        let journal_head = world.journal_head();
+        let manifest_hash = world.kernel.manifest_hash().to_hex();
 
         let mut records = Vec::new();
         records.push(ProjectionRecord {
@@ -118,7 +175,7 @@ impl HostedWorkerRuntimeInner {
 
         if !world.projection_bootstrapped {
             records.extend(
-                materialize_workspaces(&world.host, journal_head)?
+                materialize_workspaces(world, journal_head)?
                     .into_iter()
                     .map(|workspace| ProjectionRecord {
                         key: ProjectionKey::Workspace {
@@ -132,7 +189,7 @@ impl HostedWorkerRuntimeInner {
                     }),
             );
 
-            for cell in materialize_cells(&world.host, &store, &workflow_modules)? {
+            for cell in materialize_cells(world, &store, &workflow_modules)? {
                 records.push(ProjectionRecord {
                     key: ProjectionKey::Cell {
                         world_id,
@@ -147,8 +204,8 @@ impl HostedWorkerRuntimeInner {
                 });
             }
 
-            let _ = world.host.drain_workspace_projection_deltas()?;
-            let _ = world.host.drain_cell_projection_deltas();
+            let _ = world.drain_workspace_projection_deltas()?;
+            let _ = world.drain_cell_projection_deltas();
             return Ok(ProjectionEmissionPlan {
                 records,
                 published: ProjectionPublishedState {
@@ -163,7 +220,7 @@ impl HostedWorkerRuntimeInner {
             world_id,
             &projection_token,
             journal_head,
-            world.host.drain_workspace_projection_deltas()?,
+            world.drain_workspace_projection_deltas()?,
         ));
         records.extend(cell_delta_projection_records(
             world_id,
@@ -171,7 +228,7 @@ impl HostedWorkerRuntimeInner {
             &workflow_modules,
             &store,
             journal_head,
-            world.host.drain_cell_projection_deltas(),
+            world.drain_cell_projection_deltas(),
         )?);
 
         Ok(ProjectionEmissionPlan {
@@ -182,6 +239,90 @@ impl HostedWorkerRuntimeInner {
                 active_baseline,
             },
         })
+    }
+
+    pub(super) fn prepare_projection_continuity_for_reopen(
+        &mut self,
+        world_id: WorldId,
+        journal_head: u64,
+        active_baseline: &SnapshotRecord,
+    ) -> Result<bool, WorkerError> {
+        let world =
+            self.state
+                .registered_worlds
+                .get_mut(&world_id)
+                .ok_or(WorkerError::UnknownWorld {
+                    universe_id: self.infra.default_universe_id,
+                    world_id,
+                })?;
+        let continuity_matches = world
+            .projection_continuity
+            .as_ref()
+            .is_some_and(|continuity| {
+                continuity.world_epoch == world.world_epoch
+                    && continuity.last_projected_head == journal_head
+                    && continuity.active_baseline == *active_baseline
+            });
+        if continuity_matches {
+            return Ok(true);
+        }
+        world.projection_token = Uuid::new_v4().to_string();
+        world.projection_continuity = None;
+        Ok(false)
+    }
+
+    pub(super) fn record_projection_publish_success(
+        &mut self,
+        world_id: WorldId,
+        journal_head: u64,
+        active_baseline: SnapshotRecord,
+    ) -> Result<(), WorkerError> {
+        let world_epoch = self
+            .state
+            .registered_worlds
+            .get(&world_id)
+            .ok_or(WorkerError::UnknownWorld {
+                universe_id: self.infra.default_universe_id,
+                world_id,
+            })?
+            .world_epoch;
+        self.state
+            .registered_worlds
+            .get_mut(&world_id)
+            .ok_or(WorkerError::UnknownWorld {
+                universe_id: self.infra.default_universe_id,
+                world_id,
+            })?
+            .projection_continuity = Some(ProjectionContinuity {
+            world_epoch,
+            last_projected_head: journal_head,
+            active_baseline,
+        });
+        if let Some(active_world) = self.state.active_worlds.get_mut(&world_id) {
+            active_world.projection_bootstrapped = true;
+        }
+        Ok(())
+    }
+
+    pub(super) fn invalidate_projection_continuity(
+        &mut self,
+        world_id: WorldId,
+    ) -> Result<(), WorkerError> {
+        let new_token = Uuid::new_v4().to_string();
+        {
+            let world = self.state.registered_worlds.get_mut(&world_id).ok_or(
+                WorkerError::UnknownWorld {
+                    universe_id: self.infra.default_universe_id,
+                    world_id,
+                },
+            )?;
+            world.projection_token = new_token;
+            world.projection_continuity = None;
+        }
+        if let Some(active_world) = self.state.active_worlds.get_mut(&world_id) {
+            active_world.projection_bootstrapped = false;
+        }
+        Ok(())
     }
 }
 
@@ -202,19 +343,19 @@ struct MaterializedCellProjection {
 }
 
 fn materialize_cells<S: Store + 'static>(
-    host: &WorldHost<S>,
+    world: &ActiveWorld,
     store: &Arc<S>,
     workflow_modules: &BTreeSet<String>,
 ) -> Result<Vec<MaterializedCellProjection>, WorkerError> {
     let mut rows = Vec::new();
     for workflow in workflow_modules {
-        let listed = host.list_cells(workflow)?;
+        let listed = world.list_cells(workflow)?;
         if listed.is_empty() {
-            if let Some(state_bytes) = host.state(workflow, Some(&[])) {
+            if let Some(state_bytes) = world.state(workflow, Some(&[])) {
                 let state_hash = Hash::of_bytes(&state_bytes);
                 rows.push(MaterializedCellProjection {
                     record: CellStateProjectionRecord {
-                        journal_head: host.heights().head,
+                        journal_head: world.journal_head(),
                         workflow: workflow.clone(),
                         key_hash: Hash::of_bytes(&[]).as_bytes().to_vec(),
                         key_bytes: Vec::new(),
@@ -233,13 +374,13 @@ fn materialize_cells<S: Store + 'static>(
         }
 
         for cell in listed {
-            let Some(state_bytes) = host.state(workflow, Some(&cell.key_bytes)) else {
+            let Some(state_bytes) = world.state(workflow, Some(&cell.key_bytes)) else {
                 continue;
             };
             let state_hash = Hash::from(cell.state_hash);
             rows.push(MaterializedCellProjection {
                 record: CellStateProjectionRecord {
-                    journal_head: host.heights().head,
+                    journal_head: world.journal_head(),
                     workflow: workflow.clone(),
                     key_hash: cell.key_hash.to_vec(),
                     key_bytes: cell.key_bytes,
@@ -276,15 +417,16 @@ fn state_payload_for_bytes(
     }
 }
 
-fn materialize_workspaces<S: Store + 'static>(
-    host: &WorldHost<S>,
+fn materialize_workspaces(
+    world: &ActiveWorld,
     journal_head: u64,
 ) -> Result<Vec<WorkspaceRegistryProjectionRecord>, WorkerError> {
-    let mut workspaces = host
+    let mut workspaces = world
         .list_cells("sys/Workspace@1")?
         .into_iter()
         .filter_map(|cell| {
-            host.state("sys/Workspace@1", Some(&cell.key_bytes))
+            world
+                .state("sys/Workspace@1", Some(&cell.key_bytes))
                 .map(|bytes| (cell.key_bytes, bytes))
         })
         .map(|(key_bytes, bytes)| {

@@ -18,6 +18,7 @@ use crate::output::{OutputOpts, print_success};
 
 const DEFAULT_HOSTED_PROFILE: &str = "hosted";
 const DEFAULT_HOSTED_BIND: &str = "127.0.0.1:9011";
+const DEFAULT_HOSTED_STARTUP_WAIT_MS: u64 = 30_000;
 
 #[derive(Args, Debug)]
 #[command(about = "Manage the locally hosted AgentOS node")]
@@ -62,7 +63,7 @@ struct HostedUpArgs {
     #[arg(long)]
     background: bool,
     /// Milliseconds to wait for health before considering startup failed.
-    #[arg(long, default_value_t = 10_000)]
+    #[arg(long, default_value_t = DEFAULT_HOSTED_STARTUP_WAIT_MS)]
     wait_ms: u64,
     /// Number of hosted worker partitions.
     #[arg(long, env = "AOS_PARTITION_COUNT", default_value_t = 1)]
@@ -141,6 +142,22 @@ struct HostedStatusView {
     version: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct HealthInfo {
+    service: String,
+    version: String,
+    #[serde(default)]
+    pid: Option<u32>,
+    #[serde(default)]
+    state_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct DiscoveredHostedRuntime {
+    state: HostedRuntimeState,
+    paths: HostedPaths,
+}
+
 pub(crate) async fn handle(
     global: &GlobalOpts,
     output: OutputOpts,
@@ -191,6 +208,49 @@ async fn handle_up(global: &GlobalOpts, output: OutputOpts, args: HostedUpArgs) 
             return print_success(output, serde_json::to_value(status)?, None, vec![]);
         }
         cleanup_stale_state(&paths)?;
+    }
+
+    if let Ok(health) = fetch_health(&api, 500).await {
+        if health.service == "aos-node-hosted" {
+            if let (Some(pid), Some(state_root)) = (health.pid, health.state_root.as_ref()) {
+                if paths_equivalent(state_root, &paths.state_root) && process_is_running(pid)? {
+                    let recovered = HostedRuntimeState {
+                        pid,
+                        api: api.clone(),
+                        bind: args.bind.to_string(),
+                        profile: args.profile.clone(),
+                        state_root: paths.state_root.clone(),
+                        log: paths.log.clone(),
+                        partition_count: args.partition_count.max(1),
+                        default_universe_id: args.default_universe_id,
+                    };
+                    save_hosted_state(&paths, &recovered)?;
+                    ensure_hosted_profile(
+                        global,
+                        &args.profile,
+                        &api,
+                        args.default_universe_id,
+                        args.select,
+                    )?;
+                    let status = status_from_state(&paths, Some(&recovered), 500).await?;
+                    return print_success(output, serde_json::to_value(status)?, None, vec![]);
+                }
+                return Err(anyhow!(
+                    "hosted bind {} is already served by another state root ({})",
+                    args.bind,
+                    state_root.display()
+                ));
+            }
+            return Err(anyhow!(
+                "hosted bind {} is already served by an incompatible hosted node",
+                args.bind
+            ));
+        }
+        return Err(anyhow!(
+            "hosted bind {} is already served by {}",
+            args.bind,
+            health.service
+        ));
     }
 
     ensure_hosted_profile(
@@ -303,11 +363,24 @@ async fn handle_status(output: OutputOpts, args: HostedRuntimeArgs) -> Result<()
 
 async fn handle_down(global: &GlobalOpts, output: OutputOpts, args: HostedDownArgs) -> Result<()> {
     let paths = resolve_hosted_paths(args.runtime.root.as_deref())?;
-    let state = load_hosted_state(&paths)?;
-    let Some(state) = state else {
+    let discovered = if let Some(state) = load_hosted_state(&paths)? {
+        Some(DiscoveredHostedRuntime {
+            paths: resolve_hosted_paths_from_state_root(&state.state_root)?,
+            state,
+        })
+    } else if args.runtime.root.is_none() {
+        discover_hosted_runtime_for_down(global, &args, &paths).await?
+    } else {
+        None
+    };
+    let Some(discovered) = discovered else {
         let status = status_from_state(&paths, None, 200).await?;
         return print_success(output, serde_json::to_value(status)?, None, vec![]);
     };
+    let DiscoveredHostedRuntime {
+        state,
+        paths: runtime_paths,
+    } = discovered;
 
     terminate_process(state.pid, false)?;
     wait_for_process_exit(state.pid, args.wait_ms).await?;
@@ -315,9 +388,9 @@ async fn handle_down(global: &GlobalOpts, output: OutputOpts, args: HostedDownAr
         terminate_process(state.pid, true)?;
         wait_for_process_exit(state.pid, args.wait_ms).await?;
     }
-    cleanup_stale_state(&paths)?;
+    cleanup_stale_state(&runtime_paths)?;
     clear_current_profile_if_matches(global, &args.profile)?;
-    let status = status_from_state(&paths, None, 200).await?;
+    let status = status_from_state(&runtime_paths, None, 200).await?;
     print_success(output, serde_json::to_value(status)?, None, vec![])
 }
 
@@ -402,6 +475,118 @@ fn cleanup_stale_state(paths: &HostedPaths) -> Result<()> {
     Ok(())
 }
 
+fn resolve_hosted_paths_from_state_root(state_root: &Path) -> Result<HostedPaths> {
+    let Some(root) = state_root.parent() else {
+        return Err(anyhow!(
+            "hosted state root '{}' has no parent runtime root",
+            state_root.display()
+        ));
+    };
+    resolve_hosted_paths(Some(root))
+}
+
+async fn discover_hosted_runtime_for_down(
+    global: &GlobalOpts,
+    args: &HostedDownArgs,
+    fallback_paths: &HostedPaths,
+) -> Result<Option<DiscoveredHostedRuntime>> {
+    if let Some(runtime) =
+        discover_hosted_runtime_via_profile(global, &args.profile, fallback_paths).await?
+    {
+        return Ok(Some(runtime));
+    }
+    let mut candidate_apis = Vec::new();
+    if let Some(api) = global.api.as_ref() {
+        push_api_candidate(&mut candidate_apis, api);
+    }
+    push_api_candidate(
+        &mut candidate_apis,
+        &format!("http://{}", DEFAULT_HOSTED_BIND),
+    );
+    for api in candidate_apis {
+        if let Some(runtime) =
+            discover_hosted_runtime_via_api(&api, &args.profile, fallback_paths, None).await?
+        {
+            return Ok(Some(runtime));
+        }
+    }
+    Ok(None)
+}
+
+async fn discover_hosted_runtime_via_profile(
+    global: &GlobalOpts,
+    profile_name: &str,
+    fallback_paths: &HostedPaths,
+) -> Result<Option<DiscoveredHostedRuntime>> {
+    let config_paths = ConfigPaths::resolve(global.config.as_deref())?;
+    let config = load_config(&config_paths)?;
+    let Some(profile) = config.profiles.get(profile_name) else {
+        return Ok(None);
+    };
+    let default_universe_id = profile
+        .universe
+        .as_deref()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(aos_node::local_universe_id);
+    discover_hosted_runtime_via_api(
+        &profile.api,
+        profile_name,
+        fallback_paths,
+        Some(default_universe_id),
+    )
+    .await
+}
+
+async fn discover_hosted_runtime_via_api(
+    api: &str,
+    profile_name: &str,
+    fallback_paths: &HostedPaths,
+    default_universe_id: Option<UniverseId>,
+) -> Result<Option<DiscoveredHostedRuntime>> {
+    let Ok(health) = fetch_health(api, 500).await else {
+        return Ok(None);
+    };
+    if health.service != "aos-node-hosted" {
+        return Ok(None);
+    }
+    let bind = bind_from_api(api).unwrap_or_else(|| {
+        api.trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .trim_end_matches('/')
+            .to_string()
+    });
+    let pid = match health.pid {
+        Some(pid) => Some(pid),
+        None => pid_listening_on_bind(&bind)?,
+    };
+    let Some(pid) = pid else {
+        return Ok(None);
+    };
+    if !process_is_running(pid)? {
+        return Ok(None);
+    }
+    let runtime_paths = if let Some(state_root) = health.state_root.as_ref() {
+        resolve_hosted_paths_from_state_root(state_root)?
+    } else {
+        fallback_paths.clone()
+    };
+    Ok(Some(DiscoveredHostedRuntime {
+        state: HostedRuntimeState {
+            pid,
+            api: api.to_string(),
+            bind,
+            profile: profile_name.to_string(),
+            state_root: health
+                .state_root
+                .unwrap_or_else(|| runtime_paths.state_root.clone()),
+            log: runtime_paths.log.clone(),
+            partition_count: 1,
+            default_universe_id: default_universe_id.unwrap_or_else(aos_node::local_universe_id),
+        },
+        paths: runtime_paths,
+    }))
+}
+
 async fn status_from_state(
     paths: &HostedPaths,
     state: Option<&HostedRuntimeState>,
@@ -414,19 +599,17 @@ async fn status_from_state(
         false
     };
     let health = if let Some(state) = state {
-        fetch_health(&state.api, health_timeout_ms).await.ok()
+        fetch_health(&state.api, health_timeout_ms)
+            .await
+            .ok()
+            .filter(|health| health_matches_runtime(health, state.pid, &state.state_root))
     } else {
         None
-    };
-    let bind_reachable = if let Some(state) = state {
-        probe_bind(&state.bind, health_timeout_ms).await
-    } else {
-        false
     };
     Ok(HostedStatusView {
         root: paths.root.clone(),
         running,
-        healthy: health.is_some() || bind_reachable,
+        healthy: health.is_some(),
         pid,
         api: state.map(|state| state.api.clone()),
         bind: state.map(|state| state.bind.clone()),
@@ -435,20 +618,12 @@ async fn status_from_state(
         log: state.map(|state| state.log.clone()),
         partition_count: state.map(|state| state.partition_count),
         default_universe_id: state.map(|state| state.default_universe_id.to_string()),
-        service: health
-            .as_ref()
-            .and_then(|value| value.get("service"))
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string),
-        version: health
-            .as_ref()
-            .and_then(|value| value.get("version"))
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string),
+        service: health.as_ref().map(|value| value.service.clone()),
+        version: health.as_ref().map(|value| value.version.clone()),
     })
 }
 
-async fn fetch_health(api: &str, timeout_ms: u64) -> Result<serde_json::Value> {
+async fn fetch_health(api: &str, timeout_ms: u64) -> Result<HealthInfo> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms.max(1)))
         .build()
@@ -468,16 +643,67 @@ async fn fetch_health(api: &str, timeout_ms: u64) -> Result<serde_json::Value> {
         .context("decode hosted node health response")
 }
 
-async fn probe_bind(bind: &str, timeout_ms: u64) -> bool {
-    let Ok(addr) = bind.parse::<SocketAddr>() else {
-        return false;
+fn health_matches_runtime(health: &HealthInfo, pid: u32, state_root: &Path) -> bool {
+    health.pid == Some(pid)
+        && health
+            .state_root
+            .as_ref()
+            .is_some_and(|root| paths_equivalent(root, state_root))
+}
+
+fn paths_equivalent(lhs: &Path, rhs: &Path) -> bool {
+    match (lhs.canonicalize(), rhs.canonicalize()) {
+        (Ok(lhs), Ok(rhs)) => lhs == rhs,
+        _ => lhs == rhs,
+    }
+}
+
+fn push_api_candidate(candidates: &mut Vec<String>, api: &str) {
+    if !candidates.iter().any(|existing| existing == api) {
+        candidates.push(api.to_string());
+    }
+}
+
+fn bind_from_api(api: &str) -> Option<String> {
+    let url = reqwest::Url::parse(api).ok()?;
+    let host = url.host_str()?;
+    let port = url.port_or_known_default()?;
+    Some(format!("{host}:{port}"))
+}
+
+fn pid_listening_on_bind(bind: &str) -> Result<Option<u32>> {
+    let Some((_, port)) = bind.rsplit_once(':') else {
+        return Ok(None);
     };
-    tokio::time::timeout(
-        Duration::from_millis(timeout_ms.max(1)),
-        tokio::net::TcpStream::connect(addr),
-    )
-    .await
-    .is_ok_and(|result| result.is_ok())
+    #[cfg(unix)]
+    {
+        let output = match ProcessCommand::new("lsof")
+            .args(["-nP", "-tiTCP", &format!(":{port}"), "-sTCP:LISTEN"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err).with_context(|| format!("inspect listener for {bind}")),
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let pid = stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .and_then(|line| line.parse::<u32>().ok());
+        return Ok(pid);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = port;
+        Ok(None)
+    }
 }
 
 async fn wait_for_healthy_status(
@@ -491,6 +717,9 @@ async fn wait_for_healthy_status(
         if status.healthy {
             return Ok(status);
         }
+        if let Some(reason) = health_incompatibility_reason(state).await? {
+            return Err(anyhow!("{reason}"));
+        }
         if !status.running {
             return Err(anyhow!(
                 "hosted node process {} exited before becoming healthy",
@@ -499,12 +728,45 @@ async fn wait_for_healthy_status(
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(anyhow!(
-                "hosted node did not become healthy within {} ms",
+                "hosted node did not become healthy within {} ms; retry with --wait-ms if cold start needs more time",
                 wait_ms.max(1)
             ));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+async fn health_incompatibility_reason(state: &HostedRuntimeState) -> Result<Option<String>> {
+    let Ok(health) = fetch_health(&state.api, 500).await else {
+        return Ok(None);
+    };
+    if health.service != "aos-node-hosted" {
+        return Ok(Some(format!(
+            "hosted bind {} is served by {} instead of aos-node-hosted",
+            state.bind, health.service
+        )));
+    }
+    let Some(pid) = health.pid else {
+        return Ok(Some(format!(
+            "hosted node at {} responded to /v1/health without pid/state_root; this usually means `aos-node-hosted` is older than `aos`. Rebuild it with `cargo build -p aos-node-hosted --bin aos-node-hosted --features legacy-bins`",
+            state.api
+        )));
+    };
+    let Some(state_root) = health.state_root.as_ref() else {
+        return Ok(Some(format!(
+            "hosted node at {} responded to /v1/health without pid/state_root; this usually means `aos-node-hosted` is older than `aos`. Rebuild it with `cargo build -p aos-node-hosted --bin aos-node-hosted --features legacy-bins`",
+            state.api
+        )));
+    };
+    if pid != state.pid || !paths_equivalent(state_root, &state.state_root) {
+        return Ok(Some(format!(
+            "hosted bind {} is served by another hosted runtime (pid {}, state root {})",
+            state.bind,
+            pid,
+            state_root.display()
+        )));
+    }
+    Ok(None)
 }
 
 fn ensure_hosted_profile(
@@ -630,5 +892,38 @@ async fn wait_for_process_exit(pid: u32, wait_ms: u64) -> Result<()> {
             return Err(anyhow!("process {pid} did not exit before timeout"));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser, Debug)]
+    struct TestCli {
+        #[command(flatten)]
+        args: HostedArgs,
+    }
+
+    #[test]
+    fn hosted_up_default_wait_budget_covers_cold_start_replay() {
+        let cli = TestCli::parse_from(["test", "up"]);
+        let HostedCommand::Up(args) = cli.args.cmd else {
+            panic!("expected hosted up command");
+        };
+        assert_eq!(args.wait_ms, DEFAULT_HOSTED_STARTUP_WAIT_MS);
+    }
+
+    #[test]
+    fn bind_from_api_extracts_socket_address() {
+        assert_eq!(
+            bind_from_api("http://127.0.0.1:9011"),
+            Some("127.0.0.1:9011".to_string())
+        );
+        assert_eq!(
+            bind_from_api("https://example.test"),
+            Some("example.test:443".to_string())
+        );
     }
 }

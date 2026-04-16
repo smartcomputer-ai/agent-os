@@ -5,10 +5,10 @@ extern crate alloc;
 
 use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
 use aos_wasm_sdk::{
-    EffectReceiptEnvelope, ReduceError, Workflow, WorkflowCtx, aos_workflow, aos_variant,
+    EffectReceiptEnvelope, HttpRequestParams, ReduceError, Workflow, WorkflowCtx,
+    aos_workflow, aos_variant,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 const HTTP_REQUEST_EFFECT: &str = "http.request";
 
@@ -63,14 +63,6 @@ aos_variant! {
     },
     Receipt(EffectReceiptEnvelope),
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct HttpRequestParams {
-    method: String,
-    url: String,
-    headers: BTreeMap<String, String>,
-    body_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,17 +139,23 @@ fn queue_http_request(
     ctx: &mut WorkflowCtx<AggregatorState, ()>,
     target: AggregationTarget,
 ) -> Result<(), ReduceError> {
+    let issuer_ref = target.name.clone();
     let params = HttpRequestParams {
         method: target.method,
         url: target.url,
         headers: BTreeMap::new(),
         body_ref: None,
     };
-    let params_hash = hash_request_params(&params)?;
-    ctx.state.pending_targets.push(target.name.clone());
-    ctx.state.pending_by_hash.insert(params_hash, target.name);
-    ctx.effects()
-        .emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+    ctx.state.pending_targets.push(target.name);
+    ctx.state
+        .pending_by_hash
+        .insert(issuer_ref.clone(), issuer_ref.clone());
+    ctx.effects().emit_raw_with_issuer_ref(
+        HTTP_REQUEST_EFFECT,
+        &params,
+        Some("default"),
+        Some(issuer_ref.as_str()),
+    );
     Ok(())
 }
 
@@ -171,10 +169,10 @@ fn handle_receipt(
     if envelope.effect_kind != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
-    let Some(params_hash) = envelope.params_hash.as_ref() else {
-        return Err(ReduceError::new("missing params_hash on receipt"));
+    let Some(issuer_ref) = envelope.issuer_ref.as_ref() else {
+        return Err(ReduceError::new("missing issuer_ref on receipt"));
     };
-    let Some(source) = ctx.state.pending_by_hash.remove(params_hash.as_str()) else {
+    let Some(source) = ctx.state.pending_by_hash.remove(issuer_ref.as_str()) else {
         // Ignore duplicates or stale receipts for already-settled requests.
         return Ok(());
     };
@@ -200,23 +198,4 @@ fn handle_receipt(
     }
 
     Ok(())
-}
-
-fn hash_request_params(params: &HttpRequestParams) -> Result<String, ReduceError> {
-    let bytes = serde_cbor::to_vec(params)
-        .map_err(|_| ReduceError::new("failed to encode http.request params"))?;
-    let digest = Sha256::digest(&bytes);
-    let mut hex = String::with_capacity(64);
-    for byte in digest {
-        hex.push(nibble_to_hex((byte >> 4) & 0x0f));
-        hex.push(nibble_to_hex(byte & 0x0f));
-    }
-    Ok(format!("sha256:{hex}"))
-}
-
-fn nibble_to_hex(nibble: u8) -> char {
-    match nibble {
-        0..=9 => (b'0' + nibble) as char,
-        _ => (b'a' + (nibble - 10)) as char,
-    }
 }

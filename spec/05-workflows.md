@@ -28,20 +28,25 @@ Workflow modules own:
 - transition logic
 - retry/compensation policy decisions
 
-Kernel + effect manager own:
+Kernel + execution runtime own:
 - deterministic stepping
 - capability checks
 - policy checks
-- effect queueing and receipt ingestion
+- effect emission and open-work tracking
+- continuation admission and receipt ingestion
 
-Adapters own:
+Executors/adapters own:
 - side-effect execution
+- non-authoritative progress reporting
 - signed receipt production
 
 This split keeps orchestration logic in workflow code while preserving a small deterministic runtime:
 - workflow code decides what should happen
 - the kernel decides whether and when it is allowed to happen
-- adapters perform the effect and return an auditable result
+- executors perform the effect and return auditable continuations
+
+The owner/executor seam for open external work is defined in
+[spec/07-external-execution.md](07-external-execution.md).
 
 ## 3) Normative Runtime Contract
 
@@ -127,9 +132,10 @@ No guarantee of complete static future-effect prediction for unexecuted branches
 2. Router evaluates `routing.subscriptions` and delivers to matching workflow modules.
 3. Workflow `step` runs deterministically with current state + event.
 4. Workflow returns new state, domain events, and effect intents.
-5. Kernel enforces `effects_emitted` allowlist, then caps and policy.
-6. Adapters execute allowed intents and return signed receipts.
-7. Kernel canonicalizes receipt payload and routes continuation to recorded origin instance.
+5. Kernel enforces `effects_emitted` allowlist, then caps and policy, and records open work.
+6. Executors may run allowed external work independently and emit stream frames and a terminal
+   receipt.
+7. Kernel canonicalizes admitted continuations and routes them to the recorded origin instance.
 
 ## 5) Workflow Module Contract
 
