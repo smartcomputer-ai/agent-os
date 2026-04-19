@@ -15,6 +15,7 @@ This file provides guidance to coding agents when working with code in this repo
 3. **spec/03-air.md** — **CRITICAL** AIR v1 spec (post-plan active model).
 4. **spec/04-workflows.md** — Workflow module semantics and orchestration patterns.
 5. **spec/05-effects.md** — Effects, async execution, durable open work, and continuation admission.
+6. **spec/06-backends.md** — Backend contracts, SQLite/Kafka journals, local/object-store CAS, and recovery.
 
 Future protocol notes:
 - **spec/20-gc.md** — GC/reachability contract draft; deletion GC is not implemented yet.

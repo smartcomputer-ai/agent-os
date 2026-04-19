@@ -18,14 +18,7 @@ The current runtime is written in Rust and supports the following features:
 - **AIR (Agent Intermediate Representation)**: Typed control plane for modules, plans, schemas, policies, and capabilities (homoiconic in spirit, where agents can read and edit their own runtime)
 - **Capability security**: No ambient authority. All effects are scoped, budgeted, and gated by policy
 - **Full auditability**: Signed receipts for every external action enable complete forensic replay
-- **Safe self-modification**: Governed evolution through a constitutional loop that works as follows:
-  1. **propose**: Draft changes to code, policies, or workflows
-  2. **shadow**: Simulate changes in isolated environment
-  3. **approve**: Policy-gated authorization
-  4. **apply**: Atomically update the world state
-  5. **execute**: Run effects with capability constraints
-  6. **receipt**: Capture signed outcomes
-  7. **audit**: Full provenance from intent to effect
+- **Safe self-modification**: Governed evolution through propose, shadow, approve, apply, execute, receipt, and audit phases with policy gates and full provenance.
 
 ## Documentation
 
@@ -36,6 +29,7 @@ Start here:
 3. **[spec/03-air.md](spec/03-air.md)** — Complete AIR v1 spec (schemas, modules, capabilities, policies, manifests)
 4. **[spec/04-workflows.md](spec/04-workflows.md)** — Workflow module runtime contract, orchestration patterns, and keyed cells
 5. **[spec/05-effects.md](spec/05-effects.md)** — Async effects, durable open work, adapters, receipts, and continuation admission
+6. **[spec/06-backends.md](spec/06-backends.md)** — SQLite/Kafka journals, local/object-store CAS, checkpoint metadata, and recovery
 
 For implementation guidance, project structure, and coding conventions, see **[AGENTS.md](AGENTS.md)**.
 

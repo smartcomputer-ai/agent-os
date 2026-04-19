@@ -63,7 +63,11 @@ Receipts include the intent_hash and a logical height fence; late receipts that 
 
 ### Journal
 
-The journal consists of segment files with monotonic sequence numbers. Events are length‑prefixed, canonical CBOR. Segments are validated on load; corrupt segments are quarantined with clear diagnostics.
+The journal is a backend-neutral ordered sequence of world log frames. Each frame carries monotonic
+per-world sequence bounds and canonical CBOR kernel records. The unified node persists those frames
+through the selected backend: SQLite by default, or Kafka when explicitly configured. Backend
+storage layout, cursor handling, CAS choices, and recovery behavior are defined in
+[spec/06-backends.md](06-backends.md).
 
 The unified node presents the same logical journal contract through switchable backends. SQLite is the default local journal backend; Kafka is an explicit server journal backend. Worlds open by `(universe_id, world_id)`, restore from their active baseline/checkpoint, and replay journal frames from the selected backend while preserving the ordered semantics expected by the kernel.
 
