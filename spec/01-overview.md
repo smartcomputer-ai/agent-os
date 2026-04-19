@@ -68,18 +68,18 @@ AgentOS **is not** a general‑purpose programming language, compute lives in yo
 - **World**: The fundamental unit of computation and ownership. A world consists of:
   - An append‑only event log that drives all state changes
   - A materialized state snapshot after replaying the log
-  - A set of WASM modules (reducers) that define how state evolves
+  - A set of WASM workflow modules that define how state evolves
   - A structured control plane (AIR) that describes what exists and how it connects
 
   A world processes one event at a time, which makes reasoning about it straightforward. Horizontal scaling comes from running many worlds. Worlds can be forked, replayed, shadow‑run, rolled back, and exported as snapshots.
 
 - **AIR**: The typed, canonical "blueprint" for a world's control plane. It describes modules, effects, schemas, policies, and capabilities as structured data the kernel can inspect, validate, and simulate. Agents or humans modify AIR by proposing patches (diffs), which can be simulated and then applied, producing new log events and snapshots.
 
-- **Modules**: WASM artifacts. **Reducers** are deterministic state machines with a canonical signature: they consume an event and current state, then return new state and a list of effect intents. They cannot access the outside world directly; the host system executes effects if allowed by policy and capability. Pure components perform side‑effect‑free computation.
+- **Modules**: WASM artifacts. **Workflow modules** are deterministic state machines with a canonical signature: they consume an event and current state, then return new state, domain events, and effect intents. They cannot access the outside world directly; the host system executes effects if allowed by policy and capability. Pure components perform side‑effect‑free computation.
 
 - **Effects and adapters**: Explicit external actions—sending an email, calling an API, invoking an LLM, storing a blob. Each effect type is declared in the capability catalog and implemented by an external adapter. When an effect executes, the adapter produces a **receipt**—a signed record of what happened (parameters, response hash, timestamp, cost). Receipts are appended as events to the world log, preserving determinism on replay.
 
-- **Workspaces**: Named, versioned trees stored in reducer state for code and artifacts. Workflow modules and tooling use kernel-internal `workspace.*` effects to resolve, list, read, write, diff, and annotate trees deterministically; `aos push`/`aos pull` sync workspaces with the local filesystem.
+- **Workspaces**: Named, versioned trees stored in workflow state for code and artifacts. Workflow modules and tooling use kernel-internal `workspace.*` effects to resolve, list, read, write, diff, and annotate trees deterministically; `aos push`/`aos pull` sync workspaces with the local filesystem.
 
 - **Policy and capabilities**: Declarative rules and scoped tokens that gate effects. Capabilities define what kinds of effects are allowed (HTTP to specific hosts, LLM with model/token constraints, blob storage). Policies evaluate allow/deny decisions based on effect kind, capability, and origin (`workflow` vs `system` vs `governance`). Budget enforcement is deferred to a future milestone.
 
@@ -87,6 +87,6 @@ AgentOS **is not** a general‑purpose programming language, compute lives in yo
 
 ## First Version Scope
 
-The first version ships with a single‑threaded world with an append‑only journal and snapshots. AIR v1 defines core forms including **defschema**, **defmodule**, **defeffect**, **defcap**, and **defpolicy**, along with canonical encoding and typed patches. Deterministic WASM execution powers workflow modules and **pure modules** (`module_kind: "pure"`). Built-in adapters cover HTTP, blob/FS, timer, LLM, and kernel-resident introspection (`introspect.*`) guarded by the `query` capability. The kernel also ships a workspace registry (`sys/Workspace@1`) with deterministic tree effects (`workspace.*`) that power `aos ws` and `aos push`/`aos pull` syncing via `aos.sync.json`. Each comes with capabilities and signed receipts. Version 1.1 adds first-class Cells (keyed reducers) with per-key state and mailboxes. The constitutional loop and shadow runs protect the apply step, and a provenance "why graph" connects effects to state.
+The first version ships with a single‑threaded world with an append‑only journal and snapshots. AIR v1 defines core forms including **defschema**, **defmodule**, **defeffect**, **defcap**, and **defpolicy**, along with canonical encoding and typed patches. Deterministic WASM execution powers workflow modules and **pure modules** (`module_kind: "pure"`). Built-in adapters cover HTTP, blob/FS, timer, LLM, and kernel-resident introspection (`introspect.*`) guarded by the `query` capability. The kernel also ships a workspace registry (`sys/Workspace@1`) with deterministic tree effects (`workspace.*`) that power `aos ws` and `aos push`/`aos pull` syncing via `aos.sync.json`. Each comes with capabilities and signed receipts. Version 1.1 adds first-class Cells (keyed workflows) with per-key state and mailboxes. The constitutional loop and shadow runs protect the apply step, and a provenance "why graph" connects effects to state.
 
 Migrations, multi‑world fabric, and complex policy engines are deferred to later versions. The architecture leaves clean hooks for them.

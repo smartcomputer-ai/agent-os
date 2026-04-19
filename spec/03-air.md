@@ -75,7 +75,7 @@ AIR nodes exist in two interchangeable JSON lenses plus one canonical binary for
 1. **Authoring sugar (default)** — plain JSON interpreted using the surrounding schema reference. Use natural literals (`true`, `42`, `"text"`, `{field: …}`, arrays) exactly as before.
 2. **Canonical JSON (tagged)** — every literal carries an explicit type tag mirroring `ExprConst` (`{ "nat": 42 }`, `{ "list": [ { "text": "a" } ] }`, `{ "variant": { "tag": "Ok", "value": { "text": "done" } } }`, `{ "null": {} }`, etc.). This lens is ideal for diffs, automated patches, and inspector output because it round-trips without schema context.
 
-The loader **MUST** accept either lens at every typed value position, resolve the schema from context (module IO, effect params, reducer schemas, capability params, etc.), and convert to a typed value before hashing.
+The loader **MUST** accept either lens at every typed value position, resolve the schema from context (module IO, effect params, workflow schemas, capability params, etc.), and convert to a typed value before hashing.
 
 ### 3.2 Canonicalization Rules (Sugar → Typed → CBOR)
 
@@ -109,10 +109,10 @@ When hashing a typed value (module IO, cap params, etc.), always bind the **sche
 
 DomainEvents and ReceiptEvents are treated exactly like effect params:
 
-- **Ingress rule**: Every event payload is decoded against its declared `defschema` (from reducer ABI/routing subscription for module delivery, or built-in receipt schemas when synthesizing receipt events), validated, canonicalized, and re-encoded as canonical CBOR. If validation fails, the event is rejected. For reducer micro-effect receipts, the kernel **wraps** the receipt payload into the reducer’s ABI event schema before routing and journal append.
+- **Ingress rule**: Every event payload is decoded against its declared `defschema` (from workflow ABI/routing subscription for module delivery, or built-in receipt schemas when synthesizing receipt events), validated, canonicalized, and re-encoded as canonical CBOR. If validation fails, the event is rejected. For workflow-origin receipts, the kernel **wraps** the receipt payload into the workflow's ABI event schema before routing and journal append.
 - **Journal rule**: The journal stores and replays only these canonical bytes; replay never rewrites payloads.
-- **Routing/correlation**: Key extraction for routed/correlated events uses the schema-aware decoded value (not ExprValue tagging) and validates against the reducer’s `key_schema`.
-- **Sources**: Reducer-emitted DomainEvents, adapter receipts synthesized as events, and externally injected/CLI events all flow through the same normalizer.
+- **Routing/correlation**: Key extraction for routed/correlated events uses the schema-aware decoded value (not ExprValue tagging) and validates against the workflow's `key_schema`.
+- **Sources**: Workflow-emitted DomainEvents, adapter receipts synthesized as events, and externally injected/CLI events all flow through the same normalizer.
 
 ## 4) Manifest
 
@@ -133,7 +133,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
   "secrets"?: [{name, hash} | SecretDecl],
   "routing": {
     "subscriptions": [{event: SchemaRef, module: Name, key_field?: text}],
-    "inboxes": [{source: text, reducer: Name}]
+    "inboxes": [{source: text, workflow: Name}]
   },
   "defaults": {policy?: Name, cap_grants?: [CapGrant…]},
   "module_bindings"?: {Name → {slots: {slot_name → CapGrantName}}}
@@ -142,13 +142,13 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.subscriptions` maps DomainEvents on the bus to workflow modules; **the routed schema must equal the reducer ABI event schema in `defmodule.abi.workflow.event`** (use a variant schema to accept multiple event shapes, including micro-effect receipts; reducers that never emit micro-effects may use a record event schema directly). `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`); when the event schema is a variant, `key_field` typically targets the wrapped value (e.g., `$value.note_id`). The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-in schemas/effects are not auto-included. Built-in caps and modules are available even if omitted from `manifest.caps`/`manifest.modules`. Tooling may still fill the canonical hash for built-ins when the name is present without a hash. `effect_bindings` maps external effect `kind` to logical `adapter_id`; bindings must reference declared effect kinds, must not duplicate kinds, and must not include internal effect kinds (`workspace.*`, `introspect.*`, `governance.*`).
+Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.subscriptions` maps DomainEvents on the bus to workflow modules; **the routed schema must equal the workflow ABI event schema in `defmodule.abi.workflow.event`** (use a variant schema to accept multiple event shapes, including receipt envelopes; workflows that never emit effects may use a record event schema directly). `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to workflows for messages that skip the DomainEvent bus. For keyed workflows, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the workflow's `key_schema`); when the event schema is a variant, `key_field` typically targets the wrapped value (e.g., `$value.note_id`). The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-in schemas/effects are not auto-included. Built-in caps and modules are available even if omitted from `manifest.caps`/`manifest.modules`. Tooling may still fill the canonical hash for built-ins when the name is present without a hash. `effect_bindings` maps external effect `kind` to logical `adapter_id`; bindings must reference declared effect kinds, must not duplicate kinds, and must not include internal effect kinds (`workspace.*`, `introspect.*`, `governance.*`).
 
 See: spec/schemas/manifest.schema.json
 
 ## 5) defschema
 
-Defines a named type used for values, events, reducer state, module IO, and effect payloads.
+Defines a named type used for values, events, workflow state, module IO, and effect payloads.
 
 ### Shape
 
@@ -172,7 +172,7 @@ Registers a WASM module with its interface contract.
 
 ### Module Kind
 
-- **workflow**: deterministic state machine (legacy alias `"reducer"` is accepted by loaders)
+- **workflow**: deterministic state machine
 - **pure**: deterministic, side‑effect‑free function
 
 ### Shape
@@ -184,7 +184,7 @@ Registers a WASM module with its interface contract.
   "module_kind": "workflow" | "pure",
   "wasm_hash": <Hash>,
   "abi": {
-    "reducer": {
+    "workflow": {
       "state": <SchemaRef>,
       "event": <SchemaRef>,
       "context"?: <SchemaRef>,
@@ -198,7 +198,7 @@ Registers a WASM module with its interface contract.
       "context"?: <SchemaRef>
     }
   },
-"key_schema"?: <SchemaRef>
+  "key_schema"?: <SchemaRef>
 }
 ```
 
@@ -206,16 +206,16 @@ Registers a WASM module with its interface contract.
 
 **Built-in modules** live in `spec/defs/builtin-modules.air.json` (e.g., `sys/CapEnforceHttpOut@1`, `sys/CapEnforceLlmBasic@1`, `sys/Workspace@1`). The kernel ships the workspace workflow module (`sys/Workspace@1`) and its cap enforcer (`sys/CapEnforceWorkspace@1`) to provide a versioned tree registry. `sys/*` module names are reserved: external manifests may **reference** them, but may not define them; the kernel supplies the definitions and hashes.
 
-The `key_schema` field (v1.1 addendum) documents the key type when this workflow module is routed as keyed. The ABI remains a single `step` export; the kernel provides an envelope with optional call context. When routed as keyed, the reducer context includes `cell_mode=true` and the keyed `key`; returning `state=null` deletes the cell instance.
+The `key_schema` field documents the key type when this workflow module is routed as keyed. The ABI remains a single `step` export; the kernel provides an envelope with optional call context. When routed as keyed, `sys/WorkflowContext@1` includes `cell_mode=true` and the keyed `key`; returning `state=null` deletes the cell instance.
 
 ### ABI
 
-Reducer export: `step(ptr, len) -> (ptr, len)`
+Workflow export: `step(ptr, len) -> (ptr, len)`
 
-- **Input**: CBOR envelope including optional call context (see Call Context + Cells spec)
+- **Input**: CBOR envelope including optional call context (see [spec/04-workflows.md](04-workflows.md))
 - **Output**: CBOR `{state, domain_events?, effects?, ann?}`
 
-Reducer input envelope (canonical CBOR):
+Workflow input envelope (canonical CBOR):
 
 ```
 {
@@ -243,7 +243,7 @@ Pure input envelope (canonical CBOR):
 No WASI ambient syscalls, no threads, no ambient clock or randomness. All I/O happens via the effect layer. Deterministic time/entropy are supplied only via the optional call context. Prefer `dec128` in values; normalize NaNs if floats are used internally.
 
 **Note**: Pure modules (stateless, side-effect-free functions) are supported as `module_kind: "pure"`.
-Use workflow modules (reducer ABI) for stateful logic; use pure modules for deterministic transforms and authorizers.
+Use workflow modules for stateful logic; use pure modules for deterministic transforms and authorizers.
 
 ### Call Context (optional)
 
@@ -261,7 +261,7 @@ See: spec/schemas/defmodule.schema.json
 
 ## 7) Effect Catalog (Built-in v1)
 
-`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical effect parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so workflow modules, reducers, and adapters all hash the same shapes. Workflow SDK/runtime support schemas live under `spec/defs/builtin-schemas-sdk.air.json`. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions by deriving enums from the `defeffect` set.
+`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical effect parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json` so workflow modules and adapters all hash the same shapes. Workflow SDK/runtime support schemas live under `spec/defs/builtin-schemas-sdk.air.json`. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions by deriving enums from the `defeffect` set.
 
 `origin_scope` on each `defeffect` gates who may emit it. In active semantics, effects may be emitted by workflow modules, by system/governance flows, or by both. “Micro-effects” are those whose `origin_scope` allows workflow modules (currently `blob.put`, `blob.get`, `timer.set` in v1).
 
@@ -361,28 +361,28 @@ Example secret ref in `llm.generate` params:
 
 Workspace paths are URL-safe relative paths: segments match `[A-Za-z0-9._~-]`, no empty segments, `.` or `..`, and no leading or trailing `/`. Tree nodes are `sys/WorkspaceTree@2`/`sys/WorkspaceEntry@2` (annotations stored via optional `annotations_hash` on directories and entries). Entries are lexicographically sorted, file modes are `0644`/`0755`, and directory mode is `0755`. `workspace.remove` errors on non-empty directories; `workspace.read_bytes.range` uses `[start,end)` and errors if `end` exceeds file size.
 
-**introspect.manifest / introspect.reducer_state / introspect.journal_head / introspect.list_cells** (system/governance tooling in workflow runtime; cap_type `query`)
+**introspect.manifest / introspect.workflow_state / introspect.journal_head / introspect.list_cells** (system/governance tooling in workflow runtime; cap_type `query`)
 - Read-only effects served by an internal kernel adapter; receipts include consistency metadata used by governance and self-upgrade flows.
-- `introspect.manifest`: params `{ consistency: text }` (`head` | `exact:<h>` | `at_least:<h>`); receipt `{ manifest, journal_height, snapshot_hash?, manifest_hash }`
-- `introspect.reducer_state`: params `{ reducer:text, key_b64?:text, consistency:text }`; receipt `{ state_b64?:text, meta:{ journal_height, snapshot_hash?, manifest_hash } }`
-- `introspect.journal_head`: params `{}`; receipt `{ journal_height, snapshot_hash?, manifest_hash }`
-- `introspect.list_cells`: params `{ reducer:text }`; receipt `{ cells:[{ key_b64, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`
+- `introspect.manifest`: params `{ consistency: text }` (`head` | `exact:<h>` | `at_least:<h>`); receipt `{ manifest:bytes, meta:{ journal_height, snapshot_hash?, manifest_hash } }`
+- `introspect.workflow_state`: params `{ workflow:text, key?:bytes, consistency:text }`; receipt `{ state?:bytes, meta:{ journal_height, snapshot_hash?, manifest_hash } }`
+- `introspect.journal_head`: params `{}`; receipt `{ meta:{ journal_height, snapshot_hash?, manifest_hash } }`
+- `introspect.list_cells`: params `{ workflow:text }`; receipt `{ cells:[{ key, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`
 
 Built-in capability types paired with these effects (v1): `http.out`, `blob`, `timer`, `llm.basic`, `secret`, `query`, and `workspace`. The schema stays open to future types even though the kernel ships this curated set today.
 
 ### Built-in workflow receipt events
 
-Workflow modules that emit effects receive normalized receipt events. AIR v1 reserves these `defschema` names so reducer ABI event variants can include them and count on stable payloads:
+Workflow modules that emit effects receive normalized receipt events. AIR v1 reserves these `defschema` names so workflow ABI event variants can include them and count on stable payloads:
 
 | Schema | Purpose | Fields |
 | --- | --- | --- |
 | **`sys/EffectReceiptEnvelope@1`** | Canonical receipt envelope for workflow-origin effects. | `origin_module_id:text` (Name format), `origin_instance_key?:bytes`, `intent_id:text`, `effect_kind:text`, `params_hash?:text`, `issuer_ref?:text`, `receipt_payload:bytes`, `status:"ok" \| "error" \| "timeout"`, `emitted_at_seq:nat`, `adapter_id:text`, `cost_cents?:nat`, `signature:bytes` |
 | **`sys/EffectReceiptRejected@1`** | Receipt fault envelope emitted when receipt payload/schema normalization fails. | `origin_module_id:text` (Name format), `origin_instance_key?:bytes`, `intent_id:text`, `effect_kind:text`, `params_hash?:text`, `issuer_ref?:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `error_code:text`, `error_message:text`, `payload_hash:text`, `payload_size:nat`, `emitted_at_seq:nat` |
-| **`sys/TimerFired@1`** | Delivery of a `timer.set` receipt back to the originating reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text` (always `"timer.set"` in v1), `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/TimerSetParams@1`, `receipt:sys/TimerSetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
-| **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
-| **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/TimerFired@1`** | Delivery of a `timer.set` receipt back to the originating workflow. | `intent_hash:hash`, `workflow:text` (Name format), `effect_kind:text` (always `"timer.set"` in v1), `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/TimerSetParams@1`, `receipt:sys/TimerSetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the workflow. | `intent_hash:hash`, `workflow:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the workflow. | `intent_hash:hash`, `workflow:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 
-Workflow reducers should include `sys/EffectReceiptEnvelope@1` in ABI event variants as the primary receipt path. `sys/EffectReceiptRejected@1` is optional; if absent and a receipt is malformed, the kernel settles that receipt, marks the instance failed, and drops remaining pending receipts for that instance to avoid clogging execution. Legacy typed receipt events (`sys/TimerFired@1`, `sys/BlobPutResult@1`, `sys/BlobGetResult@1`) are compatibility fallbacks when reducer event schemas still expect those shapes.
+Workflow modules should include `sys/EffectReceiptEnvelope@1` in ABI event variants as the primary receipt path. `sys/EffectReceiptRejected@1` is optional; if absent and a receipt is malformed, the kernel settles that receipt, marks the instance failed, and drops remaining pending receipts for that instance to avoid clogging execution. Legacy typed receipt events (`sys/TimerFired@1`, `sys/BlobPutResult@1`, `sys/BlobGetResult@1`) are compatibility fallbacks when workflow event schemas still expect those shapes.
 
 Canonical JSON definitions for built-in effect parameter/receipt schemas live in `spec/defs/builtin-schemas.air.json` and `spec/defs/builtin-schemas-host.air.json`. Workflow continuation envelopes, runtime contexts, and reusable SDK state schemas live in `spec/defs/builtin-schemas-sdk.air.json`.
 
@@ -405,7 +405,7 @@ An intent is a request to perform an external effect:
 The `intent_hash` = `sha256(cbor(kind, params, cap, idempotency_key))` is computed by the kernel;
 adapters verify it.
 
-**Canonical params**: Before hashing or enqueue, the kernel **decodes → schema‑checks → canonicalizes → re‑encodes** `params` using the effect kind's parameter schema (same AIR canonical rules as the loader: `$tag/$value` variants, canonical map/set/option shapes, numeric normalization). The canonical CBOR bytes become `params_cbor` and are the **only** form stored, hashed, and dispatched; non‑conforming params are rejected. This path runs for *every* origin (workflow modules, system/governance flows, injected tooling) so authoring sugar or reducer ABI quirks cannot change intent identity.
+**Canonical params**: Before hashing or enqueue, the kernel **decodes → schema‑checks → canonicalizes → re‑encodes** `params` using the effect kind's parameter schema (same AIR canonical rules as the loader: `$tag/$value` variants, canonical map/set/option shapes, numeric normalization). The canonical CBOR bytes become `params_cbor` and are the **only** form stored, hashed, and dispatched; non‑conforming params are rejected. This path runs for *every* origin (workflow modules, system/governance flows, injected tooling) so authoring sugar or workflow ABI quirks cannot change intent identity.
 
 **Idempotency key**: system/governance flows may supply an explicit `idempotency_key`; when
 omitted, the kernel uses the all-zero key. For workflow-origin effects, the kernel derives the
@@ -469,7 +469,7 @@ Built-in `defcap` entries live in `spec/defs/builtin-caps.air.json` and are auto
 
 **sys/query@1**
 - Schema: `{ scope?: text }` (`scope` is optional/semantically freeform; empty/none = all)
-- Guards read-only `introspect.*` effects; policy may further restrict by reducer/effect kind.
+- Guards read-only `introspect.*` effects; policy may further restrict by workflow/effect kind.
 
 ### CapGrant (Runtime Instance)
 
@@ -533,7 +533,7 @@ See: spec/schemas/defcap.schema.json
 
 - Built-in v1 effects live in `spec/defs/builtin-effects.air.json`; include the ones your world uses (hashes may be filled by tooling for built-ins).
 - Unknown effect kinds (not declared in the manifest or built-ins) are rejected during normalization/dispatch.
-- Reducer receipt translation remains limited to effects whose `origin_scope` allows reducers.
+- Workflow receipt translation remains limited to effects whose `origin_scope` allows workflow modules.
 - Adapter binding stays out of `defeffect`; routing intent lives in manifest `effect_bindings` so logical adapter ids can evolve without redefining effect kinds.
 
 See: spec/schemas/defeffect.schema.json
@@ -594,7 +594,7 @@ Decisions are journaled as `policy_decision { intent_hash, policy_name, rule_ind
 
 See: spec/schemas/defpolicy.schema.json
 
-For workflow patterns and architecture guidance, use [spec/05-workflows.md](05-workflows.md).
+For workflow patterns and architecture guidance, use [spec/04-workflows.md](04-workflows.md).
 
 ## 12) Validation Rules (Semantic)
 
@@ -602,7 +602,7 @@ The kernel validator enforces these semantic checks:
 
 **Manifest**: Names unique per kind; all references by name resolve to hashes present in the store.
 
-**defmodule**: `wasm_hash` present; referenced schemas exist; `module_kind` is `workflow` or `pure` (legacy `reducer` alias accepted); keyed reducer routes enforce `key_schema`; `effects_emitted`/`cap_slots` (if present) are well‑formed.
+**defmodule**: `wasm_hash` present; referenced schemas exist; `module_kind` is `workflow` or `pure`; keyed workflow routes enforce `key_schema`; `effects_emitted`/`cap_slots` (if present) are well‑formed.
 
 **defpolicy**: Rule shapes valid; referenced effect kinds known.
 
@@ -640,7 +640,7 @@ Patches describe changes to the control plane (design-time modifications).
 - **set_manifest_refs**: `{ add:[{kind,name,hash}], remove:[{kind,name}] }` — update manifest references
 - **set_defaults**: `{ policy?:Name, cap_grants?:[CapGrant…] }` — update default policy and grants
 - **set_routing_events**: `{ pre_hash:hash, subscriptions:[{event, module, key_field?}...] }` — replace routing.subscriptions block (empty list clears)
-- **set_routing_inboxes**: `{ pre_hash:hash, inboxes:[{source, reducer}...] }` — replace routing.inboxes block
+- **set_routing_inboxes**: `{ pre_hash:hash, inboxes:[{source, workflow}...] }` — replace routing.inboxes block
 - **set_module_bindings**: `{ pre_hash:hash, bindings:{ module → { slots:{slot→cap_grant} } } }` — replace module_bindings block
 - **set_secrets**: `{ pre_hash:hash, secrets:[ SecretEntry… ] }` — replace manifest secrets block (refs/decls); no secret values carried in patches.
 - **defsecret**: `add_def` / `replace_def` / `remove_def` now accept `defsecret`; `set_manifest_refs` can add/remove secret refs. Secret values still live outside patches; `set_secrets` only adjusts manifest entries.
@@ -680,7 +680,7 @@ Notes:
 
 Runtime journal entries are canonical CBOR enums; the important ones for AIR workflows are:
 
-- **DomainEvent** `{ schema, value, key?, now_ns, logical_now_ns, journal_height, entropy, event_hash, manifest_hash }` – emitted by workflow modules/system ingress; replay feeds reducers via routing subscriptions.
+- **DomainEvent** `{ schema, value, key?, now_ns, logical_now_ns, journal_height, entropy, event_hash, manifest_hash }` – emitted by workflow modules/system ingress; replay feeds workflows via routing subscriptions.
 - **EffectIntent** `{ intent_hash, kind, cap_name, params_cbor, idempotency_key, origin }` – queued effects from workflow modules and system/governance flows.
 - **EffectReceipt** `{ intent_hash, adapter_id, status, payload_cbor, cost_cents?, signature, now_ns, logical_now_ns, journal_height, entropy, manifest_hash }` – adapters’ signed receipts; replay reproduces workflow receipt progression.
 - **cap_decision** `{ intent_hash, effect_kind, cap_name, cap_type, grant_hash, enforcer_module, decision, deny?, expiry_ns?, logical_now_ns }` – capability checks recorded at enqueue time for audit/replay explainability.
@@ -696,7 +696,7 @@ Budgets are deferred; no budget events are emitted in v1.
 
 ## 15) Determinism and Replay
 
-Deterministic workflow module execution, reducer invocations, and canonical expression/value evaluation guarantee that same manifest + journal + receipts ⇒ identical state.
+Deterministic workflow module execution and canonical expression/value evaluation guarantee that same manifest + journal + receipts ⇒ identical state.
 
 Effects occur only at the boundary; receipts bind non‑determinism. Replay reuses recorded receipts; shadow‑runs stub effects and report predicted intents and receipt progression.
 
@@ -710,11 +710,12 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 ## 17) On‑Disk Expectations
 
-- **Local state root**: `.aos/`
-- **SQLite runtime/admin state**: `.aos/local-node.sqlite3`
-- **CAS bytes**: `.aos/cas/<shard>/<digest>` (canonical CBOR AIR nodes and blob payloads)
+- **Authored world root**: `manifest.air.cbor` (binary), `manifest.air.json` (text), and `aos.sync.json`.
+- **Local authoring/cache state**: `.aos/`
+- **Node-managed state root**: `.aos-node/` by default for `aos node up`.
+- **SQLite journal state**: `.aos-node/journal.sqlite3` when using the SQLite journal backend.
+- **CAS bytes**: `.aos/cas/<shard>/<digest>` or `.aos-node/cas/<shard>/<digest>` depending on the active authoring/runtime path.
 - **Module/engine caches**: `.aos/cache/{modules,wasmtime}/`
-- **Manifest roots**: `manifest.air.cbor` (binary) and `manifest.air.json` (text)
 
 ## 18) Security Model
 
@@ -726,25 +727,25 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 ## 19) Examples (Abridged)
 
-20.1 defschema (FeedItem)
+19.1 defschema (FeedItem)
 
 ```json
 { "$kind":"defschema", "name":"com.acme/FeedItem@1", "type": { "record": { "title": {"text":{}}, "url": {"text":{}} } } }
 ```
 
-20.2 defcap (http.out@1)
+19.2 defcap (http.out@1)
 
 ```json
 { "$kind":"defcap", "name":"sys/http.out@1", "cap_type":"http.out", "schema": { "record": { "hosts": { "set": { "text": {} } }, "schemes": { "set": { "text": {} } }, "methods": { "set": { "text": {} } }, "ports": { "set": { "nat": {} } }, "path_prefixes": { "set": { "text": {} } } } }, "enforcer": { "module": "sys/CapEnforceHttpOut@1" } }
 ```
 
-20.3 defpolicy (allow google rss; deny LLM from workflow modules)
+19.3 defpolicy (allow google rss; deny LLM from workflow modules)
 
 ```json
 { "$kind":"defpolicy", "name":"com.acme/policy@1", "rules": [ { "when": { "effect_kind":"http.request", "cap_name":"cap_http" }, "decision":"allow" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"workflow" }, "decision":"deny" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"system" }, "decision":"allow" } ] }
 ```
 
-20.4 defmodule (workflow) excerpt
+19.4 defmodule (workflow) excerpt
 
 ```json
 {
@@ -753,7 +754,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
   "module_kind":"workflow",
   "wasm_hash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "abi":{
-    "reducer":{
+    "workflow":{
       "state":"com.acme/DigestState@1",
       "event":"com.acme/DigestEvent@1",
       "effects_emitted":["http.request","llm.generate"]
@@ -764,7 +765,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 ## 20) Implementation Guidance (Engineering Notes)
 
-- Build order: canonical CBOR + hashing → store/loader/validator → Wasmtime workflow/pure ABIs + schema checks → effect manager + adapters (http/fs/timer/llm) + receipts → patcher + governance loop → shadow‑run.
+- Build order: canonical CBOR + hashing → store/loader/validator → Wasmtime workflow/pure ABIs + schema checks → effect runtime + adapters (http/blob/timer/llm/vault) + receipts → patcher + governance loop → shadow‑run.
 - Determinism tests: golden “replay or die” snapshots; fuzz Expr evaluator and CBOR canonicalizer.
 - Errors: precise validator diagnostics (name, step id, path). Journal policy decisions and validation failures with structured details for explainers.
 

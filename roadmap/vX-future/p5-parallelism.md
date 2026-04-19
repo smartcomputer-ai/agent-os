@@ -110,6 +110,6 @@ Use round-robin across ready Runs and Cells with bounded per-entity work (one st
 
 ## References
 
-- Reducers: spec/04-reducers.md (v1), spec/05-cells.md (v1.1 Cells)
+- Workflows: spec/04-workflows.md, including keyed cells
 - AIR Plans & Manifest: spec/03-air.md (raise_event/await_event, triggers, routing)
 - Architecture: spec/02-architecture.md (Compute Layer, Cells)
