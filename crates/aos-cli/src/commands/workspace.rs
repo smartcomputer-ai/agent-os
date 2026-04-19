@@ -18,7 +18,7 @@ use super::common::{
 };
 
 #[derive(Args, Debug)]
-#[command(about = "Inspect and synchronize hosted workspaces")]
+#[command(about = "Inspect and synchronize node workspaces")]
 pub(crate) struct WorkspaceArgs {
     #[command(subcommand)]
     cmd: WorkspaceCommand,
@@ -38,9 +38,9 @@ enum WorkspaceCommand {
     Ann(WorkspaceAnnArgs),
     /// Diff two workspace refs.
     Diff(WorkspaceDiffArgs),
-    /// Push local files into hosted workspace roots and commit them.
+    /// Push local files into node workspace roots and commit them.
     Push(WorkspacePushArgs),
-    /// Pull hosted workspace files into the local filesystem.
+    /// Pull node workspace files into the local filesystem.
     Pull(WorkspacePullArgs),
 }
 

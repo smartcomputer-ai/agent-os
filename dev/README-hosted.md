@@ -1,6 +1,6 @@
 # Hosted Local Dev
 
-This directory contains the local Docker environment for the hosted Kafka/blobstore runtime.
+This directory contains the local Docker environment for the Kafka/blobstore node runtime.
 
 ## Services
 
@@ -39,7 +39,7 @@ This deletes and recreates:
 - `aos-journal`
 - `aos-route`
 
-By default `aos-ingress` and `aos-journal` are created with `AOS_PARTITION_COUNT=1` for local dev. If `AOS_PARTITION_COUNT` is unset, the scripts fall back to `AOS_HOSTED_PARTITIONS`, also defaulting to `1`.
+By default `aos-ingress` and `aos-journal` are created with `AOS_PARTITION_COUNT=1` for local dev.
 
 `dev/scripts/hosted-topics-ensure.sh` also recreates existing topics when their partition count does not match the requested value, so ingress and journal cannot silently drift apart.
 
@@ -53,7 +53,8 @@ This removes all objects under the configured `AOS_BLOBSTORE_PREFIX` and leaves 
 
 ## Runtime Environment
 
-Export these before running `aos-node-hosted` against the local stack:
+Export these before running `aos node up --journal-backend kafka --blob-backend object-store`
+against the local stack:
 
 ```bash
 export AOS_KAFKA_BOOTSTRAP_SERVERS=localhost:19092

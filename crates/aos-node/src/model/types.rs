@@ -1,5 +1,8 @@
+use std::path::PathBuf;
+
 use aos_cbor::Hash;
 use aos_effects::ReceiptStatus;
+use aos_kernel::StoreError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -209,11 +212,11 @@ pub struct PutSecretVersionRequest {
     pub created_by: Option<String>,
 }
 
-/// Request to create a new hosted world.
+/// Request to create a new world.
 ///
 /// `source.kind = "seed"` restores an already-materialized promoted baseline.
-/// `source.kind = "manifest"` bootstraps a fresh hosted world from uploaded AIR
-/// artifacts and lets the hosted node synthesize the first authoritative baseline.
+/// `source.kind = "manifest"` bootstraps a fresh world from uploaded AIR
+/// artifacts and lets the node synthesize the first authoritative baseline.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateWorldRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -486,5 +489,35 @@ impl PersistError {
 
     pub fn backend(message: impl Into<String>) -> Self {
         Self::Backend(message.into())
+    }
+
+    pub fn into_store_error(
+        self,
+        default_path: impl Into<PathBuf>,
+        not_found_message: &'static str,
+    ) -> StoreError {
+        let default_path = default_path.into();
+        match self {
+            PersistError::NotFound(message) => StoreError::Io {
+                path: PathBuf::from(message),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, not_found_message),
+            },
+            PersistError::Backend(message) => StoreError::Io {
+                path: default_path,
+                source: std::io::Error::other(message),
+            },
+            PersistError::Conflict(message) => StoreError::Io {
+                path: default_path,
+                source: std::io::Error::new(std::io::ErrorKind::AlreadyExists, message),
+            },
+            PersistError::Validation(message) => StoreError::Io {
+                path: default_path,
+                source: std::io::Error::new(std::io::ErrorKind::InvalidInput, message),
+            },
+            PersistError::Corrupt(message) => StoreError::Io {
+                path: default_path,
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, message.to_string()),
+            },
+        }
     }
 }

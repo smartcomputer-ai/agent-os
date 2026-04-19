@@ -7,14 +7,14 @@ use clap::{Args, Subcommand};
 use serde_json::json;
 
 use crate::GlobalOpts;
-use crate::authoring::sync_hosted_secrets;
+use crate::authoring::sync_node_secrets;
 use crate::client::ApiClient;
 use crate::output::{OutputOpts, print_success};
 
 use super::common::{encode_path_segment, resolve_target};
 
 #[derive(Args, Debug)]
-#[command(about = "Manage hosted secret bindings and secret values")]
+#[command(about = "Manage node secret bindings and secret values")]
 pub(crate) struct UniverseArgs {
     #[command(subcommand)]
     cmd: UniverseCommand,
@@ -27,7 +27,7 @@ enum UniverseCommand {
 }
 
 #[derive(Args, Debug)]
-#[command(about = "Manage hosted secret bindings and secret values")]
+#[command(about = "Manage node secret bindings and secret values")]
 struct UniverseSecretArgs {
     /// Optional universe UUID. Defaults to the shared default domain.
     #[arg(long)]
@@ -158,7 +158,7 @@ pub(crate) async fn handle(
                     handle_version(&client, output, universe_id, args).await
                 }
                 UniverseSecretCommand::Sync(args) => {
-                    let data = sync_hosted_secrets(
+                    let data = sync_node_secrets(
                         &client,
                         universe_id,
                         args.local_root.as_deref(),

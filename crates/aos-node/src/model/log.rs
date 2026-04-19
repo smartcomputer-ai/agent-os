@@ -130,6 +130,19 @@ pub struct PromotableBaselineRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "backend", rename_all = "snake_case")]
+pub enum WorldJournalCursor {
+    Kafka {
+        journal_topic: String,
+        partition: u32,
+        journal_offset: u64,
+    },
+    Sqlite {
+        frame_offset: u64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorldCheckpointRef {
     pub universe_id: UniverseId,
     pub world_id: WorldId,
@@ -138,16 +151,11 @@ pub struct WorldCheckpointRef {
     pub checkpointed_at_ns: u64,
     pub baseline: PromotableBaselineRef,
     pub world_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub journal_cursor: Option<WorldJournalCursor>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PartitionCheckpoint {
-    pub journal_topic: String,
-    pub partition: u32,
-    pub journal_offset: u64,
-    pub created_at_ns: u64,
-    pub worlds: Vec<WorldCheckpointRef>,
-}
+pub type WorldCheckpointRecord = WorldCheckpointRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -170,7 +178,6 @@ pub struct RegisteredWorldSummary {
     pub universe_id: UniverseId,
     pub world_id: WorldId,
     pub world_epoch: u64,
-    pub effective_partition: u32,
     pub manifest_hash: String,
     pub next_world_seq: u64,
 }

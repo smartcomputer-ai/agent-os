@@ -4,6 +4,7 @@
 .DS_Store
 .store/
 .aos/
+.aos-node/
 .aos-hosted/
 notes-world/
 .playwright-mcp/

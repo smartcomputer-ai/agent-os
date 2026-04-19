@@ -2,7 +2,7 @@ import json
 import os
 import time
 
-from aos_harness import WorkflowHarness, receipts
+from aos_harness import WorkflowHarness
 from aos_harness.testing import smoke_fixture_root
 
 
@@ -14,6 +14,11 @@ VERBOSE = os.environ.get("AOS_HARNESS_VERBOSE", "").lower() not in {"", "0", "fa
 
 def runtime_quiescent(status: dict) -> bool:
     return bool(status.get("runtime_quiescent", False))
+
+
+def next_timer_deadline(status: dict) -> int | None:
+    deadline = status.get("next_timer_deadline_ns")
+    return int(deadline) if deadline is not None else None
 
 
 class StepLogger:
@@ -53,27 +58,17 @@ def main():
         log.log(f"round {rounds}: run_to_idle")
         status = harness.run_to_idle()
         log.log(f"round {rounds}: quiescence={status}")
-        effects = harness.pull_effects()
-        log.log(f"round {rounds}: pulled {len(effects)} effects")
-        if not effects:
-            if runtime_quiescent(status):
-                log.log(f"round {rounds}: runtime quiescent")
-                break
-            raise AssertionError(f"no effects but not quiescent: {status}")
+        if runtime_quiescent(status):
+            log.log(f"round {rounds}: runtime quiescent")
+            break
 
-        for effect in effects:
-            log.log(
-                "applying timer receipt "
-                f"for intent={effect.get('intent_hash', '<unknown>')}"
-            )
-            harness.apply_receipt_object(
-                receipts.timer_set_ok(
-                    harness,
-                    effect,
-                    delivered_at_ns=DELIVER_AT_NS,
-                    key="retry",
-                )
-            )
+        deadline = next_timer_deadline(status)
+        if deadline is None:
+            raise AssertionError(f"not quiescent and no pending timer: {status}")
+
+        log.log(f"round {rounds}: jumping logical time to next timer at {deadline}")
+        jumped_to = harness.time_jump_next_due()
+        assert jumped_to == deadline
 
     log.log("reading state and exporting artifacts")
     state = harness.state_get()

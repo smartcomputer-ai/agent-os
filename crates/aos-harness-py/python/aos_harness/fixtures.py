@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from .types import BackendName, EffectModeName, PathLike
+from .types import EffectModeName, PathLike
 
 _SDK_PATH_SENTINEL = "../../../../aos-wasm-sdk"
 
@@ -105,7 +105,6 @@ class StagedWorld:
     def open_harness(
         self,
         *,
-        backend: BackendName = "embedded",
         effect_mode: EffectModeName = "scripted",
         reset: bool = True,
         force_build: bool = False,
@@ -118,7 +117,6 @@ class StagedWorld:
             reset=reset,
             force_build=force_build,
             sync_secrets=sync_secrets,
-            backend=backend,
             effect_mode=effect_mode,
         )
 

@@ -32,7 +32,7 @@ impl WorldConfig {
             std::env::var("AOS_MODULE_CACHE_DIR").ok(),
             std::env::var("AOS_STRICT_EFFECT_BINDINGS").ok(),
             std::env::var("AOS_CELL_CACHE_SIZE").ok(),
-            std::env::var("AOS_HOSTED_REPLAY_SEED_HEIGHT").ok(),
+            std::env::var("AOS_NODE_REPLAY_SEED_HEIGHT").ok(),
         )
     }
 
