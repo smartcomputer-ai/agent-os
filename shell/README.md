@@ -1,73 +1,33 @@
-# React + TypeScript + Vite
+# AgentOS Shell
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> Status: outdated. This web shell does not currently work with the active AgentOS runtime. It was built against an older control API shape and should be treated as a dormant UI prototype until it is updated.
 
-Currently, two official plugins are available:
+`shell/` is a React/Vite web UI intended to browse and operate AgentOS worlds from a browser. Its original purpose was to provide a graphical shell for inspecting manifests, definitions, workspace trees, governance drafts, and Demiurge chat/session state.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+The current runtime has moved to the unified `aos node` control surface, hot in-process reads, updated workspace/backend semantics, and newer API routes. This app has not been brought forward to that model, so routes, generated API types, assumptions about backend ports, and some feature pages are expected to be stale.
 
-## React Compiler
+## What Is Here
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
+- React 19 + React Router app under `src/`.
+- TanStack Query based SDK helpers under `src/sdk/`.
+- Manifest, workspace, governance, and Demiurge feature areas under `src/features/`.
+- shadcn/Radix-style UI components under `src/components/ui/`.
+- Vite dev/build configuration.
 
-## Expanding the ESLint configuration
+## Historical Development Commands
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+These commands describe the project shape, but they are not a guarantee that the app works against the current runtime:
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
+npm run build
+npm run lint
+npm run openapi:types
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The Vite dev server is configured for port `7778` and proxies `/api` to `http://localhost:7777`. That backend assumption is part of what needs revisiting before the shell can be used with the current node.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Before Reviving It
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+To make this shell current again, first align it with the active `aos node up` control API and regenerate the OpenAPI types from the current node. Then audit the feature routes against the current manifest, workspace, governance, and Demiurge flows before treating the UI as supported.
