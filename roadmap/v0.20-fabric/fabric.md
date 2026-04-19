@@ -6,7 +6,7 @@ The important boundary for v0.20 is:
 
 1. AOS workflows keep emitting the existing `host.*` effects.
 2. `aos-effect-adapters` gains a fabric-backed provider for those effects.
-3. The fabric backend/controller is mostly standalone and owns containers, later VMs.
+3. The fabric backend/controller is mostly standalone and owns smolvm-backed sessions.
 
 This avoids two competing terminal/session APIs. Fabric should become a backend for the host
 effect surface, not a second parallel `fabric.*` tool surface.
@@ -98,18 +98,19 @@ Backends own:
 
 ### 3) Expand `HostTarget`, do not invent `FabricTarget` effects
 
-The host target schema currently only supports `local`. v0.20 should extend it with a container
+The host target schema currently only supports `local`. v0.20 should extend it with a sandbox
 target that fabric can satisfy:
 
 ```text
 HostTarget =
   local(HostLocalTarget)
-  container(HostContainerTarget)
+  sandbox(HostSandboxTarget)
 ```
 
-Suggested first `HostContainerTarget` fields:
+Suggested first `HostSandboxTarget` fields:
 
 - `image`
+- `runtime_class`
 - `workdir`
 - `env`
 - `network_mode`
@@ -119,7 +120,7 @@ Suggested first `HostContainerTarget` fields:
 - `ttl_ns`
 - `labels`
 
-The local backend can reject `container` with `unsupported_target`. The fabric backend can reject
+The local backend can reject `sandbox` with `unsupported_target`. The fabric backend can reject
 `local` unless explicitly configured to proxy local-machine sessions.
 
 ### 4) Use simple HTTP plus NDJSON streaming first
@@ -162,9 +163,9 @@ fabric controller
   auth, idempotency, scheduling, session state
     |
 fabric host daemon(s)
-  container runtime, files, exec, logs, heartbeats
+  smolvm runtime, files, exec, logs, heartbeats
     |
-OCI containers first, VMs later
+OCI images as smolvm microVMs
 ```
 
 ### AOS Adapter Side
@@ -222,20 +223,20 @@ The host daemon runs directly on a server. It is not a Kubernetes pod manager fo
 Responsibilities:
 
 - register and heartbeat with the controller,
-- manage local container runtime resources,
-- create per-session containers and storage roots,
+- manage local smolvm runtime resources,
+- create per-session microVMs and storage roots,
 - run commands inside sessions,
 - stream stdout/stderr to the controller/adapter,
 - implement confined filesystem operations under the session root,
 - enforce resource limits and network mode,
 - report existing session inventory after restart.
 
-First runtime driver:
+Runtime driver:
 
-- OCI containers through Docker or Podman.
+- smolvm through the Rust API directly.
 
-Implementation can start with a CLI-backed driver for speed, but the driver should sit behind a
-trait so it can move to Docker Engine, Podman API, containerd, Firecracker, or normal VMs later.
+Do not implement a CLI-backed smolvm path, smolvm HTTP sidecar path, Docker/Podman path,
+Firecracker path, QEMU path, or normal-VM fallback backend in P1.
 
 ### State Authority
 
@@ -243,7 +244,7 @@ Fabric state is split intentionally:
 
 - AOS remains authoritative for effect lifecycle, replay, and receipt admission.
 - The fabric controller is authoritative for session allocation and idempotency.
-- A fabric host is authoritative for the live container/process it owns.
+- A fabric host is authoritative for the live VM/process it owns.
 
 The controller should recover by:
 
@@ -329,8 +330,8 @@ Fabric adds operational enforcement:
 - image allowlists,
 - max CPU/memory/session TTL,
 - network mode allowlists,
-- no privileged containers by default,
-- no host Docker socket inside sessions,
+- one smolvm microVM per session by default,
+- no host control socket inside sessions,
 - no Docker-in-session for v0.20,
 - path confinement for filesystem RPCs,
 - per-session labels for tenant/world/session attribution,
@@ -340,18 +341,20 @@ Fabric adds operational enforcement:
 
 Implementation should start outside AOS and move inward:
 
-1. prove one host can create and control container sessions,
+1. prove one host can create and control smolvm sessions,
 2. add a controller that schedules and reconciles hosts,
 3. add the AOS host-effect provider,
 4. wire full end-to-end runtime tests.
 
-### P1: Fabric Host Daemon With Container Sessions
+### P1: Fabric Host Daemon With Smolvm Sessions
+
+Detailed spec: `roadmap/v0.20-fabric/p1-fabric-host-daemon.md`.
 
 - [ ] Add a standalone fabric crate or crate group with minimal AOS dependencies.
 - [ ] Define the host-facing protocol request/response/event structs.
 - [ ] Implement host daemon HTTP API for local development.
-- [ ] Add container runtime trait.
-- [ ] Implement a Docker/Podman-backed container runtime driver.
+- [ ] Add a narrow smolvm facade used by the host service.
+- [ ] Implement smolvm integration using the Rust API directly.
 - [ ] Create per-session storage roots/volumes.
 - [ ] Implement session open, exec, signal, and close.
 - [ ] Implement filesystem RPCs against the confined session root.
@@ -378,14 +381,14 @@ Implementation should start outside AOS and move inward:
 - [ ] Add `FabricHostBackend` that talks to the controller API.
 - [ ] Add provider adapter kinds for fabric-backed `host.*` routes.
 - [ ] Add fabric adapter config: controller URL, auth token path/env, request timeout.
-- [ ] Extend `HostTarget` schemas/types with `container`.
+- [ ] Extend `HostTarget` schemas/types with `sandbox`.
 - [ ] Add schema normalization tests for the new target variant.
 
 ### P4: AOS End-To-End Integration
 
 - [ ] Wire fabric provider routes through `EffectAdapterConfig`.
 - [ ] Add manifest examples binding `host.*` effects to fabric route IDs.
-- [ ] Add e2e test: open container session, write file, exec command, read output, signal session.
+- [ ] Add e2e test: open smolvm session, write file, exec command, read output, signal session.
 - [ ] Add streaming test: long command emits stream frames before terminal receipt.
 - [ ] Add replay test: admitted receipts replay without re-running fabric work.
 - [ ] Add `aos` CLI dev command or documented command sequence for starting controller and one host.
@@ -396,7 +399,7 @@ In scope:
 
 - one controller,
 - one or more host daemons,
-- container sessions,
+- smolvm-backed OCI-image sessions,
 - RPC-style exec,
 - stdout/stderr streaming,
 - session TTL and stop/quiesce,
@@ -407,7 +410,7 @@ In scope:
 Out of scope:
 
 - Kubernetes-managed session pods,
-- Firecracker or full VM sessions,
+- non-smolvm runtime drivers,
 - SSH-backed external machines,
 - permanent service deployment,
 - shared volumes across sessions,
@@ -418,8 +421,6 @@ Out of scope:
 
 ## Later
 
-- Firecracker VM runtime driver.
-- Normal VM runtime driver.
 - SSH session provider.
 - Durable reusable volumes.
 - Shared volumes and session networks.
