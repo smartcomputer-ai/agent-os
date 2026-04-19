@@ -34,9 +34,8 @@ Start here:
 1. **[spec/01-overview.md](spec/01-overview.md)** — Core concepts, mental model, why this exists
 2. **[spec/02-architecture.md](spec/02-architecture.md)** — Runtime components, event flow, storage layout
 3. **[spec/03-air.md](spec/03-air.md)** — Complete AIR v1 spec (schemas, modules, capabilities, policies, manifests)
-4. **[spec/05-workflows.md](spec/05-workflows.md)** — Canonical workflow model and runtime semantics after plan removal
-5. **[spec/06-cells.md](spec/06-cells.md)** — Keyed workflow instances, routing, scheduling, and storage
-6. **[spec/07-gc.md](spec/07-gc.md)** — CAS reachability, snapshot roots, and garbage-collection semantics
+4. **[spec/04-workflows.md](spec/04-workflows.md)** — Workflow module runtime contract, orchestration patterns, and keyed cells
+5. **[spec/05-effects.md](spec/05-effects.md)** — Async effects, durable open work, adapters, receipts, and continuation admission
 
 For implementation guidance, project structure, and coding conventions, see **[AGENTS.md](AGENTS.md)**.
 
