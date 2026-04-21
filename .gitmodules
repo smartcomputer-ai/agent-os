@@ -1,0 +1,3 @@
+[submodule "third_party/smolvm"]
+	path = third_party/smolvm
+	url = https://github.com/smol-machines/smolvm.git

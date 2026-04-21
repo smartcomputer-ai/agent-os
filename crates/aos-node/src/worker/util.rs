@@ -2,13 +2,15 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aos_cbor::{HASH_PREFIX, Hash};
+use aos_effect_adapters::traits::AdapterStartContext;
 use aos_effect_types::TimerSetParams;
 use aos_effect_types::TimerSetReceipt;
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use aos_kernel::journal::{
-    Journal, JournalRecord, OwnedJournalEntry, SnapshotRecord as KernelSnapshotRecord,
+    IntentOriginRecord, Journal, JournalRecord, OwnedJournalEntry,
+    SnapshotRecord as KernelSnapshotRecord,
 };
-use aos_kernel::{Kernel, KernelConfig, LoadedManifest, Store};
+use aos_kernel::{Kernel, KernelConfig, LoadedManifest, OpenedEffect, Store};
 use aos_node::{
     BackendError, CborPayload, SnapshotRecord, TimerEntry, WorldLogFrame, WorldRuntimeInfo,
 };
@@ -209,6 +211,36 @@ pub(super) fn effect_intent_from_pending(
     .map_err(|err| WorkerError::Persist(aos_node::PersistError::validation(err.to_string())))?;
     intent.intent_hash = pending.intent_hash;
     Ok(intent)
+}
+
+pub(super) fn adapter_start_context_from_pending(
+    pending: &aos_kernel::snapshot::WorkflowReceiptSnapshot,
+) -> AdapterStartContext {
+    AdapterStartContext {
+        origin_module_id: pending.origin_module_id.clone(),
+        origin_instance_key: pending.origin_instance_key.clone(),
+        effect_kind: pending.effect_kind.clone(),
+        emitted_at_seq: pending.emitted_at_seq,
+    }
+}
+
+pub(super) fn adapter_start_context_from_opened(
+    opened: &OpenedEffect,
+) -> Option<AdapterStartContext> {
+    match &opened.record.origin {
+        IntentOriginRecord::Workflow {
+            name,
+            instance_key,
+            emitted_at_seq,
+            ..
+        } => Some(AdapterStartContext {
+            origin_module_id: name.clone(),
+            origin_instance_key: instance_key.clone(),
+            effect_kind: opened.record.kind.clone(),
+            emitted_at_seq: emitted_at_seq.unwrap_or_default(),
+        }),
+        IntentOriginRecord::Plan { .. } => None,
+    }
 }
 
 pub(super) fn runtime_info_from_world(

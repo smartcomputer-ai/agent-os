@@ -112,6 +112,17 @@ Crates keep deterministic core small and effectful code at the edges:
 - `aos-agent-eval` — Prompt/tool eval runner for agent session workflows.
 - `aos-harness-py` — Python bindings for runtime/world harnesses; use the repo `.venv`.
 - `aos-smoke` — CLI runners for numbered demos in `crates/aos-smoke/fixtures/`.
+- `fabric-protocol` — Fabric request, response, event, and OpenAPI types; no `aos-*` dependencies.
+- `fabric-client` — Fabric controller/host HTTP client and NDJSON exec stream helpers.
+- `fabric-controller` — Fabric controller API, SQLite state, scheduling, host registration, and proxying.
+- `fabric-host` — Fabric host daemon and smolvm-backed session provider.
+- `fabric-cli` — Development CLI binary named `fabric`.
+
+Fabric lives in this AOS workspace as generic host/session edge infrastructure. AOS-specific
+translation stays in `aos-effect-adapters`; Fabric crates must not depend on `aos-node`,
+`aos-kernel`, or `aos-effect-adapters`. The smolvm source dependency is the `third_party/smolvm`
+submodule, while local generated runtime bundles live under ignored `third_party/.cache/` and
+`third_party/smolvm-release/`.
 
 ## Test Strategy (Concise, Deterministic)
 

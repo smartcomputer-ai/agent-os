@@ -1,0 +1,39 @@
+[package]
+name = "fabric-host"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+smolvm-runtime = ["dep:libc", "dep:smolvm", "dep:smolvm-protocol"]
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+clap.workspace = true
+fabric-client.workspace = true
+fabric-protocol.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
+globset.workspace = true
+hex.workspace = true
+libc = { version = "0.2", optional = true }
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+smolvm = { path = "../../third_party/smolvm", optional = true }
+smolvm-protocol = { path = "../../third_party/smolvm/crates/smolvm-protocol", optional = true }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+utoipa.workspace = true
+utoipa-swagger-ui.workspace = true
+uuid.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true

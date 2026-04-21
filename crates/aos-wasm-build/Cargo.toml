@@ -1,19 +1,20 @@
 [package]
 name = "aos-wasm-build"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 license = "Apache-2.0"
 description = "Deterministic WASM compiler for AOS workflows"
 
 [dependencies]
-anyhow = "1"
-camino = { version = "1", features = ["serde1"] }
-sha2 = "0.10"
-tempfile = "3"
-thiserror = "1"
+anyhow.workspace = true
+camino.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
 which = "4"
 home = "0.5.5"
-walkdir = "2"
-hex = "0.4"
-log = "0.4"
+walkdir.workspace = true
+hex.workspace = true
+log.workspace = true
 toml = "0.8"

@@ -1,0 +1,49 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/FabricExecProgressPc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Running": { "unit": {} },
+        "Done": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/FabricExecProgressState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/FabricExecProgressPc@1" },
+        "progress_frames": { "nat": {} },
+        "last_stream_seq": { "option": { "nat": {} } },
+        "last_stream_kind": { "option": { "text": {} } },
+        "stdout_bytes": { "nat": {} },
+        "last_stdout_delta_len": { "nat": {} },
+        "exit_code": { "option": { "int": {} } },
+        "receipt_status": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/FabricExecProgressStart@1",
+    "type": {
+      "record": {
+        "session_id": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/FabricExecProgressEvent@1",
+    "type": {
+      "variant": {
+        "Start": { "ref": "demo/FabricExecProgressStart@1" },
+        "StreamFrame": { "ref": "sys/EffectStreamFrame@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
+      }
+    }
+  }
+]

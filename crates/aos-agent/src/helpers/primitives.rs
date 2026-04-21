@@ -483,7 +483,10 @@ mod tests {
         };
         assert_eq!(params.session_ttl_ns, Some(99));
         assert_eq!(
-            params.target.as_local().workdir.as_deref(),
+            params
+                .target
+                .as_local()
+                .and_then(|target| target.workdir.as_deref()),
             Some("/tmp/project")
         );
     }

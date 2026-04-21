@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_effect_adapters::default_registry;
 use aos_effect_adapters::registry::AdapterRegistry;
-use aos_effect_adapters::traits::EffectUpdate;
+use aos_effect_adapters::traits::{AdapterStartContext, EffectUpdate};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use aos_kernel::{LoadedManifest, Store, WorldInput};
 use serde::Serialize;
@@ -84,6 +84,7 @@ where
         world_id: W,
         route_id: String,
         intent: EffectIntent,
+        start_context: Option<AdapterStartContext>,
     ) -> Result<bool, RuntimeError> {
         let key = (world_id.clone(), intent.intent_hash);
         {
@@ -98,7 +99,13 @@ where
         let intent_hash = intent.intent_hash;
         let (update_tx, mut update_rx) = mpsc::channel(16);
         let registry = Arc::clone(&self.adapter_registry);
-        if let Err(err) = registry.ensure_started_routed(intent, route_id.clone(), update_tx) {
+        let normalize_context = start_context.clone();
+        if let Err(err) = registry.ensure_started_routed_with_context(
+            intent,
+            route_id.clone(),
+            start_context,
+            update_tx,
+        ) {
             let continuation_tx = self.continuation_tx.clone();
             let inflight = Arc::clone(&self.inflight);
             let world_id = world_id.clone();
@@ -127,14 +134,18 @@ where
         tokio::spawn(async move {
             let mut terminal_seen = false;
             while let Some(update) = update_rx.recv().await {
-                let input =
-                    match normalize_effect_update(update, intent_hash, &route_id_for_updates) {
-                        EffectUpdate::Receipt(receipt) => {
-                            terminal_seen = true;
-                            WorldInput::Receipt(receipt)
-                        }
-                        EffectUpdate::StreamFrame(frame) => WorldInput::StreamFrame(frame),
-                    };
+                let input = match normalize_effect_update(
+                    update,
+                    intent_hash,
+                    &route_id_for_updates,
+                    normalize_context.as_ref(),
+                ) {
+                    EffectUpdate::Receipt(receipt) => {
+                        terminal_seen = true;
+                        WorldInput::Receipt(receipt)
+                    }
+                    EffectUpdate::StreamFrame(frame) => WorldInput::StreamFrame(frame),
+                };
                 let _ = continuation_tx
                     .send(EffectRuntimeEvent::WorldInput {
                         world_id: world_id_for_updates.clone(),
@@ -250,6 +261,15 @@ where
     }
 
     pub fn ensure_started(&self, world_id: W, intent: EffectIntent) -> Result<bool, RuntimeError> {
+        self.ensure_started_with_context(world_id, intent, None)
+    }
+
+    pub fn ensure_started_with_context(
+        &self,
+        world_id: W,
+        intent: EffectIntent,
+        start_context: Option<AdapterStartContext>,
+    ) -> Result<bool, RuntimeError> {
         match self.classify_intent(&intent) {
             EffectExecutionClass::InlineInternal => {
                 return Err(RuntimeError::ExecutionClass(format!(
@@ -268,7 +288,7 @@ where
 
         let route_id = self.resolve_effect_route_id(intent.kind.as_str())?;
         self.shared
-            .ensure_started_routed(world_id, route_id, intent)
+            .ensure_started_routed(world_id, route_id, intent, start_context)
     }
 }
 
@@ -276,6 +296,7 @@ fn normalize_effect_update(
     mut update: EffectUpdate,
     expected_intent_hash: [u8; 32],
     route_id: &str,
+    context: Option<&AdapterStartContext>,
 ) -> EffectUpdate {
     match &mut update {
         EffectUpdate::Receipt(receipt) => {
@@ -296,6 +317,12 @@ fn normalize_effect_update(
                     hex::encode(expected_intent_hash),
                 );
                 frame.intent_hash = expected_intent_hash;
+            }
+            if let Some(context) = context {
+                frame.origin_module_id = context.origin_module_id.clone();
+                frame.origin_instance_key = context.origin_instance_key.clone();
+                frame.effect_kind = context.effect_kind.clone();
+                frame.emitted_at_seq = context.emitted_at_seq;
             }
         }
     }
@@ -541,5 +568,42 @@ mod tests {
             .await
             .expect("timely event")
             .expect("runtime event");
+    }
+
+    #[test]
+    fn normalize_stream_frame_fills_runtime_origin_context() {
+        let context = AdapterStartContext {
+            origin_module_id: "com.acme/Workflow@1".to_string(),
+            origin_instance_key: Some(vec![1, 2, 3]),
+            effect_kind: EffectKind::HOST_EXEC.to_string(),
+            emitted_at_seq: 42,
+        };
+        let update = EffectUpdate::StreamFrame(aos_effects::EffectStreamFrame {
+            intent_hash: [1; 32],
+            adapter_id: "host.exec.fabric".to_string(),
+            origin_module_id: "placeholder".to_string(),
+            origin_instance_key: None,
+            effect_kind: "placeholder".to_string(),
+            emitted_at_seq: 0,
+            seq: 7,
+            kind: "host.exec.progress".to_string(),
+            payload_cbor: Vec::new(),
+            payload_ref: None,
+            signature: vec![0; 64],
+        });
+
+        let normalized =
+            normalize_effect_update(update, [2; 32], "host.exec.fabric", Some(&context));
+        let EffectUpdate::StreamFrame(frame) = normalized else {
+            panic!("expected stream frame");
+        };
+
+        assert_eq!(frame.intent_hash, [2; 32]);
+        assert_eq!(frame.origin_module_id, context.origin_module_id);
+        assert_eq!(frame.origin_instance_key, context.origin_instance_key);
+        assert_eq!(frame.effect_kind, context.effect_kind);
+        assert_eq!(frame.emitted_at_seq, context.emitted_at_seq);
+        assert_eq!(frame.seq, 7);
+        assert_eq!(frame.kind, "host.exec.progress");
     }
 }

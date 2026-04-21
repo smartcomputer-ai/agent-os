@@ -1,6 +1,9 @@
 use crate::{
     EmptyObject, HashRef, ValueList, ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull,
-    ValueRecord, ValueText, builtins::find_builtin_schema, validate_value_literal,
+    ValueRecord, ValueText, ValueVariant,
+    builtins::{builtin_schemas, find_builtin_schema},
+    schema_index::{SchemaIndex, validate_literal},
+    validate_value_literal,
 };
 
 fn text(value: &str) -> ValueLiteral {
@@ -45,6 +48,13 @@ fn map(entries: Vec<(ValueLiteral, ValueLiteral)>) -> ValueLiteral {
 
 fn list(items: Vec<ValueLiteral>) -> ValueLiteral {
     ValueLiteral::List(ValueList { list: items })
+}
+
+fn variant(tag: &str, value: ValueLiteral) -> ValueLiteral {
+    ValueLiteral::Variant(ValueVariant {
+        tag: tag.to_string(),
+        value: Some(Box::new(value)),
+    })
 }
 
 #[test]
@@ -171,4 +181,42 @@ fn llm_generate_receipt_requires_token_usage_fields() {
         ("provider_id", text("openai")),
     ]);
     assert!(validate_value_literal(&literal, &schema.schema.ty).is_err());
+}
+
+#[test]
+fn host_target_accepts_local_and_sandbox_variants() {
+    let schema = find_builtin_schema("sys/HostTarget@1").expect("host target schema");
+    let schemas = SchemaIndex::new(
+        builtin_schemas()
+            .iter()
+            .map(|schema| (schema.schema.name.clone(), schema.schema.ty.clone()))
+            .collect(),
+    );
+    let local = variant(
+        "local",
+        record(vec![
+            ("mounts", null()),
+            ("workdir", null()),
+            ("env", null()),
+            ("network_mode", text("none")),
+        ]),
+    );
+    validate_literal(&local, &schema.schema.ty, &schema.schema.name, &schemas)
+        .expect("local target matches schema");
+
+    let sandbox = variant(
+        "sandbox",
+        record(vec![
+            ("image", text("docker.io/library/alpine:latest")),
+            ("runtime_class", null()),
+            ("workdir", null()),
+            ("env", null()),
+            ("network_mode", text("egress")),
+            ("mounts", null()),
+            ("cpu_limit_millis", null()),
+            ("memory_limit_bytes", null()),
+        ]),
+    );
+    validate_literal(&sandbox, &schema.schema.ty, &schema.schema.name, &schemas)
+        .expect("sandbox target matches schema");
 }

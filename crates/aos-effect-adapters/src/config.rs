@@ -11,6 +11,7 @@ pub struct EffectAdapterConfig {
     pub effect_timeout: Duration,
     pub http: HttpAdapterConfig,
     pub llm: Option<LlmAdapterConfig>,
+    pub fabric: Option<FabricAdapterConfig>,
     pub adapter_routes: HashMap<String, AdapterProviderSpec>,
 }
 
@@ -20,6 +21,7 @@ impl Default for EffectAdapterConfig {
             effect_timeout: Duration::from_secs(30),
             http: HttpAdapterConfig::default(),
             llm: LlmAdapterConfig::from_env().ok(),
+            fabric: FabricAdapterConfig::from_env(),
             adapter_routes: default_adapter_routes(),
         }
     }
@@ -190,6 +192,65 @@ impl Default for HttpAdapterConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct FabricAdapterConfig {
+    pub controller_url: String,
+    pub bearer_token: Option<String>,
+    pub request_timeout: Duration,
+    pub exec_progress_interval: Duration,
+    pub default_image: Option<String>,
+    pub default_runtime_class: Option<String>,
+    pub default_network_mode: Option<String>,
+}
+
+impl FabricAdapterConfig {
+    pub fn from_env() -> Option<Self> {
+        let controller_url = std::env::var("AOS_FABRIC_CONTROLLER_URL").ok()?;
+        let controller_url = controller_url.trim().trim_end_matches('/').to_string();
+        if controller_url.is_empty() {
+            return None;
+        }
+
+        let bearer_token = explicit_or_file_token();
+        Some(Self {
+            controller_url,
+            bearer_token,
+            request_timeout: duration_secs_env("AOS_FABRIC_REQUEST_TIMEOUT_SECS", 300),
+            exec_progress_interval: duration_secs_env("AOS_FABRIC_EXEC_PROGRESS_INTERVAL_SECS", 10),
+            default_image: non_empty_env("AOS_FABRIC_DEFAULT_IMAGE"),
+            default_runtime_class: non_empty_env("AOS_FABRIC_DEFAULT_RUNTIME_CLASS"),
+            default_network_mode: non_empty_env("AOS_FABRIC_DEFAULT_NETWORK_MODE"),
+        })
+    }
+}
+
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn duration_secs_env(key: &str, default_secs: u64) -> Duration {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(default_secs))
+}
+
+fn explicit_or_file_token() -> Option<String> {
+    if let Some(token) = non_empty_env("AOS_FABRIC_BEARER_TOKEN") {
+        return Some(token);
+    }
+
+    let path = non_empty_env("AOS_FABRIC_BEARER_TOKEN_FILE")?;
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmApiKind {
     ChatCompletions,
@@ -269,6 +330,14 @@ mod tests {
             }
             Self { key, previous }
         }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
     }
 
     impl Drop for EnvGuard {
@@ -336,5 +405,26 @@ mod tests {
                 .map(|spec| spec.adapter_kind.as_str()),
             Some("llm.generate")
         );
+    }
+
+    #[test]
+    fn fabric_config_from_env_requires_controller_url() {
+        let _lock = env_lock().lock().unwrap();
+        let _url = EnvGuard::unset("AOS_FABRIC_CONTROLLER_URL");
+        assert!(FabricAdapterConfig::from_env().is_none());
+    }
+
+    #[test]
+    fn fabric_config_from_env_reads_controller_and_token() {
+        let _lock = env_lock().lock().unwrap();
+        let _url = EnvGuard::set("AOS_FABRIC_CONTROLLER_URL", "http://127.0.0.1:8787/");
+        let _token = EnvGuard::set("AOS_FABRIC_BEARER_TOKEN", " token ");
+        let _timeout = EnvGuard::set("AOS_FABRIC_REQUEST_TIMEOUT_SECS", "42");
+        let _progress = EnvGuard::set("AOS_FABRIC_EXEC_PROGRESS_INTERVAL_SECS", "3");
+        let cfg = FabricAdapterConfig::from_env().expect("fabric config");
+        assert_eq!(cfg.controller_url, "http://127.0.0.1:8787");
+        assert_eq!(cfg.bearer_token.as_deref(), Some("token"));
+        assert_eq!(cfg.request_timeout, Duration::from_secs(42));
+        assert_eq!(cfg.exec_progress_interval, Duration::from_secs(3));
     }
 }

@@ -10,6 +10,14 @@ pub enum EffectUpdate {
 
 pub type EffectUpdateSender = mpsc::Sender<EffectUpdate>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdapterStartContext {
+    pub origin_module_id: String,
+    pub origin_instance_key: Option<Vec<u8>>,
+    pub effect_kind: String,
+    pub emitted_at_seq: u64,
+}
+
 #[async_trait]
 pub trait AsyncEffectAdapter: Send + Sync {
     fn kind(&self) -> &str;
@@ -23,6 +31,16 @@ pub trait AsyncEffectAdapter: Send + Sync {
     async fn ensure_started(
         &self,
         intent: EffectIntent,
+        updates: EffectUpdateSender,
+    ) -> anyhow::Result<()> {
+        self.ensure_started_with_context(intent, None, updates)
+            .await
+    }
+
+    async fn ensure_started_with_context(
+        &self,
+        intent: EffectIntent,
+        _context: Option<AdapterStartContext>,
         updates: EffectUpdateSender,
     ) -> anyhow::Result<()> {
         let receipt = self.run_terminal(&intent).await?;

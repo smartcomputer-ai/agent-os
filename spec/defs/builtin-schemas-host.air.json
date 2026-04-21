@@ -53,11 +53,69 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/HostSandboxTarget@1",
+    "type": {
+      "record": {
+        "image": {
+          "text": {}
+        },
+        "runtime_class": {
+          "option": {
+            "text": {}
+          }
+        },
+        "workdir": {
+          "option": {
+            "text": {}
+          }
+        },
+        "env": {
+          "option": {
+            "map": {
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "network_mode": {
+          "option": {
+            "text": {}
+          }
+        },
+        "mounts": {
+          "option": {
+            "list": {
+              "ref": "sys/HostMount@1"
+            }
+          }
+        },
+        "cpu_limit_millis": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "memory_limit_bytes": {
+          "option": {
+            "nat": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/HostTarget@1",
     "type": {
       "variant": {
         "local": {
           "ref": "sys/HostLocalTarget@1"
+        },
+        "sandbox": {
+          "ref": "sys/HostSandboxTarget@1"
         }
       }
     }
@@ -243,6 +301,34 @@
           "option": {
             "text": {}
           }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HostExecProgressFrame@1",
+    "type": {
+      "record": {
+        "exec_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "elapsed_ns": {
+          "nat": {}
+        },
+        "stdout_delta": {
+          "bytes": {}
+        },
+        "stderr_delta": {
+          "bytes": {}
+        },
+        "stdout_bytes": {
+          "nat": {}
+        },
+        "stderr_bytes": {
+          "nat": {}
         }
       }
     }

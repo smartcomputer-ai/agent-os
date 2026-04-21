@@ -16,8 +16,8 @@ use super::core::{
 };
 use super::types::{AsyncWorldState, HostedWorkerCore, WorkerError};
 use super::util::{
-    build_timer_receipt, snapshot_record_from_checkpoint, snapshot_record_from_frames,
-    timer_entry_from_intent, unix_time_ns,
+    adapter_start_context_from_opened, build_timer_receipt, snapshot_record_from_checkpoint,
+    snapshot_record_from_frames, timer_entry_from_intent, unix_time_ns,
 };
 
 impl HostedWorkerCore {
@@ -216,7 +216,10 @@ impl HostedWorkerCore {
                         timer_intents.push(opened.intent.clone());
                     }
                     EffectExecutionClass::ExternalAsync => {
-                        external_intents.push(opened.intent.clone());
+                        external_intents.push((
+                            opened.intent.clone(),
+                            adapter_start_context_from_opened(opened),
+                        ));
                     }
                 }
             }
@@ -229,8 +232,10 @@ impl HostedWorkerCore {
             }
         }
         if let Some(registered) = self.state.registered_worlds.get(&world_id) {
-            for intent in external_intents {
-                let _ = registered.effect_runtime.ensure_started(world_id, intent)?;
+            for (intent, context) in external_intents {
+                let _ = registered
+                    .effect_runtime
+                    .ensure_started_with_context(world_id, intent, context)?;
             }
         }
 

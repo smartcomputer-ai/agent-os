@@ -4,7 +4,7 @@ use std::sync::Arc;
 use aos_effects::EffectIntent;
 use log::warn;
 
-use super::traits::{AsyncEffectAdapter, EffectUpdateSender};
+use super::traits::{AdapterStartContext, AsyncEffectAdapter, EffectUpdateSender};
 
 pub struct AdapterRegistry {
     adapters: HashMap<String, Arc<dyn AsyncEffectAdapter>>,
@@ -87,6 +87,16 @@ impl AdapterRegistry {
         adapter_id: String,
         updates: EffectUpdateSender,
     ) -> Result<(), AdapterStartError> {
+        self.ensure_started_routed_with_context(intent, adapter_id, None, updates)
+    }
+
+    pub fn ensure_started_routed_with_context(
+        &self,
+        intent: EffectIntent,
+        adapter_id: String,
+        context: Option<AdapterStartContext>,
+        updates: EffectUpdateSender,
+    ) -> Result<(), AdapterStartError> {
         let adapter_kind = self.routes.get(&adapter_id).cloned().ok_or_else(|| {
             AdapterStartError::MissingRoute {
                 adapter_id: adapter_id.clone(),
@@ -99,7 +109,10 @@ impl AdapterRegistry {
             }
         })?;
         tokio::spawn(async move {
-            if let Err(err) = adapter.ensure_started(intent, updates).await {
+            if let Err(err) = adapter
+                .ensure_started_with_context(intent, context, updates)
+                .await
+            {
                 warn!("adapter '{adapter_id}' failed after start: {err:#}");
             }
         });
