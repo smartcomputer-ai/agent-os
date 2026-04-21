@@ -1,4 +1,11 @@
-You’re right to be skeptical of a separate `defadapter`. It is a plausible incremental patch, but it does not solve the deeper modeling problem. It keeps this asymmetry:
+# defop refactor
+
+Note: this was written by someone without full access to the codebase, so some statements need to be taken with a grain of salt. This is not a spec but a directional memo.
+
+Important: however, as we move towards the op model, we must refactor _agressively_ because we are on an experimental branch and do NOT need to worry about breaking anything. Do not maintain any backward compatibility. Treat it as if we are building on a blank slate.
+
+
+So bar our design proposals kept this asymmetry:
 
 ```text
 workflow/pure call surface  -> defined in defmodule

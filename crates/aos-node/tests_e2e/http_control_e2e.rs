@@ -50,6 +50,10 @@ async fn http_control_broker_mode_submits_via_standalone_services() {
         return;
     };
     let worker_runtime = ctx.worker_runtime("worker");
+    let world_id = WorldId::from(uuid::Uuid::new_v4());
+    worker_runtime
+        .configure_owned_worlds([world_id])
+        .expect("configure worker world ownership");
     let control_runtime = ctx.control_runtime("control");
     let app = control_app(&control_runtime);
     let worker = hosted_worker();
@@ -64,11 +68,11 @@ async fn http_control_broker_mode_submits_via_standalone_services() {
     let created: Value = response_json_with_status(
         app.clone()
             .oneshot(
-                Request::post("/v1/worlds")
+                Request::post("/v1/worlds?wait_for_flush=true")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::to_vec(&CreateWorldBody {
-                            world_id: None,
+                            world_id: Some(world_id),
                             universe_id,
                             created_at_ns: 1,
                             source: CreateWorldSource::Manifest { manifest_hash },
@@ -82,11 +86,12 @@ async fn http_control_broker_mode_submits_via_standalone_services() {
         StatusCode::CREATED,
     )
     .await;
-    let world_id = created["world_id"]
+    let created_world_id = created["world_id"]
         .as_str()
         .unwrap()
         .parse::<WorldId>()
         .unwrap();
+    assert_eq!(created_world_id, world_id);
 
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
@@ -104,7 +109,7 @@ async fn http_control_broker_mode_submits_via_standalone_services() {
     let event: Value = response_json_with_status(
         app.clone()
             .oneshot(
-                Request::post(format!("/v1/worlds/{world_id}/events"))
+                Request::post(format!("/v1/worlds/{world_id}/events?wait_for_flush=true"))
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::to_vec(&SubmitEventBody {
