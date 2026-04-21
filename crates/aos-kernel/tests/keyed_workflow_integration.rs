@@ -41,7 +41,6 @@ async fn keyed_workflow_integration_flow() {
             context: Some(fixtures::schema("sys/WorkflowContext@1")),
             annotations: None,
             effects_emitted: vec![],
-            cap_slots: Default::default(),
         });
 
         let routing = vec![aos_air_types::RoutingEvent {

@@ -897,7 +897,6 @@ mod tests {
                     context: None,
                     annotations: None,
                     effects_emitted: vec![],
-                    cap_slots: Default::default(),
                 }),
                 pure: None,
             },
@@ -955,7 +954,6 @@ mod tests {
                     context: None,
                     annotations: None,
                     effects_emitted: vec![aos_air_types::EffectKind::timer_set()],
-                    cap_slots: Default::default(),
                 }),
                 pure: None,
             },
@@ -980,8 +978,6 @@ mod tests {
             secrets: vec![],
             modules: HashMap::from([(module.name.clone(), module)]),
             effects: HashMap::from([(timer_effect.name.clone(), timer_effect.clone())]),
-            caps: HashMap::new(),
-            policies: HashMap::new(),
             schemas: HashMap::from([
                 ("com.acme/State@1".into(), schema_text("com.acme/State@1")),
                 (
@@ -1198,8 +1194,6 @@ mod tests {
             secrets: vec![],
             modules: HashMap::new(),
             effects: HashMap::new(),
-            caps: HashMap::new(),
-            policies: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: EffectCatalog::new(),
         };
@@ -1231,8 +1225,6 @@ mod tests {
             secrets: vec![],
             modules: HashMap::new(),
             effects: HashMap::new(),
-            caps: HashMap::new(),
-            policies: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: EffectCatalog::new(),
         };

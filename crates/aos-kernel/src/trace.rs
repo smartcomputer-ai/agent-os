@@ -3,9 +3,7 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::journal::{
-    CapDecisionOutcome, DomainEventRecord, JournalKind, JournalRecord, PolicyDecisionOutcome,
-};
+use crate::journal::{DomainEventRecord, JournalKind, JournalRecord};
 use crate::snapshot::EffectIntentSnapshot;
 use crate::{Kernel, KernelError, StateReader, Store};
 
@@ -300,10 +298,6 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
     let mut receipt_error = 0u64;
     let mut receipt_timeout = 0u64;
     let mut stream_frames = 0u64;
-    let mut policy_allow = 0u64;
-    let mut policy_deny = 0u64;
-    let mut cap_allow = 0u64;
-    let mut cap_deny = 0u64;
     let mut proposed = 0u64;
     let mut shadowed = 0u64;
     let mut approved = 0u64;
@@ -320,14 +314,6 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
                 ReceiptStatus::Timeout => receipt_timeout += 1,
             },
             JournalRecord::StreamFrame(_) => stream_frames += 1,
-            JournalRecord::PolicyDecision(decision) => match decision.decision {
-                PolicyDecisionOutcome::Allow => policy_allow += 1,
-                PolicyDecisionOutcome::Deny => policy_deny += 1,
-            },
-            JournalRecord::CapDecision(decision) => match decision.decision {
-                CapDecisionOutcome::Allow => cap_allow += 1,
-                CapDecisionOutcome::Deny => cap_deny += 1,
-            },
             JournalRecord::Governance(governance) => match governance {
                 crate::journal::GovernanceRecord::Proposed(_) => proposed += 1,
                 crate::journal::GovernanceRecord::ShadowReport(_) => shadowed += 1,
@@ -403,14 +389,6 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
                     "timeout": receipt_timeout,
                 },
                 "stream_frames": stream_frames,
-            },
-            "policy_decisions": {
-                "allow": policy_allow,
-                "deny": policy_deny,
-            },
-            "cap_decisions": {
-                "allow": cap_allow,
-                "deny": cap_deny,
             },
             "workflows": {
                 "total": workflow_instances.len(),
@@ -501,8 +479,6 @@ pub fn diagnose_trace(trace: &Value) -> Value {
         .map(std::vec::Vec::len)
         .unwrap_or(0);
 
-    let mut policy_denied = false;
-    let mut capability_denied = false;
     let mut adapter_error = false;
     let mut adapter_timeout = false;
     let mut workflow_failed = false;
@@ -516,18 +492,6 @@ pub fn diagnose_trace(trace: &Value) -> Value {
         let record = entry.get("record").cloned().unwrap_or(Value::Null);
 
         match kind {
-            "policy_decision" => {
-                let decision = find_str(&record, "decision").unwrap_or_default();
-                if decision.eq_ignore_ascii_case("deny") {
-                    policy_denied = true;
-                }
-            }
-            "cap_decision" => {
-                let decision = find_str(&record, "decision").unwrap_or_default();
-                if decision.eq_ignore_ascii_case("deny") {
-                    capability_denied = true;
-                }
-            }
             "effect_receipt" => {
                 let status = find_str(&record, "status").unwrap_or_default();
                 if status.eq_ignore_ascii_case("error") {
@@ -562,11 +526,7 @@ pub fn diagnose_trace(trace: &Value) -> Value {
         workflow_failed = true;
     }
 
-    let cause = if policy_denied {
-        "policy_denied"
-    } else if capability_denied {
-        "capability_denied"
-    } else if adapter_timeout {
+    let cause = if adapter_timeout {
         "adapter_timeout"
     } else if adapter_error {
         "adapter_error"
@@ -585,8 +545,6 @@ pub fn diagnose_trace(trace: &Value) -> Value {
     };
 
     let hint = match cause {
-        "policy_denied" => "Adjust policy rules or module-origin/cap mapping.",
-        "capability_denied" => "Inspect capability grant constraints and enforcer output.",
         "adapter_timeout" => "Check adapter timeout and upstream endpoint latency.",
         "adapter_error" => "Inspect adapter receipt payload for failure details.",
         "invariant_violation" => "Inspect module state invariants and step transitions.",
@@ -713,10 +671,8 @@ fn journal_kind_name(kind: JournalKind) -> &'static str {
         JournalKind::EffectIntent => "effect_intent",
         JournalKind::EffectReceipt => "effect_receipt",
         JournalKind::StreamFrame => "stream_frame",
-        JournalKind::CapDecision => "cap_decision",
         JournalKind::Manifest => "manifest",
         JournalKind::Snapshot => "snapshot",
-        JournalKind::PolicyDecision => "policy_decision",
         JournalKind::Governance => "governance",
         JournalKind::PlanStarted => "legacy_plan_started",
         JournalKind::PlanResult => "legacy_plan_result",
@@ -758,17 +714,17 @@ mod tests {
     use super::diagnose_trace;
 
     #[test]
-    fn diagnose_trace_prefers_policy_denied() {
+    fn diagnose_trace_identifies_adapter_errors() {
         let trace = serde_json::json!({
             "terminal_state": "failed",
             "journal_window": {
                 "entries": [
-                    { "kind": "policy_decision", "record": { "decision": "deny" } }
+                    { "kind": "effect_receipt", "record": { "status": "error" } }
                 ]
             },
             "live_wait": {}
         });
         let diagnosis = diagnose_trace(&trace);
-        assert_eq!(diagnosis["cause"], "policy_denied");
+        assert_eq!(diagnosis["cause"], "adapter_error");
     }
 }

@@ -74,14 +74,13 @@ These still matter without caps or policies:
 
 ## Keep Internally For Now
 
-Keep these as permissive internals so existing code does not need to be gutted in the same patch as the public simplification:
+The v0.22 experiment now keeps only legacy wire fields that still belong to effect intent identity:
 
-- `LoadedManifest` indexes may keep empty caps/policies maps internally.
-- Kernel authorization function stays, but returns allow by default.
-- Legacy kernel cap enforcer machinery may remain unreachable/dead-ended temporarily for compatibility tests, but public built-in defs and `aos-sys` handlers are removed.
-- Policy evaluator can remain behind an empty/default policy shim.
+- `EffectIntent.cap_name` remains as a sentinel/compatibility field outside AIR.
 - Receipt, open-work, and idempotency logic remain unchanged.
 - Effect param and receipt schema validation remains strict.
+
+The old kernel capability resolver, cap enforcer, policy evaluator, cap/policy AIR nodes, cap/policy manifest indexes, cap/policy journal decision records, and secret cap policies have been removed.
 
 ## Phase 1: Schema And AIR Surface
 
@@ -103,7 +102,7 @@ Done when:
 
 ## Phase 2: Rust Model And Loader
 
-Status: done for the public surface. Legacy structs remain internally, but authored/imported AIR rejects `defcap` and `defpolicy`, and the active schema set excludes them.
+Status: done. `Manifest`, `AirNode`, validation, built-ins, authoring bundle/import, and loaded manifest state no longer carry caps or policies.
 
 Work:
 
@@ -119,7 +118,7 @@ Done when:
 
 ## Phase 3: Kernel Runtime Shim
 
-Status: done for workflow-origin effect enqueue. New workflow effects use an internal sentinel grant while legacy intent structs still carry `cap_name`.
+Status: done. Effect enqueue is permissive after structural checks; workflow `effects_emitted`, effect schema normalization, open-work, receipts, and replay paths remain.
 
 Work:
 

@@ -210,11 +210,6 @@ fn enforce_kind(expected: &str, node: &AirNode) -> Result<(), KernelError> {
     let actual = match node {
         AirNode::Defmodule(_) => "defmodule",
         AirNode::Defschema(_) => "defschema",
-        AirNode::Defcap(_) | AirNode::Defpolicy(_) => {
-            return Err(KernelError::Manifest(
-                "defcap and defpolicy are not supported in public patch documents".to_string(),
-            ));
-        }
         AirNode::Defeffect(_) => "defeffect",
         AirNode::Defsecret(_) => "defsecret",
         AirNode::Manifest(_) => "manifest",
@@ -421,8 +416,6 @@ fn node_name(node: &AirNode) -> Option<&str> {
         AirNode::Defschema(s) => Some(s.name.as_str()),
         AirNode::Defmodule(m) => Some(m.name.as_str()),
         AirNode::Defeffect(e) => Some(e.name.as_str()),
-        AirNode::Defcap(c) => Some(c.name.as_str()),
-        AirNode::Defpolicy(p) => Some(p.name.as_str()),
         AirNode::Defsecret(s) => Some(s.name.as_str()),
         AirNode::Manifest(_) => None,
     }

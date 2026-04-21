@@ -1,7 +1,5 @@
 //! Deterministic kernel entry points: load manifests, run workflows, emit intents.
 
-pub mod cap_enforcer;
-pub mod capability;
 pub mod cell_index;
 pub mod effects;
 pub mod error;
@@ -14,7 +12,6 @@ pub mod journal;
 pub mod manifest;
 pub mod manifest_catalog;
 pub mod patch_doc;
-pub mod policy;
 pub mod pure;
 pub mod query;
 pub mod receipts;

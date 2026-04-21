@@ -48,7 +48,6 @@ fn workflow_abi_struct_round_trip() {
             event: SchemaRef::new("com.acme/Event@1").unwrap(),
             annotations: None,
             effects_emitted: vec![crate::EffectKind::http_request()],
-            cap_slots: indexmap::IndexMap::new(),
         }),
         pure: None,
     };

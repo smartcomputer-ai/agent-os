@@ -5,6 +5,6 @@ mod summary;
 pub use config::{ShadowConfig, ShadowHarness};
 pub use runner::ShadowExecutor;
 pub use summary::{
-    DeltaKind, LedgerDelta, LedgerKind, ModuleEffectAllowlist, PendingWorkflowReceipt,
-    PredictedEffect, ShadowSummary, WorkflowInstancePreview,
+    ModuleEffectAllowlist, PendingWorkflowReceipt, PredictedEffect, ShadowSummary,
+    WorkflowInstancePreview,
 };

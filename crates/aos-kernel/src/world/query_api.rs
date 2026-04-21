@@ -177,14 +177,10 @@ mod tests {
             air_version: CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: vec![],
-            caps: vec![],
             effects: vec![],
             effect_bindings: vec![],
-            policies: vec![],
             secrets: vec![],
-            module_bindings: IndexMap::new(),
             routing: None,
-            defaults: None,
         }
     }
 
@@ -199,8 +195,6 @@ mod tests {
             secrets: vec![],
             modules: HashMap::new(),
             effects: HashMap::new(),
-            caps: HashMap::new(),
-            policies: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: aos_air_types::catalog::EffectCatalog::default(),
         };

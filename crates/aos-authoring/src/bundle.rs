@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, DefSecret, HashRef, Manifest,
-    NamedRef, SecretEntry, builtins,
+    AirNode, DefEffect, DefModule, DefSchema, DefSecret, HashRef, Manifest, NamedRef, SecretEntry,
+    builtins,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::LoadedManifest;
@@ -30,8 +30,6 @@ pub struct WorldBundle {
     pub manifest: Manifest,
     pub schemas: Vec<DefSchema>,
     pub modules: Vec<DefModule>,
-    pub caps: Vec<DefCap>,
-    pub policies: Vec<DefPolicy>,
     pub effects: Vec<DefEffect>,
     pub secrets: Vec<DefSecret>,
     pub wasm_blobs: Option<std::collections::BTreeMap<String, Vec<u8>>>,
@@ -327,8 +325,6 @@ pub fn manifest_node_hash(manifest: &Manifest) -> Result<String> {
 struct StoredBundleHashes {
     schemas: std::collections::HashMap<String, HashRef>,
     modules: std::collections::HashMap<String, HashRef>,
-    caps: std::collections::HashMap<String, HashRef>,
-    policies: std::collections::HashMap<String, HashRef>,
     effects: std::collections::HashMap<String, HashRef>,
     secrets: std::collections::HashMap<String, HashRef>,
 }
@@ -351,24 +347,6 @@ fn store_bundle_defs<S: Store>(store: &S, bundle: &WorldBundle) -> Result<Stored
         stored.modules.insert(
             module.name.to_string(),
             HashRef::new(hash.to_hex()).context("hash defmodule")?,
-        );
-    }
-    for cap in &bundle.caps {
-        let hash = store
-            .put_node(&AirNode::Defcap(cap.clone()))
-            .context("store defcap")?;
-        stored.caps.insert(
-            cap.name.to_string(),
-            HashRef::new(hash.to_hex()).context("hash defcap")?,
-        );
-    }
-    for policy in &bundle.policies {
-        let hash = store
-            .put_node(&AirNode::Defpolicy(policy.clone()))
-            .context("store defpolicy")?;
-        stored.policies.insert(
-            policy.name.to_string(),
-            HashRef::new(hash.to_hex()).context("hash defpolicy")?,
         );
     }
     for effect in &bundle.effects {
@@ -431,15 +409,13 @@ fn patch_named_refs_for_genesis(
                     builtins::find_builtin_module(reference.name.as_str())
                         .map(|builtin| builtin.hash_ref.clone())
                 }),
-                "cap" => builtins::find_builtin_cap(reference.name.as_str())
-                    .map(|builtin| builtin.hash_ref.clone()),
                 "effect" => builtins::find_builtin_effect(reference.name.as_str())
                     .map(|builtin| builtin.hash_ref.clone()),
                 _ => None,
             }
         } else {
             match kind {
-                "schema" | "module" | "cap" | "policy" | "effect" | "secret" => {
+                "schema" | "module" | "effect" | "secret" => {
                     stored.get(reference.name.as_str()).cloned()
                 }
                 _ => bail!("unsupported manifest ref kind '{kind}'"),
@@ -538,8 +514,6 @@ impl WorldBundle {
             manifest: loaded.manifest,
             schemas: loaded.schemas.into_values().collect(),
             modules: loaded.modules.into_values().collect(),
-            caps: loaded.caps.into_values().collect(),
-            policies: loaded.policies.into_values().collect(),
             effects: loaded.effects.into_values().collect(),
             secrets: Vec::new(),
             wasm_blobs: None,
@@ -553,8 +527,6 @@ impl WorldBundle {
             manifest: loaded.manifest,
             schemas: loaded.schemas.into_values().collect(),
             modules: loaded.modules.into_values().collect(),
-            caps: loaded.caps.into_values().collect(),
-            policies: loaded.policies.into_values().collect(),
             effects: loaded.effects.into_values().collect(),
             secrets,
             wasm_blobs: None,
@@ -565,8 +537,6 @@ impl WorldBundle {
     fn sort_defs(&mut self) {
         self.schemas.sort_by(|a, b| a.name.cmp(&b.name));
         self.modules.sort_by(|a, b| a.name.cmp(&b.name));
-        self.caps.sort_by(|a, b| a.name.cmp(&b.name));
-        self.policies.sort_by(|a, b| a.name.cmp(&b.name));
         self.effects.sort_by(|a, b| a.name.cmp(&b.name));
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
     }
@@ -729,18 +699,6 @@ impl HasName for DefEffect {
     }
 }
 
-impl HasName for DefCap {
-    fn name(&self) -> &str {
-        self.name.as_str()
-    }
-}
-
-impl HasName for DefPolicy {
-    fn name(&self) -> &str {
-        self.name.as_str()
-    }
-}
-
 impl HasName for DefSecret {
     fn name(&self) -> &str {
         self.name.as_str()
@@ -754,9 +712,6 @@ fn extend_with_builtins(bundle: &mut WorldBundle) {
     }
     for effect in &bundle.effects {
         existing.insert(effect.name.clone());
-    }
-    for cap in &bundle.caps {
-        existing.insert(cap.name.clone());
     }
     for module in &bundle.modules {
         existing.insert(module.name.clone());
@@ -772,11 +727,6 @@ fn extend_with_builtins(bundle: &mut WorldBundle) {
             bundle.effects.push(builtin.effect.clone());
         }
     }
-    for builtin in builtins::builtin_caps() {
-        if existing.insert(builtin.cap.name.clone()) {
-            bundle.caps.push(builtin.cap.clone());
-        }
-    }
     for builtin in builtins::builtin_modules() {
         if existing.insert(builtin.module.name.clone()) {
             bundle.modules.push(builtin.module.clone());
@@ -787,8 +737,6 @@ fn extend_with_builtins(bundle: &mut WorldBundle) {
 fn bundle_from_catalog(catalog: aos_kernel::Catalog, include_sys: bool) -> WorldBundle {
     let mut schemas = Vec::new();
     let mut modules = Vec::new();
-    let mut caps = Vec::new();
-    let mut policies = Vec::new();
     let mut effects = Vec::new();
     let mut secrets = Vec::new();
 
@@ -799,8 +747,6 @@ fn bundle_from_catalog(catalog: aos_kernel::Catalog, include_sys: bool) -> World
         match entry.node {
             AirNode::Defschema(schema) => schemas.push(schema),
             AirNode::Defmodule(module) => modules.push(module),
-            AirNode::Defcap(cap) => caps.push(cap),
-            AirNode::Defpolicy(policy) => policies.push(policy),
             AirNode::Defeffect(effect) => effects.push(effect),
             AirNode::Defsecret(secret) => secrets.push(secret),
             AirNode::Manifest(_) => {}
@@ -811,8 +757,6 @@ fn bundle_from_catalog(catalog: aos_kernel::Catalog, include_sys: bool) -> World
         manifest: catalog.manifest,
         schemas,
         modules,
-        caps,
-        policies,
         effects,
         secrets,
         wasm_blobs: None,
@@ -839,12 +783,7 @@ mod tests {
             modules: Vec::new(),
             effects: Vec::new(),
             effect_bindings: vec![],
-
-            caps: Vec::new(),
-            policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: None,
-            module_bindings: Default::default(),
             routing: None,
         };
         let store = MemStore::new();
@@ -874,12 +813,7 @@ mod tests {
             modules: Vec::new(),
             effects: Vec::new(),
             effect_bindings: vec![],
-
-            caps: Vec::new(),
-            policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: None,
-            module_bindings: Default::default(),
             routing: None,
         };
         let manifest_hash = store
@@ -921,7 +855,6 @@ mod tests {
                     context: None,
                     annotations: None,
                     effects_emitted: Vec::new(),
-                    cap_slots: Default::default(),
                 }),
                 pure: None,
             },
@@ -938,11 +871,7 @@ mod tests {
             }],
             effects: Vec::new(),
             effect_bindings: vec![],
-            caps: Vec::new(),
-            policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: None,
-            module_bindings: Default::default(),
             routing: None,
         };
 
@@ -954,8 +883,6 @@ mod tests {
             manifest,
             schemas: Vec::new(),
             modules: vec![new_module.clone()],
-            caps: Vec::new(),
-            policies: Vec::new(),
             effects: Vec::new(),
             secrets: Vec::new(),
             wasm_blobs: None,
@@ -993,12 +920,7 @@ mod tests {
             modules: Vec::new(),
             effects: Vec::new(),
             effect_bindings: vec![],
-
-            caps: Vec::new(),
-            policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: None,
-            module_bindings: Default::default(),
             routing: None,
         };
         let manifest_hash = store.put_node(&manifest).expect("store manifest").to_hex();
@@ -1040,20 +962,13 @@ mod tests {
             modules: Vec::new(),
             effects: Vec::new(),
             effect_bindings: vec![],
-
-            caps: Vec::new(),
-            policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: None,
-            module_bindings: Default::default(),
             routing: None,
         };
         let bundle = WorldBundle {
             manifest: manifest.clone(),
             schemas: vec![schema.clone()],
             modules: Vec::new(),
-            caps: Vec::new(),
-            policies: Vec::new(),
             effects: Vec::new(),
             secrets: Vec::new(),
             wasm_blobs: None,
@@ -1100,11 +1015,7 @@ mod tests {
             modules: Vec::new(),
             effects: Vec::new(),
             effect_bindings: vec![],
-            caps: Vec::new(),
-            policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: None,
-            module_bindings: Default::default(),
             routing: None,
         };
         let base_hash = store.put_node(&base_manifest).expect("store base").to_hex();
@@ -1113,7 +1024,6 @@ mod tests {
             name: "llm/openai_api@1".into(),
             binding_id: "env:OPENAI_API_KEY".into(),
             expected_digest: None,
-            allowed_caps: vec!["llm".into()],
         };
         let secret_hash = store
             .put_node(&AirNode::Defsecret(secret.clone()))
@@ -1128,8 +1038,6 @@ mod tests {
             manifest: bundle_manifest,
             schemas: Vec::new(),
             modules: Vec::new(),
-            caps: Vec::new(),
-            policies: Vec::new(),
             effects: Vec::new(),
             secrets: vec![secret],
             wasm_blobs: None,

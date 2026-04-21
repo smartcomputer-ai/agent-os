@@ -5,8 +5,8 @@
 #![allow(dead_code)]
 
 use aos_air_types::{
-    DefPolicy, DefSchema, EmptyObject, ManifestDefaults, NamedRef, TypeExpr, TypePrimitive,
-    TypePrimitiveInt, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant, WorkflowAbi,
+    DefSchema, EmptyObject, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveInt,
+    TypePrimitiveText, TypeRecord, TypeRef, TypeVariant, WorkflowAbi,
 };
 use aos_effects::builtins::TimerSetParams;
 #[path = "fixtures.rs"]
@@ -56,7 +56,6 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
-        cap_slots: Default::default(),
     });
     timer_handler.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
@@ -64,7 +63,6 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
     let mut loaded = fixtures::build_loaded_manifest(vec![timer_emitter, timer_handler], routing);
     insert_test_schemas(
@@ -113,7 +111,6 @@ pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
     let routing = vec![fixtures::routing_event(START_SCHEMA, &workflow.name)];
     let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
@@ -170,21 +167,4 @@ pub fn insert_test_schemas(
             });
         }
     }
-}
-
-/// Attaches a policy to the manifest defaults so it becomes the runtime policy gate.
-pub fn attach_default_policy(loaded: &mut aos_kernel::manifest::LoadedManifest, policy: DefPolicy) {
-    loaded.manifest.policies.push(NamedRef {
-        name: policy.name.clone(),
-        hash: zero_hash(),
-    });
-    if let Some(defaults) = loaded.manifest.defaults.as_mut() {
-        defaults.policy = Some(policy.name.clone());
-    } else {
-        loaded.manifest.defaults = Some(ManifestDefaults {
-            policy: Some(policy.name.clone()),
-            cap_grants: vec![],
-        });
-    }
-    loaded.policies.insert(policy.name.clone(), policy);
 }

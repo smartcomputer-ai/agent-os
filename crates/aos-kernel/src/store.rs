@@ -67,12 +67,6 @@ pub enum StoreError {
     },
     #[error("secret name '{name}' is invalid: {reason}")]
     InvalidSecretName { name: String, reason: String },
-    #[error("secret {alias}@{version} not permitted for {context}")]
-    SecretPolicyViolation {
-        alias: String,
-        version: u64,
-        context: String,
-    },
     #[error("reserved sys/* name '{name}' is not allowed for {kind}")]
     ReservedSysName { kind: &'static str, name: String },
     #[error("manifest declares unsupported air_version '{found}' (supported: {supported})")]

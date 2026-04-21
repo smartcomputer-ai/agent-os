@@ -130,11 +130,7 @@ pub fn build_loaded_manifest(
             })
             .collect(),
         effect_bindings: vec![],
-        caps: vec![],
-        policies: vec![],
         secrets: vec![],
-        defaults: None,
-        module_bindings: Default::default(),
         routing,
     };
 
@@ -154,8 +150,6 @@ pub fn build_loaded_manifest(
         secrets: Vec::new(),
         modules: modules_map,
         effects: effects_map,
-        caps: HashMap::new(),
-        policies: HashMap::new(),
         schemas: HashMap::new(),
         effect_catalog,
     };
@@ -404,7 +398,6 @@ pub fn workflow_module_from_target(
                 context: Some(schema("sys/WorkflowContext@1")),
                 annotations: None,
                 effects_emitted: vec![],
-                cap_slots: IndexMap::new(),
             }),
             pure: None,
         },

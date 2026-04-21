@@ -122,8 +122,6 @@ pub(crate) struct GovShadowReceipt {
     pub workflow_instances: Vec<GovWorkflowInstancePreview>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub module_effect_allowlists: Vec<GovModuleEffectAllowlist>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ledger_deltas: Vec<GovLedgerDelta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,28 +176,6 @@ pub(crate) struct GovModuleEffectAllowlist {
     pub module: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects_emitted: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GovLedgerDelta {
-    pub ledger: GovLedgerKind,
-    pub name: String,
-    pub change: GovDeltaKind,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case", tag = "$tag")]
-pub(crate) enum GovLedgerKind {
-    Capability,
-    Policy,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case", tag = "$tag")]
-pub(crate) enum GovDeltaKind {
-    Added,
-    Removed,
-    Changed,
 }
 
 fn decode_variant_value(value: CborValue) -> Result<(String, Option<CborValue>), String> {
@@ -316,43 +292,6 @@ impl<'de> Deserialize<'de> for GovApprovalDecision {
             "reject" => Ok(GovApprovalDecision::Reject),
             other => Err(serde::de::Error::custom(format!(
                 "unknown GovApprovalDecision tag '{other}'"
-            ))),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for GovLedgerKind {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = CborValue::deserialize(deserializer)?;
-        let (tag, inner) = decode_variant_value(value).map_err(serde::de::Error::custom)?;
-        decode_unit_variant(&tag, inner).map_err(serde::de::Error::custom)?;
-        match tag.as_str() {
-            "capability" => Ok(GovLedgerKind::Capability),
-            "policy" => Ok(GovLedgerKind::Policy),
-            other => Err(serde::de::Error::custom(format!(
-                "unknown GovLedgerKind tag '{other}'"
-            ))),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for GovDeltaKind {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = CborValue::deserialize(deserializer)?;
-        let (tag, inner) = decode_variant_value(value).map_err(serde::de::Error::custom)?;
-        decode_unit_variant(&tag, inner).map_err(serde::de::Error::custom)?;
-        match tag.as_str() {
-            "added" => Ok(GovDeltaKind::Added),
-            "removed" => Ok(GovDeltaKind::Removed),
-            "changed" => Ok(GovDeltaKind::Changed),
-            other => Err(serde::de::Error::custom(format!(
-                "unknown GovDeltaKind tag '{other}'"
             ))),
         }
     }

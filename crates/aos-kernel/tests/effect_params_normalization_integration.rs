@@ -1,11 +1,8 @@
 #[path = "support/fixtures.rs"]
 mod fixtures;
 
-use aos_effects::CapabilityGrant;
-use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::Journal;
-use aos_kernel::policy::AllowAllPolicy;
 use aos_wasm_abi::WorkflowEffect;
 use indexmap::IndexMap;
 use serde_cbor::Value as CborValue;
@@ -22,14 +19,7 @@ use aos_air_types::{
 /// must canonicalize to the same params bytes and intent hash.
 #[test]
 fn plan_effect_params_canonicalize_before_hashing() {
-    // Capability: minimal llm.basic grant
-    let grant = CapabilityGrant::builder("cap_llm", "sys/llm.basic@1", &serde_json::json!({}))
-        .build()
-        .expect("grant");
-    let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::llm_basic())])
-            .expect("grant resolver");
-    let mut mgr = mgr_with_cap(cap_gate);
+    let mut mgr = mgr();
 
     // Params variant A: valid dec128 encoded as string
     let params_a = llm_params_cbor(CborValue::Text("0.5".into()));
@@ -69,14 +59,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
 /// hash while still enforcing schema conformance (field ordering canonicalized).
 #[test]
 fn workflow_effect_params_canonicalize_noop() {
-    // Capability: timer cap
-    let grant = CapabilityGrant::builder("cap_timer", "sys/timer@1", &serde_json::json!({}))
-        .build()
-        .expect("grant");
-    let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::timer())])
-            .expect("grant resolver");
-    let mut mgr = mgr_with_cap(cap_gate);
+    let mut mgr = mgr();
 
     // Params with out-of-order fields (key optional) to ensure canonicalization sorts.
     let mut params = BTreeMap::new();
@@ -142,13 +125,7 @@ fn workflow_effect_params_canonicalize_noop() {
 /// params_ref hash, and intent_hash.
 #[test]
 fn sugar_forms_share_intent_hash_and_params_ref() {
-    let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
-        .build()
-        .expect("grant");
-    let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::http_out())])
-            .expect("grant resolver");
-    let mut mgr = mgr_with_cap(cap_gate);
+    let mut mgr = mgr();
 
     // Sugar A: body_ref null, headers absent
     let sugar_a = serde_json::json!({
@@ -224,7 +201,6 @@ fn workflow_params_round_trip_journal_replay() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
-        cap_slots: Default::default(),
     });
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
@@ -296,7 +272,6 @@ fn workflow_params_round_trip_journal_replay() {
                         context: Some(fixtures::schema("sys/WorkflowContext@1")),
                         annotations: None,
                         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
-                        cap_slots: Default::default(),
                     });
                     vec![workflow]
                 },
@@ -367,18 +342,9 @@ fn builtin_effect_context() -> (Arc<EffectCatalog>, Arc<SchemaIndex>) {
     (Arc::new(catalog), Arc::new(SchemaIndex::new(schemas)))
 }
 
-fn mgr_with_cap(cap_gate: CapabilityResolver) -> EffectManager {
+fn mgr() -> EffectManager {
     let (effects, schemas) = builtin_effect_context();
-    EffectManager::new(
-        cap_gate,
-        Box::new(AllowAllPolicy),
-        effects,
-        schemas,
-        None,
-        None,
-        None,
-        None,
-    )
+    EffectManager::new(effects, schemas, None, None, None)
 }
 
 fn timer_params_cbor(deliver_at: u64, key: Option<String>) -> Vec<u8> {

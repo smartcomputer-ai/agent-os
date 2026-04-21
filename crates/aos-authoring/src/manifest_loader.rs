@@ -90,10 +90,6 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
                         }
                         AirNode::Defschema(schema) => schemas.push(schema),
                         AirNode::Defmodule(module) => modules.push(module),
-                        AirNode::Defcap(_) | AirNode::Defpolicy(_) => bail!(
-                            "defcap and defpolicy are no longer supported in authored AIR ({})",
-                            path.display()
-                        ),
                         AirNode::Defsecret(secret) => secrets.push(secret),
                         AirNode::Defeffect(effect) => effects.push(effect),
                     }

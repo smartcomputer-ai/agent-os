@@ -31,21 +31,11 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
     },
-    "CapType": {
-      "title": "Capability type (namespaced string)",
-      "description": "Open-ended capability type identifier. Built-in types shipped in v1 are documented in spec/03-air.md.",
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
-    },
     "VarName": {
       "type": "string",
       "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
     },
     "StepId": {
-      "type": "string",
-      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
-    },
-    "CapGrantName": {
       "type": "string",
       "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
     },

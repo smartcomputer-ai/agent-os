@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use aos_air_types::{
-    AirNode, CapGrant, CapType, DefCap, DefSchema, ManifestDefaults, NamedRef, TypeExpr,
-    TypeRecord, ValueLiteral, ValueRecord, WorkflowAbi,
-};
+use aos_air_types::{AirNode, DefSchema, WorkflowAbi};
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
@@ -211,31 +208,6 @@ fn applied_records_manifest_root_not_patch_hash() {
     assert_ne!(applied.manifest_hash_new, applied.patch_hash);
 }
 
-#[test]
-fn shadow_upgrade_reports_followup_effect_cap_delta() {
-    let store = fixtures::new_mem_store();
-    let base = simple_state_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), base).unwrap();
-
-    let upgraded = manifest_with_added_cap(&store);
-    let patch = manifest_patch_from_loaded(&upgraded);
-    let proposal_id = world
-        .kernel
-        .submit_proposal(patch, Some("safe-upgrade".into()))
-        .unwrap();
-
-    let summary = world
-        .kernel
-        .run_shadow(proposal_id, Some(ShadowHarness::default()))
-        .unwrap();
-    assert!(
-        summary
-            .ledger_deltas
-            .iter()
-            .any(|delta| delta.name == "com.acme/http_followup_cap@1")
-    );
-}
-
 fn manifest_with_workflow(
     store: &Arc<TestStore>,
     name: &str,
@@ -257,7 +229,6 @@ fn manifest_with_workflow(
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
     let routing = vec![fixtures::routing_event(START_SCHEMA, &workflow.name)];
     let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
@@ -274,38 +245,6 @@ fn manifest_with_workflow(
     loaded
 }
 
-fn manifest_with_added_cap(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let mut loaded = simple_state_manifest(store);
-    let followup_cap = test_http_cap("com.acme/http_followup_cap@1");
-
-    loaded.manifest.caps.push(NamedRef {
-        name: followup_cap.name.clone(),
-        hash: fixtures::zero_hash(),
-    });
-    loaded
-        .caps
-        .insert(followup_cap.name.clone(), followup_cap.clone());
-
-    let mut cap_grants = loaded
-        .manifest
-        .defaults
-        .clone()
-        .map(|defaults| defaults.cap_grants)
-        .unwrap_or_default();
-    cap_grants.push(CapGrant {
-        name: "cap_http_followup".into(),
-        cap: followup_cap.name,
-        params: empty_literal(),
-        expiry_ns: None,
-    });
-    loaded.manifest.defaults = Some(ManifestDefaults {
-        policy: None,
-        cap_grants,
-    });
-
-    loaded
-}
-
 fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> ManifestPatch {
     let mut nodes: Vec<AirNode> = loaded
         .modules
@@ -313,8 +252,6 @@ fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> 
         .cloned()
         .map(AirNode::Defmodule)
         .collect();
-    nodes.extend(loaded.caps.values().cloned().map(AirNode::Defcap));
-    nodes.extend(loaded.policies.values().cloned().map(AirNode::Defpolicy));
     nodes.extend(loaded.effects.values().cloned().map(AirNode::Defeffect));
     nodes.extend(loaded.schemas.values().cloned().map(AirNode::Defschema));
 
@@ -322,23 +259,4 @@ fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> 
         manifest: loaded.manifest.clone(),
         nodes,
     }
-}
-
-fn test_http_cap(name: &str) -> DefCap {
-    DefCap {
-        name: name.to_string(),
-        cap_type: CapType::http_out(),
-        schema: TypeExpr::Record(TypeRecord {
-            record: IndexMap::new(),
-        }),
-        enforcer: aos_air_types::CapEnforcer {
-            module: "sys/CapEnforceHttpOut@1".into(),
-        },
-    }
-}
-
-fn empty_literal() -> ValueLiteral {
-    ValueLiteral::Record(ValueRecord {
-        record: IndexMap::new(),
-    })
 }

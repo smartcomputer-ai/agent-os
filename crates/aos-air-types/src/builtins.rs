@@ -4,7 +4,7 @@ use aos_cbor::Hash;
 use once_cell::sync::Lazy;
 use serde_json;
 
-use crate::{DefCap, DefEffect, DefModule, DefSchema, HashRef};
+use crate::{DefEffect, DefModule, DefSchema, HashRef};
 
 static BUILTIN_SCHEMAS_RAW: &str = include_str!("../../../spec/defs/builtin-schemas.air.json");
 static BUILTIN_SCHEMAS_SDK_RAW: &str =
@@ -24,13 +24,6 @@ pub struct BuiltinSchema {
 #[derive(Debug, Clone)]
 pub struct BuiltinEffect {
     pub effect: DefEffect,
-    pub hash: Hash,
-    pub hash_ref: HashRef,
-}
-
-#[derive(Debug, Clone)]
-pub struct BuiltinCap {
-    pub cap: DefCap,
     pub hash: Hash,
     pub hash_ref: HashRef,
 }
@@ -87,8 +80,6 @@ static BUILTIN_EFFECTS: Lazy<Vec<BuiltinEffect>> = Lazy::new(|| {
         .collect()
 });
 
-static BUILTIN_CAPS: Lazy<Vec<BuiltinCap>> = Lazy::new(Vec::new);
-
 static BUILTIN_MODULES: Lazy<Vec<BuiltinModule>> = Lazy::new(|| {
     let defs: Vec<DefModule> = serde_json::from_str(BUILTIN_MODULES_RAW)
         .expect("spec/defs/builtin-modules.air.json must parse");
@@ -121,14 +112,6 @@ static BUILTIN_EFFECT_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
         .collect()
 });
 
-static BUILTIN_CAP_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
-    BUILTIN_CAPS
-        .iter()
-        .enumerate()
-        .map(|(idx, cap)| (cap.cap.name.clone(), idx))
-        .collect()
-});
-
 static BUILTIN_MODULE_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
     BUILTIN_MODULES
         .iter()
@@ -145,11 +128,6 @@ pub fn builtin_schemas() -> &'static [BuiltinSchema] {
 /// Returns the parsed list of built-in `defeffect` nodes.
 pub fn builtin_effects() -> &'static [BuiltinEffect] {
     &BUILTIN_EFFECTS
-}
-
-/// Returns legacy built-in `defcap` nodes. v0.22 has no public built-in caps.
-pub fn builtin_caps() -> &'static [BuiltinCap] {
-    &BUILTIN_CAPS
 }
 
 /// Returns the parsed list of built-in `defmodule` nodes.
@@ -169,13 +147,6 @@ pub fn find_builtin_effect(name: &str) -> Option<&'static BuiltinEffect> {
     BUILTIN_EFFECT_INDEX
         .get(name)
         .and_then(|idx| BUILTIN_EFFECTS.get(*idx))
-}
-
-/// Finds a legacy built-in capability definition. v0.22 has no public built-in caps.
-pub fn find_builtin_cap(name: &str) -> Option<&'static BuiltinCap> {
-    BUILTIN_CAP_INDEX
-        .get(name)
-        .and_then(|idx| BUILTIN_CAPS.get(*idx))
 }
 
 /// Finds a built-in module definition by name (e.g., `sys/Workspace@1`).
@@ -236,7 +207,6 @@ mod tests {
         assert!(names.contains(&"sys/HostFsExistsReceipt@1"));
         assert!(names.contains(&"sys/HostFsListDirParams@1"));
         assert!(names.contains(&"sys/HostFsListDirReceipt@1"));
-        assert!(names.contains(&"sys/HostCapParams@1"));
         assert!(names.contains(&"sys/BlobPutParams@1"));
         assert!(names.contains(&"sys/BlobEdge@1"));
         assert!(names.contains(&"sys/BlobPutReceipt@1"));
@@ -334,12 +304,6 @@ mod tests {
     fn lookup_returns_same_instance() {
         let timer = find_builtin_schema("sys/TimerSetParams@1").expect("timer params");
         assert_eq!(timer.schema.name.as_str(), "sys/TimerSetParams@1");
-    }
-
-    #[test]
-    fn exposes_expected_caps() {
-        assert!(builtin_caps().is_empty());
-        assert!(find_builtin_cap("sys/timer@1").is_none());
     }
 
     #[test]

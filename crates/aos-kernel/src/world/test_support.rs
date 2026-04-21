@@ -30,14 +30,10 @@ pub(crate) fn minimal_manifest() -> Manifest {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![],
-        caps: vec![],
         effects: vec![],
         effect_bindings: vec![],
-        policies: vec![],
         secrets: vec![],
-        module_bindings: IndexMap::new(),
         routing: None,
-        defaults: None,
     }
 }
 
@@ -89,23 +85,16 @@ pub(crate) fn loaded_manifest_with_schema(
             hash: HashRef::new(schema_hash.to_hex()).unwrap(),
         }],
         modules: vec![],
-        caps: vec![],
         effects: vec![],
         effect_bindings: vec![],
-        policies: vec![],
         secrets: vec![],
-        module_bindings: Default::default(),
         routing: None,
-        defaults: None,
     };
     let loaded = LoadedManifest {
         manifest,
         secrets: vec![],
         modules: HashMap::new(),
         effects: HashMap::new(),
-
-        caps: HashMap::new(),
-        policies: HashMap::new(),
         schemas: HashMap::from([(schema_name.into(), schema)]),
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
@@ -155,7 +144,6 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<crate::MemStore> {
                 context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: vec![],
-                cap_slots: Default::default(),
             }),
             pure: None,
         },
@@ -178,12 +166,7 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<crate::MemStore> {
         }],
         effects: vec![],
         effect_bindings: vec![],
-
-        caps: vec![],
-        policies: vec![],
         secrets: vec![],
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -198,9 +181,6 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<crate::MemStore> {
         secrets: vec![],
         modules,
         effects: HashMap::new(),
-
-        caps: HashMap::new(),
-        policies: HashMap::new(),
         schemas,
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
@@ -221,7 +201,6 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<crate::MemStore> 
                 context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: vec![],
-                cap_slots: Default::default(),
             }),
             pure: None,
         },
@@ -243,12 +222,7 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<crate::MemStore> 
         }],
         effects: vec![],
         effect_bindings: vec![],
-
-        caps: vec![],
-        policies: vec![],
         secrets: vec![],
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -263,9 +237,6 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<crate::MemStore> 
         secrets: vec![],
         modules,
         effects: HashMap::new(),
-
-        caps: HashMap::new(),
-        policies: HashMap::new(),
         schemas,
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
@@ -286,7 +257,6 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<crate::MemStore> {
                 context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: vec![],
-                cap_slots: Default::default(),
             }),
             pure: None,
         },
@@ -308,12 +278,7 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<crate::MemStore> {
         }],
         effects: vec![],
         effect_bindings: vec![],
-
-        caps: vec![],
-        policies: vec![],
         secrets: vec![],
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -328,9 +293,6 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<crate::MemStore> {
         secrets: vec![],
         modules,
         effects: HashMap::new(),
-
-        caps: HashMap::new(),
-        policies: HashMap::new(),
         schemas,
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
@@ -351,7 +313,6 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<crate::MemStore
                 context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: vec![],
-                cap_slots: Default::default(),
             }),
             pure: None,
         },
@@ -374,12 +335,7 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<crate::MemStore
         }],
         effects: vec![],
         effect_bindings: vec![],
-
-        caps: vec![],
-        policies: vec![],
         secrets: vec![],
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -394,9 +350,6 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<crate::MemStore
         secrets: vec![],
         modules,
         effects: HashMap::new(),
-
-        caps: HashMap::new(),
-        policies: HashMap::new(),
         schemas,
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
@@ -410,12 +363,7 @@ pub(crate) fn empty_manifest() -> Manifest {
         modules: vec![],
         effects: vec![],
         effect_bindings: vec![],
-
-        caps: vec![],
-        policies: vec![],
         secrets: vec![],
-        defaults: None,
-        module_bindings: Default::default(),
         routing: None,
     }
 }
@@ -436,9 +384,6 @@ pub(crate) fn kernel_with_store_and_journal(
         secrets: vec![],
         modules: HashMap::new(),
         effects: HashMap::new(),
-
-        caps: HashMap::new(),
-        policies: HashMap::new(),
         schemas: HashMap::new(),
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };

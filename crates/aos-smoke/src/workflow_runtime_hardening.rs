@@ -7,7 +7,7 @@ use aos_air_types::HashRef;
 use aos_authoring::{is_placeholder_hash, load_from_assets_with_imports, patch_modules};
 use aos_effect_adapters::adapters::mock::{MockHttpHarness, MockHttpResponse};
 use aos_kernel::Store;
-use aos_kernel::journal::{CapDecisionOutcome, Journal, JournalRecord, PolicyDecisionOutcome};
+use aos_kernel::journal::{Journal, JournalRecord};
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest, workflow_trace_summary};
 use aos_node::FsCas;
 use aos_wasm_sdk::aos_variant;
@@ -286,10 +286,6 @@ fn journal_counters<S: Store + 'static>(kernel: &Kernel<S>) -> Result<serde_json
     let mut receipt_ok = 0u64;
     let mut receipt_error = 0u64;
     let mut receipt_timeout = 0u64;
-    let mut policy_allow = 0u64;
-    let mut policy_deny = 0u64;
-    let mut cap_allow = 0u64;
-    let mut cap_deny = 0u64;
     let mut governance_total = 0u64;
 
     for entry in kernel.dump_journal()? {
@@ -301,14 +297,6 @@ fn journal_counters<S: Store + 'static>(kernel: &Kernel<S>) -> Result<serde_json
                 aos_effects::ReceiptStatus::Ok => receipt_ok += 1,
                 aos_effects::ReceiptStatus::Error => receipt_error += 1,
                 aos_effects::ReceiptStatus::Timeout => receipt_timeout += 1,
-            },
-            JournalRecord::PolicyDecision(decision) => match decision.decision {
-                PolicyDecisionOutcome::Allow => policy_allow += 1,
-                PolicyDecisionOutcome::Deny => policy_deny += 1,
-            },
-            JournalRecord::CapDecision(decision) => match decision.decision {
-                CapDecisionOutcome::Allow => cap_allow += 1,
-                CapDecisionOutcome::Deny => cap_deny += 1,
             },
             JournalRecord::Governance(_) => governance_total += 1,
             _ => {}
@@ -323,14 +311,6 @@ fn journal_counters<S: Store + 'static>(kernel: &Kernel<S>) -> Result<serde_json
                 "error": receipt_error,
                 "timeout": receipt_timeout,
             }
-        },
-        "policy_decisions": {
-            "allow": policy_allow,
-            "deny": policy_deny,
-        },
-        "cap_decisions": {
-            "allow": cap_allow,
-            "deny": cap_deny,
         },
         "governance_records": governance_total,
     }))

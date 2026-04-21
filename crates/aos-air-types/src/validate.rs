@@ -3,8 +3,7 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::{
-    DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, ModuleKind, RoutingEvent,
-    TypeExpr, builtins,
+    DefEffect, DefModule, DefSchema, Manifest, ModuleKind, RoutingEvent, TypeExpr, builtins,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -49,21 +48,6 @@ pub enum ValidationError {
     EffectBindingDuplicateKind { kind: String },
     #[error("effect binding kind '{kind}' is internal and cannot be bound")]
     EffectBindingInternalKind { kind: String },
-    #[error("capability grant '{cap}' not found")]
-    CapabilityNotFound { cap: String },
-    #[error("capability grant '{cap}' is duplicated")]
-    DuplicateCapabilityGrant { cap: String },
-    #[error("capability definition '{cap}' not found")]
-    CapabilityDefinitionNotFound { cap: String },
-    #[error(
-        "capability '{cap}' type '{found}' does not match effect '{effect}' required type '{expected}'"
-    )]
-    CapabilityTypeMismatch {
-        cap: String,
-        effect: String,
-        expected: String,
-        found: String,
-    },
     #[error("workflow module '{module}' must define workflow ABI")]
     WorkflowAbiMissingWorkflow { module: String },
     #[error("pure module '{module}' must define pure ABI")]
@@ -77,8 +61,6 @@ pub fn validate_manifest(
     modules: &HashMap<String, DefModule>,
     schemas: &HashMap<String, DefSchema>,
     effects: &HashMap<String, DefEffect>,
-    _caps: &HashMap<String, DefCap>,
-    _policies: &HashMap<String, DefPolicy>,
 ) -> Result<(), ValidationError> {
     let schema_exists =
         |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
@@ -515,11 +497,7 @@ mod tests {
             modules: vec![named_ref("com.acme/workflow@1")],
             effects: Vec::new(),
             effect_bindings: Vec::new(),
-            caps: Vec::new(),
-            policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: None,
-            module_bindings: IndexMap::new(),
             routing: None,
         }
     }
@@ -537,7 +515,6 @@ mod tests {
                     context: None,
                     annotations: None,
                     effects_emitted: Vec::new(),
-                    cap_slots: IndexMap::new(),
                 }),
                 pure: None,
             },
@@ -564,23 +541,12 @@ mod tests {
                 },
             ),
         ]);
-        assert!(
-            validate_manifest(
-                &manifest,
-                &modules,
-                &schemas,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-            )
-            .is_ok()
-        );
+        assert!(validate_manifest(&manifest, &modules, &schemas, &HashMap::new()).is_ok());
     }
 
     #[test]
     fn validate_manifest_rejects_unknown_routing_module() {
         let mut manifest = base_manifest();
-        manifest.defaults = None;
         manifest.routing = Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -608,15 +574,7 @@ mod tests {
             ),
         ]);
 
-        let err = validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
+        let err = validate_manifest(&manifest, &modules, &schemas, &HashMap::new()).unwrap_err();
         assert!(matches!(
             err,
             ValidationError::RoutingUnknownModule { module } if module == "com.acme/missing@1"
@@ -624,48 +582,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_manifest_ignores_legacy_module_bindings() {
-        let mut manifest = base_manifest();
-        manifest.module_bindings.insert(
-            "com.acme/workflow@1".into(),
-            crate::ModuleBinding {
-                slots: IndexMap::from([(String::from("http"), String::from("missing_grant"))]),
-            },
-        );
-
-        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
-        let schemas = HashMap::from([
-            (
-                String::from("com.acme/Event@1"),
-                DefSchema {
-                    name: "com.acme/Event@1".into(),
-                    ty: record_type(),
-                },
-            ),
-            (
-                String::from("com.acme/State@1"),
-                DefSchema {
-                    name: "com.acme/State@1".into(),
-                    ty: text_type(),
-                },
-            ),
-        ]);
-
-        validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .expect("legacy module bindings are ignored by simplified AIR validation");
-    }
-
-    #[test]
     fn validate_manifest_rejects_effect_binding_kind_not_declared() {
         let mut manifest = base_manifest();
-        manifest.defaults = None;
         manifest.effect_bindings.push(EffectBinding {
             kind: crate::EffectKind::new("http.request"),
             adapter_id: "http.default".into(),
@@ -689,15 +607,7 @@ mod tests {
             ),
         ]);
 
-        let err = validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
+        let err = validate_manifest(&manifest, &modules, &schemas, &HashMap::new()).unwrap_err();
         assert!(matches!(
             err,
             ValidationError::EffectBindingKindNotDeclared { kind } if kind == "http.request"
@@ -707,7 +617,6 @@ mod tests {
     #[test]
     fn validate_manifest_rejects_duplicate_effect_binding_kind() {
         let mut manifest = base_manifest();
-        manifest.defaults = None;
         manifest.effect_bindings = vec![
             EffectBinding {
                 kind: crate::EffectKind::new("http.request"),
@@ -755,22 +664,13 @@ mod tests {
             DefEffect {
                 name: "com.acme/http.request@1".into(),
                 kind: crate::EffectKind::new("http.request"),
-                cap_type: crate::CapType::http_out(),
                 params_schema: SchemaRef::new("com.acme/HttpParams@1").unwrap(),
                 receipt_schema: SchemaRef::new("com.acme/HttpReceipt@1").unwrap(),
                 origin_scope: crate::OriginScope::Both,
             },
         )]);
 
-        let err = validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &effects,
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
+        let err = validate_manifest(&manifest, &modules, &schemas, &effects).unwrap_err();
         assert!(matches!(
             err,
             ValidationError::EffectBindingDuplicateKind { kind } if kind == "http.request"
@@ -780,7 +680,6 @@ mod tests {
     #[test]
     fn validate_manifest_rejects_internal_effect_binding_kind() {
         let mut manifest = base_manifest();
-        manifest.defaults = None;
         manifest.effect_bindings.push(EffectBinding {
             kind: crate::EffectKind::new("workspace.read_bytes"),
             adapter_id: "workspace.default".into(),
@@ -822,22 +721,13 @@ mod tests {
             DefEffect {
                 name: "com.acme/workspace.read_bytes@1".into(),
                 kind: crate::EffectKind::new("workspace.read_bytes"),
-                cap_type: crate::CapType::workspace(),
                 params_schema: SchemaRef::new("com.acme/WorkspaceParams@1").unwrap(),
                 receipt_schema: SchemaRef::new("com.acme/WorkspaceReceipt@1").unwrap(),
                 origin_scope: crate::OriginScope::Both,
             },
         )]);
 
-        let err = validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &effects,
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
+        let err = validate_manifest(&manifest, &modules, &schemas, &effects).unwrap_err();
         assert!(matches!(
             err,
             ValidationError::EffectBindingInternalKind { kind } if kind == "workspace.read_bytes"

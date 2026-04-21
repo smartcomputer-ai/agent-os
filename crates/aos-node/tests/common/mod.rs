@@ -531,11 +531,7 @@ fn prepare_fetch_notify_manifest() -> PreparedManifest {
         modules: module_refs,
         effects: effect_refs,
         effect_bindings: Vec::new(),
-        caps: Vec::new(),
-        policies: Vec::new(),
         secrets: Vec::new(),
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/FetchNotifyEvent@1"),
@@ -599,11 +595,7 @@ fn prepare_workspace_manifest() -> PreparedManifest {
         modules: module_refs,
         effects: effect_refs,
         effect_bindings: Vec::new(),
-        caps: Vec::new(),
-        policies: Vec::new(),
         secrets: Vec::new(),
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![
                 RoutingEvent {
@@ -657,11 +649,7 @@ fn prepare_fabric_exec_progress_manifest() -> PreparedManifest {
             kind: aos_air_types::EffectKind::host_exec(),
             adapter_id: "host.exec.fabric".to_string(),
         }],
-        caps: Vec::new(),
-        policies: Vec::new(),
         secrets: Vec::new(),
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/FabricExecProgressEvent@1"),
@@ -698,11 +686,7 @@ fn prepare_counter_manifest() -> PreparedManifest {
         modules: module_refs,
         effects: Vec::new(),
         effect_bindings: Vec::new(),
-        caps: Vec::new(),
-        policies: Vec::new(),
         secrets: Vec::new(),
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/CounterEvent@1"),
@@ -741,11 +725,7 @@ fn prepare_timer_manifest() -> PreparedManifest {
         modules: module_refs,
         effects: vec![builtin_effect_ref("sys/timer.set@1")],
         effect_bindings: Vec::new(),
-        caps: Vec::new(),
-        policies: Vec::new(),
         secrets: Vec::new(),
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/TimerEvent@1"),
@@ -781,8 +761,6 @@ fn air_node_name(node: &AirNode) -> String {
     match node {
         AirNode::Defschema(schema) => schema.name.clone(),
         AirNode::Defmodule(module) => module.name.clone(),
-        AirNode::Defpolicy(policy) => policy.name.clone(),
-        AirNode::Defcap(cap) => cap.name.clone(),
         AirNode::Defeffect(effect) => effect.name.clone(),
         AirNode::Defsecret(secret) => secret.name.clone(),
         AirNode::Manifest(_) => panic!("manifest is not stored as a named AIR node in tests"),

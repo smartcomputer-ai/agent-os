@@ -122,8 +122,6 @@ impl HostedReplayService {
             .iter()
             .chain(manifest_doc.modules.iter())
             .chain(manifest_doc.effects.iter())
-            .chain(manifest_doc.caps.iter())
-            .chain(manifest_doc.policies.iter())
         {
             if is_builtin_manifest_ref(named.name.as_str()) {
                 continue;
@@ -427,7 +425,6 @@ fn is_builtin_manifest_ref(name: &str) -> bool {
     builtins::find_builtin_schema(name).is_some()
         || builtins::find_builtin_module(name).is_some()
         || builtins::find_builtin_effect(name).is_some()
-        || builtins::find_builtin_cap(name).is_some()
 }
 
 fn is_builtin_module(name: &str) -> bool {

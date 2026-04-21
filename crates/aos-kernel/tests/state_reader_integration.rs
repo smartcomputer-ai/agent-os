@@ -29,7 +29,6 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
 
     // Simple schema for start event routed to the workflow.
@@ -79,7 +78,6 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
 
     let routing = vec![aos_air_types::RoutingEvent {

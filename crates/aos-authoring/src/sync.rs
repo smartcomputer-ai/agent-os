@@ -839,12 +839,6 @@ fn import_defs_hash(root: &Path) -> Result<String> {
                     let node = AirNode::Defmodule(module);
                     add_def_entry(&mut entries, &mut seen, "defmodule", name.as_str(), &node)?;
                 }
-                AirNode::Defcap(_) | AirNode::Defpolicy(_) => {
-                    anyhow::bail!(
-                        "defcap and defpolicy are no longer supported in imported AIR ({})",
-                        path.display()
-                    );
-                }
                 AirNode::Defsecret(secret) => {
                     let name = secret.name.clone();
                     let node = AirNode::Defsecret(secret);

@@ -14,9 +14,7 @@ pub const fn retry_owner_for_failure(code: FailureCode) -> RetryOwner {
         FailureCode::AdapterTimeout
         | FailureCode::AdapterError
         | FailureCode::ProviderRetryable => RetryOwner::Adapter,
-        FailureCode::PolicyDenied
-        | FailureCode::CapabilityDenied
-        | FailureCode::ValidationError
+        FailureCode::ValidationError
         | FailureCode::ProviderTerminal
         | FailureCode::ToolNotFound
         | FailureCode::ToolInvalidArgs

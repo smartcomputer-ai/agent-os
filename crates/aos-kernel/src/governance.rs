@@ -4,8 +4,8 @@ use crate::Store;
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
-    SecretEntry, SecretPolicy, builtins, catalog::EffectCatalog,
+    AirNode, DefEffect, DefModule, DefSchema, Manifest, Name, SecretDecl, SecretEntry, builtins,
+    catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use serde::{Deserialize, Serialize};
@@ -91,7 +91,6 @@ impl GovernanceManager {
                         pending_workflow_receipts: shadow.pending_workflow_receipts.clone(),
                         workflow_instances: shadow.workflow_instances.clone(),
                         module_effect_allowlists: shadow.module_effect_allowlists.clone(),
-                        ledger_deltas: shadow.ledger_deltas.clone(),
                     });
                 }
             }
@@ -146,8 +145,6 @@ impl ManifestPatch {
         let manifest = self.manifest.clone();
         let mut modules: HashMap<Name, DefModule> = HashMap::new();
         let mut effects: HashMap<Name, DefEffect> = HashMap::new();
-        let mut caps: HashMap<Name, DefCap> = HashMap::new();
-        let mut policies: HashMap<Name, DefPolicy> = HashMap::new();
         let mut schemas: HashMap<Name, DefSchema> = HashMap::new();
         let mut secrets: Vec<SecretDecl> = Vec::new();
 
@@ -156,14 +153,8 @@ impl ManifestPatch {
                 AirNode::Defmodule(m) => {
                     modules.insert(m.name.clone(), m.clone());
                 }
-                AirNode::Defcap(c) => {
-                    caps.insert(c.name.clone(), c.clone());
-                }
                 AirNode::Defeffect(e) => {
                     effects.insert(e.name.clone(), e.clone());
-                }
-                AirNode::Defpolicy(p) => {
-                    policies.insert(p.name.clone(), p.clone());
                 }
                 AirNode::Defschema(s) => {
                     schemas.insert(s.name.clone(), s.clone());
@@ -175,10 +166,6 @@ impl ManifestPatch {
                         version,
                         binding_id: s.binding_id.clone(),
                         expected_digest: s.expected_digest.clone(),
-                        policy: Some(SecretPolicy {
-                            allowed_caps: s.allowed_caps.clone(),
-                        })
-                        .filter(|p| !p.allowed_caps.is_empty()),
                     });
                 }
                 AirNode::Manifest(_) => {}
@@ -195,12 +182,6 @@ impl ManifestPatch {
                 schemas
                     .entry(builtin.schema.name.clone())
                     .or_insert(builtin.schema.clone());
-            }
-        }
-        for builtin in builtins::builtin_caps() {
-            if manifest.caps.iter().any(|nr| nr.name == builtin.cap.name) {
-                caps.entry(builtin.cap.name.clone())
-                    .or_insert(builtin.cap.clone());
             }
         }
         for builtin in builtins::builtin_effects() {
@@ -271,31 +252,6 @@ impl ManifestPatch {
                 }
             },
         )?;
-        load_defs_from_manifest(store, &manifest.caps, &mut caps, "defcap", |node| {
-            if let AirNode::Defcap(cap) = node {
-                Ok(cap)
-            } else {
-                Err(KernelError::Manifest(
-                    "manifest cap ref did not point to defcap".into(),
-                ))
-            }
-        })?;
-        load_defs_from_manifest(
-            store,
-            &manifest.policies,
-            &mut policies,
-            "defpolicy",
-            |node| {
-                if let AirNode::Defpolicy(policy) = node {
-                    Ok(policy)
-                } else {
-                    Err(KernelError::Manifest(
-                        "manifest policy ref did not point to defpolicy".into(),
-                    ))
-                }
-            },
-        )?;
-
         for entry in &manifest.secrets {
             match entry {
                 SecretEntry::Decl(secret) => secrets.push(secret.clone()),
@@ -312,10 +268,6 @@ impl ManifestPatch {
                                 version,
                                 binding_id: secret.binding_id.clone(),
                                 expected_digest: secret.expected_digest.clone(),
-                                policy: Some(SecretPolicy {
-                                    allowed_caps: secret.allowed_caps.clone(),
-                                })
-                                .filter(|p| !p.allowed_caps.is_empty()),
                             });
                         }
                         _ => {
@@ -339,8 +291,6 @@ impl ManifestPatch {
             secrets,
             modules,
             effects,
-            caps,
-            policies,
             schemas,
             effect_catalog,
         })

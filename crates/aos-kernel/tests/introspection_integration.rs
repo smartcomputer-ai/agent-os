@@ -29,7 +29,6 @@ fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,

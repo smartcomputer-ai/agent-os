@@ -380,61 +380,6 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
 }
 
 #[test]
-fn workflow_authorized_effects_skip_policy_decision_journal_records() {
-    let store = fixtures::new_mem_store();
-    let manifest = no_plan_workflow_manifest(&store);
-    let mut world = TestWorld::with_store(store, manifest).unwrap();
-    let start_event = serde_json::json!({
-        "$tag": "Start",
-        "$value": fixtures::start_event("wf-policy")
-    });
-    world
-        .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
-        .expect("submit workflow start");
-    world.tick_n(1).unwrap();
-
-    let policy_records = world
-        .kernel
-        .dump_journal()
-        .unwrap()
-        .into_iter()
-        .filter(|entry| entry.kind == JournalKind::PolicyDecision)
-        .count();
-    assert!(
-        policy_records == 0,
-        "workflow-origin effects use the permissive authorization shim and should not journal policy decisions"
-    );
-}
-
-#[test]
-fn workflow_authorized_effects_skip_cap_decision_journal_records() {
-    let store = fixtures::new_mem_store();
-    let manifest = no_plan_workflow_manifest(&store);
-    let mut world = TestWorld::with_store(store, manifest).unwrap();
-
-    let start_event = serde_json::json!({
-        "$tag": "Start",
-        "$value": fixtures::start_event("wf-cap")
-    });
-    world
-        .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
-        .expect("submit workflow start");
-    world.tick_n(1).unwrap();
-
-    let cap_records = world
-        .kernel
-        .dump_journal()
-        .unwrap()
-        .into_iter()
-        .filter(|entry| entry.kind == JournalKind::CapDecision)
-        .count();
-    assert!(
-        cap_records == 0,
-        "workflow-origin effects use the permissive authorization shim and should not journal cap decisions"
-    );
-}
-
-#[test]
 fn workflow_replay_restores_waiting_state_across_restarts() {
     let store = fixtures::new_mem_store();
     let journal_entries = {
@@ -530,7 +475,6 @@ fn no_plan_workflow_manifest_impl(
             aos_effects::EffectKind::TIMER_SET.into(),
             aos_effects::EffectKind::BLOB_PUT.into(),
         ],
-        cap_slots: Default::default(),
     });
 
     let mut result = fixtures::stub_workflow_module(
@@ -549,7 +493,6 @@ fn no_plan_workflow_manifest_impl(
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = fixtures::build_loaded_manifest(
@@ -611,13 +554,6 @@ fn no_plan_workflow_manifest_impl(
             },
         ],
     );
-    if let Some(binding) = loaded
-        .manifest
-        .module_bindings
-        .get_mut("com.acme/Workflow@1")
-    {
-        binding.slots.insert("blob".into(), "blob_cap".into());
-    }
     loaded
 }
 

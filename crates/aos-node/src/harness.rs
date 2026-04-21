@@ -96,12 +96,6 @@ impl NodeWorldHarness {
         for effect in loaded.effects.values() {
             store.put_node(effect)?;
         }
-        for cap in loaded.caps.values() {
-            store.put_node(cap)?;
-        }
-        for policy in loaded.policies.values() {
-            store.put_node(policy)?;
-        }
         let manifest_hash = store.put_node(&loaded.manifest)?.to_hex();
         self.runtime.create_world(
             universe_id,

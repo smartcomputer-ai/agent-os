@@ -10,12 +10,10 @@ use aos_effects::ReceiptStatus;
 use aos_kernel::Consistency;
 use aos_kernel::StateReader;
 use aos_kernel::Store;
-use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::{EffectManager, EffectParamPreprocessor};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ProposalState;
 use aos_kernel::governance_effects::GovernanceParamPreprocessor;
-use aos_kernel::policy::AllowAllPolicy;
 use aos_wasm_abi::WorkflowEffect;
 use serde::Deserialize;
 
@@ -143,22 +141,13 @@ fn build_effect_manager(
     }
     let schema_index = Arc::new(SchemaIndex::new(schemas));
     let effect_catalog = Arc::new(EffectCatalog::from_defs(loaded.effects.values().cloned()));
-    let capability_resolver = CapabilityResolver::from_manifest(
-        &loaded.manifest,
-        &loaded.caps,
-        schema_index.as_ref(),
-        effect_catalog.clone(),
-    )?;
     let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
         GovernanceParamPreprocessor::new(store.clone(), loaded.manifest.clone()),
     ));
     let manager = EffectManager::new(
-        capability_resolver,
-        Box::new(AllowAllPolicy),
         effect_catalog,
         schema_index,
         param_preprocessor,
-        None,
         None,
         None,
     );

@@ -438,12 +438,6 @@ impl<S: Store + 'static> Kernel<S> {
                     metrics.tick_ns += tick_started.elapsed().as_nanos();
                 }
             }
-            JournalRecord::CapDecision(_) => {
-                // Cap decisions are audit-only; runtime state is rebuilt via replay.
-            }
-            JournalRecord::PolicyDecision(_) => {
-                // Policy decisions are audit-only; runtime state is rebuilt via replay.
-            }
             JournalRecord::Manifest(record) => {
                 let hash = Hash::from_hex_str(&record.manifest_hash).map_err(|err| {
                     KernelError::Manifest(format!("invalid manifest hash: {err}"))
@@ -917,12 +911,6 @@ fn decode_tail_record(kind: JournalKind, payload: &[u8]) -> Result<JournalRecord
         JournalKind::StreamFrame => serde_cbor::from_slice(payload)
             .map(JournalRecord::StreamFrame)
             .map_err(err),
-        JournalKind::CapDecision => serde_cbor::from_slice(payload)
-            .map(JournalRecord::CapDecision)
-            .map_err(err),
-        JournalKind::PolicyDecision => serde_cbor::from_slice(payload)
-            .map(JournalRecord::PolicyDecision)
-            .map_err(err),
         JournalKind::Manifest => serde_cbor::from_slice(payload)
             .map(JournalRecord::Manifest)
             .map_err(err),
@@ -986,7 +974,6 @@ mod tests {
                     context: None,
                     annotations: None,
                     effects_emitted: vec![],
-                    cap_slots: Default::default(),
                 }),
                 pure: None,
             },
@@ -1274,8 +1261,6 @@ mod tests {
             secrets: kernel.secrets.clone(),
             modules: kernel.module_defs.clone(),
             effects: kernel.effect_defs.clone(),
-            caps: kernel.cap_defs.clone(),
-            policies: kernel.policy_defs.clone(),
             schemas: kernel.schema_defs.clone(),
             effect_catalog: EffectCatalog::from_defs(kernel.effect_defs.values().cloned()),
         };

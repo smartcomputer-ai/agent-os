@@ -177,13 +177,6 @@ fn workflow_authorized_effect_snapshot_replay_has_no_cap_decisions() {
 
     world.kernel.create_snapshot().unwrap();
     let entries = world.kernel.dump_journal().unwrap();
-    assert!(
-        !entries
-            .iter()
-            .any(|entry| entry.kind == JournalKind::CapDecision),
-        "workflow-origin effects use the permissive authorization shim and should not journal cap decisions"
-    );
-
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         workflow_resume_manifest(&store),
@@ -351,7 +344,6 @@ fn workflow_resume_manifest(
             aos_effects::EffectKind::TIMER_SET.into(),
             aos_effects::EffectKind::BLOB_PUT.into(),
         ],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = fixtures::build_loaded_manifest(

@@ -368,12 +368,6 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             None
         };
-        self.effect_manager
-            .set_cap_context(crate::effects::CapContext {
-                logical_now_ns: event.stamp.logical_now_ns,
-                journal_height: event.stamp.journal_height,
-                manifest_hash: event.stamp.manifest_hash.clone(),
-            });
         let input = WorkflowInput {
             version: ABI_VERSION,
             state: current_state,
@@ -1019,7 +1013,6 @@ mod tests {
                     context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
-                    cap_slots: Default::default(),
                 }),
                 pure: None,
             },
@@ -1072,12 +1065,7 @@ mod tests {
             }],
             effects: vec![],
             effect_bindings: vec![],
-
-            caps: vec![],
-            policies: vec![],
             secrets: vec![],
-            defaults: None,
-            module_bindings: Default::default(),
             routing: Some(Routing {
                 subscriptions: vec![RoutingEvent {
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -1092,9 +1080,6 @@ mod tests {
             secrets: vec![],
             modules,
             effects: HashMap::new(),
-
-            caps: HashMap::new(),
-            policies: HashMap::new(),
             schemas,
             effect_catalog: EffectCatalog::from_defs(Vec::new()),
         };

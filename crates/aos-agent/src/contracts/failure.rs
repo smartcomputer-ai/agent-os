@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureCode {
-    PolicyDenied,
-    CapabilityDenied,
     ValidationError,
     AdapterTimeout,
     AdapterError,
@@ -20,8 +18,6 @@ pub enum FailureCode {
 impl FailureCode {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::PolicyDenied => "policy_denied",
-            Self::CapabilityDenied => "capability_denied",
             Self::ValidationError => "validation_error",
             Self::AdapterTimeout => "adapter_timeout",
             Self::AdapterError => "adapter_error",
@@ -36,8 +32,6 @@ impl FailureCode {
 
     pub fn parse(code: &str) -> Option<Self> {
         match code {
-            "policy_denied" => Some(Self::PolicyDenied),
-            "capability_denied" => Some(Self::CapabilityDenied),
             "validation_error" => Some(Self::ValidationError),
             "adapter_timeout" => Some(Self::AdapterTimeout),
             "adapter_error" => Some(Self::AdapterError),

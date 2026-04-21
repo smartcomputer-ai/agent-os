@@ -86,8 +86,6 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
     let mut schema_hashes = HashMap::new();
     let mut module_hashes = HashMap::new();
     let mut effect_hashes = HashMap::new();
-    let mut cap_hashes = HashMap::new();
-    let mut policy_hashes = HashMap::new();
 
     for node in &patch.nodes {
         match node {
@@ -108,18 +106,6 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
                     KernelError::Manifest(format!("hash effect '{}': {err}", effect.name))
                 })?;
                 effect_hashes.insert(effect.name.clone(), hash);
-            }
-            AirNode::Defcap(cap) => {
-                let hash = Hash::of_cbor(&AirNode::Defcap(cap.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash cap '{}': {err}", cap.name))
-                })?;
-                cap_hashes.insert(cap.name.clone(), hash);
-            }
-            AirNode::Defpolicy(policy) => {
-                let hash = Hash::of_cbor(&AirNode::Defpolicy(policy.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash policy '{}': {err}", policy.name))
-                })?;
-                policy_hashes.insert(policy.name.clone(), hash);
             }
             _ => {}
         }
@@ -151,24 +137,6 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
         } else if let Some(hash) = effect_hashes.get(&reference.name) {
             reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
                 KernelError::Manifest(format!("effect hash '{}': {err}", reference.name))
-            })?;
-        }
-    }
-
-    for reference in &mut patch.manifest.caps {
-        if let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-        } else if let Some(hash) = cap_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("cap hash '{}': {err}", reference.name))
-            })?;
-        }
-    }
-
-    for reference in &mut patch.manifest.policies {
-        if let Some(hash) = policy_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("policy hash '{}': {err}", reference.name))
             })?;
         }
     }
@@ -226,11 +194,7 @@ mod tests {
                 }],
                 effects: Vec::new(),
                 effect_bindings: Vec::new(),
-                caps: Vec::new(),
-                policies: Vec::new(),
                 secrets: Vec::new(),
-                defaults: None,
-                module_bindings: IndexMap::new(),
                 routing: None,
             },
             nodes: Vec::new(),

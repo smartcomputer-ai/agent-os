@@ -34,12 +34,6 @@
         "additionalProperties": false
       }
     },
-    "required_caps": {
-      "type": "array",
-      "items": { "$ref": "common.schema.json#/$defs/CapGrantName" },
-      "uniqueItems": true,
-      "description": "Derived from emit_effect steps; may be omitted in authoring."
-    },
     "allowed_effects": {
       "type": "array",
       "items": { "$ref": "common.schema.json#/$defs/EffectKind" },
@@ -108,7 +102,6 @@
             "op": { "const": "emit_effect" },
             "kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
             "params": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
-            "cap": { "$ref": "common.schema.json#/$defs/CapGrantName" },
             "idempotency_key": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
             "bind": {
               "type": "object",
@@ -119,7 +112,7 @@
               "additionalProperties": false
             }
           },
-          "required": ["op","kind","params","cap","bind"],
+          "required": ["op","kind","params","bind"],
           "additionalProperties": false
         }
       ]
