@@ -36,7 +36,7 @@ Users should be able to mix both in the same world:
 WASM workflow   -> Python effect
 Python workflow -> Rust built-in effect
 Python workflow -> Python effect
-WASM workflow   -> WASM/pure helper
+WASM workflow   -> module-local helper
 ```
 
 The existing AgentOS effect boundary is already the right shape for this. Workflows emit typed intents as data. Effects execute outside the deterministic owner. Receipts re-enter through the journal. That boundary should be preserved exactly.
@@ -236,7 +236,7 @@ The workflow function may:
 - use deterministic context supplied by the kernel
 - construct domain events
 - construct effect intents
-- call local pure helper functions
+- call local helper functions
 
 The workflow function may not:
 
@@ -476,10 +476,12 @@ A single Python bundle can export:
 ```text
 workflow op
 effect op
-pure op
 ```
 
-Each op has a kernel role. A pure op is not a workflow handler. An effect op is not directly routed from domain events. The op kind determines which kernel subsystem may invoke the entrypoint and which input/output envelope is valid.
+Each op has a kernel role. An effect op is not directly routed from domain events. The op kind determines which kernel subsystem may invoke the entrypoint and which input/output envelope is valid.
+
+Public pure ops are deferred from v0.22. Deterministic helper functions can still live inside a bundle
+and be called by workflow/effect code, but AIR does not expose them as independently callable world ops.
 
 This lets Python be broad without making the kernel vague.
 

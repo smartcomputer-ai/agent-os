@@ -12,11 +12,8 @@ The node should dispatch an opened effect by looking at the pinned effect op and
 
 - Replace `EffectRuntime.effect_routes: kind -> adapter_id` with op implementation resolution.
 - Use `defop.effect.execution_class` instead of prefix-based `classify_effect_kind`.
-- Use `defop.impl.calling_convention` to select runtime path:
-  - `builtin_effect`
-  - `async_effect`
-  - later `python_async_effect`
-  - later `wasm_effect`
+- Select the runtime path from the effect op's referenced module `runtime.kind`, the op kind, and
+  `defop.effect.execution_class`.
 - For builtin/existing Rust adapters, map op implementation entrypoint to the existing adapter registry internally.
 - Remove `strict_effect_bindings`.
 - Remove route diagnostics that refer to `manifest.effect_bindings`.
@@ -54,4 +51,3 @@ Do not infer execution class from semantic kind prefixes once this phase is comp
 - Timers use owner-local async classification from effect op metadata.
 - Workspace, introspect, governance, and portal effects use internal deterministic classification from effect op metadata.
 - `manifest.effect_bindings` is not read anywhere.
-

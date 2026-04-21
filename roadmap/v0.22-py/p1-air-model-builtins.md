@@ -15,8 +15,9 @@ This is the structural phase. It should establish the new data model before the 
 - Replace canonical `DefEffect` with `DefOp { op_kind: "effect", ... }`.
 - Redefine `DefModule` as runtime/artifact metadata.
 - Move workflow ABI fields from `DefModule` to `DefOp.workflow`.
-- Move pure ABI fields from `DefModule` to `DefOp.pure`.
 - Move effect contract fields from `DefEffect` to `DefOp.effect`.
+- Keep `DefOp.impl.entrypoint` as an op-local selector so one module can implement many ops.
+- Do not carry forward public pure ops in v0.22; reject `op_kind = "pure"` if it appears.
 - Add JSON schema for `defop`.
 - Update `defmodule.schema.json`.
 - Update `manifest.schema.json`:
@@ -38,10 +39,7 @@ This is the structural phase. It should establish the new data model before the 
   "name": "sys/builtin_effects@1",
   "runtime": {
     "kind": "builtin",
-    "engine": "aos-node",
-    "artifact": {
-      "builtin_id": "sys.effects.v1"
-    }
+    "builtin_id": "sys.effects.v1"
   }
 }
 ```
@@ -60,11 +58,13 @@ This is the structural phase. It should establish the new data model before the 
   },
   "impl": {
     "module": "sys/builtin_effects@1",
-    "entrypoint": "http.request",
-    "calling_convention": "builtin_effect"
+    "entrypoint": "http.request"
   }
 }
 ```
+
+For WASM modules, `impl.entrypoint` names the export to invoke. It is not restricted to `"step"` in
+the target model, and it should allow multiple workflow ops to share one content-addressed module.
 
 ## Main Touch Points
 
@@ -84,4 +84,3 @@ This is the structural phase. It should establish the new data model before the 
 - Built-in schemas/modules/ops hash and load.
 - Manifest validation no longer relies on `DefEffect`.
 - `cargo test -p aos-air-types` passes.
-

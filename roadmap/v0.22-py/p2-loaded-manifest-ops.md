@@ -14,7 +14,6 @@ After this phase, the kernel should no longer ask for workflow/effect metadata f
 - Replace `LoadedManifest.effect_catalog` construction from `DefEffect` with construction from `DefOp` effect entries.
 - Add indexes:
   - `workflow_ops`
-  - `pure_ops`
   - `effect_ops`
   - semantic effect kind to op refs, if needed for diagnostics only
 - Update manifest catalog loading to load `manifest.ops`.
@@ -41,9 +40,9 @@ After this phase, the kernel should no longer ask for workflow/effect metadata f
 
 - Every `manifest.ops[]` ref must resolve to a `defop`.
 - Every op implementation module must resolve to an active `defmodule`.
-- Workflow ops must have `workflow` and must not have `pure` or `effect`.
-- Pure ops must have `pure` and must not have `workflow` or `effect`.
-- Effect ops must have `effect` and must not have `workflow` or `pure`.
+- Workflow ops must have `workflow` and must not have `effect`.
+- Effect ops must have `effect` and must not have `workflow`.
+- `op_kind = "pure"` is not in v0.22 scope and should be rejected if encountered.
 - Schema refs inside ops must exist in active or built-in schemas.
 - `routing.subscriptions[].op` must reference an active workflow op.
 - Workflow `effects_emitted[]` must reference active effect ops.
@@ -54,4 +53,3 @@ After this phase, the kernel should no longer ask for workflow/effect metadata f
 - Manifest validation errors mention ops, not modules/effects, for callable interface failures.
 - Governance patch summaries include `defop` adds/replaces/removes.
 - `cargo test -p aos-kernel manifest` and `cargo test -p aos-authoring` pass or have only expected follow-on failures from runtime migration.
-

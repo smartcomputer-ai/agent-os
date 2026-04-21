@@ -17,7 +17,8 @@ Python workflows are a later milestone. Start with Python effects because effect
 ## Work
 
 - Define Python bundle artifact format for `defmodule.runtime.kind = "python"`.
-- Add a Python effect calling convention such as `python_async_effect`.
+- Add the Python effect invocation path inferred from `runtime.kind = "python"`, `op_kind = "effect"`,
+  and `execution_class = "external_async"`.
 - Add a generic Python effect runner interface:
   - bundle hash
   - entrypoint
@@ -40,7 +41,7 @@ Python workflows are a later milestone. Start with Python effects because effect
 ## Non-Goals
 
 - Python workflow reducers.
-- Python pure functions.
+- Public pure ops.
 - Coroutine workflow syntax.
 - Perfect Python sandboxing.
 - Full native dependency packaging story.
@@ -64,4 +65,3 @@ Python workflows are a later milestone. Start with Python effects because effect
 - The node starts the Python runner only after durable append.
 - The Python runner returns a receipt that is schema-normalized by the kernel.
 - Python effect failures produce normal error receipts and do not mutate world state directly.
-
