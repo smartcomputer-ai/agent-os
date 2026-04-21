@@ -55,7 +55,7 @@ AgentOS is designed around six core principles that enable safe, governed self�
 
 5. **Portability and composability.** Worlds are self‑contained, content‑addressed bundles that can be moved, forked, or replayed anywhere. Modules interact through typed events with clear state boundaries, making composition predictable.
 
-6. **Minimal trusted base.** Keep the kernel small and auditable; push complexity to WASM modules and adapters with typed boundaries. The trusted core validates, routes, authorizes effect origins, and records open work.
+6. **Minimal trusted base.** Keep the kernel small and auditable; push complexity to WASM modules and adapters with typed boundaries. The trusted core validates schemas, routes events, admits declared effects, and records open work.
 
 ## What AgentOS Is (and Is Not)
 
@@ -75,13 +75,13 @@ AgentOS **is not** a general‑purpose programming language, compute lives in yo
 
 - **AIR**: The typed, canonical "blueprint" for a world's control plane. It describes modules, effects, schemas, secrets, manifests, and routing as structured data the kernel can inspect, validate, and simulate. Agents or humans modify AIR by proposing patches (diffs), which can be simulated and then applied, producing new log events and snapshots.
 
-- **Modules**: WASM artifacts. **Workflow modules** are deterministic state machines with a canonical signature: they consume an event and current state, then return new state, domain events, and effect intents. They cannot access the outside world directly; the host system executes effects only after the kernel authorizes the declared effect kind and records open work. Pure components perform side‑effect‑free computation.
+- **Modules**: WASM artifacts. **Workflow modules** are deterministic state machines with a canonical signature: they consume an event and current state, then return new state, domain events, and effect intents. They cannot access the outside world directly; the host system executes effects only after the kernel admits the declared effect kind and records open work. Pure components perform side‑effect‑free computation.
 
 - **Effects and adapters**: Explicit external actions—sending an email, calling an API, invoking an LLM, storing a blob. Each effect type is declared in the effect catalog and implemented by an external adapter. When an effect executes, the adapter produces a **receipt**—a signed record of what happened (parameters, response hash, timestamp, cost). Receipts are appended as events to the world log, preserving determinism on replay.
 
 - **Workspaces**: Named, versioned trees stored in workflow state for code and artifacts. Workflow modules and tooling use kernel-internal `workspace.*` effects to resolve, list, read, write, diff, and annotate trees deterministically; `aos push`/`aos pull` sync workspaces with the local filesystem.
 
-- **Authorization**: The public AIR surface has no caps or policy language. Runtime checks enforce structural constraints: workflow modules may emit only declared effect kinds, effect origins must be allowed by the effect definition, and external work is recorded durably before dispatch. Stronger hosted policy can be layered outside public AIR.
+- **Effect admission**: The public AIR surface has no caps or policy language. Runtime checks enforce structural constraints: workflow modules may emit only declared effect kinds, the effect catalog must allow the emitter, and external work is recorded durably before dispatch. Stronger hosted policy can be layered outside public AIR.
 
 - **Agents**: Interact with the world through the same protocol as humans: they read the current AIR and state, generate new code (workflow modules or pure modules), compile to WASM, draft a patch describing the changes and new module hashes, and submit the patch as a proposal. Agents can live outside the world (simpler) or inside it as privileged modules that can propose but not unilaterally apply changes.
 

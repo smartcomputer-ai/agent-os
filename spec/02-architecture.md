@@ -16,7 +16,7 @@ Application logic runs inside sandboxed WASM modules: workflow modules for state
 
 ## Components (High Level)
 
-- Kernel (Stepper): deterministic event processor, applies journal entries, authorizes effect origins, and drives workflow modules.
+- Kernel (Stepper): deterministic event processor, applies journal entries, validates emitted effect contracts, and drives workflow modules.
 - Kernel Clock: samples wall-clock + monotonic time at ingress and records deterministic timestamps.
 - Journal: append‑only log of all events (proposals, approvals, manifest application, effect intents, receipts, snapshots).
 - Snapshotter: materializes state at intervals for fast restore; replay from journal remains authoritative.
@@ -48,7 +48,7 @@ The kernel handles several categories of events. The first four are **design-tim
 - **Manifest** {manifest_hash} (appended whenever the active manifest changes; replay uses these to swap manifests in-order)
 
 **Runtime events:**
-- **EffectQueued** {intent_hash, kind, params_ref, authorization_ref?}
+- **EffectQueued** {intent_hash, kind, params_ref, origin}
 - **ReceiptAppended** {intent_hash, receipt_ref, status}
 - **SnapshotCreated** {height, snapshot_ref, logical_time_ns, receipt_horizon_height?, manifest_hash?}
 
@@ -99,9 +99,9 @@ Authoring ergonomics and determinism meet here. The loader accepts either JSON l
 
 After canonicalization, the loader validates references, shapes, effect allowlists, and routing semantics, then exposes a typed view for the kernel. Tooling hooks (`air fmt`, `air diff`, `air patch`) operate on the same canonical CBOR but can render either lens for humans.
 
-### Effect Authorization
+### Effect Admission
 
-The public v0.22 AIR surface has no caps or policy language. At enqueue time the kernel validates that workflow effects are declared in `abi.workflow.effects_emitted`, that the effect definition allows the origin scope, and that open work is recorded before external execution starts. Hosted deployments can layer stronger admission policy outside the public AIR model.
+The public v0.22 AIR surface has no caps or policy language. At enqueue time the kernel validates that workflow effects are declared in `abi.workflow.effects_emitted`, that the effect catalog allows the emitter, and that open work is recorded before external execution starts. Hosted deployments can layer stronger admission policy outside the public AIR model.
 
 ## Routing and Events (Runtime)
 
@@ -116,7 +116,7 @@ The manifest contains `routing.subscriptions`: mappings from DomainEvent schemas
 The typical runtime flow between workflow modules and effects follows five steps:
 
 1. **Workflow module receives an event** (e.g., `ChargeRequested`) via routing and executes deterministically.
-2. **Workflow module emits effect intents**; the kernel checks declared effect allowlists and origin scope, then records open work.
+2. **Workflow module emits effect intents**; the kernel checks declared effect allowlists and catalog emitter constraints, then records open work.
 3. **Unified node flushes** the frame containing that open work, then publishes opened async effects to the effect runtime.
 4. **Adapter executes** the effect and returns signed stream frames and/or a terminal receipt through world input.
 5. **Kernel delivers receipt progress** by admitting the continuation and emitting normalized receipt events (for example `sys/EffectReceiptEnvelope@1`, or `sys/EffectReceiptRejected@1` when payload decoding fails) to the recorded workflow origin.
@@ -181,7 +181,7 @@ The constitutional loop governs **design-time** changes: how the system proposes
 
 1. **Propose**: Submit AIR patches forming a proposal; the kernel validates and records **Proposed**, storing both the monotonic `proposal_id` (correlation key) and the content-addressed `patch_hash`.
 2. **Shadow**: The kernel clones state and runs a shadow simulation with stubbed receipts; it records **ShadowReport** with predicted effects/costs and diffs (optionally as an opaque summary blob for compatibility).
-3. **Approve/Reject**: Humans or policy record **Approved** with a `decision` (approve/reject) plus approver identity. A rejected proposal cannot be applied.
+3. **Approve/Reject**: Humans or governance integrations record **Approved** with a `decision` (approve/reject) plus approver identity. A rejected proposal cannot be applied.
 4. **Apply**: The kernel commits the new manifest root (**Applied**), recording `manifest_hash_new` alongside the ids for auditability; routing tables and effect definitions update atomically. Apply is only permitted after an approve decision.
 5. **Execute**: Normal event flow resumes; new modules/effects are active; effects produce receipts; audit trails accumulate.
 
@@ -199,9 +199,9 @@ Modules have no ambient access to time or randomness; all nondeterminism is isol
 
 ### Safety
 
-**Capability scoping**: Tokens encode scope and expiry; they are passed explicitly.
+**Structural effect gates**: Workflows can emit only known effect kinds listed in their ABI contract, and open work is recorded before dispatch.
 
-**Policy gates**: Enforce allow/deny/approval decisions and quotas before dispatch.
+**Governance gates**: Design-time changes move through proposal, shadow, approval, and apply records before becoming active.
 
 **Rollback**: Move the head to a prior snapshot; receipts include fences to ignore late arrivals after a rollback.
 
@@ -273,7 +273,7 @@ Later parallelism is future work. See [roadmap/vX-future/p5-parallelism.md](../r
 
 ## Failure Handling
 
-Adapters retry with exponential backoff; idempotency preserves correctness. Timeouts yield receipts with status=timeout; workflow modules can branch on statuses via receipt events. Dead‑letter policies handle intents that exceed retry or cost limits; the audit trail retains the full history. Failures are also propagated back to workflow modules so they have a chance to recover.
+Adapters retry with exponential backoff; idempotency preserves correctness. Timeouts yield receipts with status=timeout; workflow modules can branch on statuses via receipt events. Dead‑letter handling covers intents that exceed retry or cost limits; the audit trail retains the full history. Failures are also propagated back to workflow modules so they have a chance to recover.
 
 ## Security Posture
 

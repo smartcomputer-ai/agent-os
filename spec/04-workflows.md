@@ -31,7 +31,7 @@ Workflow modules own:
 
 Kernel + execution runtime own:
 - deterministic stepping
-- declared-effect and origin-scope authorization
+- declared-effect/catalog admission
 - effect emission and open-work tracking
 - continuation admission and receipt ingestion
 
@@ -132,7 +132,7 @@ No guarantee of complete static future-effect prediction for unexecuted branches
 2. Router evaluates `routing.subscriptions` and delivers to matching workflow modules.
 3. Workflow `step` runs deterministically with current state + event.
 4. Workflow returns new state, domain events, and effect intents.
-5. Kernel enforces the `effects_emitted` allowlist and effect `origin_scope`, then records open work.
+5. Kernel enforces the `effects_emitted` allowlist and effect catalog emitter constraints, then records open work.
 6. Executors may run allowed external work independently and emit stream frames and a terminal
    receipt.
 7. Kernel canonicalizes admitted continuations and routes them to the recorded origin instance.

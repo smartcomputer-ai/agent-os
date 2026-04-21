@@ -17,7 +17,7 @@ AIR (Agent Intermediate Representation) is a small, typed, canonical control‑p
 - spec/defs/builtin-effects.air.json
 - spec/defs/builtin-modules.air.json
 
-These schemas validate structure. Semantic checks (type compatibility, name/hash resolution, routing compatibility, effect allowlists, origin scope, and effect payload schemas) are enforced by the kernel validator.
+These schemas validate structure. Semantic checks (type compatibility, name/hash resolution, routing compatibility, effect allowlists, effect catalog emitter constraints, and effect payload schemas) are enforced by the kernel validator.
 
 ## Goals and Scope
 
@@ -25,7 +25,7 @@ AIR v1 provides one canonical, typed control plane the kernel can load, validate
 
 AIR is **control‑plane only**. It defines schemas, modules, effects, secrets, routing, and the manifest. Application state lives in workflow module state (deterministic WASM), encoded as canonical CBOR.
 
-The public v0.22 surface has no caps, cap grants, cap slots, or policy language. A workflow may emit an effect when the effect is declared and listed in that workflow's `effects_emitted` contract, and the effect's `origin_scope` allows workflow emission. This is an authoring/runtime contract, not a hosted security boundary. The effects set in v1 includes `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`, `vault.{put,rotate}`, `workspace.*`, and `introspect.*`. Migrations are deferred; `defmigration` is reserved.
+The public v0.22 surface has no caps, cap grants, cap slots, or policy language. A workflow may emit an effect when the effect is declared, listed in that workflow's `effects_emitted` contract, and allowed by the effect catalog's emitter constraints. This is an authoring/runtime contract, not a hosted security boundary. The effects set in v1 includes `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`, `vault.{put,rotate}`, `workspace.*`, and `introspect.*`. Migrations are deferred; `defmigration` is reserved.
 
 ## 1) Vocabulary and Identity
 
@@ -236,7 +236,7 @@ Pure input envelope (canonical CBOR):
 No WASI ambient syscalls, no threads, no ambient clock or randomness. All I/O happens via the effect layer. Deterministic time/entropy are supplied only via the optional call context. Prefer `dec128` in values; normalize NaNs if floats are used internally.
 
 **Note**: Pure modules (stateless, side-effect-free functions) are supported as `module_kind: "pure"`.
-Use workflow modules for stateful logic; use pure modules for deterministic transforms and authorizers.
+Use workflow modules for stateful logic; use pure modules for deterministic transforms and validators.
 
 ### Call Context (optional)
 
@@ -393,8 +393,7 @@ An intent is a request to perform an external effect:
 }
 ```
 
-The `intent_hash` is computed by the kernel over the canonical effect identity, params, origin-derived idempotency input, and any transitional internal fields;
-adapters verify it.
+The `intent_hash` is computed by the kernel over the effect kind, canonical params, and effective idempotency input; adapters verify it.
 
 **Canonical params**: Before hashing or enqueue, the kernel **decodes → schema‑checks → canonicalizes → re‑encodes** `params` using the effect kind's parameter schema (same AIR canonical rules as the loader: `$tag/$value` variants, canonical map/set/option shapes, numeric normalization). The canonical CBOR bytes become `params_cbor` and are the **only** form stored, hashed, and dispatched; non‑conforming params are rejected. This path runs for *every* origin (workflow modules, system/governance flows, injected tooling) so authoring sugar or workflow ABI quirks cannot change intent identity.
 
@@ -424,11 +423,11 @@ The kernel validates the signature (ed25519/HMAC), binds the receipt to its inte
 
 ## 9) Simplified Authority Model
 
-The v0.22 public AIR surface has no `defcap`, `defpolicy`, manifest cap grants, module cap slots, or policy defaults. The runtime authorization hook is permissive by default while keeping structural checks:
+The v0.22 public AIR surface has no `defcap`, `defpolicy`, manifest cap grants, module cap slots, or policy defaults. Runtime admission is permissive after structural checks:
 
 - the effect kind must exist in the loaded/built-in effect catalog
 - workflow-origin effects must be listed in `defmodule.abi.workflow.effects_emitted`
-- `origin_scope` must allow the origin kind
+- the effect catalog's emitter constraints must allow the origin kind
 - effect params and receipt payloads remain schema-validated and canonicalized
 - open work, idempotency, receipt binding, and replay invariants remain unchanged
 
@@ -555,7 +554,7 @@ Notes:
 Runtime journal entries are canonical CBOR enums; the important ones for AIR workflows are:
 
 - **DomainEvent** `{ schema, value, key?, now_ns, logical_now_ns, journal_height, entropy, event_hash, manifest_hash }` – emitted by workflow modules/system ingress; replay feeds workflows via routing subscriptions.
-- **EffectIntent** `{ intent_hash, kind, params_cbor, idempotency_key, origin }` – queued effects from workflow modules and system/governance flows. Transitional runtimes may retain an internal cap sentinel in this record shape.
+- **EffectIntent** `{ intent_hash, kind, params_cbor, idempotency_key, origin }` – queued effects from workflow modules and system/governance flows.
 - **EffectReceipt** `{ intent_hash, adapter_id, status, payload_cbor, cost_cents?, signature, now_ns, logical_now_ns, journal_height, entropy, manifest_hash }` – adapters’ signed receipts; replay reproduces workflow receipt progression.
 - **Snapshot** `{ snapshot_ref, height, logical_time_ns, receipt_horizon_height?, manifest_hash? }` – baseline snapshot record used as a restore root; replay loads the active baseline and replays tail entries with `height >= baseline.height`.
 - **Governance** – proposal/shadow/approve/apply records (design-time control plane).

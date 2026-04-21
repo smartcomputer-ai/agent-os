@@ -2,7 +2,7 @@
 
 **🌞 An agent harness for self-evolving agents.**
 
-AgentOS is an agent harness designed for autonomous self-modification of both the agent and the harness around it. Agents can safely propose, simulate, and apply changes to their own code, policies, workflows, and runtime configuration under governance, with full audit trails. Every external action produces a signed receipt. Every state change is replayable from an event log.
+AgentOS is an agent harness designed for autonomous self-modification of both the agent and the harness around it. Agents can safely propose, simulate, and apply changes to their own code, schemas, effects, workflows, and runtime configuration under governance, with full audit trails. Every external action produces a signed receipt. Every state change is replayable from an event log.
 
 ## Why AgentOS
 
@@ -15,10 +15,10 @@ AgentOS makes determinism and governed evolution first-class. Build portable, fo
 The current runtime is written in Rust and supports the following features:
 
 - **Deterministic kernel**: Single-threaded worlds with replay-identical state
-- **AIR (Agent Intermediate Representation)**: Typed control plane for modules, plans, schemas, policies, and capabilities (homoiconic in spirit, where agents can read and edit their own runtime)
-- **Capability security**: No ambient authority. All effects are scoped, budgeted, and gated by policy
+- **AIR (Agent Intermediate Representation)**: Typed control plane for schemas, modules, effects, routing, secrets, and manifests (homoiconic in spirit, where agents can read and edit their own runtime)
+- **Explicit effects**: No ambient I/O. Workflows request declared effect kinds, the kernel records open work, and adapters return signed receipts
 - **Full auditability**: Signed receipts for every external action enable complete forensic replay
-- **Safe self-modification**: Governed evolution through propose, shadow, approve, apply, execute, receipt, and audit phases with policy gates and full provenance.
+- **Safe self-modification**: Governed evolution through propose, shadow, approve, apply, execute, receipt, and audit phases with review gates and full provenance.
 
 ## Documentation
 
@@ -26,7 +26,7 @@ Start here:
 
 1. **[spec/01-overview.md](spec/01-overview.md)** — Core concepts, mental model, why this exists
 2. **[spec/02-architecture.md](spec/02-architecture.md)** — Runtime components, event flow, storage layout
-3. **[spec/03-air.md](spec/03-air.md)** — Complete AIR v1 spec (schemas, modules, capabilities, policies, manifests)
+3. **[spec/03-air.md](spec/03-air.md)** — Complete AIR v1 spec (schemas, modules, effects, routing, secrets, manifests)
 4. **[spec/04-workflows.md](spec/04-workflows.md)** — Workflow module runtime contract, orchestration patterns, and keyed cells
 5. **[spec/05-effects.md](spec/05-effects.md)** — Async effects, durable open work, adapters, receipts, and continuation admission
 6. **[spec/06-backends.md](spec/06-backends.md)** — SQLite/Kafka journals, local/object-store CAS, checkpoint metadata, and recovery
@@ -38,7 +38,7 @@ For implementation guidance, project structure, and coding conventions, see **[A
 
 ## Try AOS
 
-AOS is not quite ready for daily use yet, but it is close. The main proof of concept today is the `Demiurge` agent. The repository also includes the `aos-smoke` crate, which exercises and demonstrates core AOS capabilities.
+AOS is not quite ready for daily use yet, but it is close. The main proof of concept today is the `Demiurge` agent. The repository also includes the `aos-smoke` crate, which exercises and demonstrates core AOS behavior.
 
 Before you get started, make sure you have the Rust toolchain installed.
 
