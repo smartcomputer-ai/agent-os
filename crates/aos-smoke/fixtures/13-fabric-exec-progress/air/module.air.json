@@ -1,0 +1,17 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/FabricExecProgress@1",
+    "module_kind": "workflow",
+    "abi": {
+      "workflow": {
+        "state": "demo/FabricExecProgressState@1",
+        "event": "demo/FabricExecProgressEvent@1",
+        "effects_emitted": ["host.exec"],
+        "cap_slots": {
+          "default": "host"
+        }
+      }
+    }
+  }
+]

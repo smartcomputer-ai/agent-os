@@ -1,12 +1,16 @@
 # v0.20 Fabric
 
-Fabric is the remote execution product layer for AgentOS host sessions.
+Fabric is the remote execution product layer for AgentOS host sessions. Product-wise, Fabric
+brokers scoped access to computers. Some computers are ephemeral sandboxes that Fabric creates and
+owns, such as smolvm-backed OCI-image VMs. Others are existing machines that have a Fabric daemon
+installed on them, such as bare-metal servers, externally deployed VMs, or pods.
 
 The important boundary for v0.20 is:
 
 1. AOS workflows keep emitting the existing `host.*` effects.
 2. `aos-effect-adapters` gains a fabric-backed provider for those effects.
-3. The fabric backend/controller is mostly standalone and owns smolvm-backed sessions.
+3. The fabric backend/controller is mostly standalone and owns session allocation, regardless of
+   whether the backing computer is a Fabric-managed sandbox or an attached existing host.
 
 This avoids two competing terminal/session APIs. Fabric should become a backend for the host
 effect surface, not a second parallel `fabric.*` tool surface.
@@ -41,6 +45,12 @@ The first fabric release should give an agent access to a Unix-like scratchpad s
 - optionally allow local-machine sessions when explicitly enabled.
 
 This is for agent development and task execution, not permanent application deployment.
+
+The first operational substrate is Fabric-managed smolvm sessions, but the controller API should be
+designed around a broader model: a session is a scoped lease on a computer. For managed sandboxes,
+opening a session may create a new VM. For attached hosts, opening a session creates an access
+lease/workspace on an already-existing machine and must not imply ownership of the machine
+lifecycle.
 
 ## Design Stance
 
@@ -96,15 +106,34 @@ Backends own:
 - filesystem operations,
 - provider-specific session state.
 
-### 3) Expand `HostTarget`, do not invent `FabricTarget` effects
+### 3) Model targets and providers as tagged sum types
 
-The host target schema currently only supports `local`. v0.20 should extend it with a sandbox
-target that fabric can satisfy:
+The host target schema currently only supports `local`. v0.20 should extend it with explicit target
+variants that Fabric can satisfy. Do not invent a second `fabric.*` effect catalog; keep the
+AOS-facing effects as `host.*`, but make the target object precise.
 
 ```text
 HostTarget =
   local(HostLocalTarget)
   sandbox(HostSandboxTarget)
+  attached_host(HostAttachedTarget)
+```
+
+Use tagged sum types with variant-specific records for all variant objects. Do not model target,
+provider, selector, or signal variants as optional-field bags. The preferred wire shape is
+`kind` plus `spec`, for example:
+
+```json
+{
+  "target": {
+    "kind": "sandbox",
+    "spec": {
+      "image": "docker.io/library/alpine:latest",
+      "runtime_class": "smolvm",
+      "network_mode": "egress"
+    }
+  }
+}
 ```
 
 Suggested first `HostSandboxTarget` fields:
@@ -120,8 +149,23 @@ Suggested first `HostSandboxTarget` fields:
 - `ttl_ns`
 - `labels`
 
-The local backend can reject `sandbox` with `unsupported_target`. The fabric backend can reject
-`local` unless explicitly configured to proxy local-machine sessions.
+Suggested first `HostAttachedTarget` fields:
+
+- `selector`
+- `workdir`
+- `workspace_policy`
+- `user`
+- `env`
+- `ttl_ns`
+- `labels`
+
+`selector` should also be a tagged sum, such as `host_id(HostId)`, `pool(String)`, or
+`labels(map)`. A controller may accept the attached-host target shape before the attached-host
+daemon is implemented, but it should reject unsupported targets with a stable `unsupported_target`
+error rather than degrading into ad hoc optional fields.
+
+The local backend can reject `sandbox` and `attached_host` with `unsupported_target`. The fabric
+backend can reject `local` unless explicitly configured to proxy local-machine sessions.
 
 ### 4) Use simple HTTP plus NDJSON streaming first
 
@@ -163,9 +207,9 @@ fabric controller
   auth, idempotency, scheduling, session state
     |
 fabric host daemon(s)
-  smolvm runtime, files, exec, logs, heartbeats
+  provider capabilities, files, exec, logs, heartbeats
     |
-OCI images as smolvm microVMs
+managed smolvm microVMs or attached existing machines
 ```
 
 ### AOS Adapter Side
@@ -178,7 +222,8 @@ Responsibilities:
 - pass `intent_hash` as the idempotency key,
 - translate controller outputs into `Host*Receipt` payloads,
 - store large stdout/stderr/file results in the AOS Store/CAS using current host output rules,
-- emit stream frames for stdout/stderr chunks when the controller streams them,
+- emit coalesced time-based exec progress frames for long-running commands rather than one AOS
+  frame per controller stdout/stderr event,
 - avoid authoritative session state beyond transient request state.
 
 The adapter must not:
@@ -196,7 +241,7 @@ Responsibilities:
 
 - authenticate AOS adapters and fabric hosts,
 - maintain session records and idempotency records,
-- choose a host for new sessions,
+- choose a host/provider for new sessions,
 - track host capacity and liveness,
 - proxy or redirect session RPCs to the assigned host,
 - expose session status, logs, and terminal outcomes,
@@ -211,20 +256,28 @@ move to Postgres or a replicated store if fabric becomes multi-controller.
 
 Controller records:
 
-- hosts: `host_id`, endpoint, capabilities, resource capacity, last heartbeat, status,
+- hosts: `host_id`, endpoint, provider capabilities, resource capacity, last heartbeat, status,
 - sessions: `session_id`, target, host_id, status, lease/ttl, labels, created/updated timestamps,
 - execs: `exec_id`, session_id, idempotency key, status, exit code, timestamps, output refs,
 - idempotency: external request key to created resource or terminal result.
 
 ### Fabric Host Daemon
 
-The host daemon runs directly on a server. It is not a Kubernetes pod manager for sessions.
+The host daemon runs on a computer that Fabric can use. In P1 it manages local smolvm runtime
+resources and creates one VM per session. Later, the same daemon should also support an
+attached-host provider mode where it exposes the existing machine itself through scoped sessions.
+
+The host daemon is not a Kubernetes pod manager for sessions. It may run inside an externally
+created pod or VM, but in that case the pod/VM is attached infrastructure from Fabric's point of
+view unless Fabric also owns the provisioning layer.
 
 Responsibilities:
 
 - register and heartbeat with the controller,
-- manage local smolvm runtime resources,
-- create per-session microVMs and storage roots,
+- advertise provider capabilities as tagged sum types,
+- manage local smolvm runtime resources when running the smolvm provider,
+- create per-session microVMs and storage roots for sandbox sessions,
+- create per-session leases/workspaces for attached-host sessions,
 - run commands inside sessions,
 - stream stdout/stderr to the controller/adapter,
 - implement confined filesystem operations under the session root,
@@ -237,6 +290,9 @@ Runtime driver:
 
 Do not implement a CLI-backed smolvm path, smolvm HTTP sidecar path, Docker/Podman path,
 Firecracker path, QEMU path, or normal-VM fallback backend in P1.
+
+The attached-host daemon is tracked separately as a later tentative phase. See
+`roadmap/v0.20-fabric/p10-attached-host-daemon.md`.
 
 ### State Authority
 
@@ -263,7 +319,7 @@ in front of it. The adapter should only depend on the controller-facing API.
 
 - `POST /v1/sessions`
   - opens a session,
-  - request includes target, labels, ttl, resource hints, and AOS idempotency key,
+  - request includes a tagged target sum, labels, ttl, resource hints, and AOS idempotency key,
   - response returns `session_id`, status, timestamps, assigned host metadata.
 
 - `GET /v1/sessions/{session_id}`
@@ -299,6 +355,10 @@ Host registration:
 - `POST /v1/hosts/{host_id}/heartbeat`
 - `GET /v1/hosts/{host_id}/inventory`
 
+Registration and heartbeat payloads should advertise provider capabilities as tagged sum types, for
+example `smolvm(SmolvmProviderInfo)` and `attached_host(AttachedHostProviderInfo)`. The scheduler
+uses the requested target kind plus provider capabilities to choose a host.
+
 ### NDJSON Exec Events
 
 Minimum event kinds:
@@ -309,7 +369,7 @@ Minimum event kinds:
 - `exit`
 - `error`
 
-Each event includes:
+Each controller NDJSON event includes:
 
 - `exec_id`
 - monotonically increasing `seq`
@@ -317,7 +377,11 @@ Each event includes:
 - timestamp,
 - terminal status fields for `exit` or `error`.
 
-The adapter converts these into AOS stream frames plus the final `HostExecReceipt`.
+The Fabric AOS adapter consumes these events continuously, but it does not expose every controller
+event as an AOS stream frame. It aggregates observed output and emits time-based `host.exec`
+progress frames, for example every 10 seconds. If the exec finishes before the first interval, the
+adapter emits no progress frames. In all cases, the terminal `HostExecReceipt` contains the complete
+exec result.
 
 ## Security And Policy
 
@@ -331,6 +395,7 @@ Fabric adds operational enforcement:
 - max CPU/memory/session TTL,
 - network mode allowlists,
 - one smolvm microVM per session by default,
+- attached-host sessions cannot terminate or power-manage the underlying machine,
 - no host control socket inside sessions,
 - no Docker-in-session for v0.20,
 - path confinement for filesystem RPCs,
@@ -339,7 +404,8 @@ Fabric adds operational enforcement:
 
 ## Implementation Plan
 
-Implementation should start outside AOS and move inward:
+Implementation started by proving standalone Fabric components, then moved the generic Fabric
+runtime into this AOS workspace:
 
 1. prove one host can create and control smolvm sessions,
 2. add a controller that schedules and reconciles hosts,
@@ -350,48 +416,87 @@ Implementation should start outside AOS and move inward:
 
 Detailed spec: `roadmap/v0.20-fabric/p1-fabric-host-daemon.md`.
 
-- [ ] Add a standalone fabric crate or crate group with minimal AOS dependencies.
-- [ ] Define the host-facing protocol request/response/event structs.
-- [ ] Implement host daemon HTTP API for local development.
-- [ ] Add a narrow smolvm facade used by the host service.
-- [ ] Implement smolvm integration using the Rust API directly.
-- [ ] Create per-session storage roots/volumes.
-- [ ] Implement session open, exec, signal, and close.
-- [ ] Implement filesystem RPCs against the confined session root.
-- [ ] Stream exec stdout/stderr as NDJSON.
-- [ ] Add a direct host-daemon smoke test or CLI path: open session, exec command, read/write file,
+Status: complete for the v0.20 first cut. The host daemon substrate exists, has been manually
+smoked with real smolvm sessions, and has been validated through the controller and AOS Fabric
+adapter live e2e path.
+
+- [x] Add a standalone fabric crate or crate group with minimal AOS dependencies.
+- [x] Define the host-facing protocol request/response/event structs.
+- [x] Implement host daemon HTTP API for local development.
+- [x] Add a narrow smolvm facade used by the host service.
+- [x] Implement smolvm integration using the Rust API directly.
+- [x] Create per-session storage roots/volumes.
+- [x] Implement session open, exec, signal, and close.
+- [x] Implement filesystem RPCs against the confined session root.
+- [x] Stream exec stdout/stderr as NDJSON.
+- [x] Add a direct host-daemon smoke test or CLI path: open session, exec command, read/write file,
   close session.
-- [ ] Add host daemon integration tests gated behind an e2e feature.
+- [x] Add host daemon integration tests gated behind an e2e feature.
 
 ### P2: Fabric Controller Skeleton
 
-- [ ] Implement controller HTTP API.
-- [ ] Add SQLite state for hosts, sessions, execs, and idempotency.
-- [ ] Implement host registration and heartbeat.
-- [ ] Implement deterministic scheduler policy for v0.20: first healthy host with capacity.
-- [ ] Proxy or dispatch session, exec, signal, and filesystem RPCs to the assigned host.
-- [ ] Add controller-driven smoke test with one host daemon.
-- [ ] Add controller unit tests for idempotency and host/session reconciliation.
+Detailed spec: `roadmap/v0.20-fabric/p2-fabric-controller.md`.
+
+- Status: first cut complete for the unauthenticated controller path; bearer auth is deferred.
+
+- [x] Implement controller HTTP API.
+- [x] Model controller targets, host providers, selectors, and supported signal kinds as tagged
+  sum types or explicit enums with variant-specific records where needed.
+- [x] Add SQLite state for hosts, sessions, execs, and idempotency.
+- [x] Implement host registration and heartbeat.
+- [x] Implement deterministic scheduler policy for v0.20: first healthy host with capacity.
+- [x] Proxy or dispatch session, exec, signal, and filesystem RPCs to the assigned host.
+- [x] Add controller-driven smoke test with one host daemon.
+- [x] Add controller unit tests for idempotency and host/session reconciliation.
+- [x] Add OpenAPI discovery for controller and host APIs.
 
 ### P3: AOS Host Adapter Provider
 
-- [ ] Introduce a host backend trait used by all `host.*` adapters.
-- [ ] Move current local behavior into `LocalHostBackend`.
-- [ ] Keep existing tests passing against the local backend.
-- [ ] Add `FabricHostBackend` that talks to the controller API.
-- [ ] Add provider adapter kinds for fabric-backed `host.*` routes.
-- [ ] Add fabric adapter config: controller URL, auth token path/env, request timeout.
-- [ ] Extend `HostTarget` schemas/types with `sandbox`.
-- [ ] Add schema normalization tests for the new target variant.
+Detailed spec: `roadmap/v0.20-fabric/p3-aos-host-adapter.md`.
+
+- Status: complete for the v0.20 first cut.
+
+- [x] Introduce a host backend boundary used by `host.*` adapters.
+- [x] Move current local behavior behind the local host module boundary.
+- [x] Aggressively refactor AOS host/runtime plumbing where needed; existing tests may be updated
+  around the new boundary.
+- [x] Extend Fabric protocol/client for binary exec stdin and binary file read/write.
+- [x] Add Fabric-client exec aggregation/progress utilities for adapter use.
+- [x] Add `FabricHostBackend` that talks to the controller API.
+- [x] Add provider adapter kinds for fabric-backed `host.*` routes.
+- [x] Add fabric adapter config: controller URL, auth token path/env, request timeout, exec
+  progress interval.
+- [x] Extend `HostTarget` schemas/types with `sandbox`.
+- [x] Defer final host capability enforcement for sandbox targets to a later policy phase.
+- [x] Add schema normalization tests for the new target variant.
+- [x] Thread effect origin metadata into adapter startup so Fabric exec progress frames are
+  admitted.
 
 ### P4: AOS End-To-End Integration
 
-- [ ] Wire fabric provider routes through `EffectAdapterConfig`.
+- Status: partially complete. The adapter-level and live Fabric e2e coverage exists; manifest
+  examples, replay coverage, and a single controller-plus-host startup command sequence remain.
+  AOS-side migration validation has passed, including the Fabric Cargo gates, smolvm host build,
+  host smolvm e2e, and controller-plus-smolvm e2e checks from this checkout.
+
+- [x] Wire fabric provider routes through `EffectAdapterConfig`.
 - [ ] Add manifest examples binding `host.*` effects to fabric route IDs.
-- [ ] Add e2e test: open smolvm session, write file, exec command, read output, signal session.
-- [ ] Add streaming test: long command emits stream frames before terminal receipt.
+- [x] Add e2e test: open smolvm session, write file, exec command, read output, signal session.
+- [x] Add streaming test: long command emits time-based progress frames before terminal receipt.
 - [ ] Add replay test: admitted receipts replay without re-running fabric work.
 - [ ] Add `aos` CLI dev command or documented command sequence for starting controller and one host.
+
+### P10: Attached Host Daemon (Tentative)
+
+Detailed spec: `roadmap/v0.20-fabric/p10-attached-host-daemon.md`.
+
+- [ ] Add an attached-host provider mode to `fabric-host`.
+- [ ] Register existing machines with the same controller and scheduler as smolvm hosts.
+- [ ] Open sessions as scoped leases/workspaces on an existing machine, not as machine creation.
+- [ ] Implement exec, filesystem, and close semantics against the attached workspace.
+- [ ] Reject unsupported machine lifecycle operations such as runtime termination with stable
+  capability errors.
+- [ ] Add controller smoke tests using one attached host without requiring smolvm.
 
 ## First Version Scope
 
@@ -399,6 +504,7 @@ In scope:
 
 - one controller,
 - one or more host daemons,
+- tagged target/provider API shape that can distinguish managed sandboxes from attached hosts,
 - smolvm-backed OCI-image sessions,
 - RPC-style exec,
 - stdout/stderr streaming,
@@ -410,7 +516,8 @@ In scope:
 Out of scope:
 
 - Kubernetes-managed session pods,
-- non-smolvm runtime drivers,
+- production attached-host daemon mode,
+- non-smolvm managed runtime drivers,
 - SSH-backed external machines,
 - permanent service deployment,
 - shared volumes across sessions,
@@ -421,6 +528,8 @@ Out of scope:
 
 ## Later
 
+- Attached host daemon mode for bare-metal servers, externally deployed VMs, and externally
+  deployed pods.
 - SSH session provider.
 - Durable reusable volumes.
 - Shared volumes and session networks.

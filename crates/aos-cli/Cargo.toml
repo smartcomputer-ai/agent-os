@@ -1,39 +1,39 @@
 [package]
 name = "aos-cli"
-version = "0.1.0"
-edition = "2024"
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-aos-authoring = { path = "../aos-authoring" }
-aos-effect-types = { path = "../aos-effect-types" }
-aos-air-types = { path = "../aos-air-types" }
-aos-cbor = { path = "../aos-cbor" }
-aos-kernel = { path = "../aos-kernel" }
-aos-node = { path = "../aos-node" }
-aos-sys = { path = "../aos-sys" }
+aos-authoring.workspace = true
+aos-effect-types.workspace = true
+aos-air-types.workspace = true
+aos-cbor.workspace = true
+aos-kernel.workspace = true
+aos-node.workspace = true
+aos-sys.workspace = true
 
-anyhow = "1"
-base64 = "0.22"
-clap = { version = "4", features = ["derive", "env"] }
+anyhow.workspace = true
+base64.workspace = true
+clap = { workspace = true, features = ["env"] }
 ignore = "0.4"
 percent-encoding = "2"
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
-serde = { version = "1", features = ["derive"] }
-serde_bytes = "0.11"
-serde_cbor = "0.11"
-serde_json = "1"
-tokio = { version = "1", features = ["full"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = "1"
-walkdir = "2"
+serde.workspace = true
+serde_bytes.workspace = true
+serde_cbor.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing-subscriber.workspace = true
+uuid.workspace = true
+walkdir.workspace = true
 
 [dev-dependencies]
-assert_cmd = "2"
-axum = { version = "0.8.8", features = ["json"] }
-predicates = "3"
-tempfile = "3"
-tower = { version = "0.5", features = ["util"] }
+assert_cmd.workspace = true
+axum.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
+tower.workspace = true
 
 [[bin]]
 name = "aos"

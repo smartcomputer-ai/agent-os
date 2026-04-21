@@ -7,7 +7,7 @@ use std::sync::{Once, OnceLock};
 use std::time::{Duration, Instant};
 
 use aos_air_types::{
-    AirNode, CapGrant, DefCap, DefModule, DefPolicy, DefSchema, HashRef, Manifest,
+    AirNode, CapGrant, DefCap, DefModule, DefPolicy, DefSchema, EffectBinding, HashRef, Manifest,
     ManifestDefaults, NamedRef, Routing, RoutingEvent, SchemaRef, ValueLiteral, ValueRecord,
     builtins,
 };
@@ -210,6 +210,18 @@ pub fn upload_workspace_manifest(runtime: &HostedWorkerRuntime, universe_id: Uni
         runtime,
         universe_id,
         PREPARED.get_or_init(prepare_workspace_manifest),
+    )
+}
+
+pub fn upload_fabric_exec_progress_manifest(
+    runtime: &HostedWorkerRuntime,
+    universe_id: UniverseId,
+) -> String {
+    static PREPARED: OnceLock<PreparedManifest> = OnceLock::new();
+    upload_prepared_manifest(
+        runtime,
+        universe_id,
+        PREPARED.get_or_init(prepare_fabric_exec_progress_manifest),
     )
 }
 
@@ -656,6 +668,71 @@ fn prepare_workspace_manifest() -> PreparedManifest {
     }
 }
 
+fn prepare_fabric_exec_progress_manifest() -> PreparedManifest {
+    let wasm_bytes = compile_fixture_workflow(fabric_exec_progress_world_root().join("workflow"));
+    let schemas = load_json_file::<Vec<DefSchema>>(
+        &fabric_exec_progress_world_root().join("air/schemas.air.json"),
+    );
+    let wasm_hash = Hash::of_bytes(&wasm_bytes);
+    let modules = load_fixture_modules(
+        &fabric_exec_progress_world_root().join("air/module.air.json"),
+        &wasm_hash,
+    );
+
+    let mut blobs = vec![wasm_bytes];
+    let mut schema_refs = store_defs(&mut blobs, schemas.into_iter().map(AirNode::Defschema));
+    schema_refs.extend([
+        builtin_schema_ref("sys/EffectReceiptEnvelope@1"),
+        builtin_schema_ref("sys/EffectStreamFrame@1"),
+        builtin_schema_ref("sys/HostExecParams@1"),
+        builtin_schema_ref("sys/HostExecReceipt@1"),
+        builtin_schema_ref("sys/HostExecProgressFrame@1"),
+    ]);
+    let mut module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
+    let (host_enforcer_ref, host_enforcer_blobs) = authored_builtin_module("sys/CapEnforceHost@1");
+    blobs.extend(host_enforcer_blobs);
+    module_refs.push(host_enforcer_ref);
+
+    let manifest = Manifest {
+        air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
+        schemas: schema_refs,
+        modules: module_refs,
+        effects: vec![builtin_effect_ref("sys/host.exec@1")],
+        effect_bindings: vec![EffectBinding {
+            kind: aos_air_types::EffectKind::host_exec(),
+            adapter_id: "host.exec.fabric".to_string(),
+        }],
+        caps: vec![builtin_cap_ref("sys/host@1")],
+        policies: Vec::new(),
+        secrets: Vec::new(),
+        defaults: Some(ManifestDefaults {
+            policy: None,
+            cap_grants: vec![CapGrant {
+                name: "host".into(),
+                cap: "sys/host@1".into(),
+                params: ValueLiteral::Record(ValueRecord {
+                    record: Default::default(),
+                }),
+                expiry_ns: None,
+            }],
+        }),
+        module_bindings: Default::default(),
+        routing: Some(Routing {
+            subscriptions: vec![RoutingEvent {
+                event: schema_ref("demo/FabricExecProgressEvent@1"),
+                module: "demo/FabricExecProgress@1".into(),
+                key_field: None,
+            }],
+            inboxes: Vec::new(),
+        }),
+    };
+
+    PreparedManifest {
+        blobs,
+        manifest_bytes: to_canonical_cbor(&manifest).expect("encode fabric exec manifest"),
+    }
+}
+
 fn prepare_counter_manifest() -> PreparedManifest {
     let wasm_bytes = compile_fixture_workflow(counter_world_root().join("workflow"));
     let schemas =
@@ -858,6 +935,14 @@ pub fn workspace_world_root() -> PathBuf {
         .clone()
 }
 
+pub fn fabric_exec_progress_world_root() -> PathBuf {
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        authored_smoke_world_root("13-fabric-exec-progress", "aos-node-fabric-exec-tests")
+    })
+    .clone()
+}
+
 fn smoke_fixture_root(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../aos-smoke/fixtures")
@@ -930,6 +1015,7 @@ fn authored_builtin_module(name: &str) -> (NamedRef, Vec<Vec<u8>>) {
 fn builtin_module_wasm_bytes(name: &str) -> Vec<u8> {
     let bin = match name {
         "sys/CapEnforceHttpOut@1" => "cap_enforce_http_out",
+        "sys/CapEnforceHost@1" => "cap_enforce_host",
         "sys/CapEnforceWorkspace@1" => "cap_enforce_workspace",
         "sys/Workspace@1" => "workspace",
         other => panic!("unsupported builtin test module {other}"),

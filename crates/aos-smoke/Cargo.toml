@@ -1,44 +1,45 @@
 [package]
 name = "aos-smoke"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-anyhow = "1"
-aos-air-types = { path = "../aos-air-types" }
-aos-agent = { path = "../aos-agent" }
-aos-authoring = { path = "../aos-authoring" }
-aos-cbor = { path = "../aos-cbor" }
-aos-effect-types = { path = "../aos-effect-types" }
-aos-kernel = { path = "../aos-kernel" }
-aos-node = { path = "../aos-node" }
-aos-sys = { path = "../aos-sys" }
-aos-air-exec = { path = "../aos-air-exec" }
-aos-wasm-abi = { path = "../aos-wasm-abi" }
-aos-wasm-sdk = { path = "../aos-wasm-sdk" }
-aos-effects = { path = "../aos-effects" }
-aos-effect-adapters = { path = "../aos-effect-adapters", features = ["e2e-tests"] }
-aos-wasm-build = { path = "../aos-wasm-build" }
-clap = { version = "4", features = ["derive"] }
-indexmap = "2"
-once_cell = "1"
-camino = "1"
-serde = { version = "1", features = ["derive"] }
-serde_cbor = "0.11"
-serde_json = "1"
-serde_bytes = "0.11"
-sha2 = "0.10"
-hex = "0.4"
-log = "0.4"
+anyhow.workspace = true
+aos-air-types.workspace = true
+aos-agent.workspace = true
+aos-authoring.workspace = true
+aos-cbor.workspace = true
+aos-effect-types.workspace = true
+aos-kernel.workspace = true
+aos-node.workspace = true
+aos-sys.workspace = true
+aos-air-exec.workspace = true
+aos-wasm-abi.workspace = true
+aos-wasm-sdk.workspace = true
+aos-effects.workspace = true
+aos-effect-adapters = { workspace = true, features = ["e2e-tests"] }
+aos-wasm-build.workspace = true
+clap.workspace = true
+indexmap.workspace = true
+once_cell.workspace = true
+camino.workspace = true
+serde.workspace = true
+serde_cbor.workspace = true
+serde_json.workspace = true
+serde_bytes.workspace = true
+sha2.workspace = true
+hex.workspace = true
+log.workspace = true
 env_logger = "0.11"
-walkdir = "2"
-tokio = { version = "1", features = ["rt", "time"] }
-uuid = { version = "1", features = ["v4"] }
+walkdir.workspace = true
+tokio = { workspace = true, features = ["rt", "time"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-tempfile = "3"
-assert_cmd = "2"
-predicates = "3"
+tempfile.workspace = true
+assert_cmd.workspace = true
+predicates.workspace = true
 
 [lints.rust]
 unused_imports = "allow"

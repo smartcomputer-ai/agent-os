@@ -31,6 +31,9 @@ Start here:
 5. **[spec/05-effects.md](spec/05-effects.md)** — Async effects, durable open work, adapters, receipts, and continuation admission
 6. **[spec/06-backends.md](spec/06-backends.md)** — SQLite/Kafka journals, local/object-store CAS, checkpoint metadata, and recovery
 
+Fabric, the AOS-owned host/session execution substrate for `host.*` effects, is documented under
+**[roadmap/v0.20-fabric/](roadmap/v0.20-fabric/)** and **[dev/fabric/](dev/fabric/)**.
+
 For implementation guidance, project structure, and coding conventions, see **[AGENTS.md](AGENTS.md)**.
 
 ## Try AOS

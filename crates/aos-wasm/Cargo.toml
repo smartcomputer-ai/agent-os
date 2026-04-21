@@ -1,18 +1,18 @@
 [package]
 name = "aos-wasm"
-version = "0.1.0"
-edition = "2024"
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-aos-wasm-abi = { path = "../aos-wasm-abi" }
-anyhow = "1"
-sha2 = "0.10"
-wasmtime = { version = "36.0.3", features = ["cache"] }
-log = "0.4"
+aos-wasm-abi.workspace = true
+anyhow.workspace = true
+sha2.workspace = true
+wasmtime = { workspace = true, features = ["cache"] }
+log.workspace = true
 
 [dev-dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_cbor = "0.11"
-wat = "1"
-tempfile = "3"
+serde.workspace = true
+serde_cbor.workspace = true
+wat.workspace = true
+tempfile.workspace = true

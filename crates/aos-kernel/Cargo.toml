@@ -1,42 +1,42 @@
 [package]
 name = "aos-kernel"
-version = "0.1.0"
-edition = "2024"
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [features]
 default = []
 e2e-tests = []
 
 [dependencies]
-aos-air-types = { path = "../aos-air-types" }
-aos-air-exec = { path = "../aos-air-exec" }
-aos-effects = { path = "../aos-effects" }
-aos-wasm = { path = "../aos-wasm" }
-aos-wasm-abi = { path = "../aos-wasm-abi" }
-aos-cbor = { path = "../aos-cbor" }
-anyhow = "1"
-indexmap = "2"
-thiserror = "1"
-serde = { version = "1", features = ["derive"] }
-serde_cbor = "0.11"
-serde_json = "1"
-log = "0.4"
-serde_bytes = "0.11"
-hex = "0.4"
-base64 = "0.21"
-url = "2"
-wasmtime = "36.0.3"
-getrandom = "0.2"
-uuid = { version = "1", features = ["serde", "v4"] }
+aos-air-types.workspace = true
+aos-air-exec.workspace = true
+aos-effects.workspace = true
+aos-wasm.workspace = true
+aos-wasm-abi.workspace = true
+aos-cbor.workspace = true
+anyhow.workspace = true
+indexmap.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_cbor.workspace = true
+serde_json.workspace = true
+log.workspace = true
+serde_bytes.workspace = true
+hex.workspace = true
+base64.workspace = true
+url.workspace = true
+wasmtime.workspace = true
+getrandom.workspace = true
+uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]
-wat = "1"
-tempfile = "3"
-aos-wasm-build = { path = "../aos-wasm-build" }
-camino = "1"
-walkdir = "2"
-tokio = { version = "1", features = ["macros", "rt", "time"] }
+wat.workspace = true
+tempfile.workspace = true
+aos-wasm-build.workspace = true
+camino.workspace = true
+walkdir.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
 
 [lints.rust]
 unused_imports = "allow"

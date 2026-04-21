@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use adapters::blob_get::BlobGetAdapter;
 use adapters::blob_put::BlobPutAdapter;
-use adapters::host::make_host_adapter_set;
+use adapters::host::{make_fabric_host_adapter_set, make_host_adapter_set};
 use adapters::registry::AdapterRegistry;
 #[cfg(not(feature = "adapter-http"))]
 use adapters::stub::StubHttpAdapter;
@@ -43,6 +43,22 @@ pub fn default_registry<S: Store + 'static>(
     registry.register(Box::new(host_adapters.fs_stat));
     registry.register(Box::new(host_adapters.fs_exists));
     registry.register(Box::new(host_adapters.fs_list_dir));
+
+    if let Some(fabric_cfg) = &config.fabric {
+        let fabric_adapters = make_fabric_host_adapter_set(store.clone(), fabric_cfg.clone());
+        registry.register(Box::new(fabric_adapters.session_open));
+        registry.register(Box::new(fabric_adapters.exec));
+        registry.register(Box::new(fabric_adapters.session_signal));
+        registry.register(Box::new(fabric_adapters.fs_read_file));
+        registry.register(Box::new(fabric_adapters.fs_write_file));
+        registry.register(Box::new(fabric_adapters.fs_edit_file));
+        registry.register(Box::new(fabric_adapters.fs_apply_patch));
+        registry.register(Box::new(fabric_adapters.fs_grep));
+        registry.register(Box::new(fabric_adapters.fs_glob));
+        registry.register(Box::new(fabric_adapters.fs_stat));
+        registry.register(Box::new(fabric_adapters.fs_exists));
+        registry.register(Box::new(fabric_adapters.fs_list_dir));
+    }
 
     #[cfg(feature = "adapter-http")]
     {

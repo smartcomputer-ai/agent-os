@@ -218,12 +218,14 @@ mod tests {
         assert!(names.contains(&"sys/TimerFired@1"));
         assert!(names.contains(&"sys/HostMount@1"));
         assert!(names.contains(&"sys/HostLocalTarget@1"));
+        assert!(names.contains(&"sys/HostSandboxTarget@1"));
         assert!(names.contains(&"sys/HostTarget@1"));
         assert!(names.contains(&"sys/HostSessionOpenParams@1"));
         assert!(names.contains(&"sys/HostSessionOpenReceipt@1"));
         assert!(names.contains(&"sys/HostOutput@1"));
         assert!(names.contains(&"sys/HostExecParams@1"));
         assert!(names.contains(&"sys/HostExecReceipt@1"));
+        assert!(names.contains(&"sys/HostExecProgressFrame@1"));
         assert!(names.contains(&"sys/HostSessionSignalParams@1"));
         assert!(names.contains(&"sys/HostSessionSignalReceipt@1"));
         assert!(names.contains(&"sys/HostBlobRefInput@1"));

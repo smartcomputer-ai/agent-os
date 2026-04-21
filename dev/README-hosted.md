@@ -12,25 +12,25 @@ This directory contains the local Docker environment for the Kafka/blobstore nod
 ## Start
 
 ```bash
-dev/scripts/hosted-up.sh
+dev/hosted/hosted-up.sh
 ```
 
 ## Stop
 
 ```bash
-dev/scripts/hosted-down.sh
+dev/hosted/hosted-down.sh
 ```
 
 To also remove volumes:
 
 ```bash
-dev/scripts/hosted-down.sh -v
+dev/hosted/hosted-down.sh -v
 ```
 
 ## Reset Kafka Topics
 
 ```bash
-dev/scripts/hosted-topics-reset.sh
+dev/hosted/hosted-topics-reset.sh
 ```
 
 This deletes and recreates:
@@ -41,12 +41,12 @@ This deletes and recreates:
 
 By default `aos-ingress` and `aos-journal` are created with `AOS_PARTITION_COUNT=1` for local dev.
 
-`dev/scripts/hosted-topics-ensure.sh` also recreates existing topics when their partition count does not match the requested value, so ingress and journal cannot silently drift apart.
+`dev/hosted/hosted-topics-ensure.sh` also recreates existing topics when their partition count does not match the requested value, so ingress and journal cannot silently drift apart.
 
 ## Reset Blobstore Prefix
 
 ```bash
-dev/scripts/hosted-blobstore-reset.sh
+dev/hosted/hosted-blobstore-reset.sh
 ```
 
 This removes all objects under the configured `AOS_BLOBSTORE_PREFIX` and leaves the bucket in place.

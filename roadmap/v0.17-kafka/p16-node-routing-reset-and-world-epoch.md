@@ -37,8 +37,8 @@ Primary implemented files:
 - `crates/aos-node-hosted/src/control/facade.rs`
 - `crates/aos-node-hosted/src/main.rs`
 - `crates/aos-node-hosted/src/bin/hosted-prof.rs`
-- `dev/scripts/hosted-topics-ensure.sh`
-- `dev/scripts/hosted-topics-reset.sh`
+- `dev/hosted/hosted-topics-ensure.sh`
+- `dev/hosted/hosted-topics-reset.sh`
 
 ## Remaining Work
 

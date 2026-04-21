@@ -19,9 +19,9 @@ use super::types::{
     PendingCreatedWorld, RegisteredWorld, WorkerError,
 };
 use super::util::{
-    effect_intent_from_pending, kernel_snapshot_record, latest_snapshot_record, parse_hash_ref,
-    reopen_kernel_from_frame_log, snapshot_record_from_checkpoint, snapshot_record_from_frames,
-    unix_time_ns,
+    adapter_start_context_from_pending, effect_intent_from_pending, kernel_snapshot_record,
+    latest_snapshot_record, parse_hash_ref, reopen_kernel_from_frame_log,
+    snapshot_record_from_checkpoint, snapshot_record_from_frames, unix_time_ns,
 };
 
 impl HostedWorkerCore {
@@ -367,7 +367,8 @@ impl HostedWorkerCore {
                 let intent = effect_intent_from_pending(pending)?;
                 match classify_effect_kind(intent.kind.as_str()) {
                     EffectExecutionClass::ExternalAsync => {
-                        external_intents.push(intent);
+                        external_intents
+                            .push((intent, Some(adapter_start_context_from_pending(pending))));
                     }
                     EffectExecutionClass::OwnerLocalTimer => {
                         Self::ensure_timer_started(
@@ -402,8 +403,10 @@ impl HostedWorkerCore {
         let Some(registered) = self.state.registered_worlds.get(&world_id) else {
             return Ok(());
         };
-        for intent in external_intents {
-            let _ = registered.effect_runtime.ensure_started(world_id, intent)?;
+        for (intent, context) in external_intents {
+            let _ = registered
+                .effect_runtime
+                .ensure_started_with_context(world_id, intent, context)?;
         }
         Ok(())
     }

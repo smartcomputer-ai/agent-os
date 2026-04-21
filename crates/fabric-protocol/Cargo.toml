@@ -1,0 +1,13 @@
+[package]
+name = "fabric-protocol"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+serde.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -24,9 +24,29 @@ pub struct HostLocalTarget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostSandboxTarget {
+    pub image: String,
+    #[serde(default)]
+    pub runtime_class: Option<String>,
+    #[serde(default)]
+    pub workdir: Option<String>,
+    #[serde(default)]
+    pub env: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub network_mode: Option<String>,
+    #[serde(default)]
+    pub mounts: Option<Vec<HostMount>>,
+    #[serde(default)]
+    pub cpu_limit_millis: Option<u64>,
+    #[serde(default)]
+    pub memory_limit_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "$tag", content = "$value", rename_all = "snake_case")]
 pub enum HostTarget {
     Local(HostLocalTarget),
+    Sandbox(HostSandboxTarget),
 }
 
 impl HostTarget {
@@ -34,9 +54,21 @@ impl HostTarget {
         Self::Local(local)
     }
 
-    pub fn as_local(&self) -> &HostLocalTarget {
+    pub fn sandbox(sandbox: HostSandboxTarget) -> Self {
+        Self::Sandbox(sandbox)
+    }
+
+    pub fn as_local(&self) -> Option<&HostLocalTarget> {
         match self {
-            Self::Local(local) => local,
+            Self::Local(local) => Some(local),
+            Self::Sandbox(_) => None,
+        }
+    }
+
+    pub fn as_sandbox(&self) -> Option<&HostSandboxTarget> {
+        match self {
+            Self::Local(_) => None,
+            Self::Sandbox(sandbox) => Some(sandbox),
         }
     }
 }
@@ -120,6 +152,19 @@ pub struct HostExecReceipt {
     pub error_code: Option<String>,
     #[serde(default)]
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostExecProgressFrame {
+    #[serde(default)]
+    pub exec_id: Option<String>,
+    pub elapsed_ns: u64,
+    #[serde(with = "serde_bytes")]
+    pub stdout_delta: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub stderr_delta: Vec<u8>,
+    pub stdout_bytes: u64,
+    pub stderr_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -258,6 +303,42 @@ pub struct HostFsApplyPatchParams {
     pub patch_format: Option<String>,
     #[serde(default)]
     pub dry_run: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_target_roundtrips_local_and_sandbox() {
+        let local = HostTarget::local(HostLocalTarget {
+            mounts: None,
+            workdir: None,
+            env: None,
+            network_mode: "none".to_string(),
+        });
+        let local_bytes = serde_cbor::to_vec(&local).unwrap();
+        assert_eq!(
+            serde_cbor::from_slice::<HostTarget>(&local_bytes).unwrap(),
+            local
+        );
+
+        let sandbox = HostTarget::sandbox(HostSandboxTarget {
+            image: "docker.io/library/alpine:latest".to_string(),
+            runtime_class: Some("smolvm".to_string()),
+            workdir: Some("/workspace".to_string()),
+            env: Some(BTreeMap::from([("A".to_string(), "B".to_string())])),
+            network_mode: Some("egress".to_string()),
+            mounts: None,
+            cpu_limit_millis: Some(1_000),
+            memory_limit_bytes: Some(268_435_456),
+        });
+        let sandbox_bytes = serde_cbor::to_vec(&sandbox).unwrap();
+        assert_eq!(
+            serde_cbor::from_slice::<HostTarget>(&sandbox_bytes).unwrap(),
+            sandbox
+        );
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -6,11 +6,17 @@
 .aos/
 .aos-node/
 .aos-hosted/
+.fabric-ctrl/
+.fabric-host/
 notes-world/
 .playwright-mcp/
 profile.json.gz
 modules/
 roadmap/v0.17-kafka/kafka-examples/
+
+# Local third-party runtime bundles downloaded for Fabric development.
+third_party/.cache/
+third_party/smolvm-release/
 
 # ===========================================================================
 # Rust.gitignore

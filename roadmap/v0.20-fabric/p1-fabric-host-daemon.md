@@ -4,7 +4,7 @@
 **Effort**: High  
 **Risk if deferred**: High (the AOS adapter and controller would otherwise be designed against an
 unproven execution substrate)  
-**Status**: Proposed  
+**Status**: In progress  
 **Depends on**:
 - `roadmap/v0.20-fabric/fabric.md`
 - `roadmap/v0.20-fabric/rec.md`
@@ -15,16 +15,20 @@ Build the first standalone fabric host daemon.
 
 P1 should prove that one installed daemon on one Unix host can:
 
-1. create isolated smolvm-backed sessions from OCI images,
-2. run parallel RPC-style exec calls inside a session,
-3. stream stdout/stderr while commands run,
-4. expose confined filesystem operations against the session workspace,
-5. quiesce, resume, and close sessions,
-6. reconstruct live/quiesced sessions from smolvm runtime inventory after daemon restart,
-7. be exercised directly with `curl` or a small CLI before any controller or AOS adapter exists.
+1. [x] create isolated smolvm-backed sessions from OCI images,
+2. [x] run parallel RPC-style exec calls inside a session,
+3. [x] stream stdout/stderr while commands run,
+4. [x] expose confined filesystem operations against the session workspace,
+5. [x] quiesce, resume, and close sessions,
+6. [x] reconstruct live/quiesced sessions from smolvm runtime inventory after daemon restart,
+7. [x] be exercised directly with `curl` or a small CLI before any controller or AOS adapter exists.
 
-This phase intentionally starts outside AOS. There is no `aos-effect-adapters` work in P1 and no
-controller scheduling layer. P1 is the host substrate that P2 and P3 will build on.
+Current implementation note: the exec endpoint emits live NDJSON events from smolvm protocol frames,
+and the CLI consumes those events without buffering the whole response body.
+
+This phase was originally developed before Fabric moved into AOS. There is no
+`aos-effect-adapters` work in P1 and no controller scheduling layer. P1 is the host substrate that
+P2 and P3 build on.
 
 ## Why This Exists
 
@@ -64,25 +68,42 @@ P1 does not implement:
 
 ## Crate Shape
 
-Add a new standalone workspace crate:
+Initial P1 used the compact standalone workspace scaffold. After the first P2 refactor, the current
+crate shape is split so the controller can depend on protocol/client code without compiling smolvm:
 
 ```text
-crates/aos-fabric/
+crates/fabric-protocol/
   Cargo.toml
   src/lib.rs
-  src/protocol.rs
-  src/host/config.rs
-  src/host/http.rs
-  src/host/state.rs
-  src/host/service.rs
-  src/host/fs.rs
-  src/host/exec.rs
-  src/host/smolvm.rs
-  src/bin/aos-fabric-host.rs
-  tests/host_daemon_smoke.rs
+
+crates/fabric-client/
+  Cargo.toml
+  src/lib.rs
+
+crates/fabric-host/
+  Cargo.toml
+  src/lib.rs
+  src/main.rs
+  src/config.rs
+  src/http.rs
+  src/state.rs
+  src/service.rs
+  src/fs.rs
+  src/exec.rs
+  src/runtime.rs
+  src/smolvm.rs
+
+crates/fabric-cli/
+  Cargo.toml
+  src/main.rs
+
+third_party/
+  smolvm/   # git submodule: https://github.com/smol-machines/smolvm.git
 ```
 
-`aos-fabric` should not depend on `aos-node`, `aos-kernel`, or `aos-effect-adapters`.
+The Fabric crates should not depend on `aos-node`, `aos-kernel`, or `aos-effect-adapters`. Later
+AOS integration should live in a separate crate, for example `fabric-aos-adapter`, and depend on
+the fabric client/protocol surface.
 
 Acceptable dependencies:
 
@@ -98,14 +119,14 @@ the smolvm HTTP server as a sidecar.
 
 Use a pinned smolvm source dependency for P1.
 
-Recommended initial shape:
+Current initial shape:
 
 ```text
 third_party/
   smolvm/   # git submodule: https://github.com/smol-machines/smolvm.git
 ```
 
-Reference the crates directly from `crates/aos-fabric/Cargo.toml`:
+Reference the crates directly from `crates/fabric-host/Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -113,9 +134,9 @@ smolvm = { path = "../../third_party/smolvm" }
 smolvm-protocol = { path = "../../third_party/smolvm/crates/smolvm-protocol" }
 ```
 
-Do not add `third_party/smolvm` as an AOS workspace member. Treat it as an external source
-dependency. This keeps the AOS workspace boundary clear while still allowing P1 to pin and patch
-smolvm while the integration surface is settling.
+Do not add `third_party/smolvm` as a workspace member. Treat it as an external source dependency.
+This keeps the fabric workspace boundary clear while still allowing P1 to pin and patch smolvm
+while the integration surface is settling.
 
 Do not commit dependencies that point at a developer-local path such as
 `/Users/lukas/dev/tmp/smolvm`. A local sibling checkout is acceptable for investigation only.
@@ -131,8 +152,9 @@ smolvm-protocol = { git = "https://github.com/smol-machines/smolvm.git", package
 
 If smolvm crates are published later, prefer normal crates.io version dependencies.
 
-Prefer keeping protocol types in `src/protocol.rs` for P1. If the protocol stabilizes, P2 can
-split it into a smaller shared crate.
+Prefer keeping protocol and client types inside `crates/fabric` for P1. If the protocol stabilizes
+and is shared by controller, CLI, and AOS adapter, P2 can split it into `fabric-protocol` and
+`fabric-client`.
 
 ## Operating Model
 
@@ -141,9 +163,9 @@ P1 runs in direct-host mode:
 ```text
 client or curl
   |
-  HTTP JSON / NDJSON
+HTTP JSON / NDJSON
   |
-aos-fabric-host
+fabric-host
   |
 smolvm facade
   |
@@ -184,11 +206,14 @@ The daemon still owns a local data root for session workspaces:
 
 ```text
 {state_root}/
+  smolvm/
+    smolvm.redb
   sessions/
     {session_id}/
       workspace/
       tmp/
       logs/
+      fabric-session.json
 ```
 
 Workspace directories are data, not daemon metadata. They can outlive machines, but a workspace
@@ -200,7 +225,7 @@ not duplicate that database locally.
 
 Required runtime identity:
 
-- deterministic machine name: `aos-fabric-{host_id_hash}-{session_id}`
+- deterministic machine name: `fabric-{host_id_hash}-{session_id}`
 - workspace path: `{state_root}/sessions/{session_id}/workspace`
 - optional marker file: `{state_root}/sessions/{session_id}/fabric-session.json`
 
@@ -243,25 +268,27 @@ idempotency.
 
 P1 uses smolvm as the only runtime backend.
 
-Define a narrow smolvm facade before wiring it into the host service. The facade is not an
-open-ended plugin system; it is just the boundary between fabric's HTTP/session semantics and
-smolvm's API details.
+Define a narrow runtime trait before wiring smolvm into the host service. This is not an open-ended
+plugin system; it is just the boundary between fabric's HTTP/session semantics and smolvm's API
+details. The current scaffold calls this trait `FabricRuntime`, with `SmolvmRuntime` as the only P1
+implementation.
 
 ```rust
-trait SmolvmFacade {
-    async fn create_session(&self, request: CreateSessionRequest) -> Result<CreatedSession>;
-    async fn start_session(&self, session: &SessionHandle) -> Result<()>;
-    async fn stop_session(&self, session: &SessionHandle, grace_ns: Option<u64>) -> Result<()>;
-    async fn remove_session(&self, session: &SessionHandle) -> Result<()>;
-    async fn inspect_session(&self, session: &SessionHandle) -> Result<RuntimeSessionState>;
-    async fn list_managed_sessions(&self, host_id: &str) -> Result<Vec<RuntimeSessionState>>;
-    async fn exec_stream(&self, request: ExecRuntimeRequest) -> Result<ExecEventStream>;
+trait FabricRuntime {
+    async fn open_session(&self, request: SessionOpenRequest) -> Result<SessionOpenResponse>;
+    async fn session_status(&self, session_id: &SessionId) -> Result<SessionStatusResponse>;
+    async fn exec_stream(&self, request: ExecRequest) -> Result<ExecEventStream>;
+    async fn signal_session(
+        &self,
+        session_id: &SessionId,
+        request: SignalSessionRequest,
+    ) -> Result<SessionStatusResponse>;
 }
 ```
 
 P1 implementation:
 
-- `SmolvmFacade` implemented with the smolvm Rust API directly.
+- `SmolvmRuntime` implements `FabricRuntime` with the smolvm Rust API directly.
 - no CLI-backed runtime path.
 - no smolvm HTTP-server sidecar.
 
@@ -293,6 +320,27 @@ intended embedded direction, but it is too narrow for P1:
 Keep all smolvm imports contained in `src/host/smolvm.rs` so the dependency shape does not leak
 through the host HTTP layer.
 
+Actual smolvm API stance after reviewing the vendored code:
+
+- Use `SmolvmDb::open_at(path)` for fabric's smolvm-owned machine registry.
+- Use `VmRecord` and `RecordState` for persisted runtime records.
+- Use `AgentManager::for_vm_with_sizes` plus `ensure_running_via_subprocess` for VM lifecycle.
+- Use one fresh `AgentClient` per exec request so parallel exec RPCs do not serialize on a shared
+  client.
+- Use `AgentRequest::Run`, not `AgentClient::vm_exec`, for normal fabric commands. `vm_exec` runs
+  in the agent VM rootfs, while fabric sessions must run in the requested OCI image rootfs.
+- Use `RunConfig::with_persistent_overlay(Some(machine_name.clone()))` or the equivalent low-level
+  `AgentRequest::Run { persistent_overlay_id: Some(machine_name), ... }` so package installs and
+  image filesystem changes persist across exec calls in the same fabric session.
+
+Known smolvm layout caveat:
+
+- `SmolvmDb::open_at` lets fabric put smolvm's machine registry under `{state_root}/smolvm`.
+- `AgentManager::for_vm_with_sizes` currently still places per-machine runtime artifacts under
+  smolvm's platform cache root.
+- P1 may tolerate this for the first proof, but the preferred follow-up is a small upstreamable
+  smolvm API that lets embedded callers choose the machine runtime root.
+
 Boot helper requirement:
 
 Smolvm's safe server launch path currently calls `std::env::current_exe()` and spawns:
@@ -301,13 +349,13 @@ Smolvm's safe server launch path currently calls `std::env::current_exe()` and s
 <current-exe> _boot-vm <config-path>
 ```
 
-When smolvm is linked into `aos-fabric-host`, `current_exe()` is the fabric daemon binary, not the
+When smolvm is linked into `fabric-host`, `current_exe()` is the fabric daemon binary, not the
 `smolvm` CLI. P1 must handle this explicitly before using
 `AgentManager::ensure_running_via_subprocess`.
 
 Acceptable solutions:
 
-1. Add a hidden `aos-fabric-host _boot-vm <config-path>` command that forwards to public smolvm
+1. Add a hidden `fabric-host _boot-vm <config-path>` command that forwards to public smolvm
    boot logic.
 2. Upstream a small smolvm API change so callers can configure the boot helper executable or call a
    public `boot_vm(config_path)` function.
@@ -317,7 +365,7 @@ smolvm CLI for normal lifecycle operations.
 
 Session creation flow:
 
-1. Derive `machine_name = aos-fabric-{host_id_hash}-{session_id}`.
+1. Derive `machine_name = fabric-{host_id_hash}-{session_id}`.
 2. Open smolvm's runtime-owned database at `{state_root}/smolvm/smolvm.redb` with
    `SmolvmDb::open_at`; call `init_tables()` during daemon startup.
 3. Create a `VmRecord` with:
@@ -335,7 +383,8 @@ Session creation flow:
    `manager.ensure_running_via_subprocess(record.host_mounts(), record.port_mappings(),
    record.vm_resources(), Default::default())`.
 7. Update the smolvm record to `RecordState::Running` with the child PID and PID start time.
-8. Optionally pre-pull the session image through `manager.connect()?.pull_with_registry_config`.
+8. Pull the session image through `manager.connect()?.pull_with_registry_config`.
+9. Return `ready` only after VM startup and image pull both succeed.
 
 Image exec flow:
 
@@ -363,8 +412,8 @@ The current high-level smolvm helpers are buffered:
 
 P1 should implement a small fabric helper over the public low-level protocol:
 
-1. send `AgentRequest::Run { interactive: true, tty: false, persistent_overlay_id: Some(machine_name),
-   ... }` with `AgentClient::send_raw`,
+1. send `AgentRequest::Run { interactive: true, tty: false, persistent_overlay_id:
+   Some(machine_name), ... }` with `AgentClient::send_raw`,
 2. wait for `AgentResponse::Started`,
 3. relay `AgentResponse::Stdout` and `AgentResponse::Stderr` to NDJSON as they arrive from
    `AgentClient::recv_raw`,
@@ -379,7 +428,7 @@ Runtime requirements:
 - never invoke a shell to construct runtime commands,
 - pass argv as process arguments,
 - use deterministic smolvm machine names:
-  - `aos-fabric-{host_id_hash}-{session_id}`
+  - `fabric-{host_id_hash}-{session_id}`
 - create/start a persistent smolvm machine for each session,
 - use OCI images as the session root image,
 - mount the session workspace into the VM,
@@ -505,8 +554,7 @@ Common fields:
 {
   "exec_id": "exec_...",
   "seq": 1,
-  "kind": "stdout",
-  "time_ns": 0
+  "kind": "stdout"
 }
 ```
 
@@ -517,8 +565,6 @@ Output event:
   "exec_id": "exec_...",
   "seq": 2,
   "kind": "stdout",
-  "time_ns": 0,
-  "data_base64": "aGVsbG8=",
   "text": "hello"
 }
 ```
@@ -530,8 +576,6 @@ Terminal event:
   "exec_id": "exec_...",
   "seq": 3,
   "kind": "exit",
-  "time_ns": 0,
-  "status": "ok",
   "exit_code": 0
 }
 ```
@@ -543,11 +587,7 @@ Error terminal event:
   "exec_id": "exec_...",
   "seq": 3,
   "kind": "error",
-  "time_ns": 0,
-  "status": "error",
-  "exit_code": -1,
-  "error_code": "spawn_failed",
-  "error_message": "..."
+  "message": "..."
 }
 ```
 
@@ -612,15 +652,15 @@ Path rules:
 
 Required endpoints:
 
-- `GET /v1/sessions/{session_id}/fs/file?path=...`
-- `PUT /v1/sessions/{session_id}/fs/file`
-- `POST /v1/sessions/{session_id}/fs/edit`
-- `POST /v1/sessions/{session_id}/fs/apply_patch`
-- `POST /v1/sessions/{session_id}/fs/grep`
-- `POST /v1/sessions/{session_id}/fs/glob`
-- `GET /v1/sessions/{session_id}/fs/stat?path=...`
-- `GET /v1/sessions/{session_id}/fs/exists?path=...`
-- `GET /v1/sessions/{session_id}/fs/list_dir?path=...`
+- [x] `GET /v1/sessions/{session_id}/fs/file?path=...`
+- [x] `PUT /v1/sessions/{session_id}/fs/file`
+- [x] `POST /v1/sessions/{session_id}/fs/edit`
+- [x] `POST /v1/sessions/{session_id}/fs/apply_patch`
+- [x] `POST /v1/sessions/{session_id}/fs/grep`
+- [x] `POST /v1/sessions/{session_id}/fs/glob`
+- [x] `GET /v1/sessions/{session_id}/fs/stat?path=...`
+- [x] `GET /v1/sessions/{session_id}/fs/exists?path=...`
+- [x] `GET /v1/sessions/{session_id}/fs/list_dir?path=...`
 
 P1 should use direct host filesystem access under the workspace root. Do not shell out inside the VM
 for file reads/writes.
@@ -632,9 +672,9 @@ materialization; that belongs in the P3 adapter provider.
 
 Required endpoints:
 
-- `GET /healthz`
-- `GET /v1/host/info`
-- `GET /v1/host/inventory`
+- [x] `GET /healthz`
+- [x] `GET /v1/host/info`
+- [x] `GET /v1/host/inventory`
 
 `/v1/host/info` returns:
 
@@ -688,7 +728,7 @@ Required settings:
 Defaults:
 
 - listen on `127.0.0.1:7788`,
-- state root `.aos/fabric-host`,
+- state root `.fabric-host`,
 - runtime defaults to `smolvm`,
 - unauthenticated loopback allowed for local development,
 - non-loopback bind requires an auth token,
@@ -725,9 +765,8 @@ Use consistent JSON error bodies:
 
 ```json
 {
-  "status": "error",
-  "error_code": "session_not_found",
-  "error_message": "session 'sess_...' not found"
+  "code": "not_found",
+  "message": "not found: session 'sess_...'"
 }
 ```
 
@@ -742,28 +781,37 @@ Recommended HTTP status mapping:
 - `500`: daemon/runtime failure,
 - `504`: timeout.
 
-The `error_code` strings should be stable because the P3 adapter will translate them into
+The `code` strings should be stable because the P3 adapter will translate them into
 `Host*Receipt` error fields.
+
+Current implementation note: the wire shape is `code` and `message`. The `code` field is semantic
+and stable at the host boundary (`invalid_request`, `conflict`, `not_found`, `not_implemented`,
+`runtime_error`).
 
 ## Direct Smoke Flow
 
 P1 should include a documented command sequence equivalent to:
 
 ```bash
-cargo run -p aos-fabric --bin aos-fabric-host -- \
-  --state-root .aos/fabric-host \
-  --listen 127.0.0.1:7788 \
-  --runtime smolvm \
-  --allowed-image alpine:latest
+dev/fabric/bootstrap-smolvm-release.sh
+dev/fabric/build-fabric-host.sh
 
-curl -s http://127.0.0.1:7788/v1/sessions \
+LIBKRUN_BUNDLE="$PWD/third_party/smolvm-release/lib" \
+DYLD_LIBRARY_PATH="$PWD/third_party/smolvm-release/lib" \
+SMOLVM_AGENT_ROOTFS="$PWD/third_party/smolvm-release/agent-rootfs" \
+target/debug/fabric-host \
+  --state-root .fabric-host \
+  --bind 127.0.0.1:8791 \
+  --host-id local-dev
+
+curl -s http://127.0.0.1:8791/v1/sessions \
   -H 'content-type: application/json' \
-  -d '{"image":"alpine:latest","network_mode":"none"}'
+  -d '{"session_id":"sess-smoke","image":"alpine:latest","network_mode":"egress"}'
 
-curl -N http://127.0.0.1:7788/v1/sessions/{session_id}/exec \
+curl -N http://127.0.0.1:8791/v1/sessions/sess-smoke/exec \
   -H 'content-type: application/json' \
   -H 'accept: application/x-ndjson' \
-  -d '{"argv":["sh","-lc","printf hello"]}'
+  -d '{"session_id":"sess-smoke","argv":["sh","-lc","printf hello"]}'
 ```
 
 The smoke flow must also cover:
@@ -779,35 +827,48 @@ The smoke flow must also cover:
 
 Unit tests:
 
-- config parsing and defaulting,
-- protocol JSON round trips,
-- error envelope serialization,
-- path confinement,
-- symlink escape rejection,
-- deterministic session id derivation from request id,
-- runtime inventory classification,
-- NDJSON event sequencing.
+- [ ] config parsing and defaulting,
+- [ ] protocol JSON round trips,
+- [ ] error envelope serialization,
+- [x] path confinement,
+- [x] symlink escape rejection,
+- [ ] deterministic session id derivation from request id,
+- [x] runtime inventory classification,
+- [ ] NDJSON event sequencing,
+- [x] patch parser and apply/edit matching behavior.
 
 Integration tests:
 
-- open session with allowed image,
-- reject disallowed image,
-- exec returns stdout/stderr and terminal event,
-- concurrent exec calls both settle,
-- timeout kills command and leaves session usable,
-- write/read/list/stat/exists round trip,
-- grep/glob round trip,
-- edit/apply-patch round trip,
-- quiesce/resume preserves workspace,
-- daemon restart inventory finds managed smolvm machines,
-- daemon restart inventory reports orphaned workspaces,
-- terminate removes runtime machine.
+- [x] open session with allowed image,
+- [ ] reject disallowed image,
+- [x] exec returns stdout/stderr and terminal event,
+- [x] concurrent exec calls both settle,
+- [ ] timeout kills command and leaves session usable,
+- [ ] write/read/list/stat/exists round trip,
+- [ ] grep/glob round trip,
+- [ ] edit/apply-patch round trip,
+- [x] quiesce/resume preserves workspace,
+- [ ] daemon restart inventory finds managed smolvm machines,
+- [ ] daemon restart inventory reports orphaned workspaces,
+- [ ] terminate removes runtime machine.
 
-Smolvm tests should be gated behind an e2e feature and an environment opt-in, for example:
+Manual smokes completed locally:
+
+- [x] open smolvm session,
+- [x] write/read workspace files,
+- [x] exec command reads `/workspace`,
+- [x] grep/glob workspace files,
+- [x] edit/apply-patch workspace files,
+- [x] quiesce/resume preserves workspace,
+- [x] restart inventory reconstructs quiesced smolvm sessions,
+- [x] inventory reports orphaned workspaces,
+- [x] close session.
+
+Smolvm tests are gated behind an environment opt-in and a wrapper script:
 
 ```text
-cargo test -p aos-fabric --features e2e-tests
-AOS_FABRIC_E2E=1 cargo test -p aos-fabric --features e2e-tests
+dev/fabric/test-smolvm-e2e.sh
+FABRIC_SMOLVM_E2E=1 cargo test -p fabric-host --test smolvm_e2e
 ```
 
 Tests must skip cleanly if smolvm is unavailable or the host lacks the required hypervisor/KVM
@@ -815,27 +876,28 @@ support.
 
 ## Implementation Order
 
-1. Add crate, config, protocol types, and health endpoint.
-2. Add stateless inventory classification from smolvm machines and workspace directories.
-3. Add path confinement helpers and filesystem endpoints.
-4. Add `SmolvmFacade`.
-5. Implement `SmolvmFacade` using the Rust API directly.
-6. Add session open and close.
-7. Add exec streaming with NDJSON over the smolvm agent protocol.
-8. Add quiesce/resume.
-9. Add restart inventory reconciliation.
-10. Add direct smoke docs and e2e tests.
+1. [x] Add crate scaffold, config, protocol types, client, and health endpoint.
+2. [x] Add smolvm path dependencies and hidden `fabric-host _boot-vm <config-path>`.
+3. [x] Implement `SmolvmRuntime::open` with `SmolvmDb::open_at(...).init_tables()`.
+4. [x] Add session directory and marker-file creation.
+5. [x] Add `POST /v1/sessions` backed by `AgentManager::ensure_running_via_subprocess` and image pull.
+6. [x] Add live NDJSON exec streaming over low-level `AgentRequest::Run` / `AgentResponse` frames.
+7. [x] Add path confinement helpers and direct host workspace filesystem endpoints.
+8. [x] Add close, quiesce, and resume.
+9. [x] Add restart inventory reconciliation from smolvm records and workspace directories.
+10. [x] Add direct smoke docs and gated smolvm e2e harness.
 
 ## Definition Of Done
 
 P1 is complete when:
 
-1. `aos-fabric-host` can run locally without `aos-node`.
-2. A direct client can open a smolvm session, run streaming exec, perform filesystem RPCs, and
+1. [x] `fabric-host` can run locally without `aos-node`.
+2. [x] A direct client can open a smolvm session, run streaming exec, perform filesystem RPCs, and
    close the session.
-3. Multiple exec calls can run concurrently against one session.
-4. Quiesce/resume preserves the session workspace.
-5. Restart inventory reports running/quiesced managed machines and orphaned workspaces correctly.
-6. Smolvm tests are gated and skip cleanly when the runtime is unavailable.
-7. The daemon has no dependency on AOS runtime crates and no daemon-owned database.
-8. The P2 controller can call the P1 host API without changing the host protocol shape.
+3. [x] Multiple exec calls can run concurrently against one session.
+4. [x] Quiesce/resume preserves the session workspace.
+5. [x] Restart inventory reports running/quiesced managed machines and orphaned workspaces correctly.
+6. [x] Smolvm tests are gated and skip cleanly when the runtime is unavailable.
+7. [x] The daemon has no dependency on AOS runtime crates and no daemon-owned database.
+8. [ ] The P2 controller can call the P1 host API without changing the host protocol shape.
+   This remains a P2 validation item; the P1 host API shape is stable enough to start controller work.

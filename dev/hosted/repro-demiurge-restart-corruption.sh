@@ -32,7 +32,7 @@ stop_node() {
 
 echo "Resetting node environment..."
 "${AOS_BIN}" node down --json >/dev/null 2>&1 || true
-./dev/scripts/hosted-topics-reset.sh >/dev/null
+./dev/hosted/hosted-topics-reset.sh >/dev/null
 rm -rf "${STATE_ROOT}"
 mkdir -p "${STATE_ROOT}"
 

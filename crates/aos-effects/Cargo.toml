@@ -1,15 +1,15 @@
 [package]
 name = "aos-effects"
-version = "0.1.0"
-edition = "2024"
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-aos-cbor = { path = "../aos-cbor" }
-aos-air-types = { path = "../aos-air-types" }
-aos-effect-types = { path = "../aos-effect-types" }
-serde = { version = "1", features = ["derive"] }
-serde_bytes = "0.11"
-serde_json = "1"
-thiserror = "1"
-serde_cbor = "0.11"
+aos-cbor.workspace = true
+aos-air-types.workspace = true
+aos-effect-types.workspace = true
+serde.workspace = true
+serde_bytes.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+serde_cbor.workspace = true
