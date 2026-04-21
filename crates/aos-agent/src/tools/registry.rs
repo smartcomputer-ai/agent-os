@@ -305,7 +305,7 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
         effect_tool(
             "introspect.manifest",
             "inspect_world",
-            "Inspect world summary, modules, routing, capabilities, policies, and manifest defaults.",
+            "Inspect world summary, modules, effects, routing, and manifest metadata.",
             r#"{"type":"object","additionalProperties":false,"properties":{}}"#,
             ToolMapper::InspectWorld,
             "query",

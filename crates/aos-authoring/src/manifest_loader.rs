@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    self as air_types, AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, DefSecret,
-    HashRef, Manifest, Name, NamedRef, SecretEntry,
+    self as air_types, AirNode, DefEffect, DefModule, DefSchema, DefSecret, HashRef, Manifest,
+    Name, NamedRef, SecretEntry,
 };
 use aos_cbor::Hash;
 use aos_kernel::{LoadedManifest, ManifestLoader, Store};
@@ -54,8 +54,6 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
     let mut manifest: Option<Manifest> = None;
     let mut schemas: Vec<DefSchema> = Vec::new();
     let mut modules: Vec<DefModule> = Vec::new();
-    let mut caps: Vec<DefCap> = Vec::new();
-    let mut policies: Vec<DefPolicy> = Vec::new();
     let mut secrets: Vec<DefSecret> = Vec::new();
     let mut effects: Vec<DefEffect> = Vec::new();
 
@@ -92,8 +90,10 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
                         }
                         AirNode::Defschema(schema) => schemas.push(schema),
                         AirNode::Defmodule(module) => modules.push(module),
-                        AirNode::Defcap(cap) => caps.push(cap),
-                        AirNode::Defpolicy(policy) => policies.push(policy),
+                        AirNode::Defcap(_) | AirNode::Defpolicy(_) => bail!(
+                            "defcap and defpolicy are no longer supported in authored AIR ({})",
+                            path.display()
+                        ),
                         AirNode::Defsecret(secret) => secrets.push(secret),
                         AirNode::Defeffect(effect) => effects.push(effect),
                     }
@@ -113,8 +113,6 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
         false,
         schemas,
         modules,
-        caps,
-        policies,
         secrets.clone(),
         effects,
     )?;
@@ -129,8 +127,6 @@ fn write_nodes<S: Store + ?Sized>(
     allow_reserved_sys: bool,
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
-    caps: Vec<DefCap>,
-    policies: Vec<DefPolicy>,
     secrets: Vec<DefSecret>,
     effects: Vec<DefEffect>,
 ) -> Result<StoredHashes> {
@@ -154,26 +150,6 @@ fn write_nodes<S: Store + ?Sized>(
             .put_node(&AirNode::Defmodule(module))
             .context("store defmodule node")?;
         insert_or_verify_hash("defmodule", &mut hashes.modules, name, hash)?;
-    }
-    for cap in caps {
-        let name = cap.name.clone();
-        if !allow_reserved_sys {
-            reject_sys_name("defcap", name.as_str())?;
-        }
-        let hash = store
-            .put_node(&AirNode::Defcap(cap))
-            .context("store defcap node")?;
-        insert_or_verify_hash("defcap", &mut hashes.caps, name, hash)?;
-    }
-    for policy in policies {
-        let name = policy.name.clone();
-        if !allow_reserved_sys {
-            reject_sys_name("defpolicy", name.as_str())?;
-        }
-        let hash = store
-            .put_node(&AirNode::Defpolicy(policy))
-            .context("store defpolicy node")?;
-        insert_or_verify_hash("defpolicy", &mut hashes.policies, name, hash)?;
     }
     for secret in secrets {
         let name = secret.name.clone();
@@ -232,8 +208,6 @@ struct StoredHashes {
     schemas: HashMap<Name, HashRef>,
     modules: HashMap<Name, HashRef>,
     effects: HashMap<Name, HashRef>,
-    caps: HashMap<Name, HashRef>,
-    policies: HashMap<Name, HashRef>,
     secrets: HashMap<Name, HashRef>,
 }
 
@@ -248,8 +222,6 @@ fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result
     patch_named_refs("schema", &mut manifest.schemas, &hashes.schemas)?;
     patch_named_refs("module", &mut manifest.modules, &hashes.modules)?;
     patch_named_refs("effect", &mut manifest.effects, &hashes.effects)?;
-    patch_named_refs("cap", &mut manifest.caps, &hashes.caps)?;
-    patch_named_refs("policy", &mut manifest.policies, &hashes.policies)?;
     let mut secret_refs = secrets_as_named_refs(&manifest.secrets)?;
     patch_named_refs("secret", &mut secret_refs, &hashes.secrets)?;
     manifest.secrets = secret_refs.into_iter().map(SecretEntry::Ref).collect();
@@ -295,12 +267,6 @@ fn patch_named_refs(
             } else {
                 bail!("manifest references unknown {kind} '{}'", reference.name);
             }
-        } else if kind == "cap" {
-            if let Some(builtin) = air_types::builtins::find_builtin_cap(reference.name.as_str()) {
-                builtin.hash_ref.clone()
-            } else {
-                bail!("manifest references unknown {kind} '{}'", reference.name);
-            }
         } else {
             bail!("manifest references unknown {kind} '{}'", reference.name);
         };
@@ -333,9 +299,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in [
-        "schemas", "modules", "caps", "policies", "effects", "secrets",
-    ] {
+    for key in ["schemas", "modules", "effects", "secrets"] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {

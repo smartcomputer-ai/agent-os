@@ -12,7 +12,6 @@ static BUILTIN_SCHEMAS_SDK_RAW: &str =
 static BUILTIN_SCHEMAS_HOST_RAW: &str =
     include_str!("../../../spec/defs/builtin-schemas-host.air.json");
 static BUILTIN_EFFECTS_RAW: &str = include_str!("../../../spec/defs/builtin-effects.air.json");
-static BUILTIN_CAPS_RAW: &str = include_str!("../../../spec/defs/builtin-caps.air.json");
 static BUILTIN_MODULES_RAW: &str = include_str!("../../../spec/defs/builtin-modules.air.json");
 
 #[derive(Debug)]
@@ -88,21 +87,7 @@ static BUILTIN_EFFECTS: Lazy<Vec<BuiltinEffect>> = Lazy::new(|| {
         .collect()
 });
 
-static BUILTIN_CAPS: Lazy<Vec<BuiltinCap>> = Lazy::new(|| {
-    let defs: Vec<DefCap> =
-        serde_json::from_str(BUILTIN_CAPS_RAW).expect("spec/defs/builtin-caps.air.json must parse");
-    defs.into_iter()
-        .map(|cap| {
-            let hash = Hash::of_cbor(&cap).expect("canonical hash");
-            let hash_ref = HashRef::new(hash.to_hex()).expect("valid hash");
-            BuiltinCap {
-                cap,
-                hash,
-                hash_ref,
-            }
-        })
-        .collect()
-});
+static BUILTIN_CAPS: Lazy<Vec<BuiltinCap>> = Lazy::new(Vec::new);
 
 static BUILTIN_MODULES: Lazy<Vec<BuiltinModule>> = Lazy::new(|| {
     let defs: Vec<DefModule> = serde_json::from_str(BUILTIN_MODULES_RAW)
@@ -162,7 +147,7 @@ pub fn builtin_effects() -> &'static [BuiltinEffect] {
     &BUILTIN_EFFECTS
 }
 
-/// Returns the parsed list of built-in `defcap` nodes.
+/// Returns legacy built-in `defcap` nodes. v0.22 has no public built-in caps.
 pub fn builtin_caps() -> &'static [BuiltinCap] {
     &BUILTIN_CAPS
 }
@@ -186,7 +171,7 @@ pub fn find_builtin_effect(name: &str) -> Option<&'static BuiltinEffect> {
         .and_then(|idx| BUILTIN_EFFECTS.get(*idx))
 }
 
-/// Finds a built-in capability definition by name (e.g., `sys/query@1`).
+/// Finds a legacy built-in capability definition. v0.22 has no public built-in caps.
 pub fn find_builtin_cap(name: &str) -> Option<&'static BuiltinCap> {
     BUILTIN_CAP_INDEX
         .get(name)
@@ -353,21 +338,8 @@ mod tests {
 
     #[test]
     fn exposes_expected_caps() {
-        let names: Vec<_> = builtin_caps().iter().map(|c| c.cap.name.as_str()).collect();
-        for name in [
-            "sys/query@1",
-            "sys/timer@1",
-            "sys/portal@1",
-            "sys/blob@1",
-            "sys/http.out@1",
-            "sys/llm.basic@1",
-            "sys/host@1",
-            "sys/secret@1",
-            "sys/workspace@1",
-            "sys/governance@1",
-        ] {
-            assert!(names.contains(&name));
-        }
+        assert!(builtin_caps().is_empty());
+        assert!(find_builtin_cap("sys/timer@1").is_none());
     }
 
     #[test]
@@ -376,15 +348,7 @@ mod tests {
             .iter()
             .map(|m| m.module.name.as_str())
             .collect();
-        for name in [
-            "sys/CapEnforceHttpOut@1",
-            "sys/CapEnforceLlmBasic@1",
-            "sys/CapEnforceHost@1",
-            "sys/CapEnforceGovernance@1",
-            "sys/CapEnforceWorkspace@1",
-            "sys/Workspace@1",
-            "sys/HttpPublish@1",
-        ] {
+        for name in ["sys/Workspace@1", "sys/HttpPublish@1"] {
             assert!(names.contains(&name));
         }
     }

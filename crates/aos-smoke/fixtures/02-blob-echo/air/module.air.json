@@ -7,10 +7,10 @@
       "workflow": {
         "state": "demo/BlobEchoState@1",
         "event": "demo/BlobEchoEvent@1",
-        "effects_emitted": ["blob.put", "blob.get"],
-        "cap_slots": {
-          "default": "blob"
-        }
+        "effects_emitted": [
+          "blob.put",
+          "blob.get"
+        ]
       }
     }
   }

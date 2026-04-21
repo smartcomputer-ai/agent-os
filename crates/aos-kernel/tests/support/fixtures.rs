@@ -10,10 +10,9 @@ use std::sync::Arc;
 
 use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
-    CapGrant, CapType, DefCap, DefEffect, DefModule, DefSchema, EmptyObject, HashRef, Manifest,
-    ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef, OriginScope, Routing,
-    RoutingEvent, SchemaRef, TypeExpr, TypeOption, TypePrimitive, TypePrimitiveText, TypeRecord,
-    ValueLiteral, ValueRecord, catalog::EffectCatalog,
+    DefEffect, DefModule, DefSchema, EmptyObject, HashRef, Manifest, ModuleAbi, ModuleKind, Name,
+    NamedRef, OriginScope, Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive,
+    TypePrimitiveText, TypeRecord, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
@@ -119,7 +118,7 @@ pub fn build_loaded_manifest(
         })
     };
 
-    let mut manifest = Manifest {
+    let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: module_refs,
@@ -150,72 +149,18 @@ pub fn build_loaded_manifest(
         .collect();
     let effect_catalog = EffectCatalog::from_defs(effects_map.values().cloned());
 
-    let caps = attach_test_capabilities(&mut manifest, modules_map.keys());
-
     let mut loaded = LoadedManifest {
         manifest,
         secrets: Vec::new(),
         modules: modules_map,
         effects: effects_map,
-        caps,
+        caps: HashMap::new(),
         policies: HashMap::new(),
         schemas: HashMap::new(),
         effect_catalog,
     };
     ensure_placeholder_schemas(&mut loaded);
     loaded
-}
-
-/// Populates the manifest with default capability grants and module slot bindings so workflows
-/// can emit timer/blob effects without extra ceremony.
-pub fn attach_test_capabilities<'a, I>(manifest: &mut Manifest, modules: I) -> HashMap<Name, DefCap>
-where
-    I: IntoIterator<Item = &'a Name>,
-{
-    manifest.defaults = Some(ManifestDefaults {
-        policy: None,
-        cap_grants: vec![
-            cap_http_grant(),
-            timer_cap_grant(),
-            blob_cap_grant(),
-            query_cap_grant(),
-        ],
-    });
-    // Ensure manifest declares the capabilities we grant.
-    manifest.caps = vec![
-        NamedRef {
-            name: "sys/http.out@1".into(),
-            hash: zero_hash(),
-        },
-        NamedRef {
-            name: "sys/timer@1".into(),
-            hash: zero_hash(),
-        },
-        NamedRef {
-            name: "sys/blob@1".into(),
-            hash: zero_hash(),
-        },
-        NamedRef {
-            name: "sys/query@1".into(),
-            hash: zero_hash(),
-        },
-    ];
-    let mut bindings = IndexMap::new();
-    for module in modules {
-        bindings.insert(
-            module.clone(),
-            ModuleBinding {
-                slots: IndexMap::from([("default".into(), "timer_cap".into())]),
-            },
-        );
-    }
-    manifest.module_bindings = bindings;
-    HashMap::from([
-        ("sys/http.out@1".into(), http_defcap()),
-        ("sys/timer@1".into(), timer_defcap()),
-        ("sys/blob@1".into(), blob_defcap()),
-        ("sys/query@1".into(), query_defcap()),
-    ])
 }
 
 fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
@@ -307,118 +252,6 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
             });
         }
     }
-}
-
-/// HTTP capability grant for tests.
-pub fn cap_http_grant() -> CapGrant {
-    CapGrant {
-        name: "cap_http".into(),
-        cap: "sys/http.out@1".into(),
-        params: empty_value_literal(),
-        expiry_ns: None,
-    }
-}
-
-/// Timer capability grant for tests.
-pub fn timer_cap_grant() -> CapGrant {
-    CapGrant {
-        name: "timer_cap".into(),
-        cap: "sys/timer@1".into(),
-        params: empty_value_literal(),
-        expiry_ns: None,
-    }
-}
-
-/// Blob capability grant for tests.
-pub fn blob_cap_grant() -> CapGrant {
-    CapGrant {
-        name: "blob_cap".into(),
-        cap: "sys/blob@1".into(),
-        params: empty_value_literal(),
-        expiry_ns: None,
-    }
-}
-
-/// Query capability grant for tests (introspection).
-pub fn query_cap_grant() -> CapGrant {
-    CapGrant {
-        name: "query_cap".into(),
-        cap: "sys/query@1".into(),
-        params: empty_value_literal(),
-        expiry_ns: None,
-    }
-}
-
-/// Minimal HTTP capability definition used inside tests.
-pub fn http_defcap() -> DefCap {
-    DefCap {
-        name: "sys/http.out@1".into(),
-        cap_type: CapType::http_out(),
-        schema: TypeExpr::Record(TypeRecord {
-            record: IndexMap::new(),
-        }),
-        enforcer: aos_air_types::CapEnforcer {
-            module: "sys/CapEnforceHttpOut@1".into(),
-        },
-    }
-}
-
-/// Minimal Timer capability definition used inside tests.
-pub fn timer_defcap() -> DefCap {
-    DefCap {
-        name: "sys/timer@1".into(),
-        cap_type: CapType::timer(),
-        schema: TypeExpr::Record(TypeRecord {
-            record: IndexMap::new(),
-        }),
-        enforcer: aos_air_types::CapEnforcer {
-            module: "sys/CapAllowAll@1".into(),
-        },
-    }
-}
-
-/// Minimal Blob capability definition used inside tests.
-pub fn blob_defcap() -> DefCap {
-    DefCap {
-        name: "sys/blob@1".into(),
-        cap_type: CapType::blob(),
-        schema: TypeExpr::Record(TypeRecord {
-            record: IndexMap::new(),
-        }),
-        enforcer: aos_air_types::CapEnforcer {
-            module: "sys/CapAllowAll@1".into(),
-        },
-    }
-}
-
-/// Minimal Query capability definition used inside tests (introspection).
-pub fn query_defcap() -> DefCap {
-    DefCap {
-        name: "sys/query@1".into(),
-        cap_type: CapType::query(),
-        schema: TypeExpr::Record(TypeRecord {
-            record: IndexMap::from([(
-                "scope".into(),
-                TypeExpr::Option(TypeOption {
-                    option: Box::new(TypeExpr::Primitive(TypePrimitive::Text(
-                        TypePrimitiveText {
-                            text: EmptyObject {},
-                        },
-                    ))),
-                }),
-            )]),
-        }),
-        enforcer: aos_air_types::CapEnforcer {
-            module: "sys/CapAllowAll@1".into(),
-        },
-    }
-}
-
-/// Handy empty record literal for cap grant params.
-pub fn empty_value_literal() -> ValueLiteral {
-    ValueLiteral::Record(ValueRecord {
-        record: IndexMap::new(),
-    })
 }
 
 /// Construct a fresh in-memory store for use in tests.

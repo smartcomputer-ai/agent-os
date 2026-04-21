@@ -7,10 +7,9 @@
       "workflow": {
         "state": "demo/FetchNotifyState@1",
         "event": "demo/FetchNotifyEvent@1",
-        "effects_emitted": ["http.request"],
-        "cap_slots": {
-          "default": "http.out"
-        }
+        "effects_emitted": [
+          "http.request"
+        ]
       }
     }
   }

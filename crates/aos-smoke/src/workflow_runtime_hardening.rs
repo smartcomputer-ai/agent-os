@@ -278,46 +278,7 @@ fn load_manifest_for_runtime<S: Store + 'static>(
         anyhow::bail!("module '{}' missing from manifest", MODULE_NAME);
     }
 
-    maybe_patch_sys_module(
-        assets_root,
-        store,
-        &mut loaded,
-        "sys/CapEnforceHttpOut@1",
-        "cap_enforce_http_out",
-    )?;
-
     Ok(loaded)
-}
-
-fn maybe_patch_sys_module<S: Store + 'static>(
-    assets_root: &Path,
-    store: Arc<S>,
-    loaded: &mut LoadedManifest,
-    module_name: &str,
-    bin_name: &str,
-) -> Result<()> {
-    let needs_patch = loaded
-        .modules
-        .get(module_name)
-        .map(is_placeholder_hash)
-        .unwrap_or(false);
-    if !needs_patch {
-        return Ok(());
-    }
-
-    let cache_dir = util::local_state_paths(assets_root).module_cache_dir();
-    let wasm_bytes =
-        util::compile_wasm_bin(crate::workspace_root(), "aos-sys", bin_name, &cache_dir)?;
-    let wasm_hash = store
-        .put_blob(&wasm_bytes)
-        .with_context(|| format!("store {module_name} wasm blob"))?;
-    let wasm_hash_ref =
-        HashRef::new(wasm_hash.to_hex()).with_context(|| format!("hash {module_name}"))?;
-    let patched = patch_modules(loaded, &wasm_hash_ref, |name, _| name == module_name);
-    if patched == 0 {
-        anyhow::bail!("module '{}' missing in manifest", module_name);
-    }
-    Ok(())
 }
 
 fn journal_counters<S: Store + 'static>(kernel: &Kernel<S>) -> Result<serde_json::Value> {

@@ -21,7 +21,7 @@ use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyModule};
 use serde::Serialize;
-use serde_json::Value as JsonValue;
+use serde_json::{Map as JsonMap, Number as JsonNumber, Value as JsonValue};
 use tempfile::TempDir;
 
 fn py_runtime_error(message: impl Into<String>) -> PyErr {
@@ -597,7 +597,75 @@ fn common_pull_effects<H: CommonHarnessOps>(
     let intents = lock_harness(mutex, label)?
         .pull_effects()
         .map_err(host_to_py_error)?;
-    serialize_to_py(py, &intents)
+    let effects = intents
+        .iter()
+        .map(effect_intent_to_py_json)
+        .collect::<PyResult<Vec<_>>>()?;
+    json_to_py(py, &JsonValue::Array(effects))
+}
+
+fn effect_intent_to_py_json(intent: &EffectIntent) -> PyResult<JsonValue> {
+    let params = serde_cbor::from_slice::<serde_cbor::Value>(&intent.params_cbor)
+        .map(cbor_value_to_json)
+        .map_err(|err| py_runtime_error(format!("decode effect params: {err}")))?;
+    let mut object = JsonMap::new();
+    object.insert(
+        "kind".to_string(),
+        JsonValue::String(intent.kind.to_string()),
+    );
+    object.insert(
+        "intent_hash".to_string(),
+        JsonValue::Array(
+            intent
+                .intent_hash
+                .iter()
+                .map(|byte| JsonValue::Number(JsonNumber::from(*byte)))
+                .collect(),
+        ),
+    );
+    object.insert("params".to_string(), params);
+    Ok(JsonValue::Object(object))
+}
+
+fn cbor_value_to_json(value: serde_cbor::Value) -> JsonValue {
+    match value {
+        serde_cbor::Value::Null => JsonValue::Null,
+        serde_cbor::Value::Bool(value) => JsonValue::Bool(value),
+        serde_cbor::Value::Integer(value) => i64::try_from(value)
+            .ok()
+            .map(JsonNumber::from)
+            .map(JsonValue::Number)
+            .unwrap_or_else(|| JsonValue::String(value.to_string())),
+        serde_cbor::Value::Float(value) => JsonNumber::from_f64(value)
+            .map(JsonValue::Number)
+            .unwrap_or(JsonValue::Null),
+        serde_cbor::Value::Bytes(bytes) => JsonValue::Array(
+            bytes
+                .into_iter()
+                .map(|byte| JsonValue::Number(JsonNumber::from(byte)))
+                .collect(),
+        ),
+        serde_cbor::Value::Text(value) => JsonValue::String(value),
+        serde_cbor::Value::Array(items) => {
+            JsonValue::Array(items.into_iter().map(cbor_value_to_json).collect())
+        }
+        serde_cbor::Value::Map(entries) => {
+            let mut object = JsonMap::new();
+            for (key, value) in entries {
+                object.insert(cbor_map_key_to_string(key), cbor_value_to_json(value));
+            }
+            JsonValue::Object(object)
+        }
+        serde_cbor::Value::Tag(_, inner) => cbor_value_to_json(*inner),
+        _ => JsonValue::Null,
+    }
+}
+
+fn cbor_map_key_to_string(key: serde_cbor::Value) -> String {
+    match key {
+        serde_cbor::Value::Text(value) => value,
+        other => cbor_value_to_json(other).to_string(),
+    }
 }
 
 fn common_apply_receipt_object<H: CommonHarnessOps>(

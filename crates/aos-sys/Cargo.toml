@@ -15,26 +15,6 @@ path = "src/bin/workspace.rs"
 name = "http_publish"
 path = "src/bin/http_publish.rs"
 
-[[bin]]
-name = "cap_enforce_http_out"
-path = "src/bin/cap_enforce_http_out.rs"
-
-[[bin]]
-name = "cap_enforce_llm_basic"
-path = "src/bin/cap_enforce_llm_basic.rs"
-
-[[bin]]
-name = "cap_enforce_host"
-path = "src/bin/cap_enforce_host.rs"
-
-[[bin]]
-name = "cap_enforce_workspace"
-path = "src/bin/cap_enforce_workspace.rs"
-
-[[bin]]
-name = "cap_enforce_governance"
-path = "src/bin/cap_enforce_governance.rs"
-
 [dependencies]
 aos-wasm-sdk.workspace = true
 aos-wasm-abi.workspace = true

@@ -28,9 +28,6 @@ embed_schema! {
     PATCH => "../../../spec/schemas/patch.schema.json",
 }
 
-// Legacy schemas kept for archival/tests only; not part of the active public schema set.
-pub const DEFCAP: &str = include_str!("../../../spec/schemas/defcap.schema.json");
-pub const DEFPOLICY: &str = include_str!("../../../spec/schemas/defpolicy.schema.json");
 pub const DEFPLAN: &str = include_str!("../../../spec/schemas/defplan.schema.json");
 
 pub fn find(name: &str) -> Option<&'static str> {

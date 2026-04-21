@@ -40,52 +40,8 @@
     { "name": "aos.agent/SessionWorkflowEvent@1" }
   ],
   "modules": [
-    { "name": "aos.agent/SessionWorkflow@1" },
-    { "name": "sys/CapEnforceLlmBasic@1" }
+    { "name": "aos.agent/SessionWorkflow@1" }
   ],
-  "caps": [
-    { "name": "demo/agent_tools_llm_basic@1" },
-    { "name": "demo/agent_tools_host@1" }
-  ],
-  "policies": [
-    { "name": "demo/agent-tools-policy@1" }
-  ],
-  "defaults": {
-    "policy": "demo/agent-tools-policy@1",
-    "cap_grants": [
-      {
-        "name": "llm",
-        "cap": "demo/agent_tools_llm_basic@1",
-        "params": {
-          "record": {
-            "models": {
-              "set": [
-                { "text": "gpt-5.2" },
-                { "text": "gpt-5.3-codex" },
-                { "text": "gpt-5-mini" },
-                { "text": "claude-sonnet-4-5" }
-              ]
-            },
-            "max_tokens": { "nat": 4096 }
-          }
-        }
-      },
-      {
-        "name": "blob",
-        "cap": "sys/blob@1",
-        "params": {
-          "record": {}
-        }
-      },
-      {
-        "name": "host",
-        "cap": "demo/agent_tools_host@1",
-        "params": {
-          "record": {}
-        }
-      }
-    ]
-  },
   "effects": [
     { "name": "sys/blob.put@1" },
     { "name": "sys/blob.get@1" },
@@ -129,14 +85,5 @@
       }
     ],
     "inboxes": []
-  },
-  "module_bindings": {
-    "aos.agent/SessionWorkflow@1": {
-      "slots": {
-        "blob": "blob",
-        "llm": "llm",
-        "host": "host"
-      }
-    }
   }
 }

@@ -64,14 +64,10 @@ pub fn map_receipt(tool_name: &str, status: &str, payload: &[u8]) -> ToolMappedR
             "schema_count": manifest.schemas.len(),
             "module_count": manifest.modules.len(),
             "effect_count": manifest.effects.len(),
-            "cap_count": manifest.caps.len(),
-            "policy_count": manifest.policies.len(),
             "has_routing": manifest.routing.is_some(),
         },
         "modules": section(&manifest_json, "modules", json!([])),
         "effects": section(&manifest_json, "effects", json!([])),
-        "capabilities": section(&manifest_json, "caps", json!([])),
-        "policies": section(&manifest_json, "policies", json!([])),
         "routing": section(
             &manifest_json,
             "routing",
@@ -80,9 +76,7 @@ pub fn map_receipt(tool_name: &str, status: &str, payload: &[u8]) -> ToolMappedR
                 "inboxes": [],
             }),
         ),
-        "defaults": section(&manifest_json, "defaults", Value::Null),
         "effect_bindings": section(&manifest_json, "effect_bindings", json!([])),
-        "module_bindings": section(&manifest_json, "module_bindings", json!({})),
     });
 
     build_receipt(

@@ -598,18 +598,6 @@ fn build_patch_summary(
         &patch.manifest.effects,
         &mut def_changes,
     );
-    refs_changed |= push_named_ref_changes(
-        "defcap",
-        &base_manifest.caps,
-        &patch.manifest.caps,
-        &mut def_changes,
-    );
-    refs_changed |= push_named_ref_changes(
-        "defpolicy",
-        &base_manifest.policies,
-        &patch.manifest.policies,
-        &mut def_changes,
-    );
     refs_changed |= diff_secret_refs(
         &base_manifest.secrets,
         &patch.manifest.secrets,
@@ -623,9 +611,6 @@ fn build_patch_summary(
     });
 
     let mut manifest_sections = HashSet::new();
-    if section_changed(&base_manifest.defaults, &patch.manifest.defaults)? {
-        manifest_sections.insert("defaults".to_string());
-    }
     let base_routing = base_manifest.routing.clone().unwrap_or_else(|| Routing {
         subscriptions: Vec::new(),
         inboxes: Vec::new(),
@@ -639,12 +624,6 @@ fn build_patch_summary(
     }
     if section_changed(&base_routing.inboxes, &next_routing.inboxes)? {
         manifest_sections.insert("routing_inboxes".to_string());
-    }
-    if section_changed(
-        &base_manifest.module_bindings,
-        &patch.manifest.module_bindings,
-    )? {
-        manifest_sections.insert("module_bindings".to_string());
     }
     if section_changed(&base_manifest.secrets, &patch.manifest.secrets)? {
         manifest_sections.insert("secrets".to_string());
@@ -672,17 +651,11 @@ fn build_patch_summary(
     }
     for section in &manifest_sections {
         match section.as_str() {
-            "defaults" => {
-                ops.insert("set_defaults".to_string());
-            }
             "routing_events" => {
                 ops.insert("set_routing_events".to_string());
             }
             "routing_inboxes" => {
                 ops.insert("set_routing_inboxes".to_string());
-            }
-            "module_bindings" => {
-                ops.insert("set_module_bindings".to_string());
             }
             "secrets" => {
                 ops.insert("set_secrets".to_string());

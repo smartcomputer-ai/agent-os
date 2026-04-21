@@ -876,12 +876,11 @@ mod tests {
     use crate::journal::JournalKind;
     use crate::world::test_support::{hash, minimal_manifest, schema_event_record, schema_text};
     use aos_air_types::{
-        CapGrant, DefModule, HashRef, ManifestDefaults, ModuleAbi, ModuleKind, NamedRef, SchemaRef,
-        ValueLiteral, ValueRecord, WorkflowAbi, builtins, catalog::EffectCatalog,
+        DefModule, HashRef, ModuleAbi, ModuleKind, NamedRef, SchemaRef, WorkflowAbi, builtins,
+        catalog::EffectCatalog,
     };
     use aos_effects::{EffectStreamFrame, ReceiptStatus, builtins::TimerSetParams};
     use aos_wasm_abi::WorkflowEffect;
-    use indexmap::IndexMap;
     use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
 
@@ -965,10 +964,6 @@ mod tests {
             .expect("builtin timer effect")
             .effect
             .clone();
-        let timer_cap = builtins::find_builtin_cap("sys/timer@1")
-            .expect("builtin timer cap")
-            .cap
-            .clone();
 
         let mut manifest = minimal_manifest();
         manifest.modules = vec![NamedRef {
@@ -979,28 +974,13 @@ mod tests {
             name: timer_effect.name.clone(),
             hash: HashRef::new(hash(2)).unwrap(),
         }];
-        manifest.caps = vec![NamedRef {
-            name: timer_cap.name.clone(),
-            hash: HashRef::new(hash(3)).unwrap(),
-        }];
-        manifest.defaults = Some(ManifestDefaults {
-            policy: None,
-            cap_grants: vec![CapGrant {
-                name: "timer_cap".into(),
-                cap: timer_cap.name.clone(),
-                params: ValueLiteral::Record(ValueRecord {
-                    record: IndexMap::new(),
-                }),
-                expiry_ns: None,
-            }],
-        });
 
         let loaded = LoadedManifest {
             manifest,
             secrets: vec![],
             modules: HashMap::from([(module.name.clone(), module)]),
             effects: HashMap::from([(timer_effect.name.clone(), timer_effect.clone())]),
-            caps: HashMap::from([(timer_cap.name.clone(), timer_cap)]),
+            caps: HashMap::new(),
             policies: HashMap::new(),
             schemas: HashMap::from([
                 ("com.acme/State@1".into(), schema_text("com.acme/State@1")),

@@ -525,22 +525,6 @@ const SYS_MODULES: &[SysModuleSpec] = &[
         name: "sys/HttpPublish@1",
         bin: "http_publish",
     },
-    SysModuleSpec {
-        name: "sys/CapEnforceHttpOut@1",
-        bin: "cap_enforce_http_out",
-    },
-    SysModuleSpec {
-        name: "sys/CapEnforceLlmBasic@1",
-        bin: "cap_enforce_llm_basic",
-    },
-    SysModuleSpec {
-        name: "sys/CapEnforceWorkspace@1",
-        bin: "cap_enforce_workspace",
-    },
-    SysModuleSpec {
-        name: "sys/CapEnforceHost@1",
-        bin: "cap_enforce_host",
-    },
 ];
 
 fn resolve_sys_module(

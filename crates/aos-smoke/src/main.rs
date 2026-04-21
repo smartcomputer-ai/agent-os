@@ -58,7 +58,7 @@ enum Commands {
     LlmSummarizer,
     /// Run the workflow-driven retry with backoff example
     RetryBackoff,
-    /// Run the workspace workflow + caps example
+    /// Run the workspace workflow example
     Workspaces,
     /// Run the agent session lifecycle example
     AgentSession,
@@ -208,7 +208,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "09",
         slug: "workspaces",
         title: "Workspaces",
-        summary: "Workspace workflow + caps demo",
+        summary: "Workspace workflow demo",
         group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/09-workspaces",
         runner: workspaces::run,

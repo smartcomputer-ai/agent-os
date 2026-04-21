@@ -637,16 +637,6 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
             },
         ],
     );
-    for module in ["com.acme/StagedWorkflow@1", "com.acme/PulseWorkflow@1"] {
-        loaded
-            .manifest
-            .module_bindings
-            .get_mut(module)
-            .expect("module binding")
-            .slots
-            .insert("http".into(), "cap_http".into());
-    }
-
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     let start_event = serde_json::json!({
         "$tag": "Start",
@@ -805,16 +795,6 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
             },
         ],
     );
-    for module in ["com.acme/ReadyWorkflow@1", "com.acme/OtherWorkflow@1"] {
-        loaded
-            .manifest
-            .module_bindings
-            .get_mut(module)
-            .expect("module binding")
-            .slots
-            .insert("http".into(), "cap_http".into());
-    }
-
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
         .submit_event_result("com.acme/Ready@1", &serde_json::json!({}))
@@ -922,14 +902,6 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
             },
         ],
     );
-    loaded
-        .manifest
-        .module_bindings
-        .get_mut("com.acme/KeyedWorkflow@1")
-        .expect("module binding")
-        .slots
-        .insert("http".into(), "cap_http".into());
-
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     for id in ["a", "b"] {
         let event = serde_json::json!({
@@ -1023,35 +995,11 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
     );
 }
 
-fn allow_http_enforcer(store: &Arc<TestStore>) -> DefModule {
-    let allow_output = aos_kernel::cap_enforcer::CapCheckOutput {
-        constraints_ok: true,
-        deny: None,
-    };
-    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
-    let pure_output = aos_wasm_abi::PureOutput {
-        output: output_bytes,
-    };
-    fixtures::stub_pure_module(
-        store,
-        "sys/CapEnforceHttpOut@1",
-        &pure_output,
-        "sys/CapCheckInput@1",
-        "sys/CapCheckOutput@1",
-    )
-}
-
 fn build_loaded_manifest_with_http_enforcer(
-    store: &Arc<TestStore>,
-    mut modules: Vec<DefModule>,
+    _store: &Arc<TestStore>,
+    modules: Vec<DefModule>,
     routing: Vec<aos_air_types::RoutingEvent>,
 ) -> aos_kernel::manifest::LoadedManifest {
-    if !modules
-        .iter()
-        .any(|module| module.name == "sys/CapEnforceHttpOut@1")
-    {
-        modules.push(allow_http_enforcer(store));
-    }
     fixtures::build_loaded_manifest(modules, routing)
 }
 

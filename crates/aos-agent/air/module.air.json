@@ -36,14 +36,7 @@
           "workspace.write_ref",
           "workspace.remove",
           "workspace.diff"
-        ],
-        "cap_slots": {
-          "blob": "blob",
-          "llm": "llm.basic",
-          "host": "host",
-          "query": "query",
-          "workspace": "workspace"
-        }
+        ]
       }
     }
   },

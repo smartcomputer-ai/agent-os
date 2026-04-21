@@ -2,9 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use aos_air_types::{
-    AirNode, CapEnforcer, CapGrant, DefSchema, EmptyObject, HashRef, ManifestDefaults, NamedRef,
-    TypeExpr, TypePrimitive, TypePrimitiveText, builtins, catalog::EffectCatalog,
-    schema_index::SchemaIndex,
+    AirNode, DefSchema, EmptyObject, HashRef, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveText,
+    builtins, catalog::EffectCatalog, schema_index::SchemaIndex,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::ReceiptStatus;
@@ -37,9 +36,8 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
     let store = fixtures::new_mem_store();
     let mut loaded = simple_state_manifest(&store);
     hydrate_schema_hashes(&store, &mut loaded)?;
-    attach_governance_cap_allow_all(&mut loaded);
 
-    let (mut effect_manager, grant) = build_effect_manager(store.clone(), &loaded)?;
+    let mut effect_manager = build_effect_manager(store.clone(), &loaded)?;
 
     let mut world = TestWorld::with_store(store, loaded)?;
     let base_manifest = world.kernel.get_manifest(Consistency::Head)?.value;
@@ -50,9 +48,8 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
     let patch_doc_bytes =
         serde_json::to_vec(&patch_doc).map_err(|err| KernelError::Manifest(err.to_string()))?;
 
-    let propose_intent = effect_manager.enqueue_workflow_effect_with_grant(
+    let propose_intent = effect_manager.enqueue_workflow_effect_authorized(
         "com.acme/Simple@1",
-        &grant,
         &WorkflowEffect::new("governance.propose", propose_params_cbor(&patch_doc_bytes)?),
     )?;
     let propose_receipt = world
@@ -69,9 +66,8 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
         .expect("proposal stored");
     assert_eq!(proposal.state, ProposalState::Submitted);
 
-    let shadow_intent = effect_manager.enqueue_workflow_effect_with_grant(
+    let shadow_intent = effect_manager.enqueue_workflow_effect_authorized(
         "com.acme/Simple@1",
-        &grant,
         &WorkflowEffect::new(
             "governance.shadow",
             shadow_params_cbor(propose.proposal_id)?,
@@ -90,9 +86,8 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
         .expect("proposal stored");
     assert_eq!(proposal.state, ProposalState::Shadowed);
 
-    let approve_intent = effect_manager.enqueue_workflow_effect_with_grant(
+    let approve_intent = effect_manager.enqueue_workflow_effect_authorized(
         "com.acme/Simple@1",
-        &grant,
         &WorkflowEffect::new(
             "governance.approve",
             approve_params_cbor(propose.proposal_id)?,
@@ -111,9 +106,8 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
         .expect("proposal stored");
     assert_eq!(proposal.state, ProposalState::Approved);
 
-    let apply_intent = effect_manager.enqueue_workflow_effect_with_grant(
+    let apply_intent = effect_manager.enqueue_workflow_effect_authorized(
         "com.acme/Simple@1",
-        &grant,
         &WorkflowEffect::new("governance.apply", apply_params_cbor(propose.proposal_id)?),
     )?;
     let apply_receipt = world
@@ -139,7 +133,7 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
 fn build_effect_manager(
     store: Arc<fixtures::TestStore>,
     loaded: &aos_kernel::manifest::LoadedManifest,
-) -> Result<(EffectManager, aos_kernel::capability::CapGrantResolution), KernelError> {
+) -> Result<EffectManager, KernelError> {
     let mut schemas = HashMap::new();
     for builtin in builtins::builtin_schemas() {
         schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
@@ -155,7 +149,6 @@ fn build_effect_manager(
         schema_index.as_ref(),
         effect_catalog.clone(),
     )?;
-    let grant = capability_resolver.resolve_grant("gov_cap")?;
     let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
         GovernanceParamPreprocessor::new(store.clone(), loaded.manifest.clone()),
     ));
@@ -169,36 +162,7 @@ fn build_effect_manager(
         None,
         None,
     );
-    Ok((manager, grant))
-}
-
-fn attach_governance_cap_allow_all(loaded: &mut aos_kernel::manifest::LoadedManifest) {
-    let mut gov_cap = builtins::find_builtin_cap("sys/governance@1")
-        .expect("builtin governance cap")
-        .cap
-        .clone();
-    gov_cap.enforcer = CapEnforcer {
-        module: "sys/CapAllowAll@1".into(),
-    };
-    loaded.caps.insert(gov_cap.name.clone(), gov_cap);
-    loaded.manifest.caps.push(NamedRef {
-        name: "sys/governance@1".into(),
-        hash: fixtures::zero_hash(),
-    });
-    let grant = CapGrant {
-        name: "gov_cap".into(),
-        cap: "sys/governance@1".into(),
-        params: fixtures::empty_value_literal(),
-        expiry_ns: None,
-    };
-    if let Some(defaults) = loaded.manifest.defaults.as_mut() {
-        defaults.cap_grants.push(grant);
-    } else {
-        loaded.manifest.defaults = Some(ManifestDefaults {
-            policy: None,
-            cap_grants: vec![grant],
-        });
-    }
+    Ok(manager)
 }
 
 fn hydrate_schema_hashes(

@@ -7,8 +7,7 @@
       "workflow": {
         "state": "demo/CounterState@1",
         "event": "demo/CounterEvent@1",
-        "effects_emitted": [],
-        "cap_slots": {}
+        "effects_emitted": []
       }
     }
   }

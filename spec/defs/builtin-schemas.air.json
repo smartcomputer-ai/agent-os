@@ -4,8 +4,14 @@
     "name": "sys/TimerSetParams@1",
     "type": {
       "record": {
-        "deliver_at_ns": { "nat": {} },
-        "key": { "option": { "text": {} } }
+        "deliver_at_ns": {
+          "nat": {}
+        },
+        "key": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -14,8 +20,14 @@
     "name": "sys/TimerSetReceipt@1",
     "type": {
       "record": {
-        "delivered_at_ns": { "nat": {} },
-        "key": { "option": { "text": {} } }
+        "delivered_at_ns": {
+          "nat": {}
+        },
+        "key": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -24,22 +36,54 @@
     "name": "sys/PortalSendParams@1",
     "type": {
       "record": {
-        "dest_universe": { "option": { "uuid": {} } },
-        "dest_world": { "uuid": {} },
-        "mode": { "text": {} },
-        "schema": { "option": { "text": {} } },
-        "value_cbor": { "option": { "bytes": {} } },
-        "inbox": { "option": { "text": {} } },
-        "payload_cbor": { "option": { "bytes": {} } },
+        "dest_universe": {
+          "option": {
+            "uuid": {}
+          }
+        },
+        "dest_world": {
+          "uuid": {}
+        },
+        "mode": {
+          "text": {}
+        },
+        "schema": {
+          "option": {
+            "text": {}
+          }
+        },
+        "value_cbor": {
+          "option": {
+            "bytes": {}
+          }
+        },
+        "inbox": {
+          "option": {
+            "text": {}
+          }
+        },
+        "payload_cbor": {
+          "option": {
+            "bytes": {}
+          }
+        },
         "headers": {
           "option": {
             "map": {
-              "key": { "text": {} },
-              "value": { "text": {} }
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
             }
           }
         },
-        "correlation_id": { "option": { "text": {} } }
+        "correlation_id": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -48,10 +92,20 @@
     "name": "sys/PortalSendReceipt@1",
     "type": {
       "record": {
-        "status": { "text": {} },
-        "message_id": { "hash": {} },
-        "dest_world": { "uuid": {} },
-        "enqueued_seq": { "option": { "bytes": {} } }
+        "status": {
+          "text": {}
+        },
+        "message_id": {
+          "hash": {}
+        },
+        "dest_world": {
+          "uuid": {}
+        },
+        "enqueued_seq": {
+          "option": {
+            "bytes": {}
+          }
+        }
       }
     }
   },
@@ -60,15 +114,36 @@
     "name": "sys/TimerFired@1",
     "type": {
       "record": {
-        "intent_hash": { "hash": {} },
-        "workflow": { "text": {}, "$comment": "Name-formatted string" },
-        "effect_kind": { "text": {} },
-        "adapter_id": { "text": {} },
-        "status": { "text": {} },
-        "requested": { "ref": "sys/TimerSetParams@1" },
-        "receipt": { "ref": "sys/TimerSetReceipt@1" },
-        "cost_cents": { "option": { "nat": {} } },
-        "signature": { "bytes": {} }
+        "intent_hash": {
+          "hash": {}
+        },
+        "workflow": {
+          "text": {},
+          "$comment": "Name-formatted string"
+        },
+        "effect_kind": {
+          "text": {}
+        },
+        "adapter_id": {
+          "text": {}
+        },
+        "status": {
+          "text": {}
+        },
+        "requested": {
+          "ref": "sys/TimerSetParams@1"
+        },
+        "receipt": {
+          "ref": "sys/TimerSetReceipt@1"
+        },
+        "cost_cents": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "signature": {
+          "bytes": {}
+        }
       }
     }
   },
@@ -77,9 +152,15 @@
     "name": "sys/HostMount@1",
     "type": {
       "record": {
-        "host_path": { "text": {} },
-        "guest_path": { "text": {} },
-        "mode": { "text": {} }
+        "host_path": {
+          "text": {}
+        },
+        "guest_path": {
+          "text": {}
+        },
+        "mode": {
+          "text": {}
+        }
       }
     }
   },
@@ -88,17 +169,33 @@
     "name": "sys/HostLocalTarget@1",
     "type": {
       "record": {
-        "mounts": { "option": { "list": { "ref": "sys/HostMount@1" } } },
-        "workdir": { "option": { "text": {} } },
-        "env": {
+        "mounts": {
           "option": {
-            "map": {
-              "key": { "text": {} },
-              "value": { "text": {} }
+            "list": {
+              "ref": "sys/HostMount@1"
             }
           }
         },
-        "network_mode": { "text": {} }
+        "workdir": {
+          "option": {
+            "text": {}
+          }
+        },
+        "env": {
+          "option": {
+            "map": {
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "network_mode": {
+          "text": {}
+        }
       }
     }
   },
@@ -107,21 +204,53 @@
     "name": "sys/HostSandboxTarget@1",
     "type": {
       "record": {
-        "image": { "text": {} },
-        "runtime_class": { "option": { "text": {} } },
-        "workdir": { "option": { "text": {} } },
+        "image": {
+          "text": {}
+        },
+        "runtime_class": {
+          "option": {
+            "text": {}
+          }
+        },
+        "workdir": {
+          "option": {
+            "text": {}
+          }
+        },
         "env": {
           "option": {
             "map": {
-              "key": { "text": {} },
-              "value": { "text": {} }
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
             }
           }
         },
-        "network_mode": { "option": { "text": {} } },
-        "mounts": { "option": { "list": { "ref": "sys/HostMount@1" } } },
-        "cpu_limit_millis": { "option": { "nat": {} } },
-        "memory_limit_bytes": { "option": { "nat": {} } }
+        "network_mode": {
+          "option": {
+            "text": {}
+          }
+        },
+        "mounts": {
+          "option": {
+            "list": {
+              "ref": "sys/HostMount@1"
+            }
+          }
+        },
+        "cpu_limit_millis": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "memory_limit_bytes": {
+          "option": {
+            "nat": {}
+          }
+        }
       }
     }
   },
@@ -130,8 +259,12 @@
     "name": "sys/HostTarget@1",
     "type": {
       "variant": {
-        "local": { "ref": "sys/HostLocalTarget@1" },
-        "sandbox": { "ref": "sys/HostSandboxTarget@1" }
+        "local": {
+          "ref": "sys/HostLocalTarget@1"
+        },
+        "sandbox": {
+          "ref": "sys/HostSandboxTarget@1"
+        }
       }
     }
   },
@@ -140,13 +273,23 @@
     "name": "sys/HostSessionOpenParams@1",
     "type": {
       "record": {
-        "target": { "ref": "sys/HostTarget@1" },
-        "session_ttl_ns": { "option": { "nat": {} } },
+        "target": {
+          "ref": "sys/HostTarget@1"
+        },
+        "session_ttl_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
         "labels": {
           "option": {
             "map": {
-              "key": { "text": {} },
-              "value": { "text": {} }
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
             }
           }
         }
@@ -158,12 +301,30 @@
     "name": "sys/HostSessionOpenReceipt@1",
     "type": {
       "record": {
-        "session_id": { "text": {} },
-        "status": { "text": {} },
-        "started_at_ns": { "nat": {} },
-        "expires_at_ns": { "option": { "nat": {} } },
-        "error_code": { "option": { "text": {} } },
-        "error_message": { "option": { "text": {} } }
+        "session_id": {
+          "text": {}
+        },
+        "status": {
+          "text": {}
+        },
+        "started_at_ns": {
+          "nat": {}
+        },
+        "expires_at_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_message": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -174,19 +335,31 @@
       "variant": {
         "inline_text": {
           "record": {
-            "text": { "text": {} }
+            "text": {
+              "text": {}
+            }
           }
         },
         "inline_bytes": {
           "record": {
-            "bytes": { "bytes": {} }
+            "bytes": {
+              "bytes": {}
+            }
           }
         },
         "blob": {
           "record": {
-            "blob_ref": { "hash": {} },
-            "size_bytes": { "nat": {} },
-            "preview_bytes": { "option": { "bytes": {} } }
+            "blob_ref": {
+              "hash": {}
+            },
+            "size_bytes": {
+              "nat": {}
+            },
+            "preview_bytes": {
+              "option": {
+                "bytes": {}
+              }
+            }
           }
         }
       }
@@ -197,20 +370,46 @@
     "name": "sys/HostExecParams@1",
     "type": {
       "record": {
-        "session_id": { "text": {} },
-        "argv": { "list": { "text": {} } },
-        "cwd": { "option": { "text": {} } },
-        "timeout_ns": { "option": { "nat": {} } },
+        "session_id": {
+          "text": {}
+        },
+        "argv": {
+          "list": {
+            "text": {}
+          }
+        },
+        "cwd": {
+          "option": {
+            "text": {}
+          }
+        },
+        "timeout_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
         "env_patch": {
           "option": {
             "map": {
-              "key": { "text": {} },
-              "value": { "text": {} }
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
             }
           }
         },
-        "stdin_ref": { "option": { "hash": {} } },
-        "output_mode": { "option": { "text": {} } }
+        "stdin_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "output_mode": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -219,14 +418,38 @@
     "name": "sys/HostExecReceipt@1",
     "type": {
       "record": {
-        "exit_code": { "int": {} },
-        "status": { "text": {} },
-        "stdout": { "option": { "ref": "sys/HostOutput@1" } },
-        "stderr": { "option": { "ref": "sys/HostOutput@1" } },
-        "started_at_ns": { "nat": {} },
-        "ended_at_ns": { "nat": {} },
-        "error_code": { "option": { "text": {} } },
-        "error_message": { "option": { "text": {} } }
+        "exit_code": {
+          "int": {}
+        },
+        "status": {
+          "text": {}
+        },
+        "stdout": {
+          "option": {
+            "ref": "sys/HostOutput@1"
+          }
+        },
+        "stderr": {
+          "option": {
+            "ref": "sys/HostOutput@1"
+          }
+        },
+        "started_at_ns": {
+          "nat": {}
+        },
+        "ended_at_ns": {
+          "nat": {}
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_message": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -235,12 +458,26 @@
     "name": "sys/HostExecProgressFrame@1",
     "type": {
       "record": {
-        "exec_id": { "option": { "text": {} } },
-        "elapsed_ns": { "nat": {} },
-        "stdout_delta": { "bytes": {} },
-        "stderr_delta": { "bytes": {} },
-        "stdout_bytes": { "nat": {} },
-        "stderr_bytes": { "nat": {} }
+        "exec_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "elapsed_ns": {
+          "nat": {}
+        },
+        "stdout_delta": {
+          "bytes": {}
+        },
+        "stderr_delta": {
+          "bytes": {}
+        },
+        "stdout_bytes": {
+          "nat": {}
+        },
+        "stderr_bytes": {
+          "nat": {}
+        }
       }
     }
   },
@@ -249,9 +486,17 @@
     "name": "sys/HostSessionSignalParams@1",
     "type": {
       "record": {
-        "session_id": { "text": {} },
-        "signal": { "text": {} },
-        "grace_timeout_ns": { "option": { "nat": {} } }
+        "session_id": {
+          "text": {}
+        },
+        "signal": {
+          "text": {}
+        },
+        "grace_timeout_ns": {
+          "option": {
+            "nat": {}
+          }
+        }
       }
     }
   },
@@ -260,11 +505,29 @@
     "name": "sys/HostSessionSignalReceipt@1",
     "type": {
       "record": {
-        "status": { "text": {} },
-        "exit_code": { "option": { "int": {} } },
-        "ended_at_ns": { "option": { "nat": {} } },
-        "error_code": { "option": { "text": {} } },
-        "error_message": { "option": { "text": {} } }
+        "status": {
+          "text": {}
+        },
+        "exit_code": {
+          "option": {
+            "int": {}
+          }
+        },
+        "ended_at_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "error_code": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_message": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -273,21 +536,99 @@
     "name": "sys/HostCapParams@1",
     "type": {
       "record": {
-        "allowed_targets": { "option": { "set": { "text": {} } } },
-        "network_modes": { "option": { "set": { "text": {} } } },
-        "local_mount_roots": { "option": { "list": { "text": {} } } },
-        "local_guest_path_prefixes": { "option": { "list": { "text": {} } } },
-        "local_mount_modes": { "option": { "set": { "text": {} } } },
-        "workdir_prefixes": { "option": { "list": { "text": {} } } },
-        "env_allow": { "option": { "set": { "text": {} } } },
-        "max_mounts": { "option": { "nat": {} } },
-        "max_env_vars": { "option": { "nat": {} } },
-        "max_session_ttl_ns": { "option": { "nat": {} } },
-        "max_exec_timeout_ns": { "option": { "nat": {} } },
-        "max_argv_len": { "option": { "nat": {} } },
-        "max_arg_length": { "option": { "nat": {} } },
-        "allowed_output_modes": { "option": { "set": { "text": {} } } },
-        "allowed_signals": { "option": { "set": { "text": {} } } }
+        "allowed_targets": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "network_modes": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "local_mount_roots": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "local_guest_path_prefixes": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "local_mount_modes": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "workdir_prefixes": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "env_allow": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "max_mounts": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_env_vars": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_session_ttl_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_exec_timeout_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_argv_len": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_arg_length": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "allowed_output_modes": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        },
+        "allowed_signals": {
+          "option": {
+            "set": {
+              "text": {}
+            }
+          }
+        }
       }
     }
   },
@@ -296,9 +637,21 @@
     "name": "sys/BlobPutParams@1",
     "type": {
       "record": {
-        "bytes": { "bytes": {} },
-        "blob_ref": { "option": { "hash": {} } },
-        "refs": { "option": { "list": { "hash": {} } } }
+        "bytes": {
+          "bytes": {}
+        },
+        "blob_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "refs": {
+          "option": {
+            "list": {
+              "hash": {}
+            }
+          }
+        }
       }
     }
   },
@@ -307,8 +660,14 @@
     "name": "sys/BlobEdge@1",
     "type": {
       "record": {
-        "blob_ref": { "hash": {} },
-        "refs": { "list": { "hash": {} } }
+        "blob_ref": {
+          "hash": {}
+        },
+        "refs": {
+          "list": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -317,9 +676,15 @@
     "name": "sys/BlobPutReceipt@1",
     "type": {
       "record": {
-        "blob_ref": { "hash": {} },
-        "edge_ref": { "hash": {} },
-        "size": { "nat": {} }
+        "blob_ref": {
+          "hash": {}
+        },
+        "edge_ref": {
+          "hash": {}
+        },
+        "size": {
+          "nat": {}
+        }
       }
     }
   },
@@ -328,7 +693,9 @@
     "name": "sys/BlobGetParams@1",
     "type": {
       "record": {
-        "blob_ref": { "hash": {} }
+        "blob_ref": {
+          "hash": {}
+        }
       }
     }
   },
@@ -337,9 +704,15 @@
     "name": "sys/BlobGetReceipt@1",
     "type": {
       "record": {
-        "blob_ref": { "hash": {} },
-        "size": { "nat": {} },
-        "bytes": { "bytes": {} }
+        "blob_ref": {
+          "hash": {}
+        },
+        "size": {
+          "nat": {}
+        },
+        "bytes": {
+          "bytes": {}
+        }
       }
     }
   },
@@ -348,15 +721,36 @@
     "name": "sys/BlobPutResult@1",
     "type": {
       "record": {
-        "intent_hash": { "hash": {} },
-        "workflow": { "text": {}, "$comment": "Name-formatted string" },
-        "effect_kind": { "text": {} },
-        "adapter_id": { "text": {} },
-        "status": { "text": {} },
-        "requested": { "ref": "sys/BlobPutParams@1" },
-        "receipt": { "ref": "sys/BlobPutReceipt@1" },
-        "cost_cents": { "option": { "nat": {} } },
-        "signature": { "bytes": {} }
+        "intent_hash": {
+          "hash": {}
+        },
+        "workflow": {
+          "text": {},
+          "$comment": "Name-formatted string"
+        },
+        "effect_kind": {
+          "text": {}
+        },
+        "adapter_id": {
+          "text": {}
+        },
+        "status": {
+          "text": {}
+        },
+        "requested": {
+          "ref": "sys/BlobPutParams@1"
+        },
+        "receipt": {
+          "ref": "sys/BlobPutReceipt@1"
+        },
+        "cost_cents": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "signature": {
+          "bytes": {}
+        }
       }
     }
   },
@@ -365,15 +759,36 @@
     "name": "sys/BlobGetResult@1",
     "type": {
       "record": {
-        "intent_hash": { "hash": {} },
-        "workflow": { "text": {}, "$comment": "Name-formatted string" },
-        "effect_kind": { "text": {} },
-        "adapter_id": { "text": {} },
-        "status": { "text": {} },
-        "requested": { "ref": "sys/BlobGetParams@1" },
-        "receipt": { "ref": "sys/BlobGetReceipt@1" },
-        "cost_cents": { "option": { "nat": {} } },
-        "signature": { "bytes": {} }
+        "intent_hash": {
+          "hash": {}
+        },
+        "workflow": {
+          "text": {},
+          "$comment": "Name-formatted string"
+        },
+        "effect_kind": {
+          "text": {}
+        },
+        "adapter_id": {
+          "text": {}
+        },
+        "status": {
+          "text": {}
+        },
+        "requested": {
+          "ref": "sys/BlobGetParams@1"
+        },
+        "receipt": {
+          "ref": "sys/BlobGetReceipt@1"
+        },
+        "cost_cents": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "signature": {
+          "bytes": {}
+        }
       }
     }
   },
@@ -382,15 +797,27 @@
     "name": "sys/HttpRequestParams@1",
     "type": {
       "record": {
-        "method": { "text": {} },
-        "url": { "text": {} },
+        "method": {
+          "text": {}
+        },
+        "url": {
+          "text": {}
+        },
         "headers": {
           "map": {
-            "key": { "text": {} },
-            "value": { "text": {} }
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "text": {}
+            }
           }
         },
-        "body_ref": { "option": { "hash": {} } }
+        "body_ref": {
+          "option": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -399,36 +826,59 @@
     "name": "sys/HttpRequestReceipt@1",
     "type": {
       "record": {
-        "status": { "int": {} },
+        "status": {
+          "int": {}
+        },
         "headers": {
           "map": {
-            "key": { "text": {} },
-            "value": { "text": {} }
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "text": {}
+            }
           }
         },
-        "body_ref": { "option": { "hash": {} } },
+        "body_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
         "timings": {
           "record": {
-            "start_ns": { "nat": {} },
-            "end_ns": { "nat": {} }
+            "start_ns": {
+              "nat": {}
+            },
+            "end_ns": {
+              "nat": {}
+            }
           }
         },
-        "adapter_id": { "text": {} }
+        "adapter_id": {
+          "text": {}
+        }
       }
     }
   },
-
   {
     "$kind": "defschema",
     "name": "sys/LlmToolChoice@1",
     "type": {
       "variant": {
-        "Auto": { "unit": {} },
-        "None": { "unit": {} },
-        "Required": { "unit": {} },
+        "Auto": {
+          "unit": {}
+        },
+        "None": {
+          "unit": {}
+        },
+        "Required": {
+          "unit": {}
+        },
         "Tool": {
           "record": {
-            "name": { "text": {} }
+            "name": {
+              "text": {}
+            }
           }
         }
       }
@@ -439,23 +889,67 @@
     "name": "sys/LlmRuntimeArgs@1",
     "type": {
       "record": {
-        "temperature": { "option": { "dec128": {} } },
-        "top_p": { "option": { "dec128": {} } },
-        "max_tokens": { "option": { "nat": {} } },
-        "tool_refs": { "option": { "list": { "hash": {} } } },
-        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
-        "reasoning_effort": { "option": { "text": {} } },
-        "stop_sequences": { "option": { "list": { "text": {} } } },
-        "metadata": {
+        "temperature": {
           "option": {
-            "map": {
-              "key": { "text": {} },
-              "value": { "text": {} }
+            "dec128": {}
+          }
+        },
+        "top_p": {
+          "option": {
+            "dec128": {}
+          }
+        },
+        "max_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "tool_refs": {
+          "option": {
+            "list": {
+              "hash": {}
             }
           }
         },
-        "provider_options_ref": { "option": { "hash": {} } },
-        "response_format_ref": { "option": { "hash": {} } }
+        "tool_choice": {
+          "option": {
+            "ref": "sys/LlmToolChoice@1"
+          }
+        },
+        "reasoning_effort": {
+          "option": {
+            "text": {}
+          }
+        },
+        "stop_sequences": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "metadata": {
+          "option": {
+            "map": {
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "provider_options_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "response_format_ref": {
+          "option": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -464,26 +958,52 @@
     "name": "sys/LlmToolCall@1",
     "type": {
       "record": {
-        "call_id": { "text": {} },
-        "tool_name": { "text": {} },
-        "arguments_ref": { "hash": {} },
-        "provider_call_id": { "option": { "text": {} } }
+        "call_id": {
+          "text": {}
+        },
+        "tool_name": {
+          "text": {}
+        },
+        "arguments_ref": {
+          "hash": {}
+        },
+        "provider_call_id": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
   {
     "$kind": "defschema",
     "name": "sys/LlmToolCallList@1",
-    "type": { "list": { "ref": "sys/LlmToolCall@1" } }
+    "type": {
+      "list": {
+        "ref": "sys/LlmToolCall@1"
+      }
+    }
   },
   {
     "$kind": "defschema",
     "name": "sys/LlmOutputEnvelope@1",
     "type": {
       "record": {
-        "assistant_text": { "option": { "text": {} } },
-        "tool_calls_ref": { "option": { "hash": {} } },
-        "reasoning_ref": { "option": { "hash": {} } }
+        "assistant_text": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tool_calls_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "reasoning_ref": {
+          "option": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -492,32 +1012,92 @@
     "name": "sys/LlmGenerateParams@1",
     "type": {
       "record": {
-        "correlation_id": { "option": { "text": {} } },
-        "provider": { "text": {} },
-        "model": { "text": {} },
-        "message_refs": { "list": { "hash": {} } },
+        "correlation_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "provider": {
+          "text": {}
+        },
+        "model": {
+          "text": {}
+        },
+        "message_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
         "runtime": {
           "record": {
-            "temperature": { "option": { "dec128": {} } },
-            "top_p": { "option": { "dec128": {} } },
-            "max_tokens": { "option": { "nat": {} } },
-            "tool_refs": { "option": { "list": { "hash": {} } } },
-            "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
-            "reasoning_effort": { "option": { "text": {} } },
-            "stop_sequences": { "option": { "list": { "text": {} } } },
-            "metadata": {
+            "temperature": {
               "option": {
-                "map": {
-                  "key": { "text": {} },
-                  "value": { "text": {} }
+                "dec128": {}
+              }
+            },
+            "top_p": {
+              "option": {
+                "dec128": {}
+              }
+            },
+            "max_tokens": {
+              "option": {
+                "nat": {}
+              }
+            },
+            "tool_refs": {
+              "option": {
+                "list": {
+                  "hash": {}
                 }
               }
             },
-            "provider_options_ref": { "option": { "hash": {} } },
-            "response_format_ref": { "option": { "hash": {} } }
+            "tool_choice": {
+              "option": {
+                "ref": "sys/LlmToolChoice@1"
+              }
+            },
+            "reasoning_effort": {
+              "option": {
+                "text": {}
+              }
+            },
+            "stop_sequences": {
+              "option": {
+                "list": {
+                  "text": {}
+                }
+              }
+            },
+            "metadata": {
+              "option": {
+                "map": {
+                  "key": {
+                    "text": {}
+                  },
+                  "value": {
+                    "text": {}
+                  }
+                }
+              }
+            },
+            "provider_options_ref": {
+              "option": {
+                "hash": {}
+              }
+            },
+            "response_format_ref": {
+              "option": {
+                "hash": {}
+              }
+            }
           }
         },
-        "api_key": { "option": { "ref": "sys/TextOrSecretRef@1" } }
+        "api_key": {
+          "option": {
+            "ref": "sys/TextOrSecretRef@1"
+          }
+        }
       }
     }
   },
@@ -526,84 +1106,99 @@
     "name": "sys/LlmGenerateReceipt@1",
     "type": {
       "record": {
-        "output_ref": { "hash": {} },
-        "raw_output_ref": { "option": { "hash": {} } },
-        "provider_response_id": { "option": { "text": {} } },
+        "output_ref": {
+          "hash": {}
+        },
+        "raw_output_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "provider_response_id": {
+          "option": {
+            "text": {}
+          }
+        },
         "finish_reason": {
           "record": {
-            "reason": { "text": {} },
-            "raw": { "option": { "text": {} } }
+            "reason": {
+              "text": {}
+            },
+            "raw": {
+              "option": {
+                "text": {}
+              }
+            }
           }
         },
         "token_usage": {
           "record": {
-            "prompt": { "nat": {} },
-            "completion": { "nat": {} },
-            "total": { "option": { "nat": {} } }
+            "prompt": {
+              "nat": {}
+            },
+            "completion": {
+              "nat": {}
+            },
+            "total": {
+              "option": {
+                "nat": {}
+              }
+            }
           }
         },
         "usage_details": {
           "option": {
             "record": {
-              "reasoning_tokens": { "option": { "nat": {} } },
-              "cache_read_tokens": { "option": { "nat": {} } },
-              "cache_write_tokens": { "option": { "nat": {} } }
+              "reasoning_tokens": {
+                "option": {
+                  "nat": {}
+                }
+              },
+              "cache_read_tokens": {
+                "option": {
+                  "nat": {}
+                }
+              },
+              "cache_write_tokens": {
+                "option": {
+                  "nat": {}
+                }
+              }
             }
           }
         },
-        "warnings_ref": { "option": { "hash": {} } },
-        "rate_limit_ref": { "option": { "hash": {} } },
-        "cost_cents": { "option": { "nat": {} } },
-        "provider_id": { "text": {} }
-      }
-    }
-  },
-
-  {
-    "$kind": "defschema",
-    "name": "sys/CapCheckInput@1",
-    "type": {
-      "record": {
-        "cap_def": { "text": {}, "$comment": "Name-formatted string" },
-        "grant_name": { "text": {} },
-        "cap_params": { "bytes": {}, "$comment": "Canonical CBOR" },
-        "effect_kind": { "text": {} },
-        "effect_params": { "bytes": {}, "$comment": "Canonical CBOR" },
-        "origin": {
-          "record": {
-            "kind": { "text": {} },
-            "name": { "text": {}, "$comment": "Name-formatted string" }
-          }
-        },
-        "logical_now_ns": { "nat": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/CapCheckOutput@1",
-    "type": {
-      "record": {
-        "constraints_ok": { "bool": {} },
-        "deny": {
+        "warnings_ref": {
           "option": {
-            "record": {
-              "code": { "text": {} },
-              "message": { "text": {} }
-            }
+            "hash": {}
           }
+        },
+        "rate_limit_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "cost_cents": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "provider_id": {
+          "text": {}
         }
       }
     }
   },
-
   {
     "$kind": "defschema",
     "name": "sys/SecretRef@1",
     "type": {
       "record": {
-        "alias": { "text": {} },
-        "version": { "nat": {} }
+        "alias": {
+          "text": {}
+        },
+        "version": {
+          "nat": {}
+        }
       }
     }
   },
@@ -612,8 +1207,12 @@
     "name": "sys/TextOrSecretRef@1",
     "type": {
       "variant": {
-        "literal": { "text": {} },
-        "secret": { "ref": "sys/SecretRef@1" }
+        "literal": {
+          "text": {}
+        },
+        "secret": {
+          "ref": "sys/SecretRef@1"
+        }
       }
     }
   },
@@ -622,8 +1221,12 @@
     "name": "sys/BytesOrSecretRef@1",
     "type": {
       "variant": {
-        "literal": { "bytes": {} },
-        "secret": { "ref": "sys/SecretRef@1" }
+        "literal": {
+          "bytes": {}
+        },
+        "secret": {
+          "ref": "sys/SecretRef@1"
+        }
       }
     }
   },
@@ -632,10 +1235,18 @@
     "name": "sys/VaultPutParams@1",
     "type": {
       "record": {
-        "alias": { "text": {} },
-        "binding_id": { "text": {} },
-        "value_ref": { "hash": {} },
-        "expected_digest": { "hash": {} }
+        "alias": {
+          "text": {}
+        },
+        "binding_id": {
+          "text": {}
+        },
+        "value_ref": {
+          "hash": {}
+        },
+        "expected_digest": {
+          "hash": {}
+        }
       }
     }
   },
@@ -644,10 +1255,18 @@
     "name": "sys/VaultPutReceipt@1",
     "type": {
       "record": {
-        "alias": { "text": {} },
-        "version": { "nat": {} },
-        "binding_id": { "text": {} },
-        "digest": { "hash": {} }
+        "alias": {
+          "text": {}
+        },
+        "version": {
+          "nat": {}
+        },
+        "binding_id": {
+          "text": {}
+        },
+        "digest": {
+          "hash": {}
+        }
       }
     }
   },
@@ -656,10 +1275,18 @@
     "name": "sys/VaultRotateParams@1",
     "type": {
       "record": {
-        "alias": { "text": {} },
-        "version": { "nat": {} },
-        "binding_id": { "text": {} },
-        "expected_digest": { "hash": {} }
+        "alias": {
+          "text": {}
+        },
+        "version": {
+          "nat": {}
+        },
+        "binding_id": {
+          "text": {}
+        },
+        "expected_digest": {
+          "hash": {}
+        }
       }
     }
   },
@@ -668,26 +1295,43 @@
     "name": "sys/VaultRotateReceipt@1",
     "type": {
       "record": {
-        "alias": { "text": {} },
-        "version": { "nat": {} },
-        "binding_id": { "text": {} },
-        "digest": { "hash": {} }
+        "alias": {
+          "text": {}
+        },
+        "version": {
+          "nat": {}
+        },
+        "binding_id": {
+          "text": {}
+        },
+        "digest": {
+          "hash": {}
+        }
       }
     }
   },
-
   {
     "$kind": "defschema",
     "name": "sys/GovPatchInput@1",
     "type": {
       "variant": {
-        "hash": { "hash": {} },
-        "patch_cbor": { "bytes": {} },
-        "patch_doc_json": { "bytes": {} },
+        "hash": {
+          "hash": {}
+        },
+        "patch_cbor": {
+          "bytes": {}
+        },
+        "patch_doc_json": {
+          "bytes": {}
+        },
         "patch_blob_ref": {
           "record": {
-            "blob_ref": { "hash": {} },
-            "format": { "text": {} }
+            "blob_ref": {
+              "hash": {}
+            },
+            "format": {
+              "text": {}
+            }
           }
         }
       }
@@ -698,25 +1342,49 @@
     "name": "sys/GovPatchSummary@1",
     "type": {
       "record": {
-        "base_manifest_hash": { "option": { "hash": {} } },
-        "patch_hash": { "hash": {} },
-        "ops": { "set": { "text": {} } },
+        "base_manifest_hash": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "patch_hash": {
+          "hash": {}
+        },
+        "ops": {
+          "set": {
+            "text": {}
+          }
+        },
         "def_changes": {
           "list": {
             "record": {
-              "kind": { "text": {} },
-              "name": { "text": {} },
+              "kind": {
+                "text": {}
+              },
+              "name": {
+                "text": {}
+              },
               "action": {
                 "variant": {
-                  "added": { "unit": {} },
-                  "removed": { "unit": {} },
-                  "changed": { "unit": {} }
+                  "added": {
+                    "unit": {}
+                  },
+                  "removed": {
+                    "unit": {}
+                  },
+                  "changed": {
+                    "unit": {}
+                  }
                 }
               }
             }
           }
         },
-        "manifest_sections": { "set": { "text": {} } }
+        "manifest_sections": {
+          "set": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -725,13 +1393,25 @@
     "name": "sys/GovProposeParams@1",
     "type": {
       "record": {
-        "patch": { "ref": "sys/GovPatchInput@1" },
-        "summary": { "option": { "ref": "sys/GovPatchSummary@1" } },
+        "patch": {
+          "ref": "sys/GovPatchInput@1"
+        },
+        "summary": {
+          "option": {
+            "ref": "sys/GovPatchSummary@1"
+          }
+        },
         "manifest_base": {
-          "option": { "hash": {} },
+          "option": {
+            "hash": {}
+          },
           "$comment": "When present, must equal patch.base_manifest_hash for the proposal."
         },
-        "description": { "option": { "text": {} } }
+        "description": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -740,9 +1420,17 @@
     "name": "sys/GovProposeReceipt@1",
     "type": {
       "record": {
-        "proposal_id": { "nat": {} },
-        "patch_hash": { "hash": {} },
-        "manifest_base": { "option": { "hash": {} } }
+        "proposal_id": {
+          "nat": {}
+        },
+        "patch_hash": {
+          "hash": {}
+        },
+        "manifest_base": {
+          "option": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -751,7 +1439,9 @@
     "name": "sys/GovShadowParams@1",
     "type": {
       "record": {
-        "proposal_id": { "nat": {} }
+        "proposal_id": {
+          "nat": {}
+        }
       }
     }
   },
@@ -760,46 +1450,92 @@
     "name": "sys/GovShadowReceipt@1",
     "type": {
       "record": {
-        "proposal_id": { "nat": {} },
-        "manifest_hash": { "hash": {} },
+        "proposal_id": {
+          "nat": {}
+        },
+        "manifest_hash": {
+          "hash": {}
+        },
         "predicted_effects": {
           "list": {
             "record": {
-              "kind": { "text": {} },
-              "cap": { "text": {} },
-              "intent_hash": { "hash": {} },
-              "params_json": { "option": { "text": {} } }
+              "kind": {
+                "text": {}
+              },
+              "cap": {
+                "text": {}
+              },
+              "intent_hash": {
+                "hash": {}
+              },
+              "params_json": {
+                "option": {
+                  "text": {}
+                }
+              }
             }
           }
         },
         "pending_workflow_receipts": {
           "list": {
             "record": {
-              "instance_id": { "text": {} },
-              "origin_module_id": { "text": {} },
-              "origin_instance_key_b64": { "option": { "text": {} } },
-              "intent_hash": { "hash": {} },
-              "effect_kind": { "text": {} },
-              "emitted_at_seq": { "nat": {} }
+              "instance_id": {
+                "text": {}
+              },
+              "origin_module_id": {
+                "text": {}
+              },
+              "origin_instance_key_b64": {
+                "option": {
+                  "text": {}
+                }
+              },
+              "intent_hash": {
+                "hash": {}
+              },
+              "effect_kind": {
+                "text": {}
+              },
+              "emitted_at_seq": {
+                "nat": {}
+              }
             }
           }
         },
         "workflow_instances": {
           "list": {
             "record": {
-              "instance_id": { "text": {} },
-              "status": { "text": {} },
-              "last_processed_event_seq": { "nat": {} },
-              "module_version": { "option": { "text": {} } },
-              "inflight_intents": { "nat": {} }
+              "instance_id": {
+                "text": {}
+              },
+              "status": {
+                "text": {}
+              },
+              "last_processed_event_seq": {
+                "nat": {}
+              },
+              "module_version": {
+                "option": {
+                  "text": {}
+                }
+              },
+              "inflight_intents": {
+                "nat": {}
+              }
             }
           }
         },
         "module_effect_allowlists": {
           "list": {
             "record": {
-              "module": { "text": {} },
-              "effects_emitted": { "list": { "text": {} } }
+              "module": {
+                "text": {}
+              },
+              "effects_emitted": {
+                "list": {
+                  "text": {}
+                }
+              }
             }
           }
         },
@@ -808,16 +1544,28 @@
             "record": {
               "ledger": {
                 "variant": {
-                  "capability": { "unit": {} },
-                  "policy": { "unit": {} }
+                  "capability": {
+                    "unit": {}
+                  },
+                  "policy": {
+                    "unit": {}
+                  }
                 }
               },
-              "name": { "text": {} },
+              "name": {
+                "text": {}
+              },
               "change": {
                 "variant": {
-                  "added": { "unit": {} },
-                  "removed": { "unit": {} },
-                  "changed": { "unit": {} }
+                  "added": {
+                    "unit": {}
+                  },
+                  "removed": {
+                    "unit": {}
+                  },
+                  "changed": {
+                    "unit": {}
+                  }
                 }
               }
             }
@@ -831,15 +1579,27 @@
     "name": "sys/GovApproveParams@1",
     "type": {
       "record": {
-        "proposal_id": { "nat": {} },
+        "proposal_id": {
+          "nat": {}
+        },
         "decision": {
           "variant": {
-            "approve": { "unit": {} },
-            "reject": { "unit": {} }
+            "approve": {
+              "unit": {}
+            },
+            "reject": {
+              "unit": {}
+            }
           }
         },
-        "approver": { "text": {} },
-        "reason": { "option": { "text": {} } }
+        "approver": {
+          "text": {}
+        },
+        "reason": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -848,16 +1608,30 @@
     "name": "sys/GovApproveReceipt@1",
     "type": {
       "record": {
-        "proposal_id": { "nat": {} },
+        "proposal_id": {
+          "nat": {}
+        },
         "decision": {
           "variant": {
-            "approve": { "unit": {} },
-            "reject": { "unit": {} }
+            "approve": {
+              "unit": {}
+            },
+            "reject": {
+              "unit": {}
+            }
           }
         },
-        "patch_hash": { "hash": {} },
-        "approver": { "text": {} },
-        "reason": { "option": { "text": {} } }
+        "patch_hash": {
+          "hash": {}
+        },
+        "approver": {
+          "text": {}
+        },
+        "reason": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -866,7 +1640,9 @@
     "name": "sys/GovApplyParams@1",
     "type": {
       "record": {
-        "proposal_id": { "nat": {} }
+        "proposal_id": {
+          "nat": {}
+        }
       }
     }
   },
@@ -875,9 +1651,15 @@
     "name": "sys/GovApplyReceipt@1",
     "type": {
       "record": {
-        "proposal_id": { "nat": {} },
-        "manifest_hash_new": { "hash": {} },
-        "patch_hash": { "hash": {} }
+        "proposal_id": {
+          "nat": {}
+        },
+        "manifest_hash_new": {
+          "hash": {}
+        },
+        "patch_hash": {
+          "hash": {}
+        }
       }
     }
   },
@@ -886,25 +1668,47 @@
     "name": "sys/GovActionRequested@1",
     "type": {
       "record": {
-        "patch": { "ref": "sys/GovPatchInput@1" },
-        "manifest_base": { "option": { "hash": {} } },
-        "description": { "option": { "text": {} } }
+        "patch": {
+          "ref": "sys/GovPatchInput@1"
+        },
+        "manifest_base": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "description": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
   {
     "$kind": "defschema",
     "name": "sys/WorkspaceName@1",
-    "type": { "text": {} }
+    "type": {
+      "text": {}
+    }
   },
   {
     "$kind": "defschema",
     "name": "sys/WorkspaceRef@1",
     "type": {
       "record": {
-        "workspace": { "text": {} },
-        "version": { "option": { "nat": {} } },
-        "path": { "option": { "text": {} } }
+        "workspace": {
+          "text": {}
+        },
+        "version": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "path": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -913,11 +1717,23 @@
     "name": "sys/HttpPublishRule@1",
     "type": {
       "record": {
-        "route_prefix": { "text": {} },
-        "workspace": { "ref": "sys/WorkspaceRef@1" },
-        "default_doc": { "option": { "text": {} } },
-        "allow_dir_listing": { "bool": {} },
-        "cache": { "text": {} }
+        "route_prefix": {
+          "text": {}
+        },
+        "workspace": {
+          "ref": "sys/WorkspaceRef@1"
+        },
+        "default_doc": {
+          "option": {
+            "text": {}
+          }
+        },
+        "allow_dir_listing": {
+          "bool": {}
+        },
+        "cache": {
+          "text": {}
+        }
       }
     }
   },
@@ -928,8 +1744,12 @@
       "record": {
         "rules": {
           "map": {
-            "key": { "text": {} },
-            "value": { "ref": "sys/HttpPublishRule@1" }
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "ref": "sys/HttpPublishRule@1"
+            }
           }
         }
       }
@@ -940,8 +1760,14 @@
     "name": "sys/HttpPublishSet@1",
     "type": {
       "record": {
-        "id": { "text": {} },
-        "rule": { "option": { "ref": "sys/HttpPublishRule@1" } }
+        "id": {
+          "text": {}
+        },
+        "rule": {
+          "option": {
+            "ref": "sys/HttpPublishRule@1"
+          }
+        }
       }
     }
   },
@@ -950,9 +1776,15 @@
     "name": "sys/WorkspaceCommitMeta@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} },
-        "owner": { "text": {} },
-        "created_at": { "time": {} }
+        "root_hash": {
+          "hash": {}
+        },
+        "owner": {
+          "text": {}
+        },
+        "created_at": {
+          "time": {}
+        }
       }
     }
   },
@@ -961,11 +1793,17 @@
     "name": "sys/WorkspaceHistory@1",
     "type": {
       "record": {
-        "latest": { "nat": {} },
+        "latest": {
+          "nat": {}
+        },
         "versions": {
           "map": {
-            "key": { "nat": {} },
-            "value": { "ref": "sys/WorkspaceCommitMeta@1" }
+            "key": {
+              "nat": {}
+            },
+            "value": {
+              "ref": "sys/WorkspaceCommitMeta@1"
+            }
           }
         }
       }
@@ -976,9 +1814,17 @@
     "name": "sys/WorkspaceCommit@1",
     "type": {
       "record": {
-        "workspace": { "text": {} },
-        "expected_head": { "option": { "nat": {} } },
-        "meta": { "ref": "sys/WorkspaceCommitMeta@1" }
+        "workspace": {
+          "text": {}
+        },
+        "expected_head": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "meta": {
+          "ref": "sys/WorkspaceCommitMeta@1"
+        }
       }
     }
   },
@@ -987,11 +1833,21 @@
     "name": "sys/WorkspaceEntry@1",
     "type": {
       "record": {
-        "name": { "text": {} },
-        "kind": { "text": {} },
-        "hash": { "hash": {} },
-        "size": { "nat": {} },
-        "mode": { "nat": {} }
+        "name": {
+          "text": {}
+        },
+        "kind": {
+          "text": {}
+        },
+        "hash": {
+          "hash": {}
+        },
+        "size": {
+          "nat": {}
+        },
+        "mode": {
+          "nat": {}
+        }
       }
     }
   },
@@ -1000,7 +1856,11 @@
     "name": "sys/WorkspaceTree@1",
     "type": {
       "record": {
-        "entries": { "list": { "ref": "sys/WorkspaceEntry@1" } }
+        "entries": {
+          "list": {
+            "ref": "sys/WorkspaceEntry@1"
+          }
+        }
       }
     }
   },
@@ -1009,12 +1869,26 @@
     "name": "sys/WorkspaceEntry@2",
     "type": {
       "record": {
-        "name": { "text": {} },
-        "kind": { "text": {} },
-        "hash": { "hash": {} },
-        "size": { "nat": {} },
-        "mode": { "nat": {} },
-        "annotations_hash": { "option": { "hash": {} } }
+        "name": {
+          "text": {}
+        },
+        "kind": {
+          "text": {}
+        },
+        "hash": {
+          "hash": {}
+        },
+        "size": {
+          "nat": {}
+        },
+        "mode": {
+          "nat": {}
+        },
+        "annotations_hash": {
+          "option": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -1023,8 +1897,16 @@
     "name": "sys/WorkspaceTree@2",
     "type": {
       "record": {
-        "entries": { "list": { "ref": "sys/WorkspaceEntry@2" } },
-        "annotations_hash": { "option": { "hash": {} } }
+        "entries": {
+          "list": {
+            "ref": "sys/WorkspaceEntry@2"
+          }
+        },
+        "annotations_hash": {
+          "option": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -1033,8 +1915,12 @@
     "name": "sys/WorkspaceAnnotations@1",
     "type": {
       "map": {
-        "key": { "text": {} },
-        "value": { "hash": {} }
+        "key": {
+          "text": {}
+        },
+        "value": {
+          "hash": {}
+        }
       }
     }
   },
@@ -1043,8 +1929,14 @@
     "name": "sys/WorkspaceAnnotationsPatch@1",
     "type": {
       "map": {
-        "key": { "text": {} },
-        "value": { "option": { "hash": {} } }
+        "key": {
+          "text": {}
+        },
+        "value": {
+          "option": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -1053,8 +1945,14 @@
     "name": "sys/WorkspaceResolveParams@1",
     "type": {
       "record": {
-        "workspace": { "text": {} },
-        "version": { "option": { "nat": {} } }
+        "workspace": {
+          "text": {}
+        },
+        "version": {
+          "option": {
+            "nat": {}
+          }
+        }
       }
     }
   },
@@ -1063,10 +1961,24 @@
     "name": "sys/WorkspaceResolveReceipt@1",
     "type": {
       "record": {
-        "exists": { "bool": {} },
-        "resolved_version": { "option": { "nat": {} } },
-        "head": { "option": { "nat": {} } },
-        "root_hash": { "option": { "hash": {} } }
+        "exists": {
+          "bool": {}
+        },
+        "resolved_version": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "head": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "root_hash": {
+          "option": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -1075,11 +1987,27 @@
     "name": "sys/WorkspaceListParams@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} },
-        "path": { "option": { "text": {} } },
-        "scope": { "option": { "text": {} } },
-        "cursor": { "option": { "text": {} } },
-        "limit": { "nat": {} }
+        "root_hash": {
+          "hash": {}
+        },
+        "path": {
+          "option": {
+            "text": {}
+          }
+        },
+        "scope": {
+          "option": {
+            "text": {}
+          }
+        },
+        "cursor": {
+          "option": {
+            "text": {}
+          }
+        },
+        "limit": {
+          "nat": {}
+        }
       }
     }
   },
@@ -1088,11 +2016,27 @@
     "name": "sys/WorkspaceListEntry@1",
     "type": {
       "record": {
-        "path": { "text": {} },
-        "kind": { "text": {} },
-        "hash": { "option": { "hash": {} } },
-        "size": { "option": { "nat": {} } },
-        "mode": { "option": { "nat": {} } }
+        "path": {
+          "text": {}
+        },
+        "kind": {
+          "text": {}
+        },
+        "hash": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "size": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "mode": {
+          "option": {
+            "nat": {}
+          }
+        }
       }
     }
   },
@@ -1101,8 +2045,16 @@
     "name": "sys/WorkspaceListReceipt@1",
     "type": {
       "record": {
-        "entries": { "list": { "ref": "sys/WorkspaceListEntry@1" } },
-        "next_cursor": { "option": { "text": {} } }
+        "entries": {
+          "list": {
+            "ref": "sys/WorkspaceListEntry@1"
+          }
+        },
+        "next_cursor": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -1111,8 +2063,12 @@
     "name": "sys/WorkspaceReadRefParams@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} },
-        "path": { "text": {} }
+        "root_hash": {
+          "hash": {}
+        },
+        "path": {
+          "text": {}
+        }
       }
     }
   },
@@ -1121,30 +2077,50 @@
     "name": "sys/WorkspaceRefEntry@1",
     "type": {
       "record": {
-        "kind": { "text": {} },
-        "hash": { "hash": {} },
-        "size": { "nat": {} },
-        "mode": { "nat": {} }
+        "kind": {
+          "text": {}
+        },
+        "hash": {
+          "hash": {}
+        },
+        "size": {
+          "nat": {}
+        },
+        "mode": {
+          "nat": {}
+        }
       }
     }
   },
   {
     "$kind": "defschema",
     "name": "sys/WorkspaceReadRefReceipt@1",
-    "type": { "option": { "ref": "sys/WorkspaceRefEntry@1" } }
+    "type": {
+      "option": {
+        "ref": "sys/WorkspaceRefEntry@1"
+      }
+    }
   },
   {
     "$kind": "defschema",
     "name": "sys/WorkspaceReadBytesParams@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} },
-        "path": { "text": {} },
+        "root_hash": {
+          "hash": {}
+        },
+        "path": {
+          "text": {}
+        },
         "range": {
           "option": {
             "record": {
-              "start": { "nat": {} },
-              "end": { "nat": {} }
+              "start": {
+                "nat": {}
+              },
+              "end": {
+                "nat": {}
+              }
             }
           }
         }
@@ -1154,17 +2130,29 @@
   {
     "$kind": "defschema",
     "name": "sys/WorkspaceReadBytesReceipt@1",
-    "type": { "bytes": {} }
+    "type": {
+      "bytes": {}
+    }
   },
   {
     "$kind": "defschema",
     "name": "sys/WorkspaceWriteBytesParams@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} },
-        "path": { "text": {} },
-        "bytes": { "bytes": {} },
-        "mode": { "option": { "nat": {} } }
+        "root_hash": {
+          "hash": {}
+        },
+        "path": {
+          "text": {}
+        },
+        "bytes": {
+          "bytes": {}
+        },
+        "mode": {
+          "option": {
+            "nat": {}
+          }
+        }
       }
     }
   },
@@ -1173,8 +2161,12 @@
     "name": "sys/WorkspaceWriteBytesReceipt@1",
     "type": {
       "record": {
-        "new_root_hash": { "hash": {} },
-        "blob_hash": { "hash": {} }
+        "new_root_hash": {
+          "hash": {}
+        },
+        "blob_hash": {
+          "hash": {}
+        }
       }
     }
   },
@@ -1183,10 +2175,20 @@
     "name": "sys/WorkspaceWriteRefParams@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} },
-        "path": { "text": {} },
-        "blob_hash": { "hash": {} },
-        "mode": { "option": { "nat": {} } }
+        "root_hash": {
+          "hash": {}
+        },
+        "path": {
+          "text": {}
+        },
+        "blob_hash": {
+          "hash": {}
+        },
+        "mode": {
+          "option": {
+            "nat": {}
+          }
+        }
       }
     }
   },
@@ -1195,8 +2197,12 @@
     "name": "sys/WorkspaceWriteRefReceipt@1",
     "type": {
       "record": {
-        "new_root_hash": { "hash": {} },
-        "blob_hash": { "hash": {} }
+        "new_root_hash": {
+          "hash": {}
+        },
+        "blob_hash": {
+          "hash": {}
+        }
       }
     }
   },
@@ -1205,8 +2211,12 @@
     "name": "sys/WorkspaceRemoveParams@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} },
-        "path": { "text": {} }
+        "root_hash": {
+          "hash": {}
+        },
+        "path": {
+          "text": {}
+        }
       }
     }
   },
@@ -1215,7 +2225,9 @@
     "name": "sys/WorkspaceRemoveReceipt@1",
     "type": {
       "record": {
-        "new_root_hash": { "hash": {} }
+        "new_root_hash": {
+          "hash": {}
+        }
       }
     }
   },
@@ -1224,9 +2236,17 @@
     "name": "sys/WorkspaceDiffParams@1",
     "type": {
       "record": {
-        "root_a": { "hash": {} },
-        "root_b": { "hash": {} },
-        "prefix": { "option": { "text": {} } }
+        "root_a": {
+          "hash": {}
+        },
+        "root_b": {
+          "hash": {}
+        },
+        "prefix": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -1235,10 +2255,22 @@
     "name": "sys/WorkspaceDiffChange@1",
     "type": {
       "record": {
-        "path": { "text": {} },
-        "kind": { "text": {} },
-        "old_hash": { "option": { "hash": {} } },
-        "new_hash": { "option": { "hash": {} } }
+        "path": {
+          "text": {}
+        },
+        "kind": {
+          "text": {}
+        },
+        "old_hash": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "new_hash": {
+          "option": {
+            "hash": {}
+          }
+        }
       }
     }
   },
@@ -1247,7 +2279,11 @@
     "name": "sys/WorkspaceDiffReceipt@1",
     "type": {
       "record": {
-        "changes": { "list": { "ref": "sys/WorkspaceDiffChange@1" } }
+        "changes": {
+          "list": {
+            "ref": "sys/WorkspaceDiffChange@1"
+          }
+        }
       }
     }
   },
@@ -1256,8 +2292,14 @@
     "name": "sys/WorkspaceAnnotationsGetParams@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} },
-        "path": { "option": { "text": {} } }
+        "root_hash": {
+          "hash": {}
+        },
+        "path": {
+          "option": {
+            "text": {}
+          }
+        }
       }
     }
   },
@@ -1266,7 +2308,11 @@
     "name": "sys/WorkspaceAnnotationsGetReceipt@1",
     "type": {
       "record": {
-        "annotations": { "option": { "ref": "sys/WorkspaceAnnotations@1" } }
+        "annotations": {
+          "option": {
+            "ref": "sys/WorkspaceAnnotations@1"
+          }
+        }
       }
     }
   },
@@ -1275,9 +2321,17 @@
     "name": "sys/WorkspaceAnnotationsSetParams@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} },
-        "path": { "option": { "text": {} } },
-        "annotations_patch": { "ref": "sys/WorkspaceAnnotationsPatch@1" }
+        "root_hash": {
+          "hash": {}
+        },
+        "path": {
+          "option": {
+            "text": {}
+          }
+        },
+        "annotations_patch": {
+          "ref": "sys/WorkspaceAnnotationsPatch@1"
+        }
       }
     }
   },
@@ -1286,8 +2340,12 @@
     "name": "sys/WorkspaceAnnotationsSetReceipt@1",
     "type": {
       "record": {
-        "new_root_hash": { "hash": {} },
-        "annotations_hash": { "hash": {} }
+        "new_root_hash": {
+          "hash": {}
+        },
+        "annotations_hash": {
+          "hash": {}
+        }
       }
     }
   },
@@ -1296,7 +2354,9 @@
     "name": "sys/WorkspaceEmptyRootParams@1",
     "type": {
       "record": {
-        "workspace": { "text": {} }
+        "workspace": {
+          "text": {}
+        }
       }
     }
   },
@@ -1305,19 +2365,28 @@
     "name": "sys/WorkspaceEmptyRootReceipt@1",
     "type": {
       "record": {
-        "root_hash": { "hash": {} }
+        "root_hash": {
+          "hash": {}
+        }
       }
     }
   },
-
   {
     "$kind": "defschema",
     "name": "sys/ReadMeta@1",
     "type": {
       "record": {
-        "journal_height": { "nat": {} },
-        "snapshot_hash": { "option": { "hash": {} } },
-        "manifest_hash": { "hash": {} }
+        "journal_height": {
+          "nat": {}
+        },
+        "snapshot_hash": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "manifest_hash": {
+          "hash": {}
+        }
       }
     }
   },
@@ -1326,7 +2395,10 @@
     "name": "sys/IntrospectManifestParams@1",
     "type": {
       "record": {
-        "consistency": { "text": {}, "$comment": "head | exact:<height> | at_least:<height>" }
+        "consistency": {
+          "text": {},
+          "$comment": "head | exact:<height> | at_least:<height>"
+        }
       }
     }
   },
@@ -1335,8 +2407,12 @@
     "name": "sys/IntrospectManifestReceipt@1",
     "type": {
       "record": {
-        "manifest": { "bytes": {} },
-        "meta": { "ref": "sys/ReadMeta@1" }
+        "manifest": {
+          "bytes": {}
+        },
+        "meta": {
+          "ref": "sys/ReadMeta@1"
+        }
       }
     }
   },
@@ -1345,9 +2421,18 @@
     "name": "sys/IntrospectWorkflowStateParams@1",
     "type": {
       "record": {
-        "workflow": { "text": {} },
-        "key": { "option": { "bytes": {} } },
-        "consistency": { "text": {}, "$comment": "head | exact:<height> | at_least:<height>" }
+        "workflow": {
+          "text": {}
+        },
+        "key": {
+          "option": {
+            "bytes": {}
+          }
+        },
+        "consistency": {
+          "text": {},
+          "$comment": "head | exact:<height> | at_least:<height>"
+        }
       }
     }
   },
@@ -1356,22 +2441,32 @@
     "name": "sys/IntrospectWorkflowStateReceipt@1",
     "type": {
       "record": {
-        "state": { "option": { "bytes": {} } },
-        "meta": { "ref": "sys/ReadMeta@1" }
+        "state": {
+          "option": {
+            "bytes": {}
+          }
+        },
+        "meta": {
+          "ref": "sys/ReadMeta@1"
+        }
       }
     }
   },
   {
     "$kind": "defschema",
     "name": "sys/IntrospectJournalHeadParams@1",
-    "type": { "record": {} }
+    "type": {
+      "record": {}
+    }
   },
   {
     "$kind": "defschema",
     "name": "sys/IntrospectJournalHeadReceipt@1",
     "type": {
       "record": {
-        "meta": { "ref": "sys/ReadMeta@1" }
+        "meta": {
+          "ref": "sys/ReadMeta@1"
+        }
       }
     }
   },
@@ -1380,7 +2475,9 @@
     "name": "sys/IntrospectListCellsParams@1",
     "type": {
       "record": {
-        "workflow": { "text": {} }
+        "workflow": {
+          "text": {}
+        }
       }
     }
   },
@@ -1392,14 +2489,24 @@
         "cells": {
           "list": {
             "record": {
-              "key": { "bytes": {} },
-              "state_hash": { "hash": {} },
-              "size": { "nat": {} },
-              "last_active_ns": { "nat": {} }
+              "key": {
+                "bytes": {}
+              },
+              "state_hash": {
+                "hash": {}
+              },
+              "size": {
+                "nat": {}
+              },
+              "last_active_ns": {
+                "nat": {}
+              }
             }
           }
         },
-        "meta": { "ref": "sys/ReadMeta@1" }
+        "meta": {
+          "ref": "sys/ReadMeta@1"
+        }
       }
     }
   }

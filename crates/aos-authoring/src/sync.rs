@@ -839,15 +839,11 @@ fn import_defs_hash(root: &Path) -> Result<String> {
                     let node = AirNode::Defmodule(module);
                     add_def_entry(&mut entries, &mut seen, "defmodule", name.as_str(), &node)?;
                 }
-                AirNode::Defcap(cap) => {
-                    let name = cap.name.clone();
-                    let node = AirNode::Defcap(cap);
-                    add_def_entry(&mut entries, &mut seen, "defcap", name.as_str(), &node)?;
-                }
-                AirNode::Defpolicy(policy) => {
-                    let name = policy.name.clone();
-                    let node = AirNode::Defpolicy(policy);
-                    add_def_entry(&mut entries, &mut seen, "defpolicy", name.as_str(), &node)?;
+                AirNode::Defcap(_) | AirNode::Defpolicy(_) => {
+                    anyhow::bail!(
+                        "defcap and defpolicy are no longer supported in imported AIR ({})",
+                        path.display()
+                    );
                 }
                 AirNode::Defsecret(secret) => {
                     let name = secret.name.clone();
@@ -1054,9 +1050,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in [
-        "schemas", "modules", "plans", "caps", "policies", "effects", "secrets",
-    ] {
+    for key in ["schemas", "modules", "plans", "effects", "secrets"] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {
@@ -1302,7 +1296,7 @@ mod tests {
         .expect("write defs");
         std::fs::write(
             import_root.join("manifest.air.json"),
-            r#"{"$kind":"manifest","air_version":"v1","schemas":[],"modules":[],"plans":[],"effects":[],"caps":[],"policies":[],"secrets":[],"module_bindings":{},"triggers":[]}"#,
+            r#"{"$kind":"manifest","air_version":"v1","schemas":[],"modules":[],"plans":[],"effects":[],"secrets":[],"triggers":[]}"#,
         )
         .expect("write manifest");
 

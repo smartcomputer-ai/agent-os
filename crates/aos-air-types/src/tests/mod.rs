@@ -3,12 +3,10 @@ use jsonschema::{JSONSchema, paths::JSONPointer};
 use once_cell::sync::Lazy;
 use serde_json::Value;
 
-pub mod caps;
 pub mod effects;
 pub mod manifest;
 pub mod modules;
 pub mod patch;
-pub mod policies;
 pub mod schemas;
 
 static COMMON_SCHEMA: Lazy<Value> =

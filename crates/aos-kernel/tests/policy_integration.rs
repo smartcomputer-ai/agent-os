@@ -1,16 +1,11 @@
-use aos_air_types::{
-    DefPolicy, DefSchema, EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch,
-    PolicyRule, WorkflowAbi,
-};
+use aos_air_types::{DefSchema, WorkflowAbi};
 use aos_effects::builtins::HttpRequestParams;
-use aos_kernel::cap_enforcer::CapCheckOutput;
-use aos_kernel::error::KernelError;
-use aos_wasm_abi::{PureOutput, WorkflowEffect, WorkflowOutput};
+use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use helpers::fixtures::{self, TestStore, TestWorld, zero_hash};
 
 #[path = "support/helpers.rs"]
 mod helpers;
-use helpers::{attach_default_policy, def_text_record_schema, text_type};
+use helpers::{def_text_record_schema, text_type};
 
 fn http_workflow_output(url: &str) -> WorkflowOutput {
     let mut headers = aos_effects::builtins::HeaderMap::new();
@@ -45,24 +40,6 @@ fn introspect_workflow_output() -> WorkflowOutput {
     }
 }
 
-fn allow_http_enforcer(store: &std::sync::Arc<TestStore>) -> aos_air_types::DefModule {
-    let allow_output = CapCheckOutput {
-        constraints_ok: true,
-        deny: None,
-    };
-    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
-    let pure_output = PureOutput {
-        output: output_bytes,
-    };
-    fixtures::stub_pure_module(
-        store,
-        "sys/CapEnforceHttpOut@1",
-        &pure_output,
-        "sys/CapCheckInput@1",
-        "sys/CapCheckOutput@1",
-    )
-}
-
 fn build_http_workflow_manifest(
     store: &std::sync::Arc<TestStore>,
     workflow_name: &str,
@@ -82,8 +59,7 @@ fn build_http_workflow_manifest(
         fixtures::START_SCHEMA,
         workflow_name,
     )];
-    let mut loaded =
-        fixtures::build_loaded_manifest(vec![workflow, allow_http_enforcer(store)], routing);
+    let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![
@@ -94,9 +70,6 @@ fn build_http_workflow_manifest(
             },
         ],
     );
-    if let Some(binding) = loaded.manifest.module_bindings.get_mut(workflow_name) {
-        binding.slots.insert("default".into(), "cap_http".into());
-    }
     loaded
 }
 
@@ -130,34 +103,18 @@ fn build_introspect_workflow_manifest(
             },
         ],
     );
-    if let Some(binding) = loaded.manifest.module_bindings.get_mut(workflow_name) {
-        binding.slots.insert("default".into(), "query_cap".into());
-    }
     loaded
 }
 
 #[test]
-fn workflow_http_effect_is_denied() {
+fn workflow_http_effect_is_allowed_without_policy() {
     let store = fixtures::new_mem_store();
     let workflow_name = "com.acme/HttpWorkflow@1";
-    let mut loaded = build_http_workflow_manifest(
+    let loaded = build_http_workflow_manifest(
         &store,
         workflow_name,
-        http_workflow_output("https://denied"),
+        http_workflow_output("https://example.com/allowed"),
     );
-
-    let policy = DefPolicy {
-        name: "com.acme/policy@1".into(),
-        rules: vec![PolicyRule {
-            when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::http_request()),
-                origin_kind: Some(OriginKind::Workflow),
-                ..Default::default()
-            },
-            decision: PolicyDecision::Deny,
-        }],
-    };
-    attach_default_policy(&mut loaded, policy);
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
@@ -166,35 +123,25 @@ fn workflow_http_effect_is_denied() {
             &serde_json::json!({ "id": "start" }),
         )
         .expect("submit start event");
-    let err = world.kernel.tick_until_idle().unwrap_err();
-    assert!(
-        matches!(err, KernelError::PolicyDenied { .. }),
-        "expected policy denial, got {err:?}"
+    world.tick_n(2).unwrap();
+
+    let effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(
+        effects[0].kind.as_str(),
+        aos_effects::EffectKind::HTTP_REQUEST
     );
 }
 
 #[test]
-fn workflow_effect_allowed_by_policy() {
+fn workflow_effect_declared_in_abi_is_allowed() {
     let store = fixtures::new_mem_store();
     let workflow_name = "com.acme/HttpAllowed@1";
-    let mut loaded = build_http_workflow_manifest(
+    let loaded = build_http_workflow_manifest(
         &store,
         workflow_name,
         http_workflow_output("https://example.com/allowed"),
     );
-
-    let policy = DefPolicy {
-        name: "com.acme/workflow-policy@1".into(),
-        rules: vec![PolicyRule {
-            when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::http_request()),
-                origin_kind: Some(OriginKind::Workflow),
-                ..Default::default()
-            },
-            decision: PolicyDecision::Allow,
-        }],
-    };
-    attach_default_policy(&mut loaded, policy);
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
@@ -215,21 +162,8 @@ fn workflow_effect_params_are_preserved() {
     let store = fixtures::new_mem_store();
     let workflow_name = "com.acme/HttpParams@1";
     let expected_url = "https://example.com/preserved";
-    let mut loaded =
+    let loaded =
         build_http_workflow_manifest(&store, workflow_name, http_workflow_output(expected_url));
-
-    let policy = DefPolicy {
-        name: "com.acme/workflow-policy@1".into(),
-        rules: vec![PolicyRule {
-            when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::http_request()),
-                origin_kind: Some(OriginKind::Workflow),
-                ..Default::default()
-            },
-            decision: PolicyDecision::Allow,
-        }],
-    };
-    attach_default_policy(&mut loaded, policy);
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
@@ -244,22 +178,9 @@ fn workflow_effect_params_are_preserved() {
 }
 
 #[test]
-fn workflow_introspect_denied_by_policy() {
+fn workflow_introspect_effect_is_allowed_without_policy() {
     let store = fixtures::new_mem_store();
-    let mut loaded = build_introspect_workflow_manifest(&store);
-
-    let policy = DefPolicy {
-        name: "com.acme/policy@1".into(),
-        rules: vec![PolicyRule {
-            when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::introspect_manifest()),
-                origin_kind: Some(OriginKind::Workflow),
-                ..Default::default()
-            },
-            decision: PolicyDecision::Deny,
-        }],
-    };
-    attach_default_policy(&mut loaded, policy);
+    let loaded = build_introspect_workflow_manifest(&store);
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
@@ -268,28 +189,5 @@ fn workflow_introspect_denied_by_policy() {
             &serde_json::json!({ "id": "start" }),
         )
         .expect("submit start event");
-    let err = world.kernel.tick_until_idle().unwrap_err();
-    assert!(
-        matches!(err, KernelError::PolicyDenied { .. }),
-        "expected policy denial, got {err:?}"
-    );
-}
-
-#[test]
-fn workflow_introspect_missing_capability_is_rejected() {
-    let store = fixtures::new_mem_store();
-    let mut loaded = build_introspect_workflow_manifest(&store);
-
-    if let Some(defaults) = loaded.manifest.defaults.as_mut() {
-        defaults.cap_grants.retain(|g| g.name != "query_cap");
-    }
-
-    let err = match TestWorld::with_store(store, loaded) {
-        Ok(_) => panic!("expected manifest load to fail due to missing query cap"),
-        Err(e) => e,
-    };
-    match err {
-        KernelError::ModuleCapabilityMissing { ref cap, .. } if cap == "query_cap" => {}
-        other => panic!("expected missing query cap at manifest load, got {other:?}"),
-    }
+    world.kernel.tick_until_idle().unwrap();
 }

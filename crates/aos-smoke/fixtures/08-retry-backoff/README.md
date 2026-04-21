@@ -15,9 +15,7 @@ crates/aos-smoke/fixtures/08-retry-backoff/
     schemas.air.json      # StartWork, WorkRequested, WorkOk, WorkErr, RetryEvent, RetryState
     module.air.json       # defmodule demo/RetrySM@1 (workflow)
     plans.air.json        # defplan demo/WorkPlan@1 (raises WorkErr)
-    capabilities.air.json # timer cap
-    policies.air.json     # allow-all policy
-    manifest.air.json     # wires routing + trigger + cap grant
+    manifest.air.json     # wires routing + effects
   workflow/
     Cargo.toml
     src/lib.rs            # workflow state machine and backoff logic

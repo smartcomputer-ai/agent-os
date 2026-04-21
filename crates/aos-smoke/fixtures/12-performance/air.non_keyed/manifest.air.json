@@ -2,15 +2,19 @@
   "$kind": "manifest",
   "air_version": "1",
   "schemas": [
-    { "name": "demo/PerfState@1" },
-    { "name": "demo/PerfEvent@1" }
+    {
+      "name": "demo/PerfState@1"
+    },
+    {
+      "name": "demo/PerfEvent@1"
+    }
   ],
   "modules": [
-    { "name": "demo/PerfCounter@1" }
+    {
+      "name": "demo/PerfCounter@1"
+    }
   ],
   "effects": [],
-  "caps": [],
-  "policies": [],
   "routing": {
     "subscriptions": [
       {

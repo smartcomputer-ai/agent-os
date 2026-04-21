@@ -24,48 +24,8 @@
   "modules": [
     {
       "name": "demo/SafeUpgrade@1"
-    },
-    {
-      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
-  "caps": [
-    {
-      "name": "demo/http_fetch_cap@1"
-    }
-  ],
-  "policies": [
-    {
-      "name": "demo/http-policy@1"
-    }
-  ],
-  "defaults": {
-    "policy": "demo/http-policy@1",
-    "cap_grants": [
-      {
-        "name": "cap_http_fetch",
-        "cap": "demo/http_fetch_cap@1",
-        "params": {
-          "record": {
-            "hosts": {
-              "set": [
-                {
-                  "text": "example.com"
-                }
-              ]
-            },
-            "methods": {
-              "set": [
-                {
-                  "text": "GET"
-                }
-              ]
-            }
-          }
-        }
-      }
-    ]
-  },
   "routing": {
     "subscriptions": [
       {

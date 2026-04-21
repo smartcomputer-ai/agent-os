@@ -214,14 +214,14 @@ mod tests {
     #[test]
     fn normalize_patch_manifest_refs_keeps_builtin_module_hash() {
         let original_hash = format!("sha256:{}", "1".repeat(64));
-        assert!(builtins::find_builtin_module("sys/CapEnforceLlmBasic@1").is_some());
+        assert!(builtins::find_builtin_module("sys/Workspace@1").is_some());
 
         let mut patch = ManifestPatch {
             manifest: Manifest {
                 air_version: CURRENT_AIR_VERSION.to_string(),
                 schemas: Vec::new(),
                 modules: vec![NamedRef {
-                    name: "sys/CapEnforceLlmBasic@1".into(),
+                    name: "sys/Workspace@1".into(),
                     hash: HashRef::new(original_hash.clone()).expect("valid hash"),
                 }],
                 effects: Vec::new(),

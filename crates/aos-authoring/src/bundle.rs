@@ -13,8 +13,8 @@ use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::LoadedManifest;
 use aos_kernel::Store;
 use aos_kernel::patch_doc::{
-    AddDef, ManifestRef, PatchDocument, PatchOp, SetDefaults, SetManifestRefs, SetModuleBindings,
-    SetRoutingEvents, SetRoutingInboxes, SetSecrets,
+    AddDef, ManifestRef, PatchDocument, PatchOp, SetManifestRefs, SetRoutingEvents,
+    SetRoutingInboxes, SetSecrets,
 };
 
 use crate::manifest_loader;
@@ -212,28 +212,6 @@ pub fn build_patch_document(
             },
         });
     }
-    for cap in &bundle.caps {
-        if is_sys_name(cap.name.as_str()) {
-            continue;
-        }
-        patches.push(PatchOp::AddDef {
-            add_def: AddDef {
-                kind: "defcap".to_string(),
-                node: AirNode::Defcap(cap.clone()),
-            },
-        });
-    }
-    for policy in &bundle.policies {
-        if is_sys_name(policy.name.as_str()) {
-            continue;
-        }
-        patches.push(PatchOp::AddDef {
-            add_def: AddDef {
-                kind: "defpolicy".to_string(),
-                node: AirNode::Defpolicy(policy.clone()),
-            },
-        });
-    }
     for effect in &bundle.effects {
         if is_sys_name(effect.name.as_str()) {
             continue;
@@ -270,14 +248,6 @@ pub fn build_patch_document(
         &filter_sys_refs(&bundle.manifest.modules),
     ));
     add_refs.extend(manifest_refs_from(
-        "defcap",
-        &filter_sys_refs(&bundle.manifest.caps),
-    ));
-    add_refs.extend(manifest_refs_from(
-        "defpolicy",
-        &filter_sys_refs(&bundle.manifest.policies),
-    ));
-    add_refs.extend(manifest_refs_from(
         "defeffect",
         &filter_sys_refs(&bundle.manifest.effects),
     ));
@@ -288,15 +258,6 @@ pub fn build_patch_document(
             set_manifest_refs: SetManifestRefs {
                 add: add_refs,
                 remove: Vec::new(),
-            },
-        });
-    }
-
-    if let Some(defaults) = &bundle.manifest.defaults {
-        patches.push(PatchOp::SetDefaults {
-            set_defaults: SetDefaults {
-                policy: Some(defaults.policy.clone()),
-                cap_grants: Some(defaults.cap_grants.clone()),
             },
         });
     }
@@ -338,16 +299,6 @@ pub fn build_patch_document(
         .unwrap_or_default();
     patches.push(PatchOp::SetRoutingInboxes {
         set_routing_inboxes: SetRoutingInboxes { pre_hash, inboxes },
-    });
-
-    let pre_hash = Hash::of_cbor(&base_manifest.module_bindings)
-        .context("hash base module_bindings")?
-        .to_hex();
-    patches.push(PatchOp::SetModuleBindings {
-        set_module_bindings: SetModuleBindings {
-            pre_hash,
-            bindings: bundle.manifest.module_bindings.clone(),
-        },
     });
 
     let pre_hash = Hash::of_cbor(&secrets_pre_state)
@@ -448,8 +399,6 @@ fn patch_manifest_for_genesis(
     let mut manifest = manifest.clone();
     patch_named_refs_for_genesis("schema", &mut manifest.schemas, &stored.schemas)?;
     patch_named_refs_for_genesis("module", &mut manifest.modules, &stored.modules)?;
-    patch_named_refs_for_genesis("cap", &mut manifest.caps, &stored.caps)?;
-    patch_named_refs_for_genesis("policy", &mut manifest.policies, &stored.policies)?;
     patch_named_refs_for_genesis("effect", &mut manifest.effects, &stored.effects)?;
     let mut secret_refs = manifest_secret_refs(&manifest.secrets)?;
     patch_named_refs_for_genesis("secret", &mut secret_refs, &stored.secrets)?;
@@ -538,8 +487,6 @@ pub fn write_air_layout_with_options(
     let (schemas, sys_schemas) = split_sys_defs(&bundle.schemas, options.include_sys);
     let (modules, sys_modules) = split_sys_defs(&bundle.modules, options.include_sys);
     let (effects, sys_effects) = split_sys_defs(&bundle.effects, options.include_sys);
-    let (caps, sys_caps) = split_sys_defs(&bundle.caps, options.include_sys);
-    let (policies, sys_policies) = split_sys_defs(&bundle.policies, options.include_sys);
     let (secrets, sys_secrets) = split_sys_defs(&bundle.secrets, options.include_sys);
 
     write_json(
@@ -547,7 +494,7 @@ pub fn write_air_layout_with_options(
         &AirNode::Manifest(bundle.manifest.clone()),
     )?;
     if options.defs_bundle {
-        let defs = collect_def_nodes(schemas, modules, effects, caps, policies, secrets);
+        let defs = collect_def_nodes(schemas, modules, effects, secrets);
         write_node_array_with_options(
             &air_dir.join("defs.air.json"),
             defs,
@@ -568,28 +515,13 @@ pub fn write_air_layout_with_options(
             effects.iter().cloned().map(AirNode::Defeffect).collect(),
         )?;
         write_node_array(
-            &air_dir.join("capabilities.air.json"),
-            caps.iter().cloned().map(AirNode::Defcap).collect(),
-        )?;
-        write_node_array(
-            &air_dir.join("policies.air.json"),
-            policies.iter().cloned().map(AirNode::Defpolicy).collect(),
-        )?;
-        write_node_array(
             &air_dir.join("secrets.air.json"),
             secrets.iter().cloned().map(AirNode::Defsecret).collect(),
         )?;
     }
 
     if options.include_sys {
-        let sys_nodes = collect_sys_nodes(
-            sys_schemas,
-            sys_modules,
-            sys_effects,
-            sys_caps,
-            sys_policies,
-            sys_secrets,
-        );
+        let sys_nodes = collect_sys_nodes(sys_schemas, sys_modules, sys_effects, sys_secrets);
         write_node_array(&air_dir.join("sys.air.json"), sys_nodes)?;
     }
 
@@ -751,16 +683,12 @@ fn collect_sys_nodes(
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
     effects: Vec<DefEffect>,
-    caps: Vec<DefCap>,
-    policies: Vec<DefPolicy>,
     secrets: Vec<DefSecret>,
 ) -> Vec<AirNode> {
     let mut nodes = Vec::new();
     nodes.extend(schemas.into_iter().map(AirNode::Defschema));
     nodes.extend(modules.into_iter().map(AirNode::Defmodule));
     nodes.extend(effects.into_iter().map(AirNode::Defeffect));
-    nodes.extend(caps.into_iter().map(AirNode::Defcap));
-    nodes.extend(policies.into_iter().map(AirNode::Defpolicy));
     nodes.extend(secrets.into_iter().map(AirNode::Defsecret));
     nodes
 }
@@ -769,16 +697,12 @@ fn collect_def_nodes(
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
     effects: Vec<DefEffect>,
-    caps: Vec<DefCap>,
-    policies: Vec<DefPolicy>,
     secrets: Vec<DefSecret>,
 ) -> Vec<AirNode> {
     let mut nodes = Vec::new();
     nodes.extend(schemas.into_iter().map(AirNode::Defschema));
     nodes.extend(modules.into_iter().map(AirNode::Defmodule));
     nodes.extend(effects.into_iter().map(AirNode::Defeffect));
-    nodes.extend(caps.into_iter().map(AirNode::Defcap));
-    nodes.extend(policies.into_iter().map(AirNode::Defpolicy));
     nodes.extend(secrets.into_iter().map(AirNode::Defsecret));
     nodes
 }

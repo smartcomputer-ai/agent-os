@@ -8,8 +8,7 @@
       "workflow": {
         "state": "demo/PerfState@1",
         "event": "demo/PerfEvent@1",
-        "effects_emitted": [],
-        "cap_slots": {}
+        "effects_emitted": []
       }
     }
   }

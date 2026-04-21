@@ -178,18 +178,6 @@ pub async fn upload_bundle(
                 )
             })?;
     }
-    for cap in &bundle.caps {
-        client.log(format!("uploading capability {}", cap.name));
-        upload_node(client, &AirNode::Defcap(cap.clone()))
-            .await
-            .with_context(|| format!("upload capability {} to CAS", cap.name))?;
-    }
-    for policy in &bundle.policies {
-        client.log(format!("uploading policy {}", policy.name));
-        upload_node(client, &AirNode::Defpolicy(policy.clone()))
-            .await
-            .with_context(|| format!("upload policy {} to CAS", policy.name))?;
-    }
     for effect in &bundle.effects {
         client.log(format!("uploading effect {}", effect.name));
         upload_node(client, &AirNode::Defeffect(effect.clone()))

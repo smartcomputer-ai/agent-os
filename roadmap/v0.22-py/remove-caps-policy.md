@@ -1,6 +1,6 @@
 # Remove Caps And Policies From v0.22
 
-Status: in progress — Phase 1 schema/spec simplification started
+Status: done for cap/policy removal. Python effect runner work remains as a separate follow-on.
 
 ## Context
 
@@ -78,12 +78,14 @@ Keep these as permissive internals so existing code does not need to be gutted i
 
 - `LoadedManifest` indexes may keep empty caps/policies maps internally.
 - Kernel authorization function stays, but returns allow by default.
-- Cap enforcer machinery can remain unreachable/dead-ended temporarily.
+- Legacy kernel cap enforcer machinery may remain unreachable/dead-ended temporarily for compatibility tests, but public built-in defs and `aos-sys` handlers are removed.
 - Policy evaluator can remain behind an empty/default policy shim.
 - Receipt, open-work, and idempotency logic remain unchanged.
 - Effect param and receipt schema validation remains strict.
 
 ## Phase 1: Schema And AIR Surface
+
+Status: done. The public `defcap`/`defpolicy` schema files and built-in cap defs are removed.
 
 Work:
 
@@ -101,6 +103,8 @@ Done when:
 
 ## Phase 2: Rust Model And Loader
 
+Status: done for the public surface. Legacy structs remain internally, but authored/imported AIR rejects `defcap` and `defpolicy`, and the active schema set excludes them.
+
 Work:
 
 - Make `Manifest` omit caps, policies, `defaults.policy`, `defaults.cap_grants`, and `module_bindings`.
@@ -114,6 +118,8 @@ Done when:
 - Manifest validation errors no longer mention missing caps, cap grants, or policy defaults.
 
 ## Phase 3: Kernel Runtime Shim
+
+Status: done for workflow-origin effect enqueue. New workflow effects use an internal sentinel grant while legacy intent structs still carry `cap_name`.
 
 Work:
 
@@ -132,6 +138,8 @@ Done when:
 
 ## Phase 4: Authoring, CLI, Examples
 
+Status: done for checked-in authored AIR fixtures and public authoring output. Cap/policy fixture files were removed, and patch docs no longer expose defaults or module bindings.
+
 Work:
 
 - Remove cap/policy prompts and generated manifest blocks from `aos` authoring flows.
@@ -145,6 +153,8 @@ Done when:
 - All checked-in fixtures use the simplified manifest shape.
 
 ## Phase 5: Python Effects On Simplified Model
+
+Status: follow-on.
 
 Work:
 

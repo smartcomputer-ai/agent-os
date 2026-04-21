@@ -7,8 +7,10 @@
       "workflow": {
         "state": "demo/LlmSummarizerState@1",
         "event": "demo/LlmSummarizerEvent@1",
-        "effects_emitted": ["http.request", "llm.generate"],
-        "cap_slots": {}
+        "effects_emitted": [
+          "http.request",
+          "llm.generate"
+        ]
       }
     }
   }

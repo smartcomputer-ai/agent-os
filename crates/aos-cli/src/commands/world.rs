@@ -422,7 +422,7 @@ struct WorldTraceSummaryArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Compare the local authored bundle against the selected node world's current manifest, build a governance patch document, submit governance propose, and optionally chain shadow, approve, and apply. Use this for manifest-level changes such as defs, modules, routing, policies, effects, and secrets."
+    long_about = "Compare the local authored bundle against the selected node world's current manifest, build a governance patch document, submit governance propose, and optionally chain shadow, approve, and apply. Use this for manifest-level changes such as defs, modules, routing, effects, and secrets."
 )]
 struct WorldPatchArgs {
     /// Local world root to build and diff against the node manifest.

@@ -24,8 +24,6 @@
     }
   ],
   "effects": [],
-  "caps": [],
-  "policies": [],
   "routing": {
     "subscriptions": [
       {

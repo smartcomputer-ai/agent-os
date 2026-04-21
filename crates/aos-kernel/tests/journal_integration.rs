@@ -1,17 +1,14 @@
 use aos_air_types::{
-    DefModule, DefPolicy, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind, OriginKind,
-    PolicyDecision, PolicyMatch, PolicyRule, TypeExpr, TypeRecord, TypeRef, TypeVariant,
+    DefModule, HashRef, ModuleAbi, ModuleKind, TypeExpr, TypeRecord, TypeRef, TypeVariant,
     WorkflowAbi,
 };
 use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::Store;
 use aos_kernel::journal::Journal;
-use aos_kernel::journal::{JournalKind, JournalRecord, PolicyDecisionOutcome};
+use aos_kernel::journal::{JournalKind, JournalRecord};
 use aos_kernel::snapshot::WorkflowStatusSnapshot;
 use aos_wasm_abi::{DomainEvent, WorkflowEffect, WorkflowOutput};
-use serde_cbor::Value as CborValue;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use wat::parse_str;
 
@@ -19,7 +16,7 @@ use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 
 #[path = "support/helpers.rs"]
 mod helpers;
-use helpers::{attach_default_policy, timer_manifest};
+use helpers::timer_manifest;
 
 #[test]
 fn workflow_timer_receipt_replays_from_journal() {
@@ -383,32 +380,9 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
 }
 
 #[test]
-fn workflow_policy_decision_is_journaled() {
+fn workflow_authorized_effects_skip_policy_decision_journal_records() {
     let store = fixtures::new_mem_store();
-    let mut manifest = no_plan_workflow_manifest(&store);
-    let policy = DefPolicy {
-        name: "com.acme/allow-workflow-effects@1".into(),
-        rules: vec![
-            PolicyRule {
-                when: PolicyMatch {
-                    origin_kind: Some(OriginKind::Workflow),
-                    effect_kind: Some(AirEffectKind::timer_set()),
-                    ..Default::default()
-                },
-                decision: PolicyDecision::Allow,
-            },
-            PolicyRule {
-                when: PolicyMatch {
-                    origin_kind: Some(OriginKind::Workflow),
-                    effect_kind: Some(AirEffectKind::blob_put()),
-                    ..Default::default()
-                },
-                decision: PolicyDecision::Allow,
-            },
-        ],
-    };
-    attach_default_policy(&mut manifest, policy.clone());
-
+    let manifest = no_plan_workflow_manifest(&store);
     let mut world = TestWorld::with_store(store, manifest).unwrap();
     let start_event = serde_json::json!({
         "$tag": "Start",
@@ -419,30 +393,21 @@ fn workflow_policy_decision_is_journaled() {
         .expect("submit workflow start");
     world.tick_n(1).unwrap();
 
-    let policy_records: Vec<_> = world
+    let policy_records = world
         .kernel
         .dump_journal()
         .unwrap()
         .into_iter()
         .filter(|entry| entry.kind == JournalKind::PolicyDecision)
-        .filter_map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok())
-        .collect();
+        .count();
     assert!(
-        !policy_records.is_empty(),
-        "expected policy decision records"
+        policy_records == 0,
+        "workflow-origin effects use the permissive authorization shim and should not journal policy decisions"
     );
-    assert!(policy_records.into_iter().any(|record| match record {
-        JournalRecord::PolicyDecision(decision) => {
-            decision.policy_name == policy.name
-                && decision.rule_index == Some(0)
-                && decision.decision == PolicyDecisionOutcome::Allow
-        }
-        _ => false,
-    }));
 }
 
 #[test]
-fn workflow_cap_decision_includes_stable_grant_hash() {
+fn workflow_authorized_effects_skip_cap_decision_journal_records() {
     let store = fixtures::new_mem_store();
     let manifest = no_plan_workflow_manifest(&store);
     let mut world = TestWorld::with_store(store, manifest).unwrap();
@@ -456,34 +421,17 @@ fn workflow_cap_decision_includes_stable_grant_hash() {
         .expect("submit workflow start");
     world.tick_n(1).unwrap();
 
-    let cap_records: Vec<_> = world
+    let cap_records = world
         .kernel
         .dump_journal()
         .unwrap()
         .into_iter()
         .filter(|entry| entry.kind == JournalKind::CapDecision)
-        .filter_map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok())
-        .collect();
-    assert!(!cap_records.is_empty(), "expected cap decision records");
-
-    let empty_params =
-        aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new())).expect("params cbor");
-    assert!(cap_records.into_iter().any(|record| match record {
-        JournalRecord::CapDecision(decision) => {
-            let defcap_ref = match decision.cap_type.as_str() {
-                "timer" => "sys/timer@1",
-                "blob" => "sys/blob@1",
-                _ => return false,
-            };
-            compute_grant_hash(
-                defcap_ref,
-                &decision.cap_type,
-                &empty_params,
-                decision.expiry_ns,
-            ) == decision.grant_hash
-        }
-        _ => false,
-    }));
+        .count();
+    assert!(
+        cap_records == 0,
+        "workflow-origin effects use the permissive authorization shim and should not journal cap decisions"
+    );
 }
 
 #[test]
@@ -823,33 +771,4 @@ fn sequenced_workflow_module<S: Store + ?Sized>(
             pure: None,
         },
     }
-}
-
-fn compute_grant_hash(
-    defcap_ref: &str,
-    cap_type: &str,
-    params_cbor: &[u8],
-    expiry_ns: Option<u64>,
-) -> [u8; 32] {
-    let mut map = BTreeMap::new();
-    map.insert(
-        CborValue::Text("defcap_ref".into()),
-        CborValue::Text(defcap_ref.into()),
-    );
-    map.insert(
-        CborValue::Text("cap_type".into()),
-        CborValue::Text(cap_type.into()),
-    );
-    map.insert(
-        CborValue::Text("params_cbor".into()),
-        CborValue::Bytes(params_cbor.to_vec()),
-    );
-    if let Some(expiry) = expiry_ns {
-        map.insert(
-            CborValue::Text("expiry_ns".into()),
-            CborValue::Integer(expiry as i128),
-        );
-    }
-    let hash = aos_cbor::Hash::of_cbor(&CborValue::Map(map)).expect("grant hash");
-    *hash.as_bytes()
 }
