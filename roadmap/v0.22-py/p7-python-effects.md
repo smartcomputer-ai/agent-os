@@ -16,11 +16,11 @@ Python workflows are a later milestone. Start with Python effects because effect
 
 ## Work
 
-- Define Python bundle artifact format for `defmodule.runtime.kind = "python"`.
-- Add the Python effect invocation path inferred from `runtime.kind = "python"`, `op_kind = "effect"`,
-  and `execution_class = "external_async"`.
+- Define Python artifact hydration for `python_bundle` and `workspace_root` artifacts.
+- Add the Python effect invocation path inferred from `runtime.kind = "python"` and
+  `op_kind = "effect"`.
 - Add a generic Python effect runner interface:
-  - bundle hash
+  - artifact kind and hash/root hash
   - entrypoint
   - canonical params
   - effect op identity/hash
@@ -35,7 +35,7 @@ Python workflows are a later milestone. Start with Python effects because effect
   - `@effect`
   - Pydantic/type-to-AIR schema generation for a small supported subset
   - generated `defschema`, `defmodule`, and `defop`
-- Package a content-addressed Python bundle and upload it to CAS.
+- Package a content-addressed Python bundle or pin a workspace root for runner hydration.
 - Add a small e2e fixture: WASM workflow emits a custom Python effect.
 
 ## Non-Goals
@@ -60,7 +60,7 @@ Python workflows are a later milestone. Start with Python effects because effect
 
 ## Done When
 
-- A user can write a Python async function, build it into a content-addressed bundle, and activate it as an effect op.
+- A user can write a Python async function, activate it from a content-addressed bundle or pinned workspace root, and expose it as an effect op.
 - A WASM workflow can emit that effect op.
 - The node starts the Python runner only after durable append.
 - The Python runner returns a receipt that is schema-normalized by the kernel.

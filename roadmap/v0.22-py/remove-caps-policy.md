@@ -69,8 +69,6 @@ These still matter without caps or policies:
 - workflow `effects_emitted` / future effect-op allowlist
 - effect params schema
 - effect receipt schema
-- effect `origin_scope`
-- effect `execution_class`
 
 ## Internal Compatibility
 
@@ -124,7 +122,6 @@ Work:
 
 - Replace cap+policy admission with a single permissive `authorize_effect` hook.
 - Keep workflow `effects_emitted` enforcement.
-- Keep `origin_scope` enforcement.
 - Keep effect params canonicalization before intent hashing.
 - Remove cap name from new effect intent construction, or set an internal sentinel while legacy code remains.
 - Keep receipts bound to `intent_hash` and recorded origin identity.
@@ -157,7 +154,7 @@ Status: follow-on.
 
 Work:
 
-- Python `@effect` declares name, kind, params, receipt, `origin_scope`, `execution_class`, and implementation.
+- Python `@effect` declares name, kind, params, receipt, and implementation.
 - Python effect runner receives canonical params, intent identity, op identity, secret context, and tracing context.
 - Secrets are granted by coarse runner/world config, not by AIR caps.
 - Receipt payload validation remains schema-authoritative.
@@ -221,7 +218,9 @@ The future model should be driven by concrete hosted/runtime needs: tenancy, sec
 
 4. Should `origin_scope` remain?
 
-   Recommendation: yes. It is not a policy system; it is a simple structural rule preventing workflow/system/governance origin confusion.
+   Decision: no for AIR v2. Workflows are the only public effect emitters, and
+   `workflow.effects_emitted[]` is the structural gate. System/governance/internal paths should not
+   be modeled as public AIR origins in v0.22.
 
 ## Implementation Order
 

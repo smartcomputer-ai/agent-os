@@ -38,8 +38,7 @@ This is the structural phase. It should establish the new data model before the 
   "$kind": "defmodule",
   "name": "sys/builtin_effects@1",
   "runtime": {
-    "kind": "builtin",
-    "builtin_id": "sys.effects.v1"
+    "kind": "builtin"
   }
 }
 ```
@@ -52,9 +51,7 @@ This is the structural phase. It should establish the new data model before the 
   "effect": {
     "kind": "http.request",
     "params": "sys/HttpRequestParams@1",
-    "receipt": "sys/HttpRequestReceipt@1",
-    "origin_scope": ["workflow", "system", "governance"],
-    "execution_class": "external_async"
+    "receipt": "sys/HttpRequestReceipt@1"
   },
   "impl": {
     "module": "sys/builtin_effects@1",
@@ -65,6 +62,11 @@ This is the structural phase. It should establish the new data model before the 
 
 For WASM modules, `impl.entrypoint` names the export to invoke. It is not restricted to `"step"` in
 the target model, and it should allow multiple workflow ops to share one content-addressed module.
+
+Effect ops do not carry public `origin_scope` or `execution_class` fields. Workflows are the only
+public effect emitters, gated by `workflow.effects_emitted[]`. Effect execution dispatch is resolved
+from `impl.module`, `impl.entrypoint`, and the active runtime/builtin registry. Builtins use their
+versioned module name as the registry identity; no separate `builtin_id` field is needed.
 
 ## Main Touch Points
 

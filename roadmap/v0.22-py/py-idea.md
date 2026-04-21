@@ -303,9 +303,18 @@ same journal + same CAS + same receipts -> same world state
 
 WASM remains the lane for strict recomputation. Python becomes a lane for committed, auditable decisions.
 
-## Bundles
+## Artifacts
 
-Python code should be packaged as an AOS bundle, not as a pointer to a Git ref or a custom deployed worker.
+Python code should be exposed through a content-addressed artifact, not as a pointer to a Git ref or
+a custom deployed worker. The stable forms are:
+
+```text
+python_bundle  -> packaged tree with bundle metadata, locks, source, wheels, generated AIR
+workspace_root -> pinned workspace tree root used directly by the runner
+```
+
+The workspace form keeps the edit loop short: edit the workspace, produce a new root hash, and replace
+the module definition. It is still replay-stable because AIR pins the exact root hash.
 
 Example bundle:
 
@@ -326,7 +335,7 @@ bundle/
   sbom.json
 ```
 
-The authoritative identity is the bundle hash. Git metadata can be stored as provenance, but replay must not require GitHub or a branch name.
+The authoritative identity is the artifact root hash. Git metadata can be stored as provenance, but replay must not require GitHub or a branch name.
 
 The bundle manifest should say:
 
@@ -367,16 +376,17 @@ aos-wasm-runner
 The runner receives:
 
 ```text
-bundle hash
+artifact kind
+artifact root hash
 entrypoint
-calling convention
+invocation mode inferred from runtime kind and op kind
 input bytes
 runtime limits
 ```
 
-It hydrates the bundle, creates or reuses an isolated environment, invokes the entrypoint, and returns canonical output.
+It hydrates the artifact, creates or reuses an isolated environment, invokes the entrypoint, and returns canonical output.
 
-This is what makes agent-generated code practical. Hundreds of generated workflows should create hundreds of bundle hashes, not hundreds of bespoke worker deployments.
+This is what makes agent-generated code practical. Hundreds of generated workflows should create hundreds of artifact roots, not hundreds of bespoke worker deployments.
 
 ## Sandboxing
 
@@ -494,7 +504,7 @@ A workflow instance should pin:
 ```text
 workflow op identity
 resolved implementation identity
-bundle hash
+artifact kind and root hash
 replay profile
 ```
 
@@ -503,7 +513,7 @@ An open effect should pin:
 ```text
 effect op identity
 resolved implementation identity
-bundle hash
+artifact kind and root hash
 entrypoint
 params schema hash
 receipt schema hash
@@ -585,7 +595,7 @@ Build:
 - Pydantic-to-AIR schema generation
 - bundle builder
 - Python async effect runner
-- dynamic effect execution from bundle hash and entrypoint
+- dynamic effect execution from artifact root and entrypoint
 - receipt payload validation/canonicalization
 - basic sandboxing
 - tests with a WASM workflow calling a Python effect
@@ -597,7 +607,7 @@ This phase should not require Python workflows.
 Build:
 
 - `@workflow` decorator
-- sync reducer calling convention
+- sync reducer invocation mode
 - workflow input/output bridge
 - decision-log replay mode
 - checked replay mode
@@ -608,7 +618,7 @@ Build:
 
 Build:
 
-- environment cache keyed by bundle hash/target
+- environment cache keyed by artifact root hash and target
 - dependency wheelhouse support
 - resource limits
 - better diagnostics

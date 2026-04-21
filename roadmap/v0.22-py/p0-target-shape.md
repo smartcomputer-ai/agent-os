@@ -117,7 +117,7 @@ Target complete schema:
       "type": "object",
       "properties": {
         "kind": { "const": "wasm" },
-        "artifact": { "$ref": "#/$defs/HashedArtifact" }
+        "artifact": { "$ref": "#/$defs/WasmModuleArtifact" }
       },
       "required": ["kind", "artifact"],
       "additionalProperties": false
@@ -130,7 +130,7 @@ Target complete schema:
           "type": "string",
           "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$"
         },
-        "artifact": { "$ref": "#/$defs/HashedArtifact" }
+        "artifact": { "$ref": "#/$defs/PythonArtifact" }
       },
       "required": ["kind", "python", "artifact"],
       "additionalProperties": false
@@ -138,21 +138,51 @@ Target complete schema:
     "BuiltinRuntime": {
       "type": "object",
       "properties": {
-        "kind": { "const": "builtin" },
-        "builtin_id": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
-        }
+        "kind": { "const": "builtin" }
       },
-      "required": ["kind", "builtin_id"],
+      "required": ["kind"],
       "additionalProperties": false
     },
-    "HashedArtifact": {
+    "PythonArtifact": {
+      "type": "object",
+      "oneOf": [
+        { "$ref": "#/$defs/PythonBundleArtifact" },
+        { "$ref": "#/$defs/WorkspaceRootArtifact" }
+      ]
+    },
+    "WasmModuleArtifact": {
       "type": "object",
       "properties": {
+        "kind": { "const": "wasm_module" },
         "hash": { "$ref": "common.schema.json#/$defs/Hash" }
       },
-      "required": ["hash"],
+      "required": ["kind", "hash"],
+      "additionalProperties": false
+    },
+    "PythonBundleArtifact": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "python_bundle" },
+        "root_hash": { "$ref": "common.schema.json#/$defs/Hash" }
+      },
+      "required": ["kind", "root_hash"],
+      "additionalProperties": false
+    },
+    "WorkspaceRootArtifact": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "workspace_root" },
+        "root_hash": { "$ref": "common.schema.json#/$defs/Hash" },
+        "workspace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["kind", "root_hash"],
       "additionalProperties": false
     }
   }
@@ -164,9 +194,12 @@ Runtime field decisions:
 ```text
 runtime.kind is the public runtime discriminator.
 engine is not part of AIR v2; Wasmtime, CPython, and node/kernel placement are implementation choices.
-artifact exists only for content-addressed runtime bundles.
-artifact format is implied by runtime.kind in v0.22.
-Builtins use builtin_id directly because there are no CAS bytes.
+artifact.kind is the public artifact discriminator.
+runtime.kind restricts which artifact kinds are valid.
+wasm supports only compiled wasm_module artifacts in v0.22.
+python supports python_bundle and workspace_root artifacts in v0.22.
+workspace_root artifacts must be pinned by root_hash; updating code means writing a new workspace root and replacing the defmodule.
+Builtins use the versioned module name as identity because there are no CAS bytes.
 Python target/platform is bundle metadata, not AIR metadata.
 ```
 
@@ -243,22 +276,9 @@ Target complete schema:
       "properties": {
         "kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
         "params": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-        "receipt": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-        "origin_scope": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["workflow", "system", "governance"]
-          },
-          "minItems": 1,
-          "uniqueItems": true
-        },
-        "execution_class": {
-          "type": "string",
-          "enum": ["internal_deterministic", "owner_local_async", "external_async"]
-        }
+        "receipt": { "$ref": "common.schema.json#/$defs/SchemaRef" }
       },
-      "required": ["kind", "params", "receipt", "origin_scope", "execution_class"],
+      "required": ["kind", "params", "receipt"],
       "additionalProperties": false
     },
     "OpImpl": {
@@ -282,6 +302,8 @@ Schema-level removals:
 ```text
 workflow.cap_slots
 effect.cap_type
+effect.origin_scope
+effect.execution_class
 pure op kind
 cap_enforcer op kind
 ```
@@ -290,6 +312,24 @@ cap_enforcer op kind
 `pure` is also out of the v0.22 target because current uses are tests or cap/policy residue. Module
 authors can still use private helper functions inside their bundles; AIR does not expose them as
 independently callable world ops in this phase.
+
+`effect.origin_scope` is removed because workflows are the only public AIR origin that can request
+effects. A workflow must list the effect op in `workflow.effects_emitted[]`; that is the public
+structural authority check. System, governance, and owner-internal operations remain implementation
+paths, not public effect emitters in AIR v2.
+
+`effect.execution_class` is removed because dispatch class is runtime implementation metadata. The
+node resolves the execution path from the effect op implementation and the active runtime registry,
+not from a public schema field and not from semantic kind prefixes.
+
+`workflow.key_schema` replaces v1 `defmodule.key_schema`. In v1, `defmodule` carried both the
+artifact and the workflow ABI. In AIR v2, `defmodule` is only the runtime/artifact declaration, so
+keyedness belongs to the workflow op whose state cells are being addressed.
+
+`routing.subscriptions[].key_field` remains route-local event extraction. Semantic validation must
+require `key_field` when the target workflow op has `workflow.key_schema`, reject it when the target
+workflow op has no key schema, and verify that the extracted field type matches the workflow key
+schema.
 
 Invocation convention is inferred from the referenced module's `runtime.kind` and the op's `op_kind`.
 The schema does not expose a separate ABI selector until there are multiple supported conventions for
@@ -313,6 +353,7 @@ These examples are illustrative only. The sections above define the actual schem
   "runtime": {
     "kind": "wasm",
     "artifact": {
+      "kind": "wasm_module",
       "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }
   }
@@ -352,7 +393,8 @@ These examples are illustrative only. The sections above define the actual schem
     "kind": "python",
     "python": "3.12",
     "artifact": {
-      "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "kind": "python_bundle",
+      "root_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   }
 }
@@ -366,13 +408,71 @@ These examples are illustrative only. The sections above define the actual schem
   "effect": {
     "kind": "acme.slack.post",
     "params": "acme/SlackPostParams@1",
-    "receipt": "acme/SlackPostReceipt@1",
-    "origin_scope": ["workflow", "system"],
-    "execution_class": "external_async"
+    "receipt": "acme/SlackPostReceipt@1"
   },
   "impl": {
     "module": "acme/order_bundle@1",
     "entrypoint": "orders.effects:post_to_slack"
+  }
+}
+```
+
+### Python Workflow
+
+```json
+{
+  "$kind": "defmodule",
+  "name": "acme/order_py@1",
+  "runtime": {
+    "kind": "python",
+    "python": "3.12",
+    "artifact": {
+      "kind": "workspace_root",
+      "root_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "workspace": "acme-order",
+      "path": "python/order"
+    }
+  }
+}
+```
+
+```json
+{
+  "$kind": "defop",
+  "name": "acme/order.py_step@1",
+  "op_kind": "workflow",
+  "workflow": {
+    "state": "acme/OrderState@1",
+    "event": "acme/OrderEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "key_schema": "acme/OrderId@1",
+    "effects_emitted": [
+      "acme/slack.post@1"
+    ],
+    "determinism": "decision_log"
+  },
+  "impl": {
+    "module": "acme/order_py@1",
+    "entrypoint": "orders.workflow:step"
+  }
+}
+```
+
+### Python Workspace Artifact
+
+```json
+{
+  "$kind": "defmodule",
+  "name": "acme/order_workspace@1",
+  "runtime": {
+    "kind": "python",
+    "python": "3.12",
+    "artifact": {
+      "kind": "workspace_root",
+      "root_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "workspace": "acme-order",
+      "path": "python/order"
+    }
   }
 }
 ```
@@ -384,8 +484,7 @@ These examples are illustrative only. The sections above define the actual schem
   "$kind": "defmodule",
   "name": "sys/builtin_effects@1",
   "runtime": {
-    "kind": "builtin",
-    "builtin_id": "sys.effects.v1"
+    "kind": "builtin"
   }
 }
 ```
@@ -398,9 +497,7 @@ These examples are illustrative only. The sections above define the actual schem
   "effect": {
     "kind": "timer.set",
     "params": "sys/TimerSetParams@1",
-    "receipt": "sys/TimerSetReceipt@1",
-    "origin_scope": ["workflow", "system", "governance"],
-    "execution_class": "owner_local_async"
+    "receipt": "sys/TimerSetReceipt@1"
   },
   "impl": {
     "module": "sys/builtin_effects@1",
@@ -614,12 +711,14 @@ JSON Schema covers structure only. Semantic validation still needs:
 7. Every routing subscription references an active workflow op.
 8. Every inbox route references an active workflow op.
 9. Every workflow `effects_emitted[]` entry references an active effect op.
-10. Workflow key-field validation uses `workflow.key_schema`.
+10. Workflow key-field validation uses the target op's `workflow.key_schema`, not the referenced module.
 11. Effect semantic kind duplicates are allowed only if the runtime has a deterministic dispatch rule by op identity. Recommendation: allow duplicates because op identity is canonical.
 12. The referenced module runtime kind must support the op kind.
-13. Effect execution class must be compatible with module runtime kind and op kind.
-14. Hashed artifacts must decode as the artifact shape implied by `runtime.kind`.
-15. Python bundle metadata must satisfy the declared `runtime.python` version and provide a compatible target for the runner host.
+13. Effect execution path must resolve from the referenced module runtime and op implementation.
+14. Artifact kind compatibility is enforced by the `defmodule` schema: `wasm` accepts `wasm_module`; `python` accepts `python_bundle` or `workspace_root`; `builtin` has no artifact.
+15. `wasm_module.hash` must identify compiled WASM bytes.
+16. `python_bundle.root_hash` and `workspace_root.root_hash` must identify a workspace/tree root that the Python runner can hydrate.
+17. Python artifact metadata must satisfy the declared `runtime.python` version and provide a compatible target for the runner host.
 
 ## Open Schema Decisions
 

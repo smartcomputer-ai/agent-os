@@ -11,9 +11,9 @@ The node should dispatch an opened effect by looking at the pinned effect op and
 ## Work
 
 - Replace `EffectRuntime.effect_routes: kind -> adapter_id` with op implementation resolution.
-- Use `defop.effect.execution_class` instead of prefix-based `classify_effect_kind`.
+- Remove prefix-based `classify_effect_kind` dispatch.
 - Select the runtime path from the effect op's referenced module `runtime.kind`, the op kind, and
-  `defop.effect.execution_class`.
+  the runtime/builtin implementation registry.
 - For builtin/existing Rust adapters, map op implementation entrypoint to the existing adapter registry internally.
 - Remove `strict_effect_bindings`.
 - Remove route diagnostics that refer to `manifest.effect_bindings`.
@@ -33,21 +33,24 @@ The node should dispatch an opened effect by looking at the pinned effect op and
 - `crates/aos-kernel/src/trace.rs`
 - node and adapter tests
 
-## Execution Class Mapping
+## Runtime Dispatch Mapping
 
-Effect execution class should be declared in the effect op:
+Effect dispatch class is not a public AIR field. Resolve it from op implementation metadata:
 
 ```text
-internal_deterministic -> kernel internal effect path
-owner_local_async      -> owner-local runtime such as timer
-external_async         -> async effect runtime
+builtin sys/workspace.* -> kernel internal effect path
+builtin sys/timer.set   -> owner-local timer runtime
+python effect op        -> async Python runner after durable flush
+builtin adapter effects -> async effect runtime after durable flush
 ```
 
-Do not infer execution class from semantic kind prefixes once this phase is complete.
+Do not infer dispatch class from semantic kind prefixes once this phase is complete. For builtins,
+the internal registry keyed by `impl.module + impl.entrypoint` owns the mapping. For Python effects,
+`runtime.kind = "python"` and `op_kind = "effect"` select the async Python runner.
 
 ## Done When
 
 - External async effects start from effect op impl metadata.
-- Timers use owner-local async classification from effect op metadata.
-- Workspace, introspect, governance, and portal effects use internal deterministic classification from effect op metadata.
+- Timers use owner-local dispatch from builtin op implementation metadata.
+- Workspace, introspect, governance, and portal effects use internal deterministic dispatch from builtin op implementation metadata.
 - `manifest.effect_bindings` is not read anywhere.
