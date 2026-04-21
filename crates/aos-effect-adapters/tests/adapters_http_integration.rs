@@ -13,8 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 fn build_intent(kind: EffectKind, params_cbor: Vec<u8>) -> EffectIntent {
-    // cap name is irrelevant for adapter execution here
-    EffectIntent::from_raw_params(kind, "cap", params_cbor, [0u8; 32]).unwrap()
+    EffectIntent::from_raw_params(kind, params_cbor, [0u8; 32]).unwrap()
 }
 
 async fn start_test_server(

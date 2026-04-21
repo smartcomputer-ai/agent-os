@@ -2573,7 +2573,6 @@ mod tests {
     fn intent_for<T: serde::Serialize>(kind: &str, params: &T, seed: u8) -> EffectIntent {
         EffectIntent::from_raw_params(
             EffectKind::new(kind),
-            "cap_host",
             serde_cbor::to_vec(params).expect("encode params"),
             [seed; 32],
         )

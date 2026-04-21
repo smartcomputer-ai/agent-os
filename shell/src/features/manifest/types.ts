@@ -125,7 +125,6 @@ export interface CapDef extends BaseDef {
 export interface PolicyRule {
   when: {
     effect_kind?: string;
-    cap_name?: string;
     cap_type?: string;
     origin_kind?: "workflow" | "system" | "governance";
     origin_name?: string;

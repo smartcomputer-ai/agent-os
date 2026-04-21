@@ -39,7 +39,6 @@ impl EffectSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectIntent {
     pub kind: EffectKind,
-    pub cap_name: String,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
     pub idempotency_key: IdempotencyKey,
@@ -53,15 +52,12 @@ impl EffectIntent {
 
     pub fn from_raw_params(
         kind: EffectKind,
-        cap_name: impl Into<String>,
         params_cbor: Vec<u8>,
         idempotency_key: IdempotencyKey,
     ) -> Result<Self, IntentEncodeError> {
-        let cap_name = cap_name.into();
-        let hash = compute_intent_hash(kind.as_str(), &params_cbor, &cap_name, &idempotency_key)?;
+        let hash = compute_intent_hash(kind.as_str(), &params_cbor, &idempotency_key)?;
         Ok(Self {
             kind,
-            cap_name,
             params_cbor,
             idempotency_key,
             intent_hash: hash,
@@ -71,17 +67,14 @@ impl EffectIntent {
 
 pub struct IntentBuilder<'a, P> {
     kind: EffectKind,
-    cap_name: String,
     params: &'a P,
     idempotency_key: IdempotencyKey,
 }
 
 impl<'a, P> IntentBuilder<'a, P> {
-    pub fn new(kind: EffectKind, cap_name: impl Into<String>, params: &'a P) -> Self {
-        let cap_name = cap_name.into();
+    pub fn new(kind: EffectKind, params: &'a P) -> Self {
         Self {
             kind,
-            cap_name,
             params,
             idempotency_key: [0u8; 32],
         }
@@ -89,10 +82,9 @@ impl<'a, P> IntentBuilder<'a, P> {
 
     pub fn builder(
         kind: impl Into<EffectKind>,
-        cap_name: impl Into<String>,
         params: &'a P,
     ) -> Self {
-        Self::new(kind.into(), cap_name, params)
+        Self::new(kind.into(), params)
     }
 
     pub fn idempotency_key(mut self, key: IdempotencyKey) -> Self {
@@ -105,15 +97,9 @@ impl<'a, P> IntentBuilder<'a, P> {
         P: Serialize,
     {
         let params_cbor = to_canonical_cbor(self.params)?;
-        let hash = compute_intent_hash(
-            self.kind.as_str(),
-            &params_cbor,
-            &self.cap_name,
-            &self.idempotency_key,
-        )?;
+        let hash = compute_intent_hash(self.kind.as_str(), &params_cbor, &self.idempotency_key)?;
         Ok(EffectIntent {
             kind: self.kind,
-            cap_name: self.cap_name,
             params_cbor,
             idempotency_key: self.idempotency_key,
             intent_hash: hash,
@@ -124,7 +110,6 @@ impl<'a, P> IntentBuilder<'a, P> {
 fn compute_intent_hash(
     kind: &str,
     params_cbor: &[u8],
-    cap_name: &str,
     idempotency_key: &IdempotencyKey,
 ) -> Result<[u8; 32], serde_cbor::Error> {
     #[derive(Serialize)]
@@ -132,7 +117,6 @@ fn compute_intent_hash(
         kind: &'a str,
         #[serde(with = "serde_bytes")]
         params: &'a [u8],
-        cap: &'a str,
         #[serde(with = "serde_bytes")]
         idempotency_key: &'a [u8; 32],
     }
@@ -140,7 +124,6 @@ fn compute_intent_hash(
     let bytes = to_canonical_cbor(&Envelope {
         kind,
         params: params_cbor,
-        cap: cap_name,
         idempotency_key,
     })?;
     let hash: Hash = Hash::of_bytes(&bytes);

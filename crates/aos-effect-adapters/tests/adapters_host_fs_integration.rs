@@ -20,7 +20,7 @@ use aos_kernel::{MemStore, Store};
 use tempfile::TempDir;
 
 fn build_intent(kind: &str, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
-    EffectIntent::from_raw_params(EffectKind::new(kind), "cap", params_cbor, [seed; 32]).unwrap()
+    EffectIntent::from_raw_params(EffectKind::new(kind), params_cbor, [seed; 32]).unwrap()
 }
 
 async fn open_session(set: &HostAdapterSet<MemStore>, workdir: &Path, seed: u8) -> String {

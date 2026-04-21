@@ -72,12 +72,12 @@ These still matter without caps or policies:
 - effect `origin_scope`
 - effect `execution_class`
 
-## Keep Internally For Now
+## Internal Compatibility
 
-The v0.22 experiment now keeps only legacy wire fields that still belong to effect intent identity:
+The v0.22 experiment removed the legacy capability field from effect intent identity:
 
-- `EffectIntent.cap_name` remains as a sentinel/compatibility field outside AIR.
-- Receipt, open-work, and idempotency logic remain unchanged.
+- The legacy capability field is gone from `EffectIntent`; intent identity is now kind + canonical params + idempotency key.
+- Receipt and open-work routing still use intent hashes.
 - Effect param and receipt schema validation remains strict.
 
 The old kernel capability resolver, cap enforcer, policy evaluator, cap/policy AIR nodes, cap/policy manifest indexes, cap/policy journal decision records, and secret cap policies have been removed.

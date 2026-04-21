@@ -144,7 +144,6 @@ pub(crate) struct GovApplyReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GovPredictedEffect {
     pub kind: String,
-    pub cap: String,
     pub intent_hash: HashRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_json: Option<String>,

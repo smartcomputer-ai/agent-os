@@ -566,7 +566,6 @@ impl<S: Store + 'static> Kernel<S> {
                     workflow_name.clone(),
                     key.clone(),
                     effect.kind.clone(),
-                    intent.cap_name.clone(),
                     intent.params_cbor.clone(),
                     intent.idempotency_key,
                     effect.issuer_ref.clone(),

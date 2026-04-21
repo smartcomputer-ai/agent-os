@@ -204,7 +204,6 @@ pub(super) fn effect_intent_from_pending(
 ) -> Result<EffectIntent, WorkerError> {
     let mut intent = aos_effects::EffectIntent::from_raw_params(
         pending.effect_kind.clone().into(),
-        pending.cap_name.clone(),
         pending.params_cbor.clone(),
         pending.idempotency_key,
     )

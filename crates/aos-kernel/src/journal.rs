@@ -139,7 +139,6 @@ pub struct DomainEventRecord {
 pub struct EffectIntentRecord {
     pub intent_hash: [u8; 32],
     pub kind: String,
-    pub cap_name: String,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

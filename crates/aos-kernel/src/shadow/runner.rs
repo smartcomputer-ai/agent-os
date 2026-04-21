@@ -88,7 +88,6 @@ impl ShadowExecutor {
                 let intent = opened.intent;
                 predicted_effects.push(PredictedEffect {
                     kind: intent.kind.as_str().to_string(),
-                    cap: intent.cap_name.clone(),
                     intent_hash: hex::encode(intent.intent_hash),
                     params_json: params_to_json(&intent.params_cbor),
                 });

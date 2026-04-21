@@ -83,7 +83,6 @@ mod tests {
     fn blob_intent(params: BlobPutParams) -> EffectIntent {
         EffectIntent::from_raw_params(
             EffectKind::new(aos_effects::EffectKind::BLOB_PUT),
-            "cap_blob",
             serde_cbor::to_vec(&params).expect("encode params"),
             [0u8; 32],
         )

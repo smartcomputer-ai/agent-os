@@ -152,7 +152,6 @@ impl<S: Store + 'static> Kernel<S> {
         )?;
         let mut intent = aos_effects::EffectIntent::from_raw_params(
             aos_effects::EffectKind::new(record.kind.clone()),
-            record.cap_name.clone(),
             params_cbor,
             record.idempotency_key,
         )
@@ -917,7 +916,6 @@ mod tests {
             module_name.into(),
             None,
             "http.request".into(),
-            "cap/http@1".into(),
             vec![1, 2, 3],
             [0x33u8; 32],
             None,

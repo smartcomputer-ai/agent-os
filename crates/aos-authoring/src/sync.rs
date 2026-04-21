@@ -1004,18 +1004,8 @@ fn parse_air_nodes_for_import_hash(path: &Path) -> Result<Vec<AirNode>> {
 
     let mut nodes = Vec::new();
     for item in items {
-        let kind = item
-            .get("$kind")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        match serde_json::from_value::<AirNode>(item) {
-            Ok(node) => nodes.push(node),
-            Err(_) if kind == "defplan" => {
-                // Legacy plan defs do not contribute to post-plan import identity.
-            }
-            Err(err) => return Err(err).context("deserialize AIR node"),
-        }
+        let node = serde_json::from_value::<AirNode>(item).context("deserialize AIR node")?;
+        nodes.push(node);
     }
     Ok(nodes)
 }
@@ -1296,28 +1286,6 @@ mod tests {
 
         let hash = import_defs_hash(&import_root).expect("hash");
         assert!(hash.starts_with("sha256:"));
-    }
-
-    #[test]
-    fn import_defs_hash_ignores_legacy_defplan_nodes() {
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let with_plan = temp.path().join("with-plan");
-        let no_plan = temp.path().join("no-plan");
-        std::fs::create_dir_all(&with_plan).expect("mkdir with-plan");
-        std::fs::create_dir_all(&no_plan).expect("mkdir no-plan");
-
-        let defs_only = r#"[{"$kind":"defschema","name":"demo/S@1","type":{"text":{}}}]"#;
-        std::fs::write(with_plan.join("defs.air.json"), defs_only).expect("write defs with-plan");
-        std::fs::write(no_plan.join("defs.air.json"), defs_only).expect("write defs no-plan");
-        std::fs::write(
-            with_plan.join("legacy-plan.air.json"),
-            r#"[{"$kind":"defplan","name":"legacy/Plan@1"}]"#,
-        )
-        .expect("write legacy plan");
-
-        let with_plan_hash = import_defs_hash(&with_plan).expect("hash with plan");
-        let no_plan_hash = import_defs_hash(&no_plan).expect("hash no plan");
-        assert_eq!(with_plan_hash, no_plan_hash);
     }
 
     #[test]

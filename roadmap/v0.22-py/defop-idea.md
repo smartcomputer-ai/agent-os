@@ -434,7 +434,6 @@ The effect intent should become something like:
   "effect_op_hash": "sha256:...",
   "kind": "acme.slack.post",
   "params_cbor": "...",
-  "cap_name": "cap_slack",
   "origin": {
     "op": "acme/order.step@1",
     "op_hash": "sha256:...",

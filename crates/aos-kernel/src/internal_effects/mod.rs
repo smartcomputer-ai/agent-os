@@ -193,7 +193,7 @@ mod tests {
         let params = ManifestParams {
             consistency: "head".into(),
         };
-        let intent = IntentBuilder::new(EffectKind::introspect_manifest(), "sys/query@1", &params)
+        let intent = IntentBuilder::new(EffectKind::introspect_manifest(), &params)
             .build()
             .unwrap();
 
@@ -225,7 +225,6 @@ mod tests {
         // bogus CBOR payload
         let intent = EffectIntent {
             kind: EffectKind::introspect_manifest(),
-            cap_name: "sys/query@1".into(),
             params_cbor: b"\x01\x02\x03".to_vec(),
             idempotency_key: [0; 32],
             intent_hash: [9; 32],
@@ -244,10 +243,9 @@ mod tests {
         let params = ListCellsParams {
             workflow: "missing/Workflow@1".into(),
         };
-        let intent =
-            IntentBuilder::new(EffectKind::introspect_list_cells(), "sys/query@1", &params)
-                .build()
-                .unwrap();
+        let intent = IntentBuilder::new(EffectKind::introspect_list_cells(), &params)
+            .build()
+            .unwrap();
 
         let receipt = kernel
             .handle_internal_intent(&intent)

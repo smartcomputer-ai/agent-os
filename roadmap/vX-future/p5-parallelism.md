@@ -57,7 +57,7 @@ Trade-offs
 
 - Event IDs: assign every scheduled unit a monotonic event_id; record it in the journal.
 - Deterministic RNG: seed per step as seed = H(event_id, reducer_name, key).
-- Effect identity: compute intent hash from (kind, params_cbor, cap_name, idempotency_key); derive idempotency_key from stable business data + event_id.
+- Effect identity: compute intent hash from (kind, params_cbor, idempotency_key); derive idempotency_key from stable business data + event_id.
 - Counters at commit: specify policy checks and decrements occur at commit time to avoid races.
 - Snapshot semantics: define read snapshot as “state as of ticket−1”; v1 already behaves this way; write it down.
 - Journal fields: include event_id and optional lane_id (default 0) for future lanes.

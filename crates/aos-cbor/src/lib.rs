@@ -161,7 +161,7 @@ mod tests {
         let cases = [
             (
                 "spec/schemas/common.schema.json",
-                "sha256:16937289a4168c465b1029c2a077269b7bc0c98b4082638f93ec9834668a77d9",
+                "sha256:0d217c20164ccc948361c3142f4c514fc80c86777a29186605b1fcd442b48f1e",
             ),
             (
                 "spec/schemas/defschema.schema.json",
@@ -170,10 +170,6 @@ mod tests {
             (
                 "spec/schemas/defmodule.schema.json",
                 "sha256:f8fe13397d7d4d882463022330b3074ed4e4a2d5ed4f56678fd0e6ff0793cb8c",
-            ),
-            (
-                "spec/schemas/defplan.schema.json",
-                "sha256:19c37514ac9f6a38c01b3a7bf3b9d792216f0622128693f2bd68ae3206257e8a",
             ),
             (
                 "spec/schemas/manifest.schema.json",
@@ -185,7 +181,7 @@ mod tests {
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:b36d67d2c9308c47e740f9d4d53cbfca22c7aeeaee9aa157105e1641423dbb1f",
+                "sha256:8593fc538a5162b67b2888da48d9d5de5ae016fd26d35adc357fa9beb80fcbc3",
             ),
             (
                 "spec/defs/builtin-schemas-sdk.air.json",
@@ -193,7 +189,7 @@ mod tests {
             ),
             (
                 "spec/defs/builtin-schemas-host.air.json",
-                "sha256:9dca29200e43a643b93be4123e8cc6eb04f14dff5e624d255f4891b3caf0580f",
+                "sha256:2aac2282595ebb57e314341b35a442aa52d624789d42c33b831745756a1db3f6",
             ),
         ];
 
@@ -228,7 +224,6 @@ mod tests {
         for file in [
             "spec/test-vectors/canonical-cbor.json",
             "spec/test-vectors/schemas.json",
-            "spec/test-vectors/plans.json",
         ] {
             for vector in load_vectors(file) {
                 let bytes = to_canonical_cbor(&vector.json).expect("canonical cbor");

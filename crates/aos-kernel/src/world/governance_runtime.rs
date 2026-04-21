@@ -325,7 +325,6 @@ mod tests {
                 "com.acme/Workflow@1".into(),
                 None,
                 "timer.set".into(),
-                "cap/timer@1".into(),
                 vec![],
                 [2u8; 32],
                 None,
@@ -336,7 +335,6 @@ mod tests {
         );
         kernel.effect_manager.restore_queue(vec![EffectIntent {
             kind: EffectKind::new("introspect.manifest"),
-            cap_name: "sys/query@1".into(),
             params_cbor: vec![],
             idempotency_key: [0u8; 32],
             intent_hash: [3u8; 32],

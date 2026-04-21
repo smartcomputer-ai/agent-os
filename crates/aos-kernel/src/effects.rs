@@ -10,8 +10,6 @@ use crate::secret::{SecretResolver, normalize_secret_variants};
 use aos_air_types::catalog::EffectCatalog;
 use aos_air_types::schema_index::SchemaIndex;
 
-pub const INTERNAL_ALLOW_CAP_NAME: &str = "__aos_internal_allow";
-
 #[derive(Default)]
 pub struct EffectQueue {
     intents: Vec<EffectIntent>,
@@ -80,7 +78,6 @@ impl EffectManager {
     pub fn enqueue_workflow_effect(
         &mut self,
         workflow_name: &str,
-        _cap_name: &str,
         effect: &WorkflowEffect,
     ) -> Result<EffectIntent, KernelError> {
         self.enqueue_workflow_effect_authorized(workflow_name, effect)
@@ -112,7 +109,6 @@ impl EffectManager {
         &mut self,
         plan_name: &str,
         kind: &EffectKind,
-        _cap_name: &str,
         params_cbor: Vec<u8>,
         idempotency_key: [u8; 32],
     ) -> Result<EffectIntent, KernelError> {
@@ -132,13 +128,8 @@ impl EffectManager {
         self.ensure_origin_scope(&source, &runtime_kind)?;
         let canonical_params =
             self.canonicalize_effect_params(&source, &runtime_kind, params_cbor)?;
-        let intent = EffectIntent::from_raw_params(
-            runtime_kind,
-            INTERNAL_ALLOW_CAP_NAME,
-            canonical_params,
-            idempotency_key,
-        )
-        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        let intent = EffectIntent::from_raw_params(runtime_kind, canonical_params, idempotency_key)
+            .map_err(|err| KernelError::EffectManager(err.to_string()))?;
         Ok(intent)
     }
 

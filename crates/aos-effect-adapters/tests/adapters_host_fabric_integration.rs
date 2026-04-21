@@ -49,7 +49,7 @@ use globset::Glob;
 use tokio::task::JoinHandle;
 
 fn build_intent(kind: &str, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
-    EffectIntent::from_raw_params(EffectKind::new(kind), "cap", params_cbor, [seed; 32]).unwrap()
+    EffectIntent::from_raw_params(EffectKind::new(kind), params_cbor, [seed; 32]).unwrap()
 }
 
 #[test]

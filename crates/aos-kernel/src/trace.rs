@@ -138,7 +138,6 @@ pub fn trace_get<S: Store + 'static>(
         .filter_map(|effect| {
             aos_effects::EffectIntent::from_raw_params(
                 effect.effect_kind.clone().into(),
-                effect.cap_name.clone(),
                 effect.params_cbor.clone(),
                 effect.idempotency_key,
             )
@@ -251,7 +250,6 @@ pub fn trace_get<S: Store + 'static>(
                 json!({
                     "intent_hash": hash_bytes_hex(&queued.intent_hash),
                     "kind": queued.kind,
-                    "cap_name": queued.cap_name,
                 })
             }).collect::<Vec<_>>(),
             "strict_quiescence": {
@@ -331,7 +329,6 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
         .filter_map(|effect| {
             aos_effects::EffectIntent::from_raw_params(
                 effect.effect_kind.clone().into(),
-                effect.cap_name.clone(),
                 effect.params_cbor.clone(),
                 effect.idempotency_key,
             )

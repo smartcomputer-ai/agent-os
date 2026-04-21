@@ -70,7 +70,6 @@ where
                     };
                     Ok(GovPredictedEffect {
                         kind: effect.kind,
-                        cap: effect.cap,
                         intent_hash,
                         params_json,
                     })

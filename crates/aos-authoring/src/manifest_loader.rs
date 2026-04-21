@@ -413,16 +413,8 @@ fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
     };
     let mut nodes = Vec::new();
     for item in items {
-        let kind = item
-            .get("$kind")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        match serde_json::from_value::<AirNode>(item) {
-            Ok(node) => nodes.push(node),
-            Err(_) if kind == "defplan" => {}
-            Err(err) => return Err(err).context("deserialize AIR node"),
-        }
+        let node = serde_json::from_value::<AirNode>(item).context("deserialize AIR node")?;
+        nodes.push(node);
     }
     Ok(nodes)
 }

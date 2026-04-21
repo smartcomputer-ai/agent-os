@@ -478,7 +478,6 @@ mod tests {
         );
         let intent = EffectIntent::from_raw_params(
             EffectKind::llm_generate(),
-            "sys/llm.basic@1",
             serde_cbor::to_vec(&serde_json::json!({
                 "provider": "stub",
                 "model": "stub",
@@ -542,7 +541,6 @@ mod tests {
             EffectRuntime::from_effect_routes_with_shared(shared, HashMap::new(), false);
         let intent = EffectIntent::from_raw_params(
             EffectKind::llm_generate(),
-            "sys/llm.basic@1",
             serde_cbor::to_vec(&serde_json::json!({
                 "provider": "stub",
                 "model": "stub",

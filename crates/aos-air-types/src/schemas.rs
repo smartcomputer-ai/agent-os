@@ -28,8 +28,6 @@ embed_schema! {
     PATCH => "../../../spec/schemas/patch.schema.json",
 }
 
-pub const DEFPLAN: &str = include_str!("../../../spec/schemas/defplan.schema.json");
-
 pub fn find(name: &str) -> Option<&'static str> {
     ALL.iter()
         .find(|doc| doc.name.eq_ignore_ascii_case(name))

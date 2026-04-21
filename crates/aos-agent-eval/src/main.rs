@@ -648,7 +648,6 @@ fn bootstrap_host_session(host: &mut EvalHost, workdir: &Path) -> Result<String>
 
     let intent = EffectIntent::from_raw_params(
         EffectKind::host_session_open(),
-        "host",
         serde_cbor::to_vec(&params).context("encode host.session.open params")?,
         [0x11; 32],
     )
@@ -748,7 +747,6 @@ fn execute_live_llm_intent<S: Store + 'static>(
 
     let patched_intent = EffectIntent::from_raw_params(
         EffectKind::llm_generate(),
-        intent.cap_name.clone(),
         serde_cbor::to_vec(&params).context("encode patched llm.generate params")?,
         intent.idempotency_key,
     )

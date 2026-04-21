@@ -30,7 +30,6 @@ fn plan_effect_params_canonicalize_before_hashing() {
         .enqueue_plan_effect(
             "com.acme/Plan@1",
             &EffectKind::llm_generate(),
-            "cap_llm",
             params_a.clone(),
             [0u8; 32],
         )
@@ -39,7 +38,6 @@ fn plan_effect_params_canonicalize_before_hashing() {
         .enqueue_plan_effect(
             "com.acme/Plan@1",
             &EffectKind::llm_generate(),
-            "cap_llm",
             params_b.clone(),
             [0u8; 32],
         )
@@ -79,7 +77,7 @@ fn workflow_effect_params_canonicalize_noop() {
         "timer",
     );
     let intent = mgr
-        .enqueue_workflow_effect("com.acme/Timer", "cap_timer", &effect)
+        .enqueue_workflow_effect("com.acme/Timer", &effect)
         .expect("enqueue workflow effect");
 
     let (effects, schemas) = builtin_effect_context();
@@ -110,7 +108,6 @@ fn workflow_effect_params_canonicalize_noop() {
 
     let rehashed = aos_effects::EffectIntent::from_raw_params(
         intent.kind.clone(),
-        intent.cap_name.clone(),
         intent.params_cbor.clone(),
         intent.idempotency_key,
     )
@@ -149,7 +146,6 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
         .enqueue_plan_effect(
             "com.acme/Plan@1",
             &EffectKind::http_request(),
-            "cap_http",
             params_a.clone(),
             [0u8; 32],
         )
@@ -158,7 +154,6 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
         .enqueue_plan_effect(
             "com.acme/Plan@1",
             &EffectKind::http_request(),
-            "cap_http",
             params_b.clone(),
             [0u8; 32],
         )

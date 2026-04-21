@@ -1083,7 +1083,6 @@ impl<S: Store + 'static> Kernel<S> {
                             name.clone(),
                             instance_key.clone(),
                             effect_kind.clone(),
-                            record.cap_name.clone(),
                             params_cbor.clone(),
                             record.idempotency_key,
                             issuer_ref.clone(),
@@ -1601,7 +1600,6 @@ impl<S: Store + 'static> Kernel<S> {
             .filter_map(|effect| {
                 aos_effects::EffectIntent::from_raw_params(
                     effect.effect_kind.into(),
-                    effect.cap_name,
                     effect.params_cbor,
                     effect.idempotency_key,
                 )
@@ -1807,7 +1805,6 @@ impl<S: Store + 'static> Kernel<S> {
         let record = JournalRecord::EffectIntent(EffectIntentRecord {
             intent_hash: intent.intent_hash,
             kind: intent.kind.as_str().to_string(),
-            cap_name: intent.cap_name.clone(),
             params_cbor: stored_params.inline,
             params_ref: stored_params.cbor_ref,
             params_size: stored_params.size,
@@ -2194,7 +2191,6 @@ mod tests {
             "com.acme/Workflow@1".into(),
             None,
             "llm.generate".into(),
-            "cap/llm@1".into(),
             vec![0xA0],
             [0x22u8; 32],
             None,
