@@ -112,10 +112,9 @@ pub fn run(example_root: &Path) -> Result<()> {
     )?;
 
     println!(
-        "   shadow: {} predicted effect(s), {} workflow instance(s), {} ledger delta(s)",
+        "   shadow: {} predicted effect(s), {} workflow instance(s)",
         summary.predicted_effects.len(),
-        summary.workflow_instances.len(),
-        summary.ledger_deltas.len()
+        summary.workflow_instances.len()
     );
 
     host.kernel_mut()

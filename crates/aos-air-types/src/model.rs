@@ -5,7 +5,6 @@ use serde_json::Value as JsonValue;
 
 pub type Name = String;
 pub type VarName = String;
-pub type CapGrantName = String;
 pub type SecretAlias = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,8 +123,6 @@ pub struct DefSecret {
     pub binding_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_digest: Option<HashRef>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub allowed_caps: Vec<CapGrantName>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -411,8 +408,6 @@ pub struct VariantExpr {
 pub enum AirNode {
     Defschema(DefSchema),
     Defmodule(DefModule),
-    Defcap(DefCap),
-    Defpolicy(DefPolicy),
     Defsecret(DefSecret),
     Defeffect(DefEffect),
     Manifest(Manifest),
@@ -460,8 +455,6 @@ pub struct WorkflowAbi {
     pub annotations: Option<SchemaRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects_emitted: Vec<EffectKind>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub cap_slots: IndexMap<VarName, CapType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -470,26 +463,6 @@ pub struct PureAbi {
     pub output: SchemaRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<SchemaRef>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DefCap {
-    pub name: Name,
-    pub cap_type: CapType,
-    pub schema: TypeExpr,
-    #[serde(default = "default_cap_enforcer")]
-    pub enforcer: CapEnforcer,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapEnforcer {
-    pub module: Name,
-}
-
-fn default_cap_enforcer() -> CapEnforcer {
-    CapEnforcer {
-        module: "sys/CapAllowAll@1".to_string(),
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -516,135 +489,7 @@ pub struct DefEffect {
     pub kind: EffectKind,
     pub params_schema: SchemaRef,
     pub receipt_schema: SchemaRef,
-    pub cap_type: CapType,
     pub origin_scope: OriginScope,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct CapType(String);
-
-impl CapType {
-    pub const HTTP_OUT: &'static str = "http.out";
-    pub const BLOB: &'static str = "blob";
-    pub const TIMER: &'static str = "timer";
-    pub const PORTAL: &'static str = "portal";
-    pub const LLM_BASIC: &'static str = "llm.basic";
-    pub const HOST: &'static str = "host";
-    pub const SECRET: &'static str = "secret";
-    pub const QUERY: &'static str = "query";
-    pub const WORKSPACE: &'static str = "workspace";
-
-    pub fn new(cap_type: impl Into<String>) -> Self {
-        Self(cap_type.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn http_out() -> Self {
-        Self::new(Self::HTTP_OUT)
-    }
-
-    pub fn blob() -> Self {
-        Self::new(Self::BLOB)
-    }
-
-    pub fn timer() -> Self {
-        Self::new(Self::TIMER)
-    }
-
-    pub fn portal() -> Self {
-        Self::new(Self::PORTAL)
-    }
-
-    pub fn llm_basic() -> Self {
-        Self::new(Self::LLM_BASIC)
-    }
-
-    pub fn host() -> Self {
-        Self::new(Self::HOST)
-    }
-
-    pub fn secret() -> Self {
-        Self::new(Self::SECRET)
-    }
-
-    pub fn query() -> Self {
-        Self::new(Self::QUERY)
-    }
-
-    pub fn workspace() -> Self {
-        Self::new(Self::WORKSPACE)
-    }
-}
-
-impl<S: Into<String>> From<S> for CapType {
-    fn from(value: S) -> Self {
-        CapType::new(value)
-    }
-}
-
-impl std::fmt::Display for CapType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for CapType {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::new(s.to_owned()))
-    }
-}
-
-impl AsRef<str> for CapType {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DefPolicy {
-    pub name: Name,
-    pub rules: Vec<PolicyRule>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PolicyRule {
-    pub when: PolicyMatch,
-    pub decision: PolicyDecision,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum PolicyDecision {
-    Allow,
-    Deny,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PolicyMatch {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_kind: Option<EffectKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cap_name: Option<CapGrantName>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cap_type: Option<CapType>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_kind: Option<OriginKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_name: Option<Name>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum OriginKind {
-    Workflow,
-    System,
-    Governance,
 }
 
 pub const CURRENT_AIR_VERSION: &str = "1";
@@ -658,14 +503,8 @@ pub struct Manifest {
     pub effects: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effect_bindings: Vec<EffectBinding>,
-    pub caps: Vec<NamedRef>,
-    pub policies: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<SecretEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub defaults: Option<ManifestDefaults>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub module_bindings: IndexMap<Name, ModuleBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<Routing>,
 }
@@ -690,34 +529,12 @@ pub enum SecretEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ManifestDefaults {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub policy: Option<Name>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub cap_grants: Vec<CapGrant>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretDecl {
     pub alias: SecretAlias,
     pub version: u64,
     pub binding_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_digest: Option<HashRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub policy: Option<SecretPolicy>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SecretPolicy {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub allowed_caps: Vec<CapGrantName>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleBinding {
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub slots: IndexMap<VarName, CapGrantName>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -742,15 +559,6 @@ pub type RoutingEvent = RoutingSubscription;
 pub struct InboxRoute {
     pub source: String,
     pub workflow: Name,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapGrant {
-    pub name: CapGrantName,
-    pub cap: Name,
-    pub params: ValueLiteral,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expiry_ns: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -1076,8 +884,6 @@ mod tests {
                     "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                 }
             ],
-            "caps": [],
-            "policies": [],
             "routing": {
                 "subscriptions": [
                     {
@@ -1091,5 +897,21 @@ mod tests {
         let node: AirNode = serde_json::from_value(manifest_json.clone()).expect("deserialize");
         let round_trip = serde_json::to_value(node).expect("serialize");
         assert_eq!(manifest_json, round_trip);
+    }
+
+    #[test]
+    fn defeffect_omits_public_cap_type() {
+        let effect_json = json!({
+            "$kind": "defeffect",
+            "name": "com.acme/send@1",
+            "kind": "email.send",
+            "params_schema": "com.acme/SendParams@1",
+            "receipt_schema": "com.acme/SendReceipt@1",
+            "origin_scope": "workflow"
+        });
+
+        let node: AirNode = serde_json::from_value(effect_json.clone()).expect("deserialize");
+        let round_trip = serde_json::to_value(node).expect("serialize");
+        assert_eq!(effect_json, round_trip);
     }
 }

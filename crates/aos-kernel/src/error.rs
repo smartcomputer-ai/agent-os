@@ -1,7 +1,5 @@
 use thiserror::Error;
 
-use crate::journal::CapDenyReason;
-
 #[derive(Debug, Error)]
 pub enum KernelError {
     #[error("store error: {0}")]
@@ -24,52 +22,8 @@ pub enum KernelError {
     ReceiptDecode(String),
     #[error("unsupported workflow receipt kind '{0}'")]
     UnsupportedWorkflowReceipt(String),
-    #[error("capability grant '{0}' not found")]
-    CapabilityGrantNotFound(String),
-    #[error("capability definition '{0}' not found")]
-    CapabilityDefinitionNotFound(String),
-    #[error("duplicate capability grant '{0}'")]
-    DuplicateCapabilityGrant(String),
-    #[error("capability params encoding error: {0}")]
-    CapabilityEncoding(String),
-    #[error(
-        "effect '{effect_kind}' requires capability type '{expected}' but grant '{grant}' provides '{found}'"
-    )]
-    CapabilityTypeMismatch {
-        grant: String,
-        effect_kind: String,
-        expected: String,
-        found: String,
-    },
     #[error("unsupported effect kind '{0}'")]
     UnsupportedEffectKind(String),
-    #[error("capability binding missing for workflow '{workflow}' slot '{slot}'")]
-    CapabilityBindingMissing { workflow: String, slot: String },
-    #[error("capability grant '{cap}' referenced by plan '{plan}' is missing")]
-    PlanCapabilityMissing { plan: String, cap: String },
-    #[error("module '{module}' binding references missing capability '{cap}'")]
-    ModuleCapabilityMissing { module: String, cap: String },
-    #[error(
-        "policy '{policy_name}' denied effect '{effect_kind}' from {origin} (rule_index={rule_index:?})"
-    )]
-    PolicyDenied {
-        effect_kind: String,
-        origin: String,
-        policy_name: String,
-        rule_index: Option<u32>,
-    },
-    #[error("capability grant '{grant}' params do not match schema for '{cap}': {reason}")]
-    CapabilityParamInvalid {
-        grant: String,
-        cap: String,
-        reason: String,
-    },
-    #[error("capability denied for '{cap}' on effect '{effect_kind}': {reason}")]
-    CapabilityDenied {
-        cap: String,
-        effect_kind: String,
-        reason: CapDenyReason,
-    },
     #[error("invalid idempotency key: {0}")]
     IdempotencyKeyInvalid(String),
     #[error("journal error: {0}")]
@@ -107,12 +61,6 @@ pub enum KernelError {
     SecretResolver(String),
     #[error("secret validation failed: {0}")]
     SecretResolution(String),
-    #[error("secret policy denied for {alias}@{version}: {reason}")]
-    SecretPolicyDenied {
-        alias: String,
-        version: u64,
-        reason: String,
-    },
     #[error("manifest validation error: {0}")]
     ManifestValidation(String),
     #[error("query error: {0}")]
@@ -135,18 +83,7 @@ impl KernelError {
             KernelError::UnknownReceipt(_) => "receipt.unknown",
             KernelError::ReceiptDecode(_) => "receipt.decode",
             KernelError::UnsupportedWorkflowReceipt(_) => "receipt.workflow_unsupported",
-            KernelError::CapabilityGrantNotFound(_) => "cap.grant_missing",
-            KernelError::CapabilityDefinitionNotFound(_) => "cap.def_missing",
-            KernelError::DuplicateCapabilityGrant(_) => "cap.grant_duplicate",
-            KernelError::CapabilityEncoding(_) => "cap.params_encode",
-            KernelError::CapabilityTypeMismatch { .. } => "cap.type_mismatch",
             KernelError::UnsupportedEffectKind(_) => "effect.kind_unsupported",
-            KernelError::CapabilityBindingMissing { .. } => "cap.binding_missing",
-            KernelError::PlanCapabilityMissing { .. } => "cap.plan_missing",
-            KernelError::ModuleCapabilityMissing { .. } => "cap.module_missing",
-            KernelError::PolicyDenied { .. } => "policy.denied",
-            KernelError::CapabilityParamInvalid { .. } => "cap.params_invalid",
-            KernelError::CapabilityDenied { reason, .. } => reason.code.as_str(),
             KernelError::IdempotencyKeyInvalid(_) => "idempotency.invalid",
             KernelError::Journal(_) => "journal.error",
             KernelError::SnapshotUnavailable(_) => "snapshot.unavailable",
@@ -159,7 +96,6 @@ impl KernelError {
             KernelError::SecretResolverMissing => "secret.resolver_missing",
             KernelError::SecretResolver(_) => "secret.resolver_error",
             KernelError::SecretResolution(_) => "secret.resolve_error",
-            KernelError::SecretPolicyDenied { .. } => "secret.policy_denied",
             KernelError::ManifestValidation(_) => "manifest.validation",
             KernelError::Query(_) => "query.error",
             KernelError::Entropy(_) => "entropy.error",

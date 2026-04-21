@@ -368,12 +368,6 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             None
         };
-        self.effect_manager
-            .set_cap_context(crate::effects::CapContext {
-                logical_now_ns: event.stamp.logical_now_ns,
-                journal_height: event.stamp.journal_height,
-                manifest_hash: event.stamp.manifest_hash.clone(),
-            });
         let input = WorkflowInput {
             version: ABI_VERSION,
             state: current_state,
@@ -536,23 +530,6 @@ impl<S: Store + 'static> Kernel<S> {
                     effect.kind
                 )));
             }
-            let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
-            let bound_grant = self
-                .module_cap_bindings
-                .get(&workflow_name)
-                .and_then(|binding| binding.get(&slot));
-            let default_grant = if bound_grant.is_none() && slot == "default" {
-                self.effect_manager
-                    .unique_grant_for_effect_kind(effect.kind.as_str())?
-            } else {
-                None
-            };
-            let grant = bound_grant
-                .or_else(|| default_grant.as_ref())
-                .ok_or_else(|| KernelError::CapabilityBindingMissing {
-                    workflow: workflow_name.clone(),
-                    slot: slot.clone(),
-                })?;
             let mut effect_for_enqueue = effect.clone();
             let derived_idempotency = derive_workflow_intent_idempotency_key(
                 workflow_name.as_str(),
@@ -563,11 +540,10 @@ impl<S: Store + 'static> Kernel<S> {
             )
             .map_err(KernelError::WorkflowOutput)?;
             effect_for_enqueue.idempotency_key = Some(derived_idempotency.to_vec());
-            let intent = match self.effect_manager.enqueue_workflow_effect_with_grant(
-                &workflow_name,
-                grant,
-                &effect_for_enqueue,
-            ) {
+            let intent = match self
+                .effect_manager
+                .enqueue_workflow_effect_authorized(&workflow_name, &effect_for_enqueue)
+            {
                 Ok(intent) => intent,
                 Err(err) => {
                     self.record_decisions()?;
@@ -590,7 +566,6 @@ impl<S: Store + 'static> Kernel<S> {
                     workflow_name.clone(),
                     key.clone(),
                     effect.kind.clone(),
-                    intent.cap_name.clone(),
                     intent.params_cbor.clone(),
                     intent.idempotency_key,
                     effect.issuer_ref.clone(),
@@ -1037,7 +1012,6 @@ mod tests {
                     context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
-                    cap_slots: Default::default(),
                 }),
                 pure: None,
             },
@@ -1090,12 +1064,7 @@ mod tests {
             }],
             effects: vec![],
             effect_bindings: vec![],
-
-            caps: vec![],
-            policies: vec![],
             secrets: vec![],
-            defaults: None,
-            module_bindings: Default::default(),
             routing: Some(Routing {
                 subscriptions: vec![RoutingEvent {
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -1110,9 +1079,6 @@ mod tests {
             secrets: vec![],
             modules,
             effects: HashMap::new(),
-
-            caps: HashMap::new(),
-            policies: HashMap::new(),
             schemas,
             effect_catalog: EffectCatalog::from_defs(Vec::new()),
         };

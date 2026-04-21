@@ -703,11 +703,7 @@ mod tests {
             modules: Vec::new(),
             effects: Vec::new(),
             effect_bindings: Vec::new(),
-            caps: Vec::new(),
-            policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: None,
-            module_bindings: Default::default(),
             routing: None,
         };
         let manifest_bytes = to_canonical_cbor(&manifest).expect("encode manifest");

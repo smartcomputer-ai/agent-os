@@ -1,6 +1,6 @@
 # Workflows
 
-Workflows are the orchestration unit in AgentOS. A workflow module is a deterministic state machine that consumes canonical events, updates its state, emits domain events, and requests external effects through the kernel's capability and policy gates.
+Workflows are the orchestration unit in AgentOS. A workflow module is a deterministic state machine that consumes canonical events, updates its state, emits domain events, and requests declared external effects through the kernel.
 
 This document describes the active workflow runtime contract: what a workflow owns, how it is invoked, how effects and receipts move through the system, and which invariants make replay, audit, and governance reliable.
 
@@ -31,8 +31,7 @@ Workflow modules own:
 
 Kernel + execution runtime own:
 - deterministic stepping
-- capability checks
-- policy checks
+- declared-effect/catalog admission
 - effect emission and open-work tracking
 - continuation admission and receipt ingestion
 
@@ -56,7 +55,7 @@ The owner/executor seam for open external work is defined in
 1. Only workflow modules may originate module-emitted effects.
 2. `pure` modules cannot emit effects.
 3. Workflow modules must declare `abi.workflow.effects_emitted`.
-4. Kernel rejects undeclared effect kinds before capability/policy evaluation.
+4. Kernel rejects undeclared effect kinds before enqueue.
 5. Multiple effects per step are allowed; deterministic kernel output limits apply.
 
 ### 3.2 Deterministic canonicalization
@@ -133,7 +132,7 @@ No guarantee of complete static future-effect prediction for unexecuted branches
 2. Router evaluates `routing.subscriptions` and delivers to matching workflow modules.
 3. Workflow `step` runs deterministically with current state + event.
 4. Workflow returns new state, domain events, and effect intents.
-5. Kernel enforces `effects_emitted` allowlist, then caps and policy, and records open work.
+5. Kernel enforces the `effects_emitted` allowlist and effect catalog emitter constraints, then records open work.
 6. Executors may run allowed external work independently and emit stream frames and a terminal
    receipt.
 7. Kernel canonicalizes admitted continuations and routes them to the recorded origin instance.
@@ -145,9 +144,6 @@ Workflow modules declare workflow ABI fields under `abi.workflow`:
 - `event`: event schema
 - `context` (optional)
 - `effects_emitted` (required for effecting modules)
-- `cap_slots` (optional slot -> cap type)
-
-Manifest binds slots via `module_bindings`.
 
 ## 6) Routing Contract
 
@@ -195,11 +191,11 @@ When a module declares `sys/WorkflowContext@1`, `ctx` carries `key` and `cell_mo
 In cell mode, the module receives only that cell's state and `key` is required.
 Returning `state=null` in cell mode deletes the cell.
 
-Effect authority is unchanged:
+Effect authority is structural:
 
 - only `module_kind: "workflow"` modules may emit effects
 - emitted kinds must be declared in `abi.workflow.effects_emitted`
-- capability and policy checks still apply after structural allowlist checks
+- the effect definition's `origin_scope` must allow workflow emission
 
 ### 7.3 Manifest Hooks and Routing
 
@@ -344,7 +340,7 @@ match (state.pc, event) {
 }
 ```
 
-### 9.2 Manifest routing + binding sketch
+### 9.2 Manifest routing sketch
 
 ```json
 {
@@ -356,11 +352,6 @@ match (state.pc, event) {
         "key_field": "order_id"
       }
     ]
-  },
-  "module_bindings": {
-    "com.acme/order_workflow@1": {
-      "slots": { "payments": "cap_payments" }
-    }
   }
 }
 ```

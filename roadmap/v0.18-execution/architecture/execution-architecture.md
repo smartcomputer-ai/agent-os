@@ -38,7 +38,7 @@ Corollary:
 Its construction has two stages:
 
 1. Canonicalize the effect params once.
-2. Compute `sha256(cbor(kind, canonical_params, cap_name, effective_idempotency_key))`.
+2. Compute `sha256(cbor(kind, canonical_params, effective_idempotency_key))`.
 
 For non-workflow origins, `effective_idempotency_key` is the explicit supplied key, or the all-zero
 key when omitted.

@@ -6,7 +6,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 **AgentOS** is a deterministic, event-sourced computing substrate for AI agents.
 
-**AIR (Agent Intermediate Representation)** is the typed control-plane IR governing schemas, modules, effects, capabilities, policies, secrets, and manifests.
+**AIR (Agent Intermediate Representation)** is the typed control-plane IR governing schemas, modules, effects, secrets, and manifests.
 
 ## Reading the Specs (index)
 
@@ -28,12 +28,12 @@ Reference shelves:
 
 **World**: Single-threaded deterministic kernel state. Replay checkpoint/snapshot + journal frames + receipts = identical state.
 
-**Workspaces**: Versioned tree registry (`sys/Workspace@1`). Tree ops (`workspace.*`) are internal effects, cap-gated, and used by `aos ws` plus `aos push`/`aos pull`.
+**Workspaces**: Versioned tree registry (`sys/Workspace@1`). Tree ops (`workspace.*`) are internal effects used by `aos ws` plus `aos push`/`aos pull`.
 
 **Active layers**:
 - **Workflow modules** (WASM, `module_kind: workflow`): deterministic state machines on workflow ABI; own orchestration/state transitions.
 - **Pure modules** (`module_kind: pure`): side-effect-free compute helpers.
-- **Kernel** (`aos-kernel`): synchronous authoritative world execution, governance, manifests, capabilities, policies, snapshots, replay, and open-work state.
+- **Kernel** (`aos-kernel`): synchronous authoritative world execution, governance, manifests, effect authorization, snapshots, replay, and open-work state.
 - **Unified node** (`aos-node`): owns hot worlds, serializes per-world execution, stages completed slices, durably flushes journal frames, serves hot control reads, and publishes opened async effects only after durable append.
 - **Executors/Adapters**: async edge execution for external work; stream frames and receipts re-enter only as world input through owner admission.
 
@@ -55,7 +55,7 @@ Shadow reports bounded observed effects/in-flight state and ledger deltas. Prima
 **Critical boundaries (v1/v0.19)**:
 - Only workflow modules may emit effects.
 - Emitted effects must be declared in `abi.workflow.effects_emitted`.
-- Capability + policy must both pass before dispatch.
+- Emitted effects must pass declared-effect and origin-scope authorization before dispatch.
 - Open external work is recorded before execution starts.
 - Opened async effects are published only after their containing frame has durably flushed.
 - Executors never mutate world state directly; stream frames and receipts re-enter through world input.
@@ -66,7 +66,7 @@ Shadow reports bounded observed effects/in-flight state and ledger deltas. Prima
 ## Key Principles
 
 1. Determinism by default (replay-identical state)
-2. Capability security (no ambient authority)
+2. Explicit effects (no ambient I/O)
 3. Receipts everywhere (signed, auditable)
 4. Minimal trusted base
 5. Content-addressed, portable worlds
@@ -77,8 +77,8 @@ Shadow reports bounded observed effects/in-flight state and ledger deltas. Prima
 
 **Key implementation notes**:
 - Loader accepts authoring sugar + canonical JSON, validates against schemas, emits canonical CBOR.
-- Validator enforces module ABI contracts, routing semantics, capability bindings, and effect allowlists.
-- Effect manager canonicalizes params, runs cap/policy gates, records open work, and validates admitted continuations/receipts.
+- Validator enforces module ABI contracts, routing semantics, and effect allowlists.
+- Effect manager canonicalizes params, authorizes effect origins, records open work, and validates admitted continuations/receipts.
 - Event and receipt ingress are schema-validated and canonicalized once; journal stores canonical CBOR.
 - Manifest changes are journaled as `Manifest` records; replay applies them in order.
 - Node execution center: `aos-node/src/worker/` owns hot-world scheduling, slice staging, durable flush, replay/open, and checkpoint publication.
@@ -92,10 +92,10 @@ Shadow reports bounded observed effects/in-flight state and ledger deltas. Prima
 
 Crates keep deterministic core small and effectful code at the edges:
 
-- `aos-air-types` — AIR data types, schemas, manifests, capabilities, and semantic validation.
+- `aos-air-types` — AIR data types, schemas, manifests, effects, and semantic validation.
 - `aos-air-exec` — Pure AIR expression/value evaluator.
 - `aos-cbor` — Canonical CBOR + SHA-256 helpers.
-- `aos-kernel` — Deterministic synchronous world kernel: manifests, governance, capabilities/policies, internal effects, open work, journal tail, snapshots, replay, and workflow runtime state.
+- `aos-kernel` — Deterministic synchronous world kernel: manifests, governance, effect authorization, internal effects, open work, journal tail, snapshots, replay, and workflow runtime state.
 - `aos-wasm-abi` — `no_std` envelopes shared by workflow/pure WASM components.
 - `aos-wasm` — Deterministic Wasmtime wrapper for module execution.
 - `aos-wasm-sdk` — Workflow helper library for `wasm32-unknown-unknown`.

@@ -169,7 +169,6 @@ mod tests {
     fn test_intent(effect_kind: &str) -> EffectIntent {
         EffectIntent::from_raw_params(
             effect_kind.into(),
-            effect_kind,
             serde_cbor::to_vec(&serde_json::json!({ "ok": true })).expect("params"),
             [3; 32],
         )

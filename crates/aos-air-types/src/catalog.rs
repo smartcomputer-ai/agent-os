@@ -1,11 +1,10 @@
 use indexmap::IndexMap;
 
-use crate::{CapType, DefEffect, EffectKind, OriginScope, SchemaRef};
+use crate::{DefEffect, EffectKind, OriginScope, SchemaRef};
 
 #[derive(Debug, Clone)]
 pub struct EffectCatalogEntry {
     pub kind: EffectKind,
-    pub cap_type: CapType,
     pub params_schema: SchemaRef,
     pub receipt_schema: SchemaRef,
     pub origin_scope: OriginScope,
@@ -38,7 +37,6 @@ impl EffectCatalog {
                 key,
                 EffectCatalogEntry {
                     kind: def.kind.clone(),
-                    cap_type: def.cap_type.clone(),
                     params_schema: def.params_schema.clone(),
                     receipt_schema: def.receipt_schema.clone(),
                     origin_scope: def.origin_scope,
@@ -58,10 +56,6 @@ impl EffectCatalog {
 
     pub fn receipt_schema(&self, kind: &EffectKind) -> Option<&SchemaRef> {
         self.get(kind).map(|e| &e.receipt_schema)
-    }
-
-    pub fn cap_type(&self, kind: &EffectKind) -> Option<&CapType> {
-        self.get(kind).map(|e| &e.cap_type)
     }
 
     pub fn origin_scope(&self, kind: &EffectKind) -> Option<OriginScope> {

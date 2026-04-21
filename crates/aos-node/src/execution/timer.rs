@@ -256,7 +256,6 @@ mod tests {
             WorkflowReceiptSnapshot {
                 intent_hash: [1; 32],
                 effect_kind: EffectKind::TIMER_SET.to_string(),
-                cap_name: String::new(),
                 origin_instance_key: None,
                 params_cbor: serde_cbor::to_vec(&TimerSetParams {
                     deliver_at_ns: 42,
@@ -272,7 +271,6 @@ mod tests {
             WorkflowReceiptSnapshot {
                 intent_hash: [2; 32],
                 effect_kind: EffectKind::HTTP_REQUEST.to_string(),
-                cap_name: String::new(),
                 origin_instance_key: None,
                 params_cbor: Vec::new(),
                 idempotency_key: [0; 32],

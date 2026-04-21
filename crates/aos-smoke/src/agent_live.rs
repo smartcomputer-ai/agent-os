@@ -558,7 +558,7 @@ fn execute_llm<S: aos_kernel::Store + 'static>(
 
 fn build_llm_intent(params: &LlmGenerateParams) -> Result<EffectIntent> {
     let params_cbor = serde_cbor::to_vec(params).context("encode llm params cbor")?;
-    EffectIntent::from_raw_params(EffectKind::llm_generate(), "cap", params_cbor, [0u8; 32])
+    EffectIntent::from_raw_params(EffectKind::llm_generate(), params_cbor, [0u8; 32])
         .context("build llm intent")
 }
 

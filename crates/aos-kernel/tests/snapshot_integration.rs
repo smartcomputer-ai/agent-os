@@ -1,6 +1,5 @@
 use aos_air_types::{
-    DefModule, DefPolicy, DefSchema, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind,
-    OriginKind, PolicyDecision, PolicyMatch, PolicyRule, TypeExpr, TypeRecord, TypeRef,
+    DefModule, DefSchema, HashRef, ModuleAbi, ModuleKind, TypeExpr, TypeRecord, TypeRef,
     TypeVariant, WorkflowAbi,
 };
 use aos_effects::builtins::{BlobPutParams, TimerSetParams, TimerSetReceipt};
@@ -17,21 +16,7 @@ use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 
 #[path = "support/helpers.rs"]
 mod helpers;
-use helpers::{attach_default_policy, simple_state_manifest, timer_manifest};
-
-fn deny_workflow_timer_policy() -> DefPolicy {
-    DefPolicy {
-        name: "com.acme/deny-workflow-timer@1".into(),
-        rules: vec![PolicyRule {
-            when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::timer_set()),
-                origin_kind: Some(OriginKind::Workflow),
-                ..Default::default()
-            },
-            decision: PolicyDecision::Deny,
-        }],
-    }
-}
+use helpers::{simple_state_manifest, timer_manifest};
 
 #[test]
 fn workflow_timer_snapshot_resumes_on_receipt() {
@@ -176,7 +161,7 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
 }
 
 #[test]
-fn workflow_cap_decisions_survive_snapshot_replay() {
+fn workflow_authorized_effect_snapshot_replay_has_no_cap_decisions() {
     let store = fixtures::new_mem_store();
     let manifest = workflow_resume_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
@@ -192,13 +177,6 @@ fn workflow_cap_decisions_survive_snapshot_replay() {
 
     world.kernel.create_snapshot().unwrap();
     let entries = world.kernel.dump_journal().unwrap();
-    assert!(
-        entries
-            .iter()
-            .any(|entry| entry.kind == JournalKind::CapDecision),
-        "expected cap decision entry"
-    );
-
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
         workflow_resume_manifest(&store),
@@ -264,7 +242,7 @@ fn snapshot_creation_quiesces_runtime() {
 }
 
 #[test]
-fn workflow_manifest_records_override_supplied_policy() {
+fn workflow_manifest_records_restore_queued_intent_without_policy_reevaluation() {
     let store = fixtures::new_mem_store();
     let manifest = workflow_resume_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
@@ -281,12 +259,9 @@ fn workflow_manifest_records_override_supplied_policy() {
     world.kernel.create_snapshot().unwrap();
     let entries = world.kernel.dump_journal().unwrap();
 
-    let mut denying_manifest = workflow_resume_manifest(&store);
-    attach_default_policy(&mut denying_manifest, deny_workflow_timer_policy());
-
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        denying_manifest,
+        workflow_resume_manifest(&store),
         Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
@@ -369,7 +344,6 @@ fn workflow_resume_manifest(
             aos_effects::EffectKind::TIMER_SET.into(),
             aos_effects::EffectKind::BLOB_PUT.into(),
         ],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = fixtures::build_loaded_manifest(
@@ -410,13 +384,6 @@ fn workflow_resume_manifest(
             },
         ],
     );
-    loaded
-        .manifest
-        .module_bindings
-        .get_mut("com.acme/WorkflowResume@1")
-        .expect("workflow binding")
-        .slots
-        .insert("blob".into(), "blob_cap".into());
     loaded
 }
 

@@ -26,49 +26,9 @@
       "type": "array",
       "items": { "$ref": "#/$defs/EffectBinding" }
     },
-    "caps": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/NamedRef" }
-    },
-    "policies": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/NamedRef" }
-    },
     "secrets": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
-    },
-    "defaults": {
-      "type": "object",
-      "properties": {
-        "policy": { "$ref": "common.schema.json#/$defs/Name" },
-        "cap_grants": {
-          "type": "array",
-          "items": { "$ref": "common.schema.json#/$defs/CapGrant" }
-        }
-      },
-      "additionalProperties": false
-    },
-    "module_bindings": {
-      "description": "Module-level slot bindings: module Name → { slots: { slot_name → CapGrantName } }",
-      "type": "object",
-      "patternProperties": {
-        "^[a-z][a-z0-9._-]*/[A-Za-z][A-Za-z0-9._-]*@[1-9][0-9]*$": {
-          "type": "object",
-          "properties": {
-            "slots": {
-              "type": "object",
-              "patternProperties": {
-                "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$": { "$ref": "common.schema.json#/$defs/CapGrantName" }
-              },
-              "additionalProperties": false
-            }
-          },
-          "required": ["slots"],
-          "additionalProperties": false
-        }
-      },
-      "additionalProperties": false
     },
     "routing": {
       "type": "object",
@@ -102,7 +62,7 @@
       "additionalProperties": false
     }
   },
-  "required": ["$kind","air_version","schemas","modules","effects","caps","policies"],
+  "required": ["$kind","air_version","schemas","modules","effects"],
   "additionalProperties": false,
   "$defs": {
     "NamedRef": {

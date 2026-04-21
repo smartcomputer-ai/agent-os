@@ -2,38 +2,50 @@
   "$kind": "manifest",
   "air_version": "1",
   "schemas": [
-    { "name": "demo/FabricExecProgressPc@1" },
-    { "name": "demo/FabricExecProgressState@1" },
-    { "name": "demo/FabricExecProgressStart@1" },
-    { "name": "demo/FabricExecProgressEvent@1" },
-    { "name": "sys/EffectReceiptEnvelope@1" },
-    { "name": "sys/EffectStreamFrame@1" },
-    { "name": "sys/HostExecParams@1" },
-    { "name": "sys/HostExecReceipt@1" },
-    { "name": "sys/HostExecProgressFrame@1" }
+    {
+      "name": "demo/FabricExecProgressPc@1"
+    },
+    {
+      "name": "demo/FabricExecProgressState@1"
+    },
+    {
+      "name": "demo/FabricExecProgressStart@1"
+    },
+    {
+      "name": "demo/FabricExecProgressEvent@1"
+    },
+    {
+      "name": "sys/EffectReceiptEnvelope@1"
+    },
+    {
+      "name": "sys/EffectStreamFrame@1"
+    },
+    {
+      "name": "sys/HostExecParams@1"
+    },
+    {
+      "name": "sys/HostExecReceipt@1"
+    },
+    {
+      "name": "sys/HostExecProgressFrame@1"
+    }
   ],
   "modules": [
-    { "name": "demo/FabricExecProgress@1" },
-    { "name": "sys/CapEnforceHost@1" }
+    {
+      "name": "demo/FabricExecProgress@1"
+    }
   ],
   "effects": [
-    { "name": "sys/host.exec@1" }
+    {
+      "name": "sys/host.exec@1"
+    }
   ],
   "effect_bindings": [
-    { "kind": "host.exec", "adapter_id": "host.exec.fabric" }
+    {
+      "kind": "host.exec",
+      "adapter_id": "host.exec.fabric"
+    }
   ],
-  "caps": [
-    { "name": "sys/host@1" }
-  ],
-  "defaults": {
-    "cap_grants": [
-      {
-        "name": "host",
-        "cap": "sys/host@1",
-        "params": { "record": {} }
-      }
-    ]
-  },
   "routing": {
     "subscriptions": [
       {

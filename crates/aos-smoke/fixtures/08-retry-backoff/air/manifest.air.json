@@ -30,9 +30,6 @@
   "modules": [
     {
       "name": "demo/RetrySM@1"
-    },
-    {
-      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
   "effects": [
@@ -43,46 +40,6 @@
       "name": "sys/timer.set@1"
     }
   ],
-  "caps": [],
-  "policies": [
-    {
-      "name": "demo/default_policy@1"
-    }
-  ],
-  "defaults": {
-    "policy": "demo/default_policy@1",
-    "cap_grants": [
-      {
-        "name": "timer_grant",
-        "cap": "sys/timer@1",
-        "params": {
-          "record": {}
-        }
-      },
-      {
-        "name": "http_grant",
-        "cap": "sys/http.out@1",
-        "params": {
-          "record": {
-            "hosts": {
-              "set": [
-                {
-                  "text": "example.com"
-                }
-              ]
-            },
-            "methods": {
-              "set": [
-                {
-                  "text": "POST"
-                }
-              ]
-            }
-          }
-        }
-      }
-    ]
-  },
   "routing": {
     "subscriptions": [
       {

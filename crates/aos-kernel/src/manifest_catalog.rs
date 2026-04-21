@@ -1,8 +1,7 @@
 use std::{collections::HashMap, path::Path};
 
 use aos_air_types::{
-    AirNode, CURRENT_AIR_VERSION, CapGrant, Manifest, NamedRef, SecretDecl, SecretEntry,
-    SecretPolicy, SecretRef, ValueLiteral, builtins,
+    AirNode, CURRENT_AIR_VERSION, Manifest, NamedRef, SecretDecl, SecretEntry, SecretRef, builtins,
 };
 use aos_cbor::Hash;
 use serde_json::Value as JsonValue;
@@ -28,8 +27,6 @@ enum NodeKind {
     Schema,
     Module,
     Effect,
-    Cap,
-    Policy,
     Secret,
 }
 
@@ -39,8 +36,6 @@ impl NodeKind {
             NodeKind::Schema => "defschema",
             NodeKind::Module => "defmodule",
             NodeKind::Effect => "defeffect",
-            NodeKind::Cap => "defcap",
-            NodeKind::Policy => "defpolicy",
             NodeKind::Secret => "defsecret",
         }
     }
@@ -51,8 +46,6 @@ impl NodeKind {
             (NodeKind::Schema, AirNode::Defschema(_))
                 | (NodeKind::Module, AirNode::Defmodule(_))
                 | (NodeKind::Effect, AirNode::Defeffect(_))
-                | (NodeKind::Cap, AirNode::Defcap(_))
-                | (NodeKind::Policy, AirNode::Defpolicy(_))
                 | (NodeKind::Secret, AirNode::Defsecret(_))
         )
     }
@@ -81,13 +74,10 @@ pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResul
     load_refs(store, &manifest.schemas, NodeKind::Schema, &mut nodes)?;
     load_refs(store, &manifest.modules, NodeKind::Module, &mut nodes)?;
     load_refs(store, &manifest.effects, NodeKind::Effect, &mut nodes)?;
-    load_refs(store, &manifest.caps, NodeKind::Cap, &mut nodes)?;
-    load_refs(store, &manifest.policies, NodeKind::Policy, &mut nodes)?;
     load_secret_refs(store, &manifest.secrets, &mut nodes)?;
-    insert_builtin_caps(&mut nodes);
 
     let resolved_secrets = resolve_secrets(&manifest, &nodes)?;
-    validate_secrets(&manifest, &resolved_secrets)?;
+    validate_secrets(&resolved_secrets)?;
 
     Ok(Catalog {
         manifest,
@@ -125,7 +115,7 @@ fn load_refs<S: Store>(
     for reference in refs {
         if is_sys_name(reference.name.as_str()) {
             match kind {
-                NodeKind::Schema | NodeKind::Effect | NodeKind::Cap | NodeKind::Module => {}
+                NodeKind::Schema | NodeKind::Effect | NodeKind::Module => {}
                 _ => {
                     return Err(StoreError::ReservedSysName {
                         kind: kind.label(),
@@ -188,20 +178,6 @@ fn load_refs<S: Store>(
             continue;
         }
 
-        if kind == NodeKind::Cap
-            && let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str())
-        {
-            ensure_builtin_cap_hash(reference, builtin)?;
-            nodes.insert(
-                reference.name.clone(),
-                CatalogEntry {
-                    hash: builtin.hash,
-                    node: AirNode::Defcap(builtin.cap.clone()),
-                },
-            );
-            continue;
-        }
-
         if is_sys_name(reference.name.as_str()) {
             return Err(StoreError::ReservedSysName {
                 kind: kind.label(),
@@ -238,17 +214,6 @@ fn load_secret_refs<S: Store>(
         return Ok(());
     }
     load_refs(store, &refs, NodeKind::Secret, nodes)
-}
-
-fn insert_builtin_caps(nodes: &mut HashMap<String, CatalogEntry>) {
-    for builtin in builtins::builtin_caps() {
-        nodes
-            .entry(builtin.cap.name.clone())
-            .or_insert_with(|| CatalogEntry {
-                hash: builtin.hash,
-                node: AirNode::Defcap(builtin.cap.clone()),
-            });
-    }
 }
 
 fn parse_hash_str(value: &str) -> StoreResult<Hash> {
@@ -313,21 +278,6 @@ fn ensure_builtin_effect_hash(
     Ok(())
 }
 
-fn ensure_builtin_cap_hash(
-    reference: &NamedRef,
-    builtin: &builtins::BuiltinCap,
-) -> StoreResult<()> {
-    let actual = parse_hash_str(reference.hash.as_str())?;
-    if actual != builtin.hash {
-        return Err(StoreError::HashMismatch {
-            kind: EntryKind::Node,
-            expected: builtin.hash,
-            actual,
-        });
-    }
-    Ok(())
-}
-
 fn resolve_secrets(
     manifest: &Manifest,
     nodes: &HashMap<String, CatalogEntry>,
@@ -356,10 +306,6 @@ fn resolve_secrets(
                     version,
                     binding_id: def.binding_id.clone(),
                     expected_digest: def.expected_digest.clone(),
-                    policy: Some(SecretPolicy {
-                        allowed_caps: def.allowed_caps.clone(),
-                    })
-                    .filter(|p| !p.allowed_caps.is_empty()),
                 });
             }
         }
@@ -367,14 +313,8 @@ fn resolve_secrets(
     Ok(decls)
 }
 
-fn validate_secrets(manifest: &Manifest, declarations: &[SecretDecl]) -> StoreResult<()> {
-    let declarations = index_secret_decls(declarations)?;
-    if let Some(defaults) = &manifest.defaults {
-        for grant in &defaults.cap_grants {
-            validate_cap_grant_secrets(grant, &declarations)?;
-        }
-    }
-    Ok(())
+fn validate_secrets(declarations: &[SecretDecl]) -> StoreResult<()> {
+    index_secret_decls(declarations).map(|_| ())
 }
 
 fn index_secret_decls<'a>(
@@ -400,28 +340,10 @@ fn index_secret_decls<'a>(
     Ok(map)
 }
 
-fn validate_cap_grant_secrets(
-    grant: &CapGrant,
-    declarations: &HashMap<(String, u64), &SecretDecl>,
-) -> StoreResult<()> {
-    let mut refs = Vec::new();
-    collect_secret_refs_in_value_literal(&grant.params, &mut refs);
-    for reference in refs {
-        resolve_secret(
-            &reference,
-            declarations,
-            &format!("cap grant {}", grant.name),
-            Some(grant.name.as_str()),
-        )?;
-    }
-    Ok(())
-}
-
 fn resolve_secret<'a>(
     reference: &SecretRef,
     declarations: &'a HashMap<(String, u64), &'a SecretDecl>,
     context: &str,
-    cap_name: Option<&str>,
 ) -> StoreResult<&'a SecretDecl> {
     if reference.version < 1 {
         return Err(StoreError::InvalidSecretVersion {
@@ -439,52 +361,7 @@ fn resolve_secret<'a>(
         });
     };
 
-    if let Some(policy) = decl.policy.as_ref()
-        && let Some(cap) = cap_name
-        && !policy.allowed_caps.is_empty()
-        && !policy.allowed_caps.iter().any(|c| c == cap)
-    {
-        return Err(StoreError::SecretPolicyViolation {
-            alias: decl.alias.clone(),
-            version: decl.version,
-            context: context.to_string(),
-        });
-    }
-
     Ok(decl)
-}
-
-fn collect_secret_refs_in_value_literal(value: &ValueLiteral, refs: &mut Vec<SecretRef>) {
-    match value {
-        ValueLiteral::SecretRef(secret) => refs.push(secret.clone()),
-        ValueLiteral::List(list) => {
-            for item in &list.list {
-                collect_secret_refs_in_value_literal(item, refs);
-            }
-        }
-        ValueLiteral::Set(set) => {
-            for item in &set.set {
-                collect_secret_refs_in_value_literal(item, refs);
-            }
-        }
-        ValueLiteral::Map(map) => {
-            for entry in &map.map {
-                collect_secret_refs_in_value_literal(&entry.key, refs);
-                collect_secret_refs_in_value_literal(&entry.value, refs);
-            }
-        }
-        ValueLiteral::Record(record) => {
-            for field in record.record.values() {
-                collect_secret_refs_in_value_literal(field, refs);
-            }
-        }
-        ValueLiteral::Variant(variant) => {
-            if let Some(value) = variant.value.as_deref() {
-                collect_secret_refs_in_value_literal(value, refs);
-            }
-        }
-        _ => {}
-    }
 }
 
 #[allow(dead_code)]
@@ -532,10 +409,8 @@ mod tests {
     use super::*;
     use crate::MemStore;
     use aos_air_types::{
-        DefSchema, EmptyObject, HashRef, ManifestDefaults, TypeExpr, TypePrimitive,
-        TypePrimitiveText, ValueRecord,
+        DefSchema, EmptyObject, HashRef, TypeExpr, TypePrimitive, TypePrimitiveText,
     };
-    use indexmap::IndexMap;
 
     fn builtin_schema_refs() -> Vec<NamedRef> {
         builtins::builtin_schemas()
@@ -581,11 +456,7 @@ mod tests {
             modules: vec![],
             effects: builtin_effect_refs(),
             effect_bindings: vec![],
-            caps: vec![],
-            policies: vec![],
             secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
             routing: None,
         };
 
@@ -594,49 +465,4 @@ mod tests {
         assert!(catalog.nodes.contains_key("com.acme/Event@1"));
     }
 
-    #[test]
-    fn cap_grant_secret_policy_is_enforced() {
-        let store = MemStore::default();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: builtin_schema_refs(),
-            modules: vec![],
-            effects: builtin_effect_refs(),
-            effect_bindings: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![SecretEntry::Decl(SecretDecl {
-                alias: "api_key".into(),
-                version: 1,
-                binding_id: "secret/api_key".into(),
-                expected_digest: None,
-                policy: Some(SecretPolicy {
-                    allowed_caps: vec!["allowed_cap".into()],
-                }),
-            })],
-            defaults: Some(ManifestDefaults {
-                policy: None,
-                cap_grants: vec![CapGrant {
-                    name: "blocked_cap".into(),
-                    cap: "sys/cap/http_public@1".into(),
-                    params: ValueLiteral::Record(ValueRecord {
-                        record: IndexMap::from([(
-                            "api_key".into(),
-                            ValueLiteral::SecretRef(SecretRef {
-                                alias: "api_key".into(),
-                                version: 1,
-                            }),
-                        )]),
-                    }),
-                    expiry_ns: None,
-                }],
-            }),
-            module_bindings: IndexMap::new(),
-            routing: None,
-        };
-
-        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
-        let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
-        assert!(matches!(err, StoreError::SecretPolicyViolation { .. }));
-    }
 }

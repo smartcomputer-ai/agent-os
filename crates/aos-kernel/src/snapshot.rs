@@ -143,7 +143,6 @@ pub fn receipts_to_vecdeque(
 pub struct EffectIntentSnapshot {
     pub intent_hash: [u8; 32],
     pub kind: String,
-    pub cap_name: String,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
     #[serde(with = "serde_bytes")]
@@ -155,7 +154,6 @@ impl EffectIntentSnapshot {
         Self {
             intent_hash: intent.intent_hash,
             kind: intent.kind.as_str().to_string(),
-            cap_name: intent.cap_name.clone(),
             params_cbor: intent.params_cbor.clone(),
             idempotency_key: intent.idempotency_key,
         }
@@ -164,7 +162,6 @@ impl EffectIntentSnapshot {
     pub fn into_intent(self) -> EffectIntent {
         EffectIntent {
             kind: RuntimeEffectKind::new(self.kind),
-            cap_name: self.cap_name,
             params_cbor: self.params_cbor,
             idempotency_key: self.idempotency_key,
             intent_hash: self.intent_hash,
@@ -177,8 +174,6 @@ pub struct WorkflowReceiptSnapshot {
     pub intent_hash: [u8; 32],
     pub origin_module_id: String,
     pub effect_kind: String,
-    #[serde(default)]
-    pub cap_name: String,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -244,7 +239,6 @@ impl WorkflowReceiptSnapshot {
             intent_hash,
             origin_module_id: ctx.origin_module_id.clone(),
             effect_kind: ctx.effect_kind.clone(),
-            cap_name: ctx.cap_name.clone(),
             origin_instance_key: ctx.origin_instance_key.clone(),
             params_cbor: ctx.params_cbor.clone(),
             idempotency_key: ctx.idempotency_key,
@@ -259,7 +253,6 @@ impl WorkflowReceiptSnapshot {
             self.origin_module_id,
             self.origin_instance_key,
             self.effect_kind,
-            self.cap_name,
             self.params_cbor,
             self.idempotency_key,
             self.issuer_ref,

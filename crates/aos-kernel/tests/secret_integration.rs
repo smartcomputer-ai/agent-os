@@ -3,15 +3,15 @@ use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 
 use aos_air_types::catalog::EffectCatalog;
-use aos_air_types::{CURRENT_AIR_VERSION, Manifest, SecretDecl, SecretEntry, SecretPolicy};
+use aos_air_types::{CURRENT_AIR_VERSION, Manifest, SecretDecl, SecretEntry};
 use aos_cbor::Hash;
 use aos_effects::builtins::LlmGenerateParams;
 use aos_kernel::MemStore;
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::Journal;
 use aos_kernel::secret::{
-    MapSecretResolver, SecretCatalog, enforce_secret_policy, env_secret_resolver_from_manifest,
-    inject_secrets_in_params, normalize_secret_variants,
+    MapSecretResolver, SecretCatalog, env_secret_resolver_from_manifest, inject_secrets_in_params,
+    normalize_secret_variants,
 };
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use indexmap::IndexMap;
@@ -42,13 +42,12 @@ fn secret_param_cbor(alias: &str, version: u64) -> Vec<u8> {
     serde_cbor::to_vec(&Value::Map(root)).unwrap()
 }
 
-fn catalog_with_secret(policy: Option<SecretPolicy>) -> SecretCatalog {
+fn catalog_with_secret() -> SecretCatalog {
     let decl = SecretDecl {
         alias: "llm/api".into(),
         version: 1,
         binding_id: "env:LLM_API_KEY".into(),
         expected_digest: None,
-        policy,
     };
     SecretCatalog::new(&[decl])
 }
@@ -105,12 +104,7 @@ fn empty_manifest() -> Manifest {
         modules: vec![],
         effects: vec![],
         effect_bindings: vec![],
-
-        caps: vec![],
-        policies: vec![],
         secrets: vec![],
-        defaults: None,
-        module_bindings: IndexMap::new(),
         routing: None,
     }
 }
@@ -121,7 +115,6 @@ fn loaded_manifest_with_secret(binding_id: &str) -> LoadedManifest {
         version: 1,
         binding_id: binding_id.into(),
         expected_digest: None,
-        policy: None,
     };
     let mut manifest = empty_manifest();
     manifest.secrets.push(SecretEntry::Decl(secret.clone()));
@@ -130,9 +123,6 @@ fn loaded_manifest_with_secret(binding_id: &str) -> LoadedManifest {
         secrets: vec![secret],
         modules: HashMap::new(),
         effects: HashMap::new(),
-
-        caps: HashMap::new(),
-        policies: HashMap::new(),
         schemas: HashMap::new(),
         effect_catalog: EffectCatalog::new(),
     }
@@ -140,7 +130,7 @@ fn loaded_manifest_with_secret(binding_id: &str) -> LoadedManifest {
 
 #[test]
 fn injects_secret_into_params_cbor() {
-    let catalog = catalog_with_secret(None);
+    let catalog = catalog_with_secret();
     let mut map = HashMap::new();
     map.insert("env:LLM_API_KEY".into(), b"token123".to_vec());
     let resolver = MapSecretResolver::new(map);
@@ -165,7 +155,7 @@ fn injects_secret_into_params_cbor() {
 
 #[test]
 fn injects_non_utf8_secret_as_bytes() {
-    let catalog = catalog_with_secret(None);
+    let catalog = catalog_with_secret();
     let mut map = HashMap::new();
     map.insert("env:LLM_API_KEY".into(), vec![0xFF, 0x00, 0x01]);
     let resolver = MapSecretResolver::new(map);
@@ -224,7 +214,6 @@ fn expected_digest_mismatch_fails() {
         version: 1,
         binding_id: "env:LLM_API_KEY".into(),
         expected_digest: Some(expected),
-        policy: None,
     };
     let catalog = SecretCatalog::new(&[decl]);
     let resolver = MapSecretResolver::new(HashMap::from([(
@@ -237,76 +226,6 @@ fn expected_digest_mismatch_fails() {
         err,
         aos_kernel::secret::SecretResolverError::DigestMismatch { .. }
     ));
-}
-
-#[test]
-fn secret_policy_denies_disallowed_cap() {
-    let catalog = catalog_with_secret(Some(SecretPolicy {
-        allowed_caps: vec!["allowed_cap".into()],
-    }));
-    let _resolver = MapSecretResolver::new(HashMap::from([(
-        "env:LLM_API_KEY".into(),
-        b"token123".to_vec(),
-    )]));
-    let cbor = secret_param_cbor("llm/api", 1);
-    // Policy should run on original params
-    let err = enforce_secret_policy(
-        &cbor,
-        &catalog,
-        &aos_effects::EffectSource::Plan {
-            name: "allowed_plan".into(),
-        },
-        "other_cap",
-    )
-    .unwrap_err();
-    assert!(matches!(err, KernelError::SecretPolicyDenied { .. }));
-
-    // Allowed cap passes regardless of origin identity in post-plan semantics.
-    enforce_secret_policy(
-        &cbor,
-        &catalog,
-        &aos_effects::EffectSource::Plan {
-            name: "other_plan".into(),
-        },
-        "allowed_cap",
-    )
-    .expect("allowed cap should pass");
-}
-
-#[test]
-fn secret_policy_denies_by_cap_only() {
-    let catalog = catalog_with_secret(Some(SecretPolicy {
-        allowed_caps: vec!["only_cap".into()],
-    }));
-    let cbor = secret_param_cbor("llm/api", 1);
-    // Different cap should be denied regardless of plan
-    let err = enforce_secret_policy(
-        &cbor,
-        &catalog,
-        &aos_effects::EffectSource::Plan {
-            name: "any_plan".into(),
-        },
-        "other_cap",
-    )
-    .unwrap_err();
-    assert!(matches!(err, KernelError::SecretPolicyDenied { .. }));
-}
-
-#[test]
-fn secret_policy_without_cap_constraints_allows_any_origin() {
-    let catalog = catalog_with_secret(Some(SecretPolicy {
-        allowed_caps: vec![],
-    }));
-    let cbor = secret_param_cbor("llm/api", 1);
-    enforce_secret_policy(
-        &cbor,
-        &catalog,
-        &aos_effects::EffectSource::Plan {
-            name: "other_plan".into(),
-        },
-        "any_cap",
-    )
-    .expect("empty allowed_caps should not deny by origin");
 }
 
 #[test]

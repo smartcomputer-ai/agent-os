@@ -44,11 +44,6 @@ unused_variables = "allow"
 dead_code = "allow"
 
 [[test]]
-name = "cap_enforcer_e2e"
-path = "tests_e2e/cap_enforcer_e2e.rs"
-required-features = ["e2e-tests"]
-
-[[test]]
 name = "workspace_e2e"
 path = "tests_e2e/workspace_e2e.rs"
 required-features = ["e2e-tests"]

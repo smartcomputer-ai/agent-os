@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use aos_air_types::{
-    self as air_types, AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, HashRef,
-    Manifest, Name, NamedRef, SecretDecl, SecretEntry, catalog::EffectCatalog, validate_manifest,
+    self as air_types, AirNode, DefEffect, DefModule, DefSchema, HashRef, Manifest, Name,
+    NamedRef, SecretDecl, SecretEntry, catalog::EffectCatalog, validate_manifest,
 };
 use aos_cbor::Hash;
 use aos_cbor::to_canonical_cbor;
@@ -18,8 +18,6 @@ pub struct LoadedManifest {
     pub secrets: Vec<SecretDecl>,
     pub modules: HashMap<Name, DefModule>,
     pub effects: HashMap<Name, DefEffect>,
-    pub caps: HashMap<Name, DefCap>,
-    pub policies: HashMap<Name, DefPolicy>,
     pub schemas: HashMap<Name, DefSchema>,
     pub effect_catalog: EffectCatalog,
 }
@@ -61,19 +59,11 @@ impl ManifestLoader {
     fn from_catalog(catalog: Catalog) -> Result<LoadedManifest, KernelError> {
         let mut modules = HashMap::new();
         let mut effects = HashMap::new();
-        let mut caps = HashMap::new();
-        let mut policies = HashMap::new();
         let mut schemas = HashMap::new();
         for (name, entry) in catalog.nodes {
             match entry.node {
                 AirNode::Defmodule(module) => {
                     modules.insert(name, module);
-                }
-                AirNode::Defcap(cap) => {
-                    caps.insert(name, cap);
-                }
-                AirNode::Defpolicy(policy) => {
-                    policies.insert(name, policy);
                 }
                 AirNode::Defeffect(effect) => {
                     effects.insert(name, effect);
@@ -85,7 +75,7 @@ impl ManifestLoader {
             }
         }
         let manifest = catalog.manifest;
-        validate_manifest(&manifest, &modules, &schemas, &effects, &caps, &policies)
+        validate_manifest(&manifest, &modules, &schemas, &effects)
             .map_err(|e| KernelError::ManifestValidation(e.to_string()))?;
         let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
         Ok(LoadedManifest {
@@ -93,8 +83,6 @@ impl ManifestLoader {
             secrets: catalog.resolved_secrets,
             modules,
             effects,
-            caps,
-            policies,
             schemas,
             effect_catalog,
         })
@@ -109,8 +97,6 @@ pub fn manifest_patch_from_loaded(loaded: &LoadedManifest) -> ManifestPatch {
         .map(AirNode::Defmodule)
         .collect();
     nodes.extend(loaded.schemas.values().cloned().map(AirNode::Defschema));
-    nodes.extend(loaded.caps.values().cloned().map(AirNode::Defcap));
-    nodes.extend(loaded.policies.values().cloned().map(AirNode::Defpolicy));
     nodes.extend(loaded.effects.values().cloned().map(AirNode::Defeffect));
 
     ManifestPatch {
@@ -138,13 +124,6 @@ pub fn store_loaded_manifest<S: Store + ?Sized>(
             .cloned()
             .collect(),
         loaded.modules.values().cloned().collect(),
-        loaded
-            .caps
-            .values()
-            .filter(|cap| !cap.name.starts_with("sys/"))
-            .cloned()
-            .collect(),
-        loaded.policies.values().cloned().collect(),
         Vec::new(),
         loaded
             .effects
@@ -163,8 +142,6 @@ fn write_nodes<S: Store + ?Sized>(
     allow_reserved_sys: bool,
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
-    caps: Vec<DefCap>,
-    policies: Vec<DefPolicy>,
     secrets: Vec<aos_air_types::DefSecret>,
     effects: Vec<DefEffect>,
 ) -> Result<StoredHashes, KernelError> {
@@ -184,22 +161,6 @@ fn write_nodes<S: Store + ?Sized>(
         }
         let hash = store.put_node(&AirNode::Defmodule(module))?;
         insert_or_verify_hash("defmodule", &mut hashes.modules, name, hash)?;
-    }
-    for cap in caps {
-        let name = cap.name.clone();
-        if !allow_reserved_sys {
-            reject_sys_name("defcap", name.as_str())?;
-        }
-        let hash = store.put_node(&AirNode::Defcap(cap))?;
-        insert_or_verify_hash("defcap", &mut hashes.caps, name, hash)?;
-    }
-    for policy in policies {
-        let name = policy.name.clone();
-        if !allow_reserved_sys {
-            reject_sys_name("defpolicy", name.as_str())?;
-        }
-        let hash = store.put_node(&AirNode::Defpolicy(policy))?;
-        insert_or_verify_hash("defpolicy", &mut hashes.policies, name, hash)?;
     }
     for secret in secrets {
         let name = secret.name.clone();
@@ -257,8 +218,6 @@ struct StoredHashes {
     schemas: HashMap<Name, HashRef>,
     modules: HashMap<Name, HashRef>,
     effects: HashMap<Name, HashRef>,
-    caps: HashMap<Name, HashRef>,
-    policies: HashMap<Name, HashRef>,
     secrets: HashMap<Name, HashRef>,
 }
 
@@ -266,8 +225,6 @@ fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result
     patch_named_refs("schema", &mut manifest.schemas, &hashes.schemas)?;
     patch_named_refs("module", &mut manifest.modules, &hashes.modules)?;
     patch_named_refs("effect", &mut manifest.effects, &hashes.effects)?;
-    patch_named_refs("cap", &mut manifest.caps, &hashes.caps)?;
-    patch_named_refs("policy", &mut manifest.policies, &hashes.policies)?;
     let mut secret_refs = secrets_as_named_refs(&manifest.secrets)?;
     patch_named_refs("secret", &mut secret_refs, &hashes.secrets)?;
     manifest.secrets = secret_refs.into_iter().map(SecretEntry::Ref).collect();
@@ -315,15 +272,6 @@ fn patch_named_refs(
         } else if kind == "module" {
             if let Some(builtin) = air_types::builtins::find_builtin_module(reference.name.as_str())
             {
-                builtin.hash_ref.clone()
-            } else {
-                return Err(KernelError::Manifest(format!(
-                    "manifest references unknown {kind} '{}'",
-                    reference.name
-                )));
-            }
-        } else if kind == "cap" {
-            if let Some(builtin) = air_types::builtins::find_builtin_cap(reference.name.as_str()) {
                 builtin.hash_ref.clone()
             } else {
                 return Err(KernelError::Manifest(format!(

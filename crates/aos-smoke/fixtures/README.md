@@ -17,7 +17,7 @@ Grouping:
 | 06  | safe-upgrade   | Governance shadow/apply demo |
 | 07  | llm-summarizer | HTTP + LLM summarization     |
 | 08  | retry-backoff  | Workflow retry with timer     |
-| 09  | workspaces     | Workspace workflow + caps demo |
+| 09  | workspaces     | Workspace workflow demo |
 | 10  | trace-failure-classification | Trace-get/diagnose failure conformance |
 | 11  | workflow-runtime-hardening | Single-scenario workflow runtime conformance + summaries |
 | 12  | performance | Non-keyed vs keyed event throughput |

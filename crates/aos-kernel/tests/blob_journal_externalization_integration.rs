@@ -186,7 +186,6 @@ fn blob_world_manifest(
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![effect_kind.into()],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = fixtures::build_loaded_manifest(
@@ -196,13 +195,6 @@ fn blob_world_manifest(
             "com.acme/BlobWorkflow@1",
         )],
     );
-    if let Some(binding) = loaded
-        .manifest
-        .module_bindings
-        .get_mut("com.acme/BlobWorkflow@1")
-    {
-        binding.slots.insert("blob".into(), "blob_cap".into());
-    }
     insert_test_schemas(
         &mut loaded,
         vec![

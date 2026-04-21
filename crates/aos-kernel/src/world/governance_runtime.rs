@@ -57,8 +57,7 @@ impl<S: Store + 'static> Kernel<S> {
             patch_hash: proposal.patch_hash.clone(),
             harness,
         };
-        let mut summary = ShadowExecutor::run(self.store.clone(), &config)?;
-        summary.ledger_deltas = Self::compute_ledger_deltas(&self.manifest, &config.patch.manifest);
+        let summary = ShadowExecutor::run(self.store.clone(), &config)?;
         let record = GovernanceRecord::ShadowReport(ShadowReportRecord {
             proposal_id,
             patch_hash: proposal.patch_hash.clone(),
@@ -67,7 +66,6 @@ impl<S: Store + 'static> Kernel<S> {
             pending_workflow_receipts: summary.pending_workflow_receipts.clone(),
             workflow_instances: summary.workflow_instances.clone(),
             module_effect_allowlists: summary.module_effect_allowlists.clone(),
-            ledger_deltas: summary.ledger_deltas.clone(),
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);
@@ -227,9 +225,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.manifest_hash = Hash::of_bytes(&manifest_bytes);
         self.secrets = loaded.secrets;
         self.module_defs = loaded.modules;
-        self.cap_defs = loaded.caps;
         self.effect_defs = loaded.effects;
-        self.policy_defs = loaded.policies;
         self.schema_defs = loaded.schemas;
         self.router = runtime.router;
 
@@ -250,77 +246,20 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             Some(crate::secret::SecretCatalog::new(&self.secrets))
         };
-        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
-            PureCapEnforcer::new(Arc::new(self.module_defs.clone()), self.pures.clone()),
-        ));
         let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
             GovernanceParamPreprocessor::new(self.store.clone(), self.manifest.clone()),
         ));
         self.effect_manager = EffectManager::new(
-            runtime.capability_resolver,
-            runtime.policy_gate,
             runtime.effect_catalog,
             runtime.schema_index.clone(),
             param_preprocessor,
-            enforcer_invoker,
             secret_catalog,
             self.secret_resolver.clone(),
         );
-        self.module_cap_bindings = runtime.module_cap_bindings;
         if record_manifest {
             self.record_manifest()?;
         }
         Ok(())
-    }
-
-    pub(super) fn compute_ledger_deltas(
-        current: &Manifest,
-        candidate: &Manifest,
-    ) -> Vec<LedgerDelta> {
-        let mut deltas = Vec::new();
-        deltas.extend(
-            crate::governance_utils::diff_named_refs(&current.caps, &candidate.caps)
-                .into_iter()
-                .map(|delta| LedgerDelta {
-                    ledger: LedgerKind::Capability,
-                    name: delta.name,
-                    change: match delta.change {
-                        crate::governance_utils::NamedRefDiffKind::Added => DeltaKind::Added,
-                        crate::governance_utils::NamedRefDiffKind::Removed => DeltaKind::Removed,
-                        crate::governance_utils::NamedRefDiffKind::Changed => DeltaKind::Changed,
-                    },
-                }),
-        );
-        deltas.extend(
-            crate::governance_utils::diff_named_refs(&current.policies, &candidate.policies)
-                .into_iter()
-                .map(|delta| LedgerDelta {
-                    ledger: LedgerKind::Policy,
-                    name: delta.name,
-                    change: match delta.change {
-                        crate::governance_utils::NamedRefDiffKind::Added => DeltaKind::Added,
-                        crate::governance_utils::NamedRefDiffKind::Removed => DeltaKind::Removed,
-                        crate::governance_utils::NamedRefDiffKind::Changed => DeltaKind::Changed,
-                    },
-                }),
-        );
-
-        deltas.sort_by(|a, b| {
-            let ledger_a = match a.ledger {
-                LedgerKind::Capability => 0,
-                LedgerKind::Policy => 1,
-            };
-            let ledger_b = match b.ledger {
-                LedgerKind::Capability => 0,
-                LedgerKind::Policy => 1,
-            };
-            (ledger_a, &a.name, format!("{:?}", a.change)).cmp(&(
-                ledger_b,
-                &b.name,
-                format!("{:?}", b.change),
-            ))
-        });
-        deltas
     }
 
     fn secret_resolver(&self) -> Option<SharedSecretResolver> {
@@ -333,59 +272,10 @@ mod tests {
     use super::*;
     use crate::MemStore;
     use crate::receipts::WorkflowEffectContext;
-    use crate::world::test_support::{empty_manifest, hash, named_ref};
+    use crate::world::test_support::empty_manifest;
     use aos_effects::{EffectIntent, EffectKind};
     use std::collections::HashMap;
     use std::sync::Arc;
-
-    #[test]
-    fn ledger_deltas_capture_added_changed_and_removed() {
-        let current = Manifest {
-            caps: vec![
-                named_ref("cap/a@1", &hash(1)),
-                named_ref("cap/b@1", &hash(2)),
-            ],
-            policies: vec![named_ref("policy/old@1", &hash(3))],
-            ..empty_manifest()
-        };
-        let candidate = Manifest {
-            caps: vec![
-                named_ref("cap/a@1", &hash(99)),
-                named_ref("cap/c@1", &hash(4)),
-            ],
-            policies: vec![named_ref("policy/new@1", &hash(5))],
-            ..empty_manifest()
-        };
-
-        let deltas = Kernel::<MemStore>::compute_ledger_deltas(&current, &candidate);
-
-        assert_eq!(deltas.len(), 5);
-        assert!(deltas.contains(&LedgerDelta {
-            ledger: LedgerKind::Capability,
-            name: "cap/a@1".to_string(),
-            change: DeltaKind::Changed,
-        }));
-        assert!(deltas.contains(&LedgerDelta {
-            ledger: LedgerKind::Capability,
-            name: "cap/c@1".to_string(),
-            change: DeltaKind::Added,
-        }));
-        assert!(deltas.contains(&LedgerDelta {
-            ledger: LedgerKind::Capability,
-            name: "cap/b@1".to_string(),
-            change: DeltaKind::Removed,
-        }));
-        assert!(deltas.contains(&LedgerDelta {
-            ledger: LedgerKind::Policy,
-            name: "policy/old@1".to_string(),
-            change: DeltaKind::Removed,
-        }));
-        assert!(deltas.contains(&LedgerDelta {
-            ledger: LedgerKind::Policy,
-            name: "policy/new@1".to_string(),
-            change: DeltaKind::Added,
-        }));
-    }
 
     fn empty_kernel() -> Kernel<MemStore> {
         let loaded = LoadedManifest {
@@ -393,8 +283,6 @@ mod tests {
             secrets: vec![],
             modules: HashMap::new(),
             effects: HashMap::new(),
-            caps: HashMap::new(),
-            policies: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: aos_air_types::catalog::EffectCatalog::new(),
         };
@@ -437,7 +325,6 @@ mod tests {
                 "com.acme/Workflow@1".into(),
                 None,
                 "timer.set".into(),
-                "cap/timer@1".into(),
                 vec![],
                 [2u8; 32],
                 None,
@@ -448,7 +335,6 @@ mod tests {
         );
         kernel.effect_manager.restore_queue(vec![EffectIntent {
             kind: EffectKind::new("introspect.manifest"),
-            cap_name: "sys/query@1".into(),
             params_cbor: vec![],
             idempotency_key: [0u8; 32],
             intent_hash: [3u8; 32],

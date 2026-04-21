@@ -5,7 +5,7 @@ use super::assert_json_schema;
 use crate::{DefModule, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
 
 #[test]
-fn parses_workflow_module_with_cap_slots() {
+fn parses_workflow_module_with_effect_allowlist() {
     let module_json = json!({
         "$kind": "defmodule",
         "name": "com.acme/Workflow@1",
@@ -15,10 +15,7 @@ fn parses_workflow_module_with_cap_slots() {
             "workflow": {
                 "state": "com.acme/State@1",
                 "event": "com.acme/Event@1",
-                "effects_emitted": ["http.request"],
-                "cap_slots": {
-                    "http": "http.out"
-                }
+                "effects_emitted": ["http.request"]
             }
         }
     });
@@ -51,7 +48,6 @@ fn workflow_abi_struct_round_trip() {
             event: SchemaRef::new("com.acme/Event@1").unwrap(),
             annotations: None,
             effects_emitted: vec![crate::EffectKind::http_request()],
-            cap_slots: indexmap::IndexMap::new(),
         }),
         pure: None,
     };
@@ -73,11 +69,7 @@ fn workflow_module_with_annotations_and_key_schema_validates() {
                 "state": "com.acme/State@1",
                 "event": "com.acme/Event@1",
                 "annotations": "com.acme/Annotations@1",
-                "effects_emitted": ["http.request", "timer.set"],
-                "cap_slots": {
-                    "http": "http.out",
-                    "timer": "timer"
-                }
+                "effects_emitted": ["http.request", "timer.set"]
             }
         }
     });
@@ -89,7 +81,6 @@ fn workflow_module_with_annotations_and_key_schema_validates() {
     );
     let workflow = module.abi.workflow.expect("workflow abi");
     assert_eq!(workflow.effects_emitted.len(), 2);
-    assert_eq!(workflow.cap_slots.len(), 2);
 }
 
 #[test]
@@ -153,7 +144,7 @@ fn pure_module_without_abi_is_rejected_by_schema() {
 }
 
 #[test]
-fn cap_slot_names_must_match_pattern() {
+fn workflow_cap_slots_are_rejected_by_schema() {
     let module_json = json!({
         "$kind": "defmodule",
         "name": "com.acme/Workflow@1",
@@ -175,6 +166,6 @@ fn cap_slot_names_must_match_pattern() {
             &module_json
         )))
         .is_err(),
-        "patternProperties should reject leading digit"
+        "schema should reject legacy cap_slots"
     );
 }

@@ -49,57 +49,12 @@
   ],
   "modules": [
     { "name": "demiurge/Demiurge@1" },
-    { "name": "aos.agent/SessionWorkflow@1" },
-    { "name": "sys/CapEnforceLlmBasic@1" }
-  ],
-  "caps": [
-    { "name": "demiurge/task_llm_basic@1" },
-    { "name": "demiurge/task_host@1" },
-    { "name": "sys/blob@1" }
-  ],
-  "policies": [
-    { "name": "demiurge/task_policy@1" }
+    { "name": "aos.agent/SessionWorkflow@1" }
   ],
   "secrets": [
     { "name": "llm/openai_api@1" },
     { "name": "llm/anthropic_api@1" }
   ],
-  "defaults": {
-    "policy": "demiurge/task_policy@1",
-    "cap_grants": [
-      {
-        "name": "llm",
-        "cap": "demiurge/task_llm_basic@1",
-        "params": {
-          "record": {
-            "models": {
-              "set": [
-                { "text": "gpt-5.2" },
-                { "text": "gpt-5.3-codex" },
-                { "text": "gpt-5-mini" },
-                { "text": "claude-sonnet-4-5" }
-              ]
-            },
-            "max_tokens": { "nat": 100000 }
-          }
-        }
-      },
-      {
-        "name": "blob",
-        "cap": "sys/blob@1",
-        "params": {
-          "record": {}
-        }
-      },
-      {
-        "name": "host",
-        "cap": "demiurge/task_host@1",
-        "params": {
-          "record": {}
-        }
-      }
-    ]
-  },
   "effects": [
     { "name": "sys/blob.put@1" },
     { "name": "sys/blob.get@1" },
@@ -153,20 +108,5 @@
       }
     ],
     "inboxes": []
-  },
-  "module_bindings": {
-    "demiurge/Demiurge@1": {
-      "slots": {
-        "blob": "blob",
-        "host": "host"
-      }
-    },
-    "aos.agent/SessionWorkflow@1": {
-      "slots": {
-        "blob": "blob",
-        "llm": "llm",
-        "host": "host"
-      }
-    }
   }
 }

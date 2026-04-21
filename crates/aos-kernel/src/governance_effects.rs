@@ -122,8 +122,6 @@ pub(crate) struct GovShadowReceipt {
     pub workflow_instances: Vec<GovWorkflowInstancePreview>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub module_effect_allowlists: Vec<GovModuleEffectAllowlist>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ledger_deltas: Vec<GovLedgerDelta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,7 +144,6 @@ pub(crate) struct GovApplyReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GovPredictedEffect {
     pub kind: String,
-    pub cap: String,
     pub intent_hash: HashRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_json: Option<String>,
@@ -178,28 +175,6 @@ pub(crate) struct GovModuleEffectAllowlist {
     pub module: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects_emitted: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GovLedgerDelta {
-    pub ledger: GovLedgerKind,
-    pub name: String,
-    pub change: GovDeltaKind,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case", tag = "$tag")]
-pub(crate) enum GovLedgerKind {
-    Capability,
-    Policy,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case", tag = "$tag")]
-pub(crate) enum GovDeltaKind {
-    Added,
-    Removed,
-    Changed,
 }
 
 fn decode_variant_value(value: CborValue) -> Result<(String, Option<CborValue>), String> {
@@ -316,43 +291,6 @@ impl<'de> Deserialize<'de> for GovApprovalDecision {
             "reject" => Ok(GovApprovalDecision::Reject),
             other => Err(serde::de::Error::custom(format!(
                 "unknown GovApprovalDecision tag '{other}'"
-            ))),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for GovLedgerKind {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = CborValue::deserialize(deserializer)?;
-        let (tag, inner) = decode_variant_value(value).map_err(serde::de::Error::custom)?;
-        decode_unit_variant(&tag, inner).map_err(serde::de::Error::custom)?;
-        match tag.as_str() {
-            "capability" => Ok(GovLedgerKind::Capability),
-            "policy" => Ok(GovLedgerKind::Policy),
-            other => Err(serde::de::Error::custom(format!(
-                "unknown GovLedgerKind tag '{other}'"
-            ))),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for GovDeltaKind {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = CborValue::deserialize(deserializer)?;
-        let (tag, inner) = decode_variant_value(value).map_err(serde::de::Error::custom)?;
-        decode_unit_variant(&tag, inner).map_err(serde::de::Error::custom)?;
-        match tag.as_str() {
-            "added" => Ok(GovDeltaKind::Added),
-            "removed" => Ok(GovDeltaKind::Removed),
-            "changed" => Ok(GovDeltaKind::Changed),
-            other => Err(serde::de::Error::custom(format!(
-                "unknown GovDeltaKind tag '{other}'"
             ))),
         }
     }
@@ -598,18 +536,6 @@ fn build_patch_summary(
         &patch.manifest.effects,
         &mut def_changes,
     );
-    refs_changed |= push_named_ref_changes(
-        "defcap",
-        &base_manifest.caps,
-        &patch.manifest.caps,
-        &mut def_changes,
-    );
-    refs_changed |= push_named_ref_changes(
-        "defpolicy",
-        &base_manifest.policies,
-        &patch.manifest.policies,
-        &mut def_changes,
-    );
     refs_changed |= diff_secret_refs(
         &base_manifest.secrets,
         &patch.manifest.secrets,
@@ -623,9 +549,6 @@ fn build_patch_summary(
     });
 
     let mut manifest_sections = HashSet::new();
-    if section_changed(&base_manifest.defaults, &patch.manifest.defaults)? {
-        manifest_sections.insert("defaults".to_string());
-    }
     let base_routing = base_manifest.routing.clone().unwrap_or_else(|| Routing {
         subscriptions: Vec::new(),
         inboxes: Vec::new(),
@@ -639,12 +562,6 @@ fn build_patch_summary(
     }
     if section_changed(&base_routing.inboxes, &next_routing.inboxes)? {
         manifest_sections.insert("routing_inboxes".to_string());
-    }
-    if section_changed(
-        &base_manifest.module_bindings,
-        &patch.manifest.module_bindings,
-    )? {
-        manifest_sections.insert("module_bindings".to_string());
     }
     if section_changed(&base_manifest.secrets, &patch.manifest.secrets)? {
         manifest_sections.insert("secrets".to_string());
@@ -672,17 +589,11 @@ fn build_patch_summary(
     }
     for section in &manifest_sections {
         match section.as_str() {
-            "defaults" => {
-                ops.insert("set_defaults".to_string());
-            }
             "routing_events" => {
                 ops.insert("set_routing_events".to_string());
             }
             "routing_inboxes" => {
                 ops.insert("set_routing_inboxes".to_string());
-            }
-            "module_bindings" => {
-                ops.insert("set_module_bindings".to_string());
             }
             "secrets" => {
                 ops.insert("set_secrets".to_string());

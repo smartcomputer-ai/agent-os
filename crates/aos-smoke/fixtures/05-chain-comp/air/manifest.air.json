@@ -30,51 +30,8 @@
   "modules": [
     {
       "name": "demo/ChainComp@1"
-    },
-    {
-      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
-  "caps": [
-    {
-      "name": "demo/http_chain_cap@1"
-    }
-  ],
-  "policies": [
-    {
-      "name": "demo/http-chain-policy@1"
-    }
-  ],
-  "defaults": {
-    "policy": "demo/http-chain-policy@1",
-    "cap_grants": [
-      {
-        "name": "cap_http_chain",
-        "cap": "demo/http_chain_cap@1",
-        "params": {
-          "record": {
-            "hosts": {
-              "set": [
-                {
-                  "text": "example.com"
-                }
-              ]
-            },
-            "methods": {
-              "set": [
-                {
-                  "text": "POST"
-                },
-                {
-                  "text": "PUT"
-                }
-              ]
-            }
-          }
-        }
-      }
-    ]
-  },
   "routing": {
     "subscriptions": [
       {

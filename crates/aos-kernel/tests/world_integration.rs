@@ -52,7 +52,6 @@ fn raised_events_are_routed_to_workflows() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
 
     let mut consumer = fixtures::stub_workflow_module(
@@ -71,7 +70,6 @@ fn raised_events_are_routed_to_workflows() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = fixtures::build_loaded_manifest(

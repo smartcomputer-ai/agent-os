@@ -4,9 +4,9 @@ use aos_effects::EffectIntent;
 
 use crate::governance_effects::{
     GovApplyParams, GovApplyReceipt, GovApprovalDecision, GovApproveParams, GovApproveReceipt,
-    GovDeltaKind, GovLedgerDelta, GovLedgerKind, GovModuleEffectAllowlist, GovPatchInput,
-    GovPendingWorkflowReceipt, GovPredictedEffect, GovProposeParams, GovProposeReceipt,
-    GovShadowParams, GovShadowReceipt, GovWorkflowInstancePreview,
+    GovModuleEffectAllowlist, GovPatchInput, GovPendingWorkflowReceipt, GovPredictedEffect,
+    GovProposeParams, GovProposeReceipt, GovShadowParams, GovShadowReceipt,
+    GovWorkflowInstancePreview,
 };
 use crate::{Kernel, KernelError};
 
@@ -70,7 +70,6 @@ where
                     };
                     Ok(GovPredictedEffect {
                         kind: effect.kind,
-                        cap: effect.cap,
                         intent_hash,
                         params_json,
                     })
@@ -107,22 +106,6 @@ where
                 .map(|allowlist| GovModuleEffectAllowlist {
                     module: allowlist.module,
                     effects_emitted: allowlist.effects_emitted,
-                })
-                .collect(),
-            ledger_deltas: summary
-                .ledger_deltas
-                .into_iter()
-                .map(|delta| GovLedgerDelta {
-                    ledger: match delta.ledger {
-                        crate::shadow::LedgerKind::Capability => GovLedgerKind::Capability,
-                        crate::shadow::LedgerKind::Policy => GovLedgerKind::Policy,
-                    },
-                    name: delta.name,
-                    change: match delta.change {
-                        crate::shadow::DeltaKind::Added => GovDeltaKind::Added,
-                        crate::shadow::DeltaKind::Removed => GovDeltaKind::Removed,
-                        crate::shadow::DeltaKind::Changed => GovDeltaKind::Changed,
-                    },
                 })
                 .collect(),
         };

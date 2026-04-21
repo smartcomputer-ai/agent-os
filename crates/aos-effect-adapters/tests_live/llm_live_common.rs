@@ -195,7 +195,7 @@ pub(crate) fn require_live_matrix() -> Vec<ProviderRuntime> {
 
 pub(crate) fn build_intent(params: &LlmGenerateParams) -> EffectIntent {
     let params_cbor = serde_cbor::to_vec(params).expect("encode params");
-    EffectIntent::from_raw_params(EffectKind::llm_generate(), "cap", params_cbor, [0u8; 32])
+    EffectIntent::from_raw_params(EffectKind::llm_generate(), params_cbor, [0u8; 32])
         .expect("build intent")
 }
 

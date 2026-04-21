@@ -15,9 +15,6 @@ const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/workflow";
 
 const AIR_ALLOW: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/air.allow";
-const AIR_CAP_DENY: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/air.cap_deny";
-const AIR_POLICY_DENY: &str =
-    "crates/aos-smoke/fixtures/10-trace-failure-classification/air.policy_deny";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,45 +26,9 @@ aos_variant! {
 pub fn run(example_root: &Path) -> Result<()> {
     println!("→ Trace Failure Classification demo");
 
-    run_policy_denied(example_root)?;
-    run_capability_denied(example_root)?;
     run_adapter_timeout(example_root)?;
     run_adapter_error(example_root)?;
 
-    Ok(())
-}
-
-fn run_policy_denied(example_root: &Path) -> Result<()> {
-    let mut host = ExampleHost::prepare(HarnessConfig {
-        example_root,
-        assets_root: Some(Path::new(AIR_POLICY_DENY)),
-        workflow_name: WORKFLOW_NAME,
-        event_schema: EVENT_SCHEMA,
-        module_crate: MODULE_CRATE,
-    })?;
-
-    let _ = host
-        .send_event(&start_event("https://example.com/policy-denied.json"))
-        .expect_err("policy-denied path should fail event processing");
-    assert_trace_cause(&mut host, "policy_denied")?;
-    println!("   policy/cap: policy_denied");
-    Ok(())
-}
-
-fn run_capability_denied(example_root: &Path) -> Result<()> {
-    let mut host = ExampleHost::prepare(HarnessConfig {
-        example_root,
-        assets_root: Some(Path::new(AIR_CAP_DENY)),
-        workflow_name: WORKFLOW_NAME,
-        event_schema: EVENT_SCHEMA,
-        module_crate: MODULE_CRATE,
-    })?;
-
-    let _ = host
-        .send_event(&start_event("https://example.com/cap-denied.json"))
-        .expect_err("capability-denied path should fail event processing");
-    assert_trace_cause(&mut host, "capability_denied")?;
-    println!("   policy/cap: capability_denied");
     Ok(())
 }
 

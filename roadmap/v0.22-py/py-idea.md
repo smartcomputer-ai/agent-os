@@ -36,7 +36,7 @@ Users should be able to mix both in the same world:
 WASM workflow   -> Python effect
 Python workflow -> Rust built-in effect
 Python workflow -> Python effect
-WASM workflow   -> WASM/pure helper
+WASM workflow   -> module-local helper
 ```
 
 The existing AgentOS effect boundary is already the right shape for this. Workflows emit typed intents as data. Effects execute outside the deterministic owner. Receipts re-enter through the journal. That boundary should be preserved exactly.
@@ -236,7 +236,7 @@ The workflow function may:
 - use deterministic context supplied by the kernel
 - construct domain events
 - construct effect intents
-- call local pure helper functions
+- call local helper functions
 
 The workflow function may not:
 
@@ -303,9 +303,18 @@ same journal + same CAS + same receipts -> same world state
 
 WASM remains the lane for strict recomputation. Python becomes a lane for committed, auditable decisions.
 
-## Bundles
+## Artifacts
 
-Python code should be packaged as an AOS bundle, not as a pointer to a Git ref or a custom deployed worker.
+Python code should be exposed through a content-addressed artifact, not as a pointer to a Git ref or
+a custom deployed worker. The stable forms are:
+
+```text
+python_bundle  -> packaged tree with bundle metadata, locks, source, wheels, generated AIR
+workspace_root -> pinned workspace tree root used directly by the runner
+```
+
+The workspace form keeps the edit loop short: edit the workspace, produce a new root hash, and replace
+the module definition. It is still replay-stable because AIR pins the exact root hash.
 
 Example bundle:
 
@@ -326,7 +335,7 @@ bundle/
   sbom.json
 ```
 
-The authoritative identity is the bundle hash. Git metadata can be stored as provenance, but replay must not require GitHub or a branch name.
+The authoritative identity is the artifact root hash. Git metadata can be stored as provenance, but replay must not require GitHub or a branch name.
 
 The bundle manifest should say:
 
@@ -367,16 +376,17 @@ aos-wasm-runner
 The runner receives:
 
 ```text
-bundle hash
+artifact kind
+artifact root hash
 entrypoint
-calling convention
+invocation mode inferred from runtime kind and op kind
 input bytes
 runtime limits
 ```
 
-It hydrates the bundle, creates or reuses an isolated environment, invokes the entrypoint, and returns canonical output.
+It hydrates the artifact, creates or reuses an isolated environment, invokes the entrypoint, and returns canonical output.
 
-This is what makes agent-generated code practical. Hundreds of generated workflows should create hundreds of bundle hashes, not hundreds of bespoke worker deployments.
+This is what makes agent-generated code practical. Hundreds of generated workflows should create hundreds of artifact roots, not hundreds of bespoke worker deployments.
 
 ## Sandboxing
 
@@ -476,10 +486,12 @@ A single Python bundle can export:
 ```text
 workflow op
 effect op
-pure op
 ```
 
-Each op has a kernel role. A pure op is not a workflow handler. An effect op is not directly routed from domain events. The op kind determines which kernel subsystem may invoke the entrypoint and which input/output envelope is valid.
+Each op has a kernel role. An effect op is not directly routed from domain events. The op kind determines which kernel subsystem may invoke the entrypoint and which input/output envelope is valid.
+
+Public pure ops are deferred from v0.22. Deterministic helper functions can still live inside a bundle
+and be called by workflow/effect code, but AIR does not expose them as independently callable world ops.
 
 This lets Python be broad without making the kernel vague.
 
@@ -492,7 +504,7 @@ A workflow instance should pin:
 ```text
 workflow op identity
 resolved implementation identity
-bundle hash
+artifact kind and root hash
 replay profile
 ```
 
@@ -501,7 +513,7 @@ An open effect should pin:
 ```text
 effect op identity
 resolved implementation identity
-bundle hash
+artifact kind and root hash
 entrypoint
 params schema hash
 receipt schema hash
@@ -583,7 +595,7 @@ Build:
 - Pydantic-to-AIR schema generation
 - bundle builder
 - Python async effect runner
-- dynamic effect execution from bundle hash and entrypoint
+- dynamic effect execution from artifact root and entrypoint
 - receipt payload validation/canonicalization
 - basic sandboxing
 - tests with a WASM workflow calling a Python effect
@@ -595,7 +607,7 @@ This phase should not require Python workflows.
 Build:
 
 - `@workflow` decorator
-- sync reducer calling convention
+- sync reducer invocation mode
 - workflow input/output bridge
 - decision-log replay mode
 - checked replay mode
@@ -606,7 +618,7 @@ Build:
 
 Build:
 
-- environment cache keyed by bundle hash/target
+- environment cache keyed by artifact root hash and target
 - dependency wheelhouse support
 - resource limits
 - better diagnostics

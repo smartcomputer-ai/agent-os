@@ -21,7 +21,7 @@ This document defines that effect system.
 This spec covers:
 
 - effect declarations and runtime classes,
-- effect intent canonicalization and authorization,
+- effect intent canonicalization and admission,
 - durable open work,
 - the post-flush publication fence,
 - async effect runtime and adapter responsibilities,
@@ -62,10 +62,10 @@ orchestrate real external systems.
 `blob.put`, `workspace.read_bytes`, or `introspect.workflow_state`.
 
 **Effect catalog entry**: A `defeffect` node that binds an effect kind to parameter and receipt
-schemas, a capability type, and an origin scope.
+schemas plus any emitter constraints defined by the AIR version.
 
 **Effect intent**: A canonical request to perform one effect. It includes the effect kind,
-canonical params, capability grant name, origin metadata, idempotency input, and `intent_hash`.
+canonical params, origin metadata, idempotency input, and `intent_hash`.
 
 **Open work**: Owner-side durable state saying that one effect intent is pending terminal
 settlement.
@@ -94,8 +94,8 @@ kernel opens work and the node durably flushes the frame.
 ### 4.1 Internal Deterministic Effects
 
 Internal deterministic effects are handled on the owner side. They are still modeled as effects
-because they need capability/policy checks, auditability, and a uniform receipt path, but they do
-not leave deterministic execution.
+because they need declaration checks, auditability, and a uniform receipt path, but they do not
+leave deterministic execution.
 
 Examples:
 
@@ -141,12 +141,10 @@ The catalog supplies:
 
 - parameter schema,
 - receipt schema,
-- capability type,
-- allowed origin scope.
+- emitter constraints/runtime class when the AIR version defines them.
 
 Workflow modules that may emit an effect kind must also declare it in
-`abi.workflow.effects_emitted`. This structural allowlist is checked before capability and policy
-authorization.
+`abi.workflow.effects_emitted`. This structural allowlist is checked before open work is recorded.
 
 ### 5.2 Emission
 
@@ -170,22 +168,27 @@ Before an intent is accepted, the kernel canonicalizes effect params:
 3. Normalize values using AIR canonicalization rules.
 4. Re-encode params as canonical CBOR.
 
-Only canonical params participate in intent hashing, policy/capability checks, journal records, and
-adapter dispatch. Authoring sugar and SDK convenience shapes must not perturb intent identity.
+Only canonical params participate in intent hashing, journal records, and adapter dispatch.
+Authoring sugar and SDK convenience shapes must not perturb intent identity.
 
-### 5.4 Authorization
+### 5.4 Admission
 
-An effect may proceed only when both gates pass:
+The public v0.22 AIR surface has no caps, cap grants, or policy language. Effect admission is
+structural: an effect may proceed only when all of these checks pass:
 
-1. Capability grant exists, has the correct capability type, has not expired, and permits the
-   canonical params.
-2. Policy allows the effect for the origin, effect kind, capability, and relevant metadata.
+1. The effect kind exists in the loaded or built-in effect catalog.
+2. Params validate against the effect kind's params schema and canonicalize successfully.
+3. Workflow-origin effects come from a workflow module and are listed in
+   `abi.workflow.effects_emitted`.
+4. The effect catalog's emitter constraints allow the origin kind.
 
-Denied effects fail deterministically at owner admission. They do not start external work.
+Rejected effects fail deterministically at owner admission. They do not start external work. This is
+an authoring/runtime contract, not a hosted security boundary; hosted deployments can add admission
+policy outside public AIR.
 
 ### 5.5 Open Work
 
-After canonicalization and authorization, the kernel records open work in deterministic owner
+After canonicalization and admission, the kernel records open work in deterministic owner
 state. Open work includes enough information to:
 
 - route future continuations to the origin workflow instance,
@@ -267,8 +270,7 @@ architecture terms, that derivation includes:
 - effect index within the step,
 - emitted sequence.
 
-The final hash is computed over the effect kind, canonical params, capability grant name, and
-effective idempotency input.
+The final hash is computed over the effect kind, canonical params, and effective idempotency input.
 
 This makes `intent_hash` a per-emission open-work identity. It is used for:
 
@@ -380,7 +382,7 @@ Workflow modules own:
 The effect system owns:
 
 - canonicalization,
-- capability and policy gates,
+- structural effect admission,
 - durable open-work tracking,
 - post-flush async publication,
 - continuation admission,

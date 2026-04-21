@@ -301,7 +301,7 @@ async fn workspace_commit_and_resolve() {
         workspace: "dev-workspace".into(),
         version: None,
     };
-    let intent = IntentBuilder::new(EffectKind::workspace_resolve(), "sys/workspace@1", &params)
+    let intent = IntentBuilder::new(EffectKind::workspace_resolve(), &params)
         .build()
         .expect("intent");
     let receipt: WorkspaceResolveReceipt = handle_internal(&mut world.kernel, intent);
@@ -314,7 +314,7 @@ async fn workspace_commit_and_resolve() {
         workspace: "dev-workspace".into(),
         version: Some(2),
     };
-    let intent = IntentBuilder::new(EffectKind::workspace_resolve(), "sys/workspace@1", &missing)
+    let intent = IntentBuilder::new(EffectKind::workspace_resolve(), &missing)
         .build()
         .expect("intent");
     let receipt: WorkspaceResolveReceipt = handle_internal(&mut world.kernel, intent);
@@ -344,7 +344,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_write_bytes(),
-        "sys/workspace@1",
         &write_params,
     )
     .build()
@@ -360,7 +359,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_list(),
-        "sys/workspace@1",
         &list_params,
     )
     .build()
@@ -382,7 +380,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_list(),
-        "sys/workspace@1",
         &list_params,
     )
     .build()
@@ -401,7 +398,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_read_ref(),
-        "sys/workspace@1",
         &read_ref_params,
     )
     .build()
@@ -418,7 +414,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_read_bytes(),
-        "sys/workspace@1",
         &read_bytes_params,
     )
     .build()
@@ -434,7 +429,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_write_bytes(),
-        "sys/workspace@1",
         &write_params,
     )
     .build()
@@ -448,7 +442,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_diff(),
-        "sys/workspace@1",
         &diff_params,
     )
     .build()
@@ -467,7 +460,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_diff(),
-        "sys/workspace@1",
         &diff_params,
     )
     .build()
@@ -484,7 +476,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_remove(),
-        "sys/workspace@1",
         &remove_params,
     )
     .build()
@@ -497,7 +488,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_read_ref(),
-        "sys/workspace@1",
         &read_ref_params,
     )
     .build()
@@ -511,7 +501,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_remove(),
-        "sys/workspace@1",
         &remove_params,
     )
     .build()
@@ -524,7 +513,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_remove(),
-        "sys/workspace@1",
         &remove_params,
     )
     .build()
@@ -540,7 +528,6 @@ async fn workspace_tree_effects_roundtrip() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_list(),
-        "sys/workspace@1",
         &list_params,
     )
     .build()
@@ -570,7 +557,6 @@ async fn workspace_write_ref_links_existing_blob() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_write_ref(),
-        "sys/workspace@1",
         &write_params,
     )
     .build()
@@ -584,7 +570,6 @@ async fn workspace_write_ref_links_existing_blob() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_read_ref(),
-        "sys/workspace@1",
         &read_ref_params,
     )
     .build()
@@ -601,7 +586,6 @@ async fn workspace_write_ref_links_existing_blob() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_read_bytes(),
-        "sys/workspace@1",
         &read_bytes_params,
     )
     .build()
@@ -634,7 +618,6 @@ async fn workspace_annotations_roundtrip_on_root() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_annotations_set(),
-        "sys/workspace@1",
         &set_params,
     )
     .build()
@@ -648,7 +631,6 @@ async fn workspace_annotations_roundtrip_on_root() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_annotations_get(),
-        "sys/workspace@1",
         &get_params,
     )
     .build()
@@ -666,7 +648,6 @@ async fn workspace_annotations_roundtrip_on_root() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_annotations_set(),
-        "sys/workspace@1",
         &delete_params,
     )
     .build()
@@ -679,7 +660,6 @@ async fn workspace_annotations_roundtrip_on_root() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_annotations_get(),
-        "sys/workspace@1",
         &get_params,
     )
     .build()
@@ -709,7 +689,6 @@ async fn workspace_annotations_survive_file_write() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_write_bytes(),
-        "sys/workspace@1",
         &write_params,
     )
     .build()
@@ -727,7 +706,6 @@ async fn workspace_annotations_survive_file_write() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_annotations_set(),
-        "sys/workspace@1",
         &set_params,
     )
     .build()
@@ -742,7 +720,6 @@ async fn workspace_annotations_survive_file_write() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_write_bytes(),
-        "sys/workspace@1",
         &write_params,
     )
     .build()
@@ -755,7 +732,6 @@ async fn workspace_annotations_survive_file_write() {
     };
     let intent = IntentBuilder::new(
         EffectKind::workspace_annotations_get(),
-        "sys/workspace@1",
         &get_params,
     )
     .build()

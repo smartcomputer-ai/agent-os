@@ -839,16 +839,6 @@ fn import_defs_hash(root: &Path) -> Result<String> {
                     let node = AirNode::Defmodule(module);
                     add_def_entry(&mut entries, &mut seen, "defmodule", name.as_str(), &node)?;
                 }
-                AirNode::Defcap(cap) => {
-                    let name = cap.name.clone();
-                    let node = AirNode::Defcap(cap);
-                    add_def_entry(&mut entries, &mut seen, "defcap", name.as_str(), &node)?;
-                }
-                AirNode::Defpolicy(policy) => {
-                    let name = policy.name.clone();
-                    let node = AirNode::Defpolicy(policy);
-                    add_def_entry(&mut entries, &mut seen, "defpolicy", name.as_str(), &node)?;
-                }
                 AirNode::Defsecret(secret) => {
                     let name = secret.name.clone();
                     let node = AirNode::Defsecret(secret);
@@ -1014,18 +1004,8 @@ fn parse_air_nodes_for_import_hash(path: &Path) -> Result<Vec<AirNode>> {
 
     let mut nodes = Vec::new();
     for item in items {
-        let kind = item
-            .get("$kind")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        match serde_json::from_value::<AirNode>(item) {
-            Ok(node) => nodes.push(node),
-            Err(_) if kind == "defplan" => {
-                // Legacy plan defs do not contribute to post-plan import identity.
-            }
-            Err(err) => return Err(err).context("deserialize AIR node"),
-        }
+        let node = serde_json::from_value::<AirNode>(item).context("deserialize AIR node")?;
+        nodes.push(node);
     }
     Ok(nodes)
 }
@@ -1054,9 +1034,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in [
-        "schemas", "modules", "plans", "caps", "policies", "effects", "secrets",
-    ] {
+    for key in ["schemas", "modules", "plans", "effects", "secrets"] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {
@@ -1302,34 +1280,12 @@ mod tests {
         .expect("write defs");
         std::fs::write(
             import_root.join("manifest.air.json"),
-            r#"{"$kind":"manifest","air_version":"v1","schemas":[],"modules":[],"plans":[],"effects":[],"caps":[],"policies":[],"secrets":[],"module_bindings":{},"triggers":[]}"#,
+            r#"{"$kind":"manifest","air_version":"v1","schemas":[],"modules":[],"plans":[],"effects":[],"secrets":[],"triggers":[]}"#,
         )
         .expect("write manifest");
 
         let hash = import_defs_hash(&import_root).expect("hash");
         assert!(hash.starts_with("sha256:"));
-    }
-
-    #[test]
-    fn import_defs_hash_ignores_legacy_defplan_nodes() {
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let with_plan = temp.path().join("with-plan");
-        let no_plan = temp.path().join("no-plan");
-        std::fs::create_dir_all(&with_plan).expect("mkdir with-plan");
-        std::fs::create_dir_all(&no_plan).expect("mkdir no-plan");
-
-        let defs_only = r#"[{"$kind":"defschema","name":"demo/S@1","type":{"text":{}}}]"#;
-        std::fs::write(with_plan.join("defs.air.json"), defs_only).expect("write defs with-plan");
-        std::fs::write(no_plan.join("defs.air.json"), defs_only).expect("write defs no-plan");
-        std::fs::write(
-            with_plan.join("legacy-plan.air.json"),
-            r#"[{"$kind":"defplan","name":"legacy/Plan@1"}]"#,
-        )
-        .expect("write legacy plan");
-
-        let with_plan_hash = import_defs_hash(&with_plan).expect("hash with plan");
-        let no_plan_hash = import_defs_hash(&no_plan).expect("hash no plan");
-        assert_eq!(with_plan_hash, no_plan_hash);
     }
 
     #[test]

@@ -88,7 +88,6 @@ impl ShadowExecutor {
                 let intent = opened.intent;
                 predicted_effects.push(PredictedEffect {
                     kind: intent.kind.as_str().to_string(),
-                    cap: intent.cap_name.clone(),
                     intent_hash: hex::encode(intent.intent_hash),
                     params_json: params_to_json(&intent.params_cbor),
                 });
@@ -154,7 +153,6 @@ impl ShadowExecutor {
             pending_workflow_receipts,
             workflow_instances,
             module_effect_allowlists,
-            ledger_deltas: Vec::new(),
         })
     }
 }
@@ -170,9 +168,10 @@ mod tests {
     use crate::MemStore;
     use crate::governance::ManifestPatch;
     use aos_air_types::{
-        AirNode, CapEnforcer, CapType, DefCap, HashRef, Manifest, NamedRef, SecretDecl,
-        SecretEntry, TypeExpr, TypeRecord,
+        AirNode, DefSchema, HashRef, Manifest, NamedRef, SecretDecl, SecretEntry, TypeExpr,
+        TypePrimitive, TypePrimitiveText,
     };
+    use aos_air_types::EmptyObject;
 
     fn empty_manifest() -> Manifest {
         Manifest {
@@ -181,12 +180,7 @@ mod tests {
             modules: vec![],
             effects: vec![],
             effect_bindings: vec![],
-
-            caps: vec![],
-            policies: vec![],
             secrets: vec![],
-            defaults: None,
-            module_bindings: Default::default(),
             routing: None,
         }
     }
@@ -226,31 +220,27 @@ mod tests {
     #[test]
     fn shadow_executor_sets_manifest_hash_on_summary() {
         let store = Arc::new(MemStore::new());
-        let cap = DefCap {
-            name: "cap@1".into(),
-            cap_type: CapType::new("custom"),
-            schema: TypeExpr::Record(TypeRecord {
-                record: Default::default(),
-            }),
-            enforcer: CapEnforcer {
-                module: "sys/CapAllowAll@1".into(),
-            },
+        let schema = DefSchema {
+            name: "com.acme/Shadow@1".into(),
+            ty: TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                text: EmptyObject {},
+            })),
         };
-        let cap_hash = HashRef::new(
-            Hash::of_cbor(&AirNode::Defcap(cap.clone()))
+        let schema_hash = HashRef::new(
+            Hash::of_cbor(&AirNode::Defschema(schema.clone()))
                 .unwrap()
                 .to_hex(),
         )
         .unwrap();
         let patch = ManifestPatch {
             manifest: Manifest {
-                caps: vec![NamedRef {
-                    name: cap.name.clone(),
-                    hash: cap_hash,
+                schemas: vec![NamedRef {
+                    name: schema.name.clone(),
+                    hash: schema_hash,
                 }],
                 ..empty_manifest()
             },
-            nodes: vec![AirNode::Defcap(cap)],
+            nodes: vec![AirNode::Defschema(schema)],
         };
         let patch_hash = hash_of_patch(&patch);
         let manifest_hash = hash_of_manifest(&patch);
@@ -278,7 +268,6 @@ mod tests {
                     version: 1,
                     binding_id: "stripe:prod".into(),
                     expected_digest: None,
-                    policy: None,
                 })],
                 ..empty_manifest()
             },

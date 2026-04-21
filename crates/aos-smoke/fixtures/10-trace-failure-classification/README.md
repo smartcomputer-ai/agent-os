@@ -1,8 +1,6 @@
 # 10-trace-failure-classification
 
 Trace/observability conformance fixture for workflow failure diagnosis:
-- `policy_denied`,
-- `capability_denied`,
 - `adapter_timeout`,
 - `adapter_error`.
 

@@ -10,9 +10,7 @@ impl<S: Store + 'static> Kernel<S> {
         let mut loaded = loaded;
         let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
         let runtime = manifest_runtime::assemble_runtime(store.as_ref(), &loaded)?;
-        let cap_defs = loaded.caps.clone();
         let effect_defs = loaded.effects.clone();
-        let policy_defs = loaded.policies.clone();
         let schema_defs = loaded.schemas.clone();
 
         // Persist the loaded manifest + defs into the store so governance/patch doc
@@ -27,9 +25,6 @@ impl<S: Store + 'static> Kernel<S> {
             store.clone(),
             config.module_cache_dir.clone(),
         )?));
-        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
-            PureCapEnforcer::new(Arc::new(loaded.modules.clone()), pures.clone()),
-        ));
 
         let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
             GovernanceParamPreprocessor::new(store.clone(), loaded.manifest.clone()),
@@ -39,13 +34,10 @@ impl<S: Store + 'static> Kernel<S> {
             manifest: loaded.manifest.clone(),
             manifest_hash,
             module_defs: loaded.modules,
-            cap_defs,
             effect_defs,
-            policy_defs,
             schema_defs,
             schema_index: runtime.schema_index.clone(),
             workflow_schemas: runtime.workflow_schemas.clone(),
-            module_cap_bindings: runtime.module_cap_bindings,
             workflows: WorkflowRegistry::new(store.clone(), config.module_cache_dir.clone())?,
             pures,
             router: runtime.router,
@@ -54,12 +46,9 @@ impl<S: Store + 'static> Kernel<S> {
             recent_receipt_index: HashSet::new(),
             workflow_queue: VecDeque::new(),
             effect_manager: EffectManager::new(
-                runtime.capability_resolver,
-                runtime.policy_gate,
                 runtime.effect_catalog.clone(),
                 runtime.schema_index.clone(),
                 param_preprocessor,
-                enforcer_invoker,
                 if loaded.secrets.is_empty() {
                     None
                 } else {
@@ -165,7 +154,6 @@ mod tests {
             version: 1,
             binding_id: "stripe:prod".into(),
             expected_digest: None,
-            policy: None,
         }));
         let loaded = LoadedManifest {
             manifest,
@@ -174,12 +162,9 @@ mod tests {
                 version: 1,
                 binding_id: "stripe:prod".into(),
                 expected_digest: None,
-                policy: None,
             }],
             modules: HashMap::new(),
             effects: HashMap::new(),
-            caps: HashMap::new(),
-            policies: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: EffectCatalog::new(),
         };

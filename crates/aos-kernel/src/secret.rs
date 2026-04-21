@@ -2,7 +2,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{HashRef, SecretDecl};
 use aos_cbor::Hash;
-use aos_effects::EffectSource;
 use thiserror::Error;
 
 use crate::LoadedManifest;
@@ -245,34 +244,6 @@ pub fn collect_secret_refs(params_cbor: &[u8]) -> Result<Vec<(String, u64)>, Sec
     Ok(refs)
 }
 
-/// Enforce per-secret policy (allowed_caps) against collected secret refs.
-pub fn enforce_secret_policy(
-    params_cbor: &[u8],
-    catalog: &SecretCatalog,
-    origin: &EffectSource,
-    cap_name: &str,
-) -> Result<(), crate::error::KernelError> {
-    let refs = collect_secret_refs(params_cbor)
-        .map_err(|e| crate::error::KernelError::SecretResolution(e.to_string()))?;
-    for (alias, version) in refs {
-        if let Some(decl) = catalog.lookup(&alias, version) {
-            if let Some(policy) = &decl.policy {
-                if !policy.allowed_caps.is_empty()
-                    && !policy.allowed_caps.contains(&cap_name.to_string())
-                {
-                    return Err(crate::error::KernelError::SecretPolicyDenied {
-                        alias: alias.clone(),
-                        version,
-                        reason: format!("cap grant '{cap_name}' not allowed"),
-                    });
-                }
-                let _ = origin;
-            }
-        }
-    }
-    Ok(())
-}
-
 pub fn env_secret_resolver_from_manifest(loaded: &LoadedManifest) -> Option<SharedSecretResolver> {
     if loaded.secrets.is_empty() {
         return None;
@@ -504,7 +475,6 @@ mod tests {
             version: 1,
             binding_id: "binding".into(),
             expected_digest: None,
-            policy: None,
         };
         let catalog = SecretCatalog::new(&[decl]);
         // params: {headers: {"authorization": {"secret": {"alias": "...", "version": 1}}}}
@@ -592,7 +562,6 @@ mod tests {
             version: 1,
             binding_id: "binding".into(),
             expected_digest: None,
-            policy: None,
         }]);
         let resolver =
             MapSecretResolver::new(HashMap::from([("binding".into(), b"token123".to_vec())]));

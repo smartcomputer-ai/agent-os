@@ -422,7 +422,7 @@ struct WorldTraceSummaryArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Compare the local authored bundle against the selected node world's current manifest, build a governance patch document, submit governance propose, and optionally chain shadow, approve, and apply. Use this for manifest-level changes such as defs, modules, routing, policies, effects, and secrets."
+    long_about = "Compare the local authored bundle against the selected node world's current manifest, build a governance patch document, submit governance propose, and optionally chain shadow, approve, and apply. Use this for manifest-level changes such as defs, modules, routing, effects, and secrets."
 )]
 struct WorldPatchArgs {
     /// Local world root to build and diff against the node manifest.
@@ -1838,8 +1838,6 @@ mod tests {
             modules: Vec::new(),
             effects: Vec::new(),
             effect_bindings: Vec::new(),
-            caps: Vec::new(),
-            policies: Vec::new(),
             secrets: vec![
                 SecretEntry::Ref(NamedRef {
                     name: "llm/openai_api@1".into(),
@@ -1853,7 +1851,6 @@ mod tests {
                     version: 1,
                     binding_id: "llm/anthropic_api".into(),
                     expected_digest: None,
-                    policy: None,
                 }),
                 SecretEntry::Ref(NamedRef {
                     name: "llm/openai_api@1".into(),
@@ -1863,8 +1860,6 @@ mod tests {
                     .expect("hash"),
                 }),
             ],
-            defaults: None,
-            module_bindings: Default::default(),
             routing: None,
         };
         let defs = vec![
@@ -1872,13 +1867,11 @@ mod tests {
                 name: "llm/openai_api@1".into(),
                 binding_id: "llm/openai_api".into(),
                 expected_digest: None,
-                allowed_caps: Vec::new(),
             },
             DefSecret {
                 name: "llm/anthropic_api@1".into(),
                 binding_id: "llm/anthropic_api".into(),
                 expected_digest: None,
-                allowed_caps: Vec::new(),
             },
         ];
 

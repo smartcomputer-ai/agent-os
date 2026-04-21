@@ -19,7 +19,7 @@ use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_kernel::{MemStore, Store};
 
 fn build_intent(kind: EffectKind, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
-    EffectIntent::from_raw_params(kind, "cap", params_cbor, [seed; 32]).unwrap()
+    EffectIntent::from_raw_params(kind, params_cbor, [seed; 32]).unwrap()
 }
 
 fn shell_available() -> bool {

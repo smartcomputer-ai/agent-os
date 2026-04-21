@@ -21,8 +21,6 @@
         "defschema",
         "defmodule",
         "defeffect",
-        "defcap",
-        "defpolicy",
         "defsecret",
         "manifest"
       ]
@@ -33,21 +31,11 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
     },
-    "CapType": {
-      "title": "Capability type (namespaced string)",
-      "description": "Open-ended capability type identifier. Built-in types shipped in v1 are documented in spec/03-air.md.",
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
-    },
     "VarName": {
       "type": "string",
       "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
     },
     "StepId": {
-      "type": "string",
-      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
-    },
-    "CapGrantName": {
       "type": "string",
       "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
     },
@@ -303,32 +291,6 @@
         { "type": "array", "items": { "$ref": "#/$defs/Value" } },
         { "type": "object", "additionalProperties": { "$ref": "#/$defs/Value" } }
       ]
-    },
-
-    "CapGrant": {
-      "type": "object",
-      "description": "Capability grant instance. References a defcap and provides concrete parameter values (allowlists/ceilings) and optional expiry.",
-      "properties": {
-        "name": {
-          "$ref": "#/$defs/CapGrantName",
-          "description": "Unique grant name referenced by plans/modules"
-        },
-        "cap": {
-          "$ref": "#/$defs/Name",
-          "description": "defcap name this grant instantiates"
-        },
-        "params": {
-          "$ref": "#/$defs/Value",
-          "description": "Concrete parameter values conforming to the defcap's schema. Enforced at enqueue."
-        },
-        "expiry_ns": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Optional expiration time (nanoseconds since epoch). Grant denied after expiry."
-        }
-      },
-      "required": ["name", "cap", "params"],
-      "additionalProperties": false
     }
   },
   "additionalProperties": false

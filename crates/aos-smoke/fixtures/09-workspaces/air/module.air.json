@@ -13,10 +13,7 @@
           "workspace.write_bytes",
           "workspace.list",
           "workspace.diff"
-        ],
-        "cap_slots": {
-          "default": "workspace"
-        }
+        ]
       }
     }
   }

@@ -3,15 +3,13 @@ use std::sync::Arc;
 
 use crate::Store;
 use aos_air_types::{
-    AirNode, DefCap, DefModule, DefPolicy, HashRef, Manifest, Name, NamedRef, TypeExpr,
-    TypePrimitive, builtins, catalog::EffectCatalog, schema_index::SchemaIndex,
+    AirNode, DefModule, HashRef, Manifest, Name, NamedRef, TypeExpr, TypePrimitive, builtins,
+    catalog::EffectCatalog, schema_index::SchemaIndex,
 };
 use aos_cbor::Hash;
 
-use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
-use crate::policy::{AllowAllPolicy, PolicyGate, RulePolicy};
 
 use super::{EventWrap, RouteBinding, WorkflowSchema};
 
@@ -19,9 +17,6 @@ pub(super) struct RuntimeAssembly {
     pub schema_index: Arc<SchemaIndex>,
     pub workflow_schemas: Arc<HashMap<Name, WorkflowSchema>>,
     pub router: HashMap<String, Vec<RouteBinding>>,
-    pub module_cap_bindings: HashMap<Name, HashMap<String, CapGrantResolution>>,
-    pub capability_resolver: CapabilityResolver,
-    pub policy_gate: Box<dyn PolicyGate>,
     pub effect_catalog: Arc<EffectCatalog>,
 }
 
@@ -36,45 +31,13 @@ pub(super) fn assemble_runtime<S: Store>(
     )?);
     let router = build_router(&loaded.manifest, workflow_schemas.as_ref())?;
     let effect_catalog = Arc::new(loaded.effect_catalog.clone());
-    let capability_resolver = CapabilityResolver::from_manifest(
-        &loaded.manifest,
-        &loaded.caps,
-        schema_index.as_ref(),
-        effect_catalog.clone(),
-    )?;
-    let module_cap_bindings = resolve_module_cap_bindings(&loaded.manifest, &capability_resolver)?;
-    let policy_gate = build_policy_gate(&loaded.manifest, &loaded.policies)?;
 
     Ok(RuntimeAssembly {
         schema_index,
         workflow_schemas,
         router,
-        module_cap_bindings,
-        capability_resolver,
-        policy_gate,
         effect_catalog,
     })
-}
-
-fn build_policy_gate(
-    manifest: &Manifest,
-    policies: &HashMap<Name, DefPolicy>,
-) -> Result<Box<dyn PolicyGate>, KernelError> {
-    match manifest
-        .defaults
-        .as_ref()
-        .and_then(|defaults| defaults.policy.clone())
-    {
-        Some(policy_name) => {
-            let def = policies.get(&policy_name).ok_or_else(|| {
-                KernelError::Manifest(format!(
-                    "policy '{policy_name}' referenced by manifest defaults was not found"
-                ))
-            })?;
-            Ok(Box::new(RulePolicy::from_def(def)))
-        }
-        None => Ok(Box::new(AllowAllPolicy)),
-    }
 }
 
 pub(super) fn build_schema_index_from_loaded<S: Store>(
@@ -285,28 +248,6 @@ fn wrap_for_event_schema(
     }
 }
 
-fn resolve_module_cap_bindings(
-    manifest: &Manifest,
-    resolver: &CapabilityResolver,
-) -> Result<HashMap<Name, HashMap<String, CapGrantResolution>>, KernelError> {
-    let mut bindings = HashMap::new();
-    for (module, binding) in &manifest.module_bindings {
-        let mut slot_map = HashMap::new();
-        for (slot, cap) in &binding.slots {
-            if !resolver.has_grant(cap) {
-                return Err(KernelError::ModuleCapabilityMissing {
-                    module: module.clone(),
-                    cap: cap.clone(),
-                });
-            }
-            let resolved = resolver.resolve_grant(cap)?;
-            slot_map.insert(slot.clone(), resolved);
-        }
-        bindings.insert(module.clone(), slot_map);
-    }
-    Ok(bindings)
-}
-
 pub(super) fn persist_loaded_manifest<S: Store>(
     store: &S,
     loaded: &mut LoadedManifest,
@@ -314,8 +255,6 @@ pub(super) fn persist_loaded_manifest<S: Store>(
     let mut schema_hashes = HashMap::new();
     let mut module_hashes = HashMap::new();
     let mut effect_hashes = HashMap::new();
-    let mut cap_hashes = HashMap::new();
-    let mut policy_hashes = HashMap::new();
 
     for schema in loaded.schemas.values() {
         let hash = store.put_node(&AirNode::Defschema(schema.clone()))?;
@@ -324,14 +263,6 @@ pub(super) fn persist_loaded_manifest<S: Store>(
     for module in loaded.modules.values() {
         let hash = store.put_node(&AirNode::Defmodule(module.clone()))?;
         module_hashes.insert(module.name.clone(), hash);
-    }
-    for cap in loaded.caps.values() {
-        let hash = store.put_node(&AirNode::Defcap(cap.clone()))?;
-        cap_hashes.insert(cap.name.clone(), hash);
-    }
-    for policy in loaded.policies.values() {
-        let hash = store.put_node(&AirNode::Defpolicy(policy.clone()))?;
-        policy_hashes.insert(policy.name.clone(), hash);
     }
     for effect in loaded.effects.values() {
         let hash = store.put_node(&AirNode::Defeffect(effect.clone()))?;
@@ -387,36 +318,6 @@ pub(super) fn persist_loaded_manifest<S: Store>(
             "manifest references unknown effect '{}'",
             reference.name
         )));
-    }
-
-    for reference in loaded.manifest.caps.iter_mut() {
-        if let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-            continue;
-        }
-        if let Some(hash) = cap_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("cap hash '{}': {err}", reference.name))
-            })?;
-            continue;
-        }
-        return Err(KernelError::Manifest(format!(
-            "manifest references unknown cap '{}'",
-            reference.name
-        )));
-    }
-
-    for reference in loaded.manifest.policies.iter_mut() {
-        if let Some(hash) = policy_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("policy hash '{}': {err}", reference.name))
-            })?;
-        } else {
-            return Err(KernelError::Manifest(format!(
-                "manifest references unknown policy '{}'",
-                reference.name
-            )));
-        }
     }
 
     store.put_node(&loaded.manifest)?;

@@ -7,9 +7,8 @@ use std::sync::{Once, OnceLock};
 use std::time::{Duration, Instant};
 
 use aos_air_types::{
-    AirNode, CapGrant, DefCap, DefModule, DefPolicy, DefSchema, EffectBinding, HashRef, Manifest,
-    ManifestDefaults, NamedRef, Routing, RoutingEvent, SchemaRef, ValueLiteral, ValueRecord,
-    builtins,
+    AirNode, DefModule, DefSchema, EffectBinding, HashRef, Manifest, NamedRef, Routing,
+    RoutingEvent, SchemaRef, builtins,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_node::blobstore::{
@@ -504,24 +503,12 @@ pub fn seed_timer_builtins(runtime: &HostedWorkerRuntime, universe_id: UniverseI
         to_canonical_cbor(&effect.effect).expect("encode timer effect"),
         effect.hash,
     );
-    let cap = builtins::find_builtin_cap("sys/timer@1").expect("timer cap");
-    upload_builtin(
-        to_canonical_cbor(&cap.cap).expect("encode timer cap"),
-        cap.hash,
-    );
 }
 
 fn prepare_fetch_notify_manifest() -> PreparedManifest {
     let wasm_bytes = compile_fixture_workflow(fetch_notify_world_root().join("workflow"));
-    let authored_manifest = load_json_file::<serde_json::Value>(
-        &fetch_notify_world_root().join("air/manifest.air.json"),
-    );
     let schemas =
         load_json_file::<Vec<DefSchema>>(&fetch_notify_world_root().join("air/schemas.air.json"));
-    let policies =
-        load_json_file::<Vec<DefPolicy>>(&fetch_notify_world_root().join("air/policies.air.json"));
-    let caps =
-        load_json_file::<Vec<DefCap>>(&fetch_notify_world_root().join("air/capabilities.air.json"));
     let wasm_hash = Hash::of_bytes(&wasm_bytes);
     let modules = load_fixture_modules(
         &fetch_notify_world_root().join("air/module.air.json"),
@@ -535,14 +522,8 @@ fn prepare_fetch_notify_manifest() -> PreparedManifest {
         builtin_schema_ref("sys/HttpRequestReceipt@1"),
         builtin_schema_ref("sys/EffectReceiptEnvelope@1"),
     ]);
-    let mut module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
-    let (http_enforcer_ref, http_enforcer_blobs) =
-        authored_builtin_module("sys/CapEnforceHttpOut@1");
-    blobs.extend(http_enforcer_blobs);
-    module_refs.push(http_enforcer_ref);
+    let module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
     let effect_refs = vec![builtin_effect_ref("sys/http.request@1")];
-    let cap_refs = store_defs(&mut blobs, caps.into_iter().map(AirNode::Defcap));
-    let policy_refs = store_defs(&mut blobs, policies.into_iter().map(AirNode::Defpolicy));
 
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
@@ -550,16 +531,7 @@ fn prepare_fetch_notify_manifest() -> PreparedManifest {
         modules: module_refs,
         effects: effect_refs,
         effect_bindings: Vec::new(),
-        caps: cap_refs,
-        policies: policy_refs,
         secrets: Vec::new(),
-        defaults: authored_manifest
-            .get("defaults")
-            .cloned()
-            .map(serde_json::from_value::<ManifestDefaults>)
-            .transpose()
-            .expect("parse fetch-notify defaults"),
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/FetchNotifyEvent@1"),
@@ -578,14 +550,8 @@ fn prepare_fetch_notify_manifest() -> PreparedManifest {
 
 fn prepare_workspace_manifest() -> PreparedManifest {
     let wasm_bytes = compile_fixture_workflow(workspace_world_root().join("workflow"));
-    let authored_manifest =
-        load_json_file::<serde_json::Value>(&workspace_world_root().join("air/manifest.air.json"));
     let schemas =
         load_json_file::<Vec<DefSchema>>(&workspace_world_root().join("air/schemas.air.json"));
-    let policies =
-        load_json_file::<Vec<DefPolicy>>(&workspace_world_root().join("air/policies.air.json"));
-    let caps =
-        load_json_file::<Vec<DefCap>>(&workspace_world_root().join("air/capabilities.air.json"));
     let wasm_hash = Hash::of_bytes(&wasm_bytes);
     let modules = load_fixture_modules(
         &workspace_world_root().join("air/module.air.json"),
@@ -612,10 +578,6 @@ fn prepare_workspace_manifest() -> PreparedManifest {
         builtin_schema_ref("sys/WorkspaceDiffReceipt@1"),
     ]);
     let mut module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
-    let (workspace_enforcer_ref, workspace_enforcer_blobs) =
-        authored_builtin_module("sys/CapEnforceWorkspace@1");
-    blobs.extend(workspace_enforcer_blobs);
-    module_refs.push(workspace_enforcer_ref);
     let (workspace_module_ref, workspace_module_blobs) = authored_builtin_module("sys/Workspace@1");
     blobs.extend(workspace_module_blobs);
     module_refs.push(workspace_module_ref);
@@ -626,8 +588,6 @@ fn prepare_workspace_manifest() -> PreparedManifest {
         builtin_effect_ref("sys/workspace.list@1"),
         builtin_effect_ref("sys/workspace.diff@1"),
     ];
-    let cap_refs = store_defs(&mut blobs, caps.into_iter().map(AirNode::Defcap));
-    let policy_refs = store_defs(&mut blobs, policies.into_iter().map(AirNode::Defpolicy));
 
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
@@ -635,16 +595,7 @@ fn prepare_workspace_manifest() -> PreparedManifest {
         modules: module_refs,
         effects: effect_refs,
         effect_bindings: Vec::new(),
-        caps: cap_refs,
-        policies: policy_refs,
         secrets: Vec::new(),
-        defaults: authored_manifest
-            .get("defaults")
-            .cloned()
-            .map(serde_json::from_value::<ManifestDefaults>)
-            .transpose()
-            .expect("parse workspace defaults"),
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![
                 RoutingEvent {
@@ -688,11 +639,7 @@ fn prepare_fabric_exec_progress_manifest() -> PreparedManifest {
         builtin_schema_ref("sys/HostExecReceipt@1"),
         builtin_schema_ref("sys/HostExecProgressFrame@1"),
     ]);
-    let mut module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
-    let (host_enforcer_ref, host_enforcer_blobs) = authored_builtin_module("sys/CapEnforceHost@1");
-    blobs.extend(host_enforcer_blobs);
-    module_refs.push(host_enforcer_ref);
-
+    let module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: schema_refs,
@@ -702,21 +649,7 @@ fn prepare_fabric_exec_progress_manifest() -> PreparedManifest {
             kind: aos_air_types::EffectKind::host_exec(),
             adapter_id: "host.exec.fabric".to_string(),
         }],
-        caps: vec![builtin_cap_ref("sys/host@1")],
-        policies: Vec::new(),
         secrets: Vec::new(),
-        defaults: Some(ManifestDefaults {
-            policy: None,
-            cap_grants: vec![CapGrant {
-                name: "host".into(),
-                cap: "sys/host@1".into(),
-                params: ValueLiteral::Record(ValueRecord {
-                    record: Default::default(),
-                }),
-                expiry_ns: None,
-            }],
-        }),
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/FabricExecProgressEvent@1"),
@@ -753,11 +686,7 @@ fn prepare_counter_manifest() -> PreparedManifest {
         modules: module_refs,
         effects: Vec::new(),
         effect_bindings: Vec::new(),
-        caps: Vec::new(),
-        policies: Vec::new(),
         secrets: Vec::new(),
-        defaults: None,
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/CounterEvent@1"),
@@ -778,8 +707,6 @@ fn prepare_timer_manifest() -> PreparedManifest {
     let wasm_bytes = compile_fixture_workflow(timer_world_root().join("workflow"));
     let schemas =
         load_json_file::<Vec<DefSchema>>(&timer_world_root().join("air/schemas.air.json"));
-    let policies =
-        load_json_file::<Vec<DefPolicy>>(&timer_world_root().join("air/policies.air.json"));
     let wasm_hash = Hash::of_bytes(&wasm_bytes);
     let modules = load_fixture_modules(&timer_world_root().join("air/module.air.json"), &wasm_hash);
 
@@ -791,7 +718,6 @@ fn prepare_timer_manifest() -> PreparedManifest {
         builtin_schema_ref("sys/TimerFired@1"),
     ]);
     let module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
-    let policy_refs = store_defs(&mut blobs, policies.into_iter().map(AirNode::Defpolicy));
 
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
@@ -799,21 +725,7 @@ fn prepare_timer_manifest() -> PreparedManifest {
         modules: module_refs,
         effects: vec![builtin_effect_ref("sys/timer.set@1")],
         effect_bindings: Vec::new(),
-        caps: vec![builtin_cap_ref("sys/timer@1")],
-        policies: policy_refs,
         secrets: Vec::new(),
-        defaults: Some(ManifestDefaults {
-            policy: Some("demo/default_policy@1".into()),
-            cap_grants: vec![CapGrant {
-                name: "timer_grant".into(),
-                cap: "sys/timer@1".into(),
-                params: ValueLiteral::Record(ValueRecord {
-                    record: Default::default(),
-                }),
-                expiry_ns: None,
-            }],
-        }),
-        module_bindings: Default::default(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/TimerEvent@1"),
@@ -849,8 +761,6 @@ fn air_node_name(node: &AirNode) -> String {
     match node {
         AirNode::Defschema(schema) => schema.name.clone(),
         AirNode::Defmodule(module) => module.name.clone(),
-        AirNode::Defpolicy(policy) => policy.name.clone(),
-        AirNode::Defcap(cap) => cap.name.clone(),
         AirNode::Defeffect(effect) => effect.name.clone(),
         AirNode::Defsecret(secret) => secret.name.clone(),
         AirNode::Manifest(_) => panic!("manifest is not stored as a named AIR node in tests"),
@@ -869,14 +779,6 @@ fn builtin_effect_ref(name: &str) -> NamedRef {
     let builtin = builtins::find_builtin_effect(name).expect("builtin effect");
     NamedRef {
         name: builtin.effect.name.clone(),
-        hash: builtin.hash_ref.clone(),
-    }
-}
-
-fn builtin_cap_ref(name: &str) -> NamedRef {
-    let builtin = builtins::find_builtin_cap(name).expect("builtin cap");
-    NamedRef {
-        name: builtin.cap.name.clone(),
         hash: builtin.hash_ref.clone(),
     }
 }
@@ -1014,9 +916,6 @@ fn authored_builtin_module(name: &str) -> (NamedRef, Vec<Vec<u8>>) {
 
 fn builtin_module_wasm_bytes(name: &str) -> Vec<u8> {
     let bin = match name {
-        "sys/CapEnforceHttpOut@1" => "cap_enforce_http_out",
-        "sys/CapEnforceHost@1" => "cap_enforce_host",
-        "sys/CapEnforceWorkspace@1" => "cap_enforce_workspace",
         "sys/Workspace@1" => "workspace",
         other => panic!("unsupported builtin test module {other}"),
     };

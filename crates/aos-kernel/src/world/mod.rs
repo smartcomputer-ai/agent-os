@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::Store;
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
-    SecretEntry, TypeExpr, TypePrimitive, builtins, schema_index::SchemaIndex,
+    AirNode, DefEffect, DefModule, DefSchema, Manifest, Name, SecretDecl, SecretEntry, TypeExpr,
+    TypePrimitive, builtins, schema_index::SchemaIndex,
     value_normalize::normalize_cbor_by_name,
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
@@ -22,8 +22,6 @@ use serde::{Deserialize, Serialize};
 use serde_cbor;
 use serde_cbor::Value as CborValue;
 
-use crate::cap_enforcer::{CapEnforcerInvoker, PureCapEnforcer};
-use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::cell_index::{CellIndex, CellMeta};
 use crate::effects::{EffectManager, EffectParamPreprocessor};
 use crate::error::KernelError;
@@ -42,9 +40,7 @@ use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::WorkflowEffectContext;
 use crate::schema_value::cbor_to_expr_value;
 use crate::secret::{PlaceholderSecretResolver, SharedSecretResolver};
-use crate::shadow::{
-    DeltaKind, LedgerDelta, LedgerKind, ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary,
-};
+use crate::shadow::{ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary};
 use crate::snapshot::{
     EffectIntentSnapshot, KernelSnapshot, SnapshotRootCompleteness, WorkflowInflightIntentSnapshot,
     WorkflowInstanceSnapshot, WorkflowReceiptSnapshot, WorkflowStateEntry, WorkflowStatusSnapshot,
@@ -165,16 +161,13 @@ pub struct Kernel<S: Store> {
     manifest_hash: Hash,
     secrets: Vec<SecretDecl>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
-    cap_defs: HashMap<Name, DefCap>,
     effect_defs: HashMap<Name, DefEffect>,
-    policy_defs: HashMap<Name, DefPolicy>,
     schema_defs: HashMap<Name, DefSchema>,
     workflows: WorkflowRegistry<S>,
     pures: Arc<Mutex<PureRegistry<S>>>,
     router: HashMap<String, Vec<RouteBinding>>,
     schema_index: Arc<SchemaIndex>,
     workflow_schemas: Arc<HashMap<Name, WorkflowSchema>>,
-    module_cap_bindings: HashMap<Name, HashMap<String, CapGrantResolution>>,
     pending_workflow_receipts: HashMap<[u8; 32], WorkflowEffectContext>,
     recent_receipts: VecDeque<[u8; 32]>,
     recent_receipt_index: HashSet<[u8; 32]>,
@@ -306,15 +299,11 @@ pub struct DefListing {
     pub name: String,
     pub hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cap_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub params_schema: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt_schema: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_steps: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy_rules: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -439,9 +428,7 @@ fn normalize_def_kind(input: &str) -> Option<&'static str> {
     match input {
         "defschema" | "schema" => Some("defschema"),
         "defmodule" | "module" => Some("defmodule"),
-        "defcap" | "cap" => Some("defcap"),
         "defeffect" | "effect" => Some("defeffect"),
-        "defpolicy" | "policy" => Some("defpolicy"),
         _ => None,
     }
 }
@@ -1096,7 +1083,6 @@ impl<S: Store + 'static> Kernel<S> {
                             name.clone(),
                             instance_key.clone(),
                             effect_kind.clone(),
-                            record.cap_name.clone(),
                             params_cbor.clone(),
                             record.idempotency_key,
                             issuer_ref.clone(),
@@ -1394,12 +1380,6 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(def) = self.module_defs.get(name) {
             return Some(AirNode::Defmodule(def.clone()));
         }
-        if let Some(def) = self.cap_defs.get(name) {
-            return Some(AirNode::Defcap(def.clone()));
-        }
-        if let Some(def) = self.policy_defs.get(name) {
-            return Some(AirNode::Defpolicy(def.clone()));
-        }
         self.effect_defs
             .get(name)
             .map(|def| AirNode::Defeffect(def.clone()))
@@ -1451,11 +1431,9 @@ impl<S: Store + 'static> Kernel<S> {
                     kind: "defschema".into(),
                     name: name.clone(),
                     hash: hash_def(AirNode::Defschema(def.clone())),
-                    cap_type: None,
                     params_schema: None,
                     receipt_schema: None,
                     plan_steps: None,
-                    policy_rules: None,
                 },
                 &kind_filter,
                 prefix,
@@ -1471,31 +1449,9 @@ impl<S: Store + 'static> Kernel<S> {
                     kind: "defmodule".into(),
                     name: name.clone(),
                     hash: hash_def(AirNode::Defmodule(def.clone())),
-                    cap_type: None,
                     params_schema: None,
                     receipt_schema: None,
                     plan_steps: None,
-                    policy_rules: None,
-                },
-                &kind_filter,
-                prefix,
-            );
-        }
-
-        for (name, def) in self.cap_defs.iter() {
-            push_if(
-                &mut entries,
-                "defcap",
-                name.as_str(),
-                || DefListing {
-                    kind: "defcap".into(),
-                    name: name.clone(),
-                    hash: hash_def(AirNode::Defcap(def.clone())),
-                    cap_type: Some(def.cap_type.as_str().to_string()),
-                    params_schema: None,
-                    receipt_schema: None,
-                    plan_steps: None,
-                    policy_rules: None,
                 },
                 &kind_filter,
                 prefix,
@@ -1511,31 +1467,9 @@ impl<S: Store + 'static> Kernel<S> {
                     kind: "defeffect".into(),
                     name: name.clone(),
                     hash: hash_def(AirNode::Defeffect(def.clone())),
-                    cap_type: Some(def.cap_type.as_str().to_string()),
                     params_schema: Some(def.params_schema.as_str().to_string()),
                     receipt_schema: Some(def.receipt_schema.as_str().to_string()),
                     plan_steps: None,
-                    policy_rules: None,
-                },
-                &kind_filter,
-                prefix,
-            );
-        }
-
-        for (name, def) in self.policy_defs.iter() {
-            push_if(
-                &mut entries,
-                "defpolicy",
-                name.as_str(),
-                || DefListing {
-                    kind: "defpolicy".into(),
-                    name: name.clone(),
-                    hash: hash_def(AirNode::Defpolicy(def.clone())),
-                    cap_type: None,
-                    params_schema: None,
-                    receipt_schema: None,
-                    plan_steps: None,
-                    policy_rules: Some(def.rules.len()),
                 },
                 &kind_filter,
                 prefix,
@@ -1666,7 +1600,6 @@ impl<S: Store + 'static> Kernel<S> {
             .filter_map(|effect| {
                 aos_effects::EffectIntent::from_raw_params(
                     effect.effect_kind.into(),
-                    effect.cap_name,
                     effect.params_cbor,
                     effect.idempotency_key,
                 )
@@ -1872,7 +1805,6 @@ impl<S: Store + 'static> Kernel<S> {
         let record = JournalRecord::EffectIntent(EffectIntentRecord {
             intent_hash: intent.intent_hash,
             kind: intent.kind.as_str().to_string(),
-            cap_name: intent.cap_name.clone(),
             params_cbor: stored_params.inline,
             params_ref: stored_params.cbor_ref,
             params_size: stored_params.size,
@@ -1979,14 +1911,6 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn record_decisions(&mut self) -> Result<(), KernelError> {
-        let records = self.effect_manager.drain_cap_decisions();
-        for record in records {
-            self.append_record(JournalRecord::CapDecision(record))?;
-        }
-        let policy_records = self.effect_manager.drain_policy_decisions();
-        for record in policy_records {
-            self.append_record(JournalRecord::PolicyDecision(record))?;
-        }
         Ok(())
     }
 
@@ -2267,7 +2191,6 @@ mod tests {
             "com.acme/Workflow@1".into(),
             None,
             "llm.generate".into(),
-            "cap/llm@1".into(),
             vec![0xA0],
             [0x22u8; 32],
             None,

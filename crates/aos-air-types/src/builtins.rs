@@ -4,7 +4,7 @@ use aos_cbor::Hash;
 use once_cell::sync::Lazy;
 use serde_json;
 
-use crate::{DefCap, DefEffect, DefModule, DefSchema, HashRef};
+use crate::{DefEffect, DefModule, DefSchema, HashRef};
 
 static BUILTIN_SCHEMAS_RAW: &str = include_str!("../../../spec/defs/builtin-schemas.air.json");
 static BUILTIN_SCHEMAS_SDK_RAW: &str =
@@ -12,7 +12,6 @@ static BUILTIN_SCHEMAS_SDK_RAW: &str =
 static BUILTIN_SCHEMAS_HOST_RAW: &str =
     include_str!("../../../spec/defs/builtin-schemas-host.air.json");
 static BUILTIN_EFFECTS_RAW: &str = include_str!("../../../spec/defs/builtin-effects.air.json");
-static BUILTIN_CAPS_RAW: &str = include_str!("../../../spec/defs/builtin-caps.air.json");
 static BUILTIN_MODULES_RAW: &str = include_str!("../../../spec/defs/builtin-modules.air.json");
 
 #[derive(Debug)]
@@ -25,13 +24,6 @@ pub struct BuiltinSchema {
 #[derive(Debug, Clone)]
 pub struct BuiltinEffect {
     pub effect: DefEffect,
-    pub hash: Hash,
-    pub hash_ref: HashRef,
-}
-
-#[derive(Debug, Clone)]
-pub struct BuiltinCap {
-    pub cap: DefCap,
     pub hash: Hash,
     pub hash_ref: HashRef,
 }
@@ -88,22 +80,6 @@ static BUILTIN_EFFECTS: Lazy<Vec<BuiltinEffect>> = Lazy::new(|| {
         .collect()
 });
 
-static BUILTIN_CAPS: Lazy<Vec<BuiltinCap>> = Lazy::new(|| {
-    let defs: Vec<DefCap> =
-        serde_json::from_str(BUILTIN_CAPS_RAW).expect("spec/defs/builtin-caps.air.json must parse");
-    defs.into_iter()
-        .map(|cap| {
-            let hash = Hash::of_cbor(&cap).expect("canonical hash");
-            let hash_ref = HashRef::new(hash.to_hex()).expect("valid hash");
-            BuiltinCap {
-                cap,
-                hash,
-                hash_ref,
-            }
-        })
-        .collect()
-});
-
 static BUILTIN_MODULES: Lazy<Vec<BuiltinModule>> = Lazy::new(|| {
     let defs: Vec<DefModule> = serde_json::from_str(BUILTIN_MODULES_RAW)
         .expect("spec/defs/builtin-modules.air.json must parse");
@@ -136,14 +112,6 @@ static BUILTIN_EFFECT_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
         .collect()
 });
 
-static BUILTIN_CAP_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
-    BUILTIN_CAPS
-        .iter()
-        .enumerate()
-        .map(|(idx, cap)| (cap.cap.name.clone(), idx))
-        .collect()
-});
-
 static BUILTIN_MODULE_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
     BUILTIN_MODULES
         .iter()
@@ -160,11 +128,6 @@ pub fn builtin_schemas() -> &'static [BuiltinSchema] {
 /// Returns the parsed list of built-in `defeffect` nodes.
 pub fn builtin_effects() -> &'static [BuiltinEffect] {
     &BUILTIN_EFFECTS
-}
-
-/// Returns the parsed list of built-in `defcap` nodes.
-pub fn builtin_caps() -> &'static [BuiltinCap] {
-    &BUILTIN_CAPS
 }
 
 /// Returns the parsed list of built-in `defmodule` nodes.
@@ -184,13 +147,6 @@ pub fn find_builtin_effect(name: &str) -> Option<&'static BuiltinEffect> {
     BUILTIN_EFFECT_INDEX
         .get(name)
         .and_then(|idx| BUILTIN_EFFECTS.get(*idx))
-}
-
-/// Finds a built-in capability definition by name (e.g., `sys/query@1`).
-pub fn find_builtin_cap(name: &str) -> Option<&'static BuiltinCap> {
-    BUILTIN_CAP_INDEX
-        .get(name)
-        .and_then(|idx| BUILTIN_CAPS.get(*idx))
 }
 
 /// Finds a built-in module definition by name (e.g., `sys/Workspace@1`).
@@ -251,7 +207,6 @@ mod tests {
         assert!(names.contains(&"sys/HostFsExistsReceipt@1"));
         assert!(names.contains(&"sys/HostFsListDirParams@1"));
         assert!(names.contains(&"sys/HostFsListDirReceipt@1"));
-        assert!(names.contains(&"sys/HostCapParams@1"));
         assert!(names.contains(&"sys/BlobPutParams@1"));
         assert!(names.contains(&"sys/BlobEdge@1"));
         assert!(names.contains(&"sys/BlobPutReceipt@1"));
@@ -352,39 +307,12 @@ mod tests {
     }
 
     #[test]
-    fn exposes_expected_caps() {
-        let names: Vec<_> = builtin_caps().iter().map(|c| c.cap.name.as_str()).collect();
-        for name in [
-            "sys/query@1",
-            "sys/timer@1",
-            "sys/portal@1",
-            "sys/blob@1",
-            "sys/http.out@1",
-            "sys/llm.basic@1",
-            "sys/host@1",
-            "sys/secret@1",
-            "sys/workspace@1",
-            "sys/governance@1",
-        ] {
-            assert!(names.contains(&name));
-        }
-    }
-
-    #[test]
     fn exposes_expected_modules() {
         let names: Vec<_> = builtin_modules()
             .iter()
             .map(|m| m.module.name.as_str())
             .collect();
-        for name in [
-            "sys/CapEnforceHttpOut@1",
-            "sys/CapEnforceLlmBasic@1",
-            "sys/CapEnforceHost@1",
-            "sys/CapEnforceGovernance@1",
-            "sys/CapEnforceWorkspace@1",
-            "sys/Workspace@1",
-            "sys/HttpPublish@1",
-        ] {
+        for name in ["sys/Workspace@1", "sys/HttpPublish@1"] {
             assert!(names.contains(&name));
         }
     }

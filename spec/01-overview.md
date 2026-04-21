@@ -1,10 +1,10 @@
 # AgentOS Overview
 
-AgentOS is a computing substrate for AI agents and humans to co‑author reliable, auditable software systems. It combines a deterministic, event‑sourced core (the "world") with a small, typed control‑plane IR called AIR (Agent Intermediate Representation). Heavy computation and integration live in sandboxed WASM modules and effect adapters; all external I/O is governed by explicit capabilities and produces signed receipts. The result is a runtime that can safely evolve itself under policy, while remaining portable and easy to reason about.
+AgentOS is a computing substrate for AI agents and humans to co‑author reliable, auditable software systems. It combines a deterministic, event‑sourced core (the "world") with a small, typed control‑plane IR called AIR (Agent Intermediate Representation). Heavy computation and integration live in sandboxed WASM modules and effect adapters; all external I/O is expressed as explicit effects and produces signed receipts. The result is a runtime that can safely evolve itself through governance, while remaining portable and easy to reason about.
 
 ## Who It's For
 
-AgentOS is for teams building governed automations and agentic workflows that must be auditable and reversible. It's for individual developers who want portable, forkable "worlds" they can share and replay. And it's for organizations that need least‑privilege capability gating and deterministic audit trails for LLMs and APIs.
+AgentOS is for teams building governed automations and agentic workflows that must be auditable and reversible. It's for individual developers who want portable, forkable "worlds" they can share and replay. And it's for organizations that need explicit effect boundaries and deterministic audit trails for LLMs and APIs.
 
 AgentOS is currently in early development. The architecture is being designed in the open, and we invite feedback, contributions, and collaboration from anyone interested in building deterministic substrates for agents. _If this vision resonates with you, join us in shaping what agent-native computing should look like._
 
@@ -31,13 +31,13 @@ The question is: **what if the runtime itself were designed for agents?** What i
 
 Modern "agent systems" are an accumulation of scripts, queues, functions, and SaaS APIs with ambient authority. The result is a mess of interrelated problems.
 
-**Non‑deterministic execution** means time, randomness, and network IO leak into core logic, making replay unreliable. **State fragmentation** scatters code, config, schemas, and policies across different tools and formats, so upgrades risk data drift. **Weak audit trails** mean effects happen without durable receipts, turning incident forensics into guesswork. And **governance fatigue** sets in because approvals and controls are out‑of‑band and hard to enforce consistently.
+**Non‑deterministic execution** means time, randomness, and network IO leak into core logic, making replay unreliable. **State fragmentation** scatters code, config, schemas, and effect wiring across different tools and formats, so upgrades risk data drift. **Weak audit trails** mean effects happen without durable receipts, turning incident forensics into guesswork. And **governance fatigue** sets in because approvals and controls are out‑of‑band and hard to enforce consistently.
 
 Agents deserve better. They need a substrate that is deterministic by default, unified in its control plane, auditable at every boundary, and safe to evolve.
 
 ## The Approach
 
-AgentOS treats each running system as a world: a single‑threaded, replayable event log with periodic snapshots. All changes—code, schemas, policies, capabilities, and workflow modules—are expressed in AIR, a small, typed IR the kernel can validate and execute deterministically. Application logic runs as WASM modules (workflow modules for state machines, pure components for pure functions). Any interaction with the outside world is an explicit effect, executed by adapters and recorded as a signed receipt. Risky changes are rehearsed in a shadow run before apply.
+AgentOS treats each running system as a world: a single‑threaded, replayable event log with periodic snapshots. All changes—code, schemas, effects, secrets, routing, and workflow modules—are expressed in AIR, a small, typed IR the kernel can validate and execute deterministically. Application logic runs as WASM modules (workflow modules for state machines, pure components for pure functions). Any interaction with the outside world is an explicit effect, executed by adapters and recorded as a signed receipt. Risky changes are rehearsed in a shadow run before apply.
 
 In short: `propose → shadow → approve → apply → execute → receipt → audit`.
 
@@ -47,19 +47,19 @@ AgentOS is designed around six core principles that enable safe, governed self�
 
 1. **Determinism by default.** Any computation within a world produces the same results when replayed from its log. Time and I/O only enter at the effect layer, where they are captured as receipts. This makes debugging, auditing, and reasoning about behavior tractable.
 
-2. **Homoiconic in spirit.** Everything that defines the world, such as code, schemas, policies, UI, capabilities, is represented as structured data the system can inspect and modify. AIR is a canonical, typed representation for modules, schemas, effects, policies, and capabilities that agents can read and edit programmatically.
+2. **Homoiconic in spirit.** Everything that defines the world, such as code, schemas, effects, routing, secrets, and UI, is represented as structured data the system can inspect and modify. AIR is a canonical, typed representation for modules, schemas, effects, secrets, and manifests that agents can read and edit programmatically.
 
-3. **Capability security.** No ambient authority. All effects are scoped by explicit capability tokens and policy‑gated. Least‑privilege is enforced mechanically, not by convention.
+3. **Explicit effects.** Workflow modules cannot perform I/O directly. They can only request declared effect kinds, and the kernel records open work before adapters execute it.
 
 4. **Receipts everywhere.** Every external effect yields a signed receipt. Audits can reconstruct complete cause→effect chains from log to receipt to state change. Incident forensics become deterministic replay rather than guesswork.
 
 5. **Portability and composability.** Worlds are self‑contained, content‑addressed bundles that can be moved, forked, or replayed anywhere. Modules interact through typed events with clear state boundaries, making composition predictable.
 
-6. **Minimal trusted base.** Keep the kernel small and auditable; push complexity to WASM modules and adapters with typed boundaries. The trusted core validates, routes, and enforces policy, nothing more.
+6. **Minimal trusted base.** Keep the kernel small and auditable; push complexity to WASM modules and adapters with typed boundaries. The trusted core validates schemas, routes events, admits declared effects, and records open work.
 
 ## What AgentOS Is (and Is Not)
 
-AgentOS **is** a deterministic, event‑sourced kernel with receipts and capabilities. It **is** a unified control plane (AIR) for modules, effects, policies, schemas, and capability grants. And it **is** a safe home for agents to propose, simulate, and apply their own upgrades under policy.
+AgentOS **is** a deterministic, event‑sourced kernel with receipts and explicit effects. It **is** a unified control plane (AIR) for modules, effects, schemas, secrets, and manifests. And it **is** a safe home for agents to propose, simulate, and apply their own upgrades through governance.
 
 AgentOS **is not** a general‑purpose programming language, compute lives in your language of choice compiled to WASM. It **is not** a blockchain or consensus layer, nor a replacement for your network stack. And it **is not** a traditional mutable database; state is derived from events, while effects and adapters handle heavy I/O and indexing.
 
@@ -73,20 +73,20 @@ AgentOS **is not** a general‑purpose programming language, compute lives in yo
 
   A world processes one event at a time, which makes reasoning about it straightforward. Horizontal scaling comes from running many worlds. Worlds can be forked, replayed, shadow‑run, rolled back, and exported as snapshots.
 
-- **AIR**: The typed, canonical "blueprint" for a world's control plane. It describes modules, effects, schemas, policies, and capabilities as structured data the kernel can inspect, validate, and simulate. Agents or humans modify AIR by proposing patches (diffs), which can be simulated and then applied, producing new log events and snapshots.
+- **AIR**: The typed, canonical "blueprint" for a world's control plane. It describes modules, effects, schemas, secrets, manifests, and routing as structured data the kernel can inspect, validate, and simulate. Agents or humans modify AIR by proposing patches (diffs), which can be simulated and then applied, producing new log events and snapshots.
 
-- **Modules**: WASM artifacts. **Workflow modules** are deterministic state machines with a canonical signature: they consume an event and current state, then return new state, domain events, and effect intents. They cannot access the outside world directly; the host system executes effects if allowed by policy and capability. Pure components perform side‑effect‑free computation.
+- **Modules**: WASM artifacts. **Workflow modules** are deterministic state machines with a canonical signature: they consume an event and current state, then return new state, domain events, and effect intents. They cannot access the outside world directly; the host system executes effects only after the kernel admits the declared effect kind and records open work. Pure components perform side‑effect‑free computation.
 
-- **Effects and adapters**: Explicit external actions—sending an email, calling an API, invoking an LLM, storing a blob. Each effect type is declared in the capability catalog and implemented by an external adapter. When an effect executes, the adapter produces a **receipt**—a signed record of what happened (parameters, response hash, timestamp, cost). Receipts are appended as events to the world log, preserving determinism on replay.
+- **Effects and adapters**: Explicit external actions—sending an email, calling an API, invoking an LLM, storing a blob. Each effect type is declared in the effect catalog and implemented by an external adapter. When an effect executes, the adapter produces a **receipt**—a signed record of what happened (parameters, response hash, timestamp, cost). Receipts are appended as events to the world log, preserving determinism on replay.
 
 - **Workspaces**: Named, versioned trees stored in workflow state for code and artifacts. Workflow modules and tooling use kernel-internal `workspace.*` effects to resolve, list, read, write, diff, and annotate trees deterministically; `aos push`/`aos pull` sync workspaces with the local filesystem.
 
-- **Policy and capabilities**: Declarative rules and scoped tokens that gate effects. Capabilities define what kinds of effects are allowed (HTTP to specific hosts, LLM with model/token constraints, blob storage). Policies evaluate allow/deny decisions based on effect kind, capability, and origin (`workflow` vs `system` vs `governance`). Budget enforcement is deferred to a future milestone.
+- **Effect admission**: The public AIR surface has no caps or policy language. Runtime checks enforce structural constraints: workflow modules may emit only declared effect kinds, the effect catalog must allow the emitter, and external work is recorded durably before dispatch. Stronger hosted policy can be layered outside public AIR.
 
-- **Agents**: Interact with the world through the same protocol as humans: they read the current AIR and state, generate new code (workflow modules, pure modules, or policies), compile to WASM, draft a patch describing the changes and new module hashes, and submit the patch as a proposal. Agents can live outside the world (simpler) or inside it as privileged modules that can propose but not unilaterally apply changes.
+- **Agents**: Interact with the world through the same protocol as humans: they read the current AIR and state, generate new code (workflow modules or pure modules), compile to WASM, draft a patch describing the changes and new module hashes, and submit the patch as a proposal. Agents can live outside the world (simpler) or inside it as privileged modules that can propose but not unilaterally apply changes.
 
 ## First Version Scope
 
-The first version ships with a single‑threaded world with an append‑only journal and snapshots. AIR v1 defines core forms including **defschema**, **defmodule**, **defeffect**, **defcap**, and **defpolicy**, along with canonical encoding and typed patches. Deterministic WASM execution powers workflow modules and **pure modules** (`module_kind: "pure"`). Built-in adapters cover HTTP, blob/FS, timer, LLM, and kernel-resident introspection (`introspect.*`) guarded by the `query` capability. The kernel also ships a workspace registry (`sys/Workspace@1`) with deterministic tree effects (`workspace.*`) that power `aos ws` and `aos push`/`aos pull` syncing via `aos.sync.json`. Each comes with capabilities and signed receipts. Version 1.1 adds first-class Cells (keyed workflows) with per-key state and mailboxes. The constitutional loop and shadow runs protect the apply step, and a provenance "why graph" connects effects to state.
+The first version ships with a single‑threaded world with an append‑only journal and snapshots. AIR v1 defines core public forms including **defschema**, **defmodule**, **defeffect**, **defsecret**, and **manifest**, along with canonical encoding and typed patches. Deterministic WASM execution powers workflow modules and **pure modules** (`module_kind: "pure"`). Built-in adapters cover HTTP, blob/FS, timer, LLM, and kernel-resident introspection (`introspect.*`). The kernel also ships a workspace registry (`sys/Workspace@1`) with deterministic tree effects (`workspace.*`) that power `aos ws` and `aos push`/`aos pull` syncing via `aos.sync.json`. Version 1.1 adds first-class Cells (keyed workflows) with per-key state and mailboxes. The constitutional loop and shadow runs protect the apply step, and a provenance "why graph" connects effects to state.
 
 Migrations, multi‑world fabric, and complex policy engines are deferred to later versions. The architecture leaves clean hooks for them.

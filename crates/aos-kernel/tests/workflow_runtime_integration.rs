@@ -95,7 +95,6 @@ fn workflow_effects_share_outbox_without_interference() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
-        cap_slots: Default::default(),
     });
 
     let mut http_module = fixtures::stub_workflow_module(
@@ -124,7 +123,6 @@ fn workflow_effects_share_outbox_without_interference() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = build_loaded_manifest_with_http_enforcer(
@@ -143,13 +141,6 @@ fn workflow_effects_share_outbox_without_interference() {
             def_text_record_schema("com.acme/HttpState@1", vec![]),
         ],
     );
-    if let Some(binding) = loaded
-        .manifest
-        .module_bindings
-        .get_mut("com.acme/HttpEmitter@1")
-    {
-        binding.slots.insert("http".into(), "cap_http".into());
-    }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
@@ -285,7 +276,6 @@ fn blob_put_receipt_routes_event_to_handler() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::BLOB_PUT.into()],
-        cap_slots: Default::default(),
     });
     handler.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
@@ -293,7 +283,6 @@ fn blob_put_receipt_routes_event_to_handler() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = build_loaded_manifest_with_http_enforcer(
@@ -329,13 +318,6 @@ fn blob_put_receipt_routes_event_to_handler() {
             },
         ],
     );
-    if let Some(binding) = loaded
-        .manifest
-        .module_bindings
-        .get_mut("com.acme/BlobPutEmitter@1")
-    {
-        binding.slots.insert("blob".into(), "blob_cap".into());
-    }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     let start_event = serde_json::json!({
@@ -414,7 +396,6 @@ fn blob_get_receipt_routes_event_to_handler() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::BLOB_GET.into()],
-        cap_slots: Default::default(),
     });
     handler.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
@@ -422,7 +403,6 @@ fn blob_get_receipt_routes_event_to_handler() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = build_loaded_manifest_with_http_enforcer(
@@ -458,13 +438,6 @@ fn blob_get_receipt_routes_event_to_handler() {
             },
         ],
     );
-    if let Some(binding) = loaded
-        .manifest
-        .module_bindings
-        .get_mut("com.acme/BlobGetEmitter@1")
-    {
-        binding.slots.insert("blob".into(), "blob_cap".into());
-    }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     let start_event = serde_json::json!({
@@ -551,7 +524,6 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
-        cap_slots: Default::default(),
     });
 
     let mut pulse = fixtures::stub_workflow_module(
@@ -580,7 +552,6 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = build_loaded_manifest_with_http_enforcer(
@@ -637,16 +608,6 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
             },
         ],
     );
-    for module in ["com.acme/StagedWorkflow@1", "com.acme/PulseWorkflow@1"] {
-        loaded
-            .manifest
-            .module_bindings
-            .get_mut(module)
-            .expect("module binding")
-            .slots
-            .insert("http".into(), "cap_http".into());
-    }
-
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     let start_event = serde_json::json!({
         "$tag": "Start",
@@ -736,7 +697,6 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
-        cap_slots: Default::default(),
     });
 
     let mut other = fixtures::stub_workflow_module(
@@ -765,7 +725,6 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
-        cap_slots: Default::default(),
     });
 
     let mut loaded = build_loaded_manifest_with_http_enforcer(
@@ -805,16 +764,6 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
             },
         ],
     );
-    for module in ["com.acme/ReadyWorkflow@1", "com.acme/OtherWorkflow@1"] {
-        loaded
-            .manifest
-            .module_bindings
-            .get_mut(module)
-            .expect("module binding")
-            .slots
-            .insert("http".into(), "cap_http".into());
-    }
-
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
         .submit_event_result("com.acme/Ready@1", &serde_json::json!({}))
@@ -878,7 +827,6 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
-        cap_slots: Default::default(),
     });
 
     let mut keyed_route =
@@ -922,14 +870,6 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
             },
         ],
     );
-    loaded
-        .manifest
-        .module_bindings
-        .get_mut("com.acme/KeyedWorkflow@1")
-        .expect("module binding")
-        .slots
-        .insert("http".into(), "cap_http".into());
-
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     for id in ["a", "b"] {
         let event = serde_json::json!({
@@ -1023,35 +963,11 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
     );
 }
 
-fn allow_http_enforcer(store: &Arc<TestStore>) -> DefModule {
-    let allow_output = aos_kernel::cap_enforcer::CapCheckOutput {
-        constraints_ok: true,
-        deny: None,
-    };
-    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
-    let pure_output = aos_wasm_abi::PureOutput {
-        output: output_bytes,
-    };
-    fixtures::stub_pure_module(
-        store,
-        "sys/CapEnforceHttpOut@1",
-        &pure_output,
-        "sys/CapCheckInput@1",
-        "sys/CapCheckOutput@1",
-    )
-}
-
 fn build_loaded_manifest_with_http_enforcer(
-    store: &Arc<TestStore>,
-    mut modules: Vec<DefModule>,
+    _store: &Arc<TestStore>,
+    modules: Vec<DefModule>,
     routing: Vec<aos_air_types::RoutingEvent>,
 ) -> aos_kernel::manifest::LoadedManifest {
-    if !modules
-        .iter()
-        .any(|module| module.name == "sys/CapEnforceHttpOut@1")
-    {
-        modules.push(allow_http_enforcer(store));
-    }
     fixtures::build_loaded_manifest(modules, routing)
 }
 
@@ -1090,7 +1006,6 @@ fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
-        cap_slots: Default::default(),
     });
 
     let mut result_module = fixtures::stub_workflow_module(
@@ -1109,7 +1024,6 @@ fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: IndexMap::new(),
     });
 
     let mut loaded = build_loaded_manifest_with_http_enforcer(
@@ -1158,13 +1072,6 @@ fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
             },
         ],
     );
-    if let Some(binding) = loaded
-        .manifest
-        .module_bindings
-        .get_mut("com.acme/Workflow@1")
-    {
-        binding.slots.insert("http".into(), "cap_http".into());
-    }
     loaded
 }
 
@@ -1200,7 +1107,6 @@ fn timer_receipt_workflow_manifest(store: &Arc<TestStore>) -> aos_kernel::manife
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
-        cap_slots: Default::default(),
     });
     let mut loaded = fixtures::build_loaded_manifest(
         vec![workflow],

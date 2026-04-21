@@ -323,7 +323,6 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         for pending in self.kernel.pending_workflow_receipts_snapshot() {
             let intent = EffectIntent {
                 kind: pending.effect_kind.clone().into(),
-                cap_name: pending.cap_name.clone(),
                 params_cbor: pending.params_cbor.clone(),
                 idempotency_key: pending.idempotency_key,
                 intent_hash: pending.intent_hash,

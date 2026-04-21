@@ -30,9 +30,6 @@
   "modules": [
     {
       "name": "demo/Aggregator@1"
-    },
-    {
-      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
   "effects": [
@@ -40,43 +37,6 @@
       "name": "sys/http.request@1"
     }
   ],
-  "caps": [
-    {
-      "name": "demo/http_aggregate_cap@1"
-    }
-  ],
-  "policies": [
-    {
-      "name": "demo/http-aggregate-policy@1"
-    }
-  ],
-  "defaults": {
-    "policy": "demo/http-aggregate-policy@1",
-    "cap_grants": [
-      {
-        "name": "cap_http_aggregate",
-        "cap": "demo/http_aggregate_cap@1",
-        "params": {
-          "record": {
-            "hosts": {
-              "set": [
-                {
-                  "text": "example.com"
-                }
-              ]
-            },
-            "methods": {
-              "set": [
-                {
-                  "text": "GET"
-                }
-              ]
-            }
-          }
-        }
-      }
-    ]
-  },
   "routing": {
     "subscriptions": [
       {

@@ -11,14 +11,11 @@ pub struct ShadowSummary {
     pub workflow_instances: Vec<WorkflowInstancePreview>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub module_effect_allowlists: Vec<ModuleEffectAllowlist>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ledger_deltas: Vec<LedgerDelta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PredictedEffect {
     pub kind: String,
-    pub cap: String,
     pub intent_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_json: Option<serde_json::Value>,
@@ -50,26 +47,4 @@ pub struct ModuleEffectAllowlist {
     pub module: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects_emitted: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LedgerDelta {
-    pub ledger: LedgerKind,
-    pub name: String,
-    pub change: DeltaKind,
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LedgerKind {
-    Capability,
-    Policy,
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DeltaKind {
-    Added,
-    Removed,
-    Changed,
 }

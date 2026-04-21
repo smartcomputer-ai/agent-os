@@ -29,7 +29,6 @@ fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
-        cap_slots: Default::default(),
     });
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
@@ -63,7 +62,6 @@ fn introspect_manifest_matches_kernel_manifest() {
     let kernel = &mut world.kernel;
     let intent = IntentBuilder::new(
         EffectKind::introspect_manifest(),
-        "sys/query@1",
         &json!({ "consistency": "head" }),
     )
     .build()
@@ -108,7 +106,6 @@ fn introspect_workflow_state_returns_value_and_meta() {
     let kernel = &mut world.kernel;
     let intent = IntentBuilder::new(
         EffectKind::introspect_workflow_state(),
-        "sys/query@1",
         &json!({
             "workflow": "com.acme/Store@1",
             "consistency": "head"
@@ -144,7 +141,6 @@ fn introspect_list_cells_returns_sentinel_for_non_keyed() {
 
     let intent = IntentBuilder::new(
         EffectKind::introspect_list_cells(),
-        "sys/query@1",
         &json!({ "workflow": "com.acme/Store@1" }),
     )
     .build()
@@ -198,13 +194,9 @@ fn introspect_journal_head_matches_state_reader() {
     world.tick_n(1).unwrap();
 
     let kernel = &mut world.kernel;
-    let intent = IntentBuilder::new(
-        EffectKind::introspect_journal_head(),
-        "sys/query@1",
-        &json!({}),
-    )
-    .build()
-    .unwrap();
+    let intent = IntentBuilder::new(EffectKind::introspect_journal_head(), &json!({}))
+        .build()
+        .unwrap();
 
     let receipt = kernel
         .handle_internal_intent(&intent)

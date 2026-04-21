@@ -1,6 +1,6 @@
 # Remove Caps And Policies From v0.22
 
-Status: roadmap note / implementation outline
+Status: done for cap/policy removal. Python effect runner work remains as a separate follow-on.
 
 ## Context
 
@@ -69,21 +69,20 @@ These still matter without caps or policies:
 - workflow `effects_emitted` / future effect-op allowlist
 - effect params schema
 - effect receipt schema
-- effect `origin_scope`
-- effect `execution_class`
 
-## Keep Internally For Now
+## Internal Compatibility
 
-Keep these as permissive internals so existing code does not need to be gutted in the same patch as the public simplification:
+The v0.22 experiment removed the legacy capability field from effect intent identity:
 
-- `LoadedManifest` indexes may keep empty caps/policies maps internally.
-- Kernel authorization function stays, but returns allow by default.
-- Cap enforcer machinery can remain unreachable/dead-ended temporarily.
-- Policy evaluator can remain behind an empty/default policy shim.
-- Receipt, open-work, and idempotency logic remain unchanged.
+- The legacy capability field is gone from `EffectIntent`; intent identity is now kind + canonical params + idempotency key.
+- Receipt and open-work routing still use intent hashes.
 - Effect param and receipt schema validation remains strict.
 
+The old kernel capability resolver, cap enforcer, policy evaluator, cap/policy AIR nodes, cap/policy manifest indexes, cap/policy journal decision records, and secret cap policies have been removed.
+
 ## Phase 1: Schema And AIR Surface
+
+Status: done. The public `defcap`/`defpolicy` schema files and built-in cap defs are removed.
 
 Work:
 
@@ -101,6 +100,8 @@ Done when:
 
 ## Phase 2: Rust Model And Loader
 
+Status: done. `Manifest`, `AirNode`, validation, built-ins, authoring bundle/import, and loaded manifest state no longer carry caps or policies.
+
 Work:
 
 - Make `Manifest` omit caps, policies, `defaults.policy`, `defaults.cap_grants`, and `module_bindings`.
@@ -115,11 +116,12 @@ Done when:
 
 ## Phase 3: Kernel Runtime Shim
 
+Status: done. Effect enqueue is permissive after structural checks; workflow `effects_emitted`, effect schema normalization, open-work, receipts, and replay paths remain.
+
 Work:
 
 - Replace cap+policy admission with a single permissive `authorize_effect` hook.
 - Keep workflow `effects_emitted` enforcement.
-- Keep `origin_scope` enforcement.
 - Keep effect params canonicalization before intent hashing.
 - Remove cap name from new effect intent construction, or set an internal sentinel while legacy code remains.
 - Keep receipts bound to `intent_hash` and recorded origin identity.
@@ -131,6 +133,8 @@ Done when:
 - Replay snapshots remain byte-identical.
 
 ## Phase 4: Authoring, CLI, Examples
+
+Status: done for checked-in authored AIR fixtures and public authoring output. Cap/policy fixture files were removed, and patch docs no longer expose defaults or module bindings.
 
 Work:
 
@@ -146,9 +150,11 @@ Done when:
 
 ## Phase 5: Python Effects On Simplified Model
 
+Status: follow-on.
+
 Work:
 
-- Python `@effect` declares name, kind, params, receipt, `origin_scope`, `execution_class`, and implementation.
+- Python `@effect` declares name, kind, params, receipt, and implementation.
 - Python effect runner receives canonical params, intent identity, op identity, secret context, and tracing context.
 - Secrets are granted by coarse runner/world config, not by AIR caps.
 - Receipt payload validation remains schema-authoritative.
@@ -212,7 +218,9 @@ The future model should be driven by concrete hosted/runtime needs: tenancy, sec
 
 4. Should `origin_scope` remain?
 
-   Recommendation: yes. It is not a policy system; it is a simple structural rule preventing workflow/system/governance origin confusion.
+   Decision: no for AIR v2. Workflows are the only public effect emitters, and
+   `workflow.effects_emitted[]` is the structural gate. System/governance/internal paths should not
+   be modeled as public AIR origins in v0.22.
 
 ## Implementation Order
 

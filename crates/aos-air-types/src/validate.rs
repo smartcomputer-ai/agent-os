@@ -3,8 +3,7 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::{
-    DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, ModuleKind, RoutingEvent,
-    SecretEntry, TypeExpr, builtins,
+    DefEffect, DefModule, DefSchema, Manifest, ModuleKind, RoutingEvent, TypeExpr, builtins,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -49,21 +48,6 @@ pub enum ValidationError {
     EffectBindingDuplicateKind { kind: String },
     #[error("effect binding kind '{kind}' is internal and cannot be bound")]
     EffectBindingInternalKind { kind: String },
-    #[error("capability grant '{cap}' not found")]
-    CapabilityNotFound { cap: String },
-    #[error("capability grant '{cap}' is duplicated")]
-    DuplicateCapabilityGrant { cap: String },
-    #[error("capability definition '{cap}' not found")]
-    CapabilityDefinitionNotFound { cap: String },
-    #[error(
-        "capability '{cap}' type '{found}' does not match effect '{effect}' required type '{expected}'"
-    )]
-    CapabilityTypeMismatch {
-        cap: String,
-        effect: String,
-        expected: String,
-        found: String,
-    },
     #[error("workflow module '{module}' must define workflow ABI")]
     WorkflowAbiMissingWorkflow { module: String },
     #[error("pure module '{module}' must define pure ABI")]
@@ -77,8 +61,6 @@ pub fn validate_manifest(
     modules: &HashMap<String, DefModule>,
     schemas: &HashMap<String, DefSchema>,
     effects: &HashMap<String, DefEffect>,
-    caps: &HashMap<String, DefCap>,
-    policies: &HashMap<String, DefPolicy>,
 ) -> Result<(), ValidationError> {
     let schema_exists =
         |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
@@ -100,62 +82,6 @@ pub fn validate_manifest(
         .values()
         .map(|def| def.kind.as_str().to_string())
         .collect();
-
-    let mut defcap_types: HashMap<String, String> = HashMap::new();
-    for builtin in builtins::builtin_caps() {
-        defcap_types.insert(
-            builtin.cap.name.clone(),
-            builtin.cap.cap_type.as_str().to_string(),
-        );
-    }
-    for cap in caps.values() {
-        defcap_types.insert(cap.name.clone(), cap.cap_type.as_str().to_string());
-    }
-
-    let defcap_listed = |name: &str| {
-        manifest.caps.iter().any(|cap| cap.name.as_str() == name)
-            || builtins::find_builtin_cap(name).is_some()
-    };
-
-    let mut grant_map: HashMap<String, String> = HashMap::new();
-    if let Some(defaults) = manifest.defaults.as_ref() {
-        for grant in &defaults.cap_grants {
-            if grant_map
-                .insert(grant.name.clone(), grant.cap.clone())
-                .is_some()
-            {
-                return Err(ValidationError::DuplicateCapabilityGrant {
-                    cap: grant.name.clone(),
-                });
-            }
-            if !defcap_listed(grant.cap.as_str()) || !defcap_types.contains_key(grant.cap.as_str())
-            {
-                return Err(ValidationError::CapabilityDefinitionNotFound {
-                    cap: grant.cap.clone(),
-                });
-            }
-        }
-    }
-
-    let grant_exists = |name: &str| grant_map.contains_key(name);
-    let cap_type_for_grant = |grant_name: &str| -> Result<String, ValidationError> {
-        let cap_name =
-            grant_map
-                .get(grant_name)
-                .ok_or_else(|| ValidationError::CapabilityNotFound {
-                    cap: grant_name.to_string(),
-                })?;
-        if !defcap_listed(cap_name.as_str()) {
-            return Err(ValidationError::CapabilityDefinitionNotFound {
-                cap: cap_name.clone(),
-            });
-        }
-        defcap_types.get(cap_name.as_str()).cloned().ok_or_else(|| {
-            ValidationError::CapabilityDefinitionNotFound {
-                cap: cap_name.clone(),
-            }
-        })
-    };
 
     if let Some(routing) = manifest.routing.as_ref() {
         for RoutingEvent {
@@ -364,66 +290,6 @@ pub fn validate_manifest(
         }
     }
 
-    for policy in policies.values() {
-        for rule in &policy.rules {
-            if let Some(kind) = rule.when.effect_kind.as_ref()
-                && !known_effect_kinds.contains(kind.as_str())
-            {
-                return Err(ValidationError::EffectNotFound {
-                    kind: kind.as_str().to_string(),
-                });
-            }
-            if let Some(cap) = rule.when.cap_name.as_ref()
-                && !grant_exists(cap.as_str())
-            {
-                return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
-            }
-        }
-    }
-
-    for binding in manifest.module_bindings.values() {
-        for cap in binding.slots.values() {
-            if !grant_exists(cap.as_str()) {
-                return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
-            }
-        }
-    }
-
-    for secret in &manifest.secrets {
-        let SecretEntry::Decl(secret) = secret else {
-            continue;
-        };
-        if let Some(policy) = secret.policy.as_ref() {
-            for cap in &policy.allowed_caps {
-                if !grant_exists(cap.as_str()) {
-                    return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
-                }
-            }
-        }
-    }
-
-    for module in modules.values() {
-        if let Some(abi) = module.abi.workflow.as_ref() {
-            let Some(binding) = manifest.module_bindings.get(&module.name) else {
-                continue;
-            };
-            for (slot, expected) in &abi.cap_slots {
-                let Some(grant_name) = binding.slots.get(slot) else {
-                    continue;
-                };
-                let found = cap_type_for_grant(grant_name.as_str())?;
-                if found != expected.as_str() {
-                    return Err(ValidationError::CapabilityTypeMismatch {
-                        cap: grant_name.clone(),
-                        effect: format!("slot:{slot}"),
-                        expected: expected.as_str().to_string(),
-                        found,
-                    });
-                }
-            }
-        }
-    }
-
     Ok(())
 }
 
@@ -600,8 +466,8 @@ fn key_type_matches(
 mod tests {
     use super::*;
     use crate::{
-        CapGrant, DefModule, EffectBinding, ManifestDefaults, ModuleAbi, ModuleBinding, NamedRef,
-        Routing, SchemaRef, TypePrimitive, TypePrimitiveText, TypeRecord, WorkflowAbi,
+        DefModule, EffectBinding, ModuleAbi, NamedRef, Routing, SchemaRef, TypePrimitive,
+        TypePrimitiveText, TypeRecord, WorkflowAbi,
     };
     use indexmap::IndexMap;
 
@@ -631,21 +497,7 @@ mod tests {
             modules: vec![named_ref("com.acme/workflow@1")],
             effects: Vec::new(),
             effect_bindings: Vec::new(),
-            caps: vec![named_ref("com.acme/http@1")],
-            policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: Some(ManifestDefaults {
-                policy: None,
-                cap_grants: vec![CapGrant {
-                    name: "http_cap".into(),
-                    cap: "com.acme/http@1".into(),
-                    params: crate::ValueLiteral::Record(crate::ValueRecord {
-                        record: IndexMap::new(),
-                    }),
-                    expiry_ns: None,
-                }],
-            }),
-            module_bindings: IndexMap::new(),
             routing: None,
         }
     }
@@ -663,7 +515,6 @@ mod tests {
                     context: None,
                     annotations: None,
                     effects_emitted: Vec::new(),
-                    cap_slots: IndexMap::new(),
                 }),
                 pure: None,
             },
@@ -690,29 +541,12 @@ mod tests {
                 },
             ),
         ]);
-        let effects = HashMap::new();
-        let caps = HashMap::from([(
-            String::from("com.acme/http@1"),
-            DefCap {
-                name: "com.acme/http@1".into(),
-                cap_type: crate::CapType::http_out(),
-                schema: text_type(),
-                enforcer: crate::CapEnforcer {
-                    module: "sys/CapAllowAll@1".into(),
-                },
-            },
-        )]);
-        let policies = HashMap::new();
-
-        assert!(
-            validate_manifest(&manifest, &modules, &schemas, &effects, &caps, &policies).is_ok()
-        );
+        assert!(validate_manifest(&manifest, &modules, &schemas, &HashMap::new()).is_ok());
     }
 
     #[test]
     fn validate_manifest_rejects_unknown_routing_module() {
         let mut manifest = base_manifest();
-        manifest.defaults = None;
         manifest.routing = Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -740,15 +574,7 @@ mod tests {
             ),
         ]);
 
-        let err = validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
+        let err = validate_manifest(&manifest, &modules, &schemas, &HashMap::new()).unwrap_err();
         assert!(matches!(
             err,
             ValidationError::RoutingUnknownModule { module } if module == "com.acme/missing@1"
@@ -756,53 +582,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_manifest_rejects_missing_binding_grant() {
-        let mut manifest = base_manifest();
-        manifest.defaults = None;
-        manifest.module_bindings.insert(
-            "com.acme/workflow@1".into(),
-            ModuleBinding {
-                slots: IndexMap::from([(String::from("http"), String::from("missing_grant"))]),
-            },
-        );
-
-        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
-        let schemas = HashMap::from([
-            (
-                String::from("com.acme/Event@1"),
-                DefSchema {
-                    name: "com.acme/Event@1".into(),
-                    ty: record_type(),
-                },
-            ),
-            (
-                String::from("com.acme/State@1"),
-                DefSchema {
-                    name: "com.acme/State@1".into(),
-                    ty: text_type(),
-                },
-            ),
-        ]);
-
-        let err = validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::CapabilityNotFound { cap } if cap == "missing_grant"
-        ));
-    }
-
-    #[test]
     fn validate_manifest_rejects_effect_binding_kind_not_declared() {
         let mut manifest = base_manifest();
-        manifest.defaults = None;
         manifest.effect_bindings.push(EffectBinding {
             kind: crate::EffectKind::new("http.request"),
             adapter_id: "http.default".into(),
@@ -826,15 +607,7 @@ mod tests {
             ),
         ]);
 
-        let err = validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
+        let err = validate_manifest(&manifest, &modules, &schemas, &HashMap::new()).unwrap_err();
         assert!(matches!(
             err,
             ValidationError::EffectBindingKindNotDeclared { kind } if kind == "http.request"
@@ -844,7 +617,6 @@ mod tests {
     #[test]
     fn validate_manifest_rejects_duplicate_effect_binding_kind() {
         let mut manifest = base_manifest();
-        manifest.defaults = None;
         manifest.effect_bindings = vec![
             EffectBinding {
                 kind: crate::EffectKind::new("http.request"),
@@ -892,22 +664,13 @@ mod tests {
             DefEffect {
                 name: "com.acme/http.request@1".into(),
                 kind: crate::EffectKind::new("http.request"),
-                cap_type: crate::CapType::http_out(),
                 params_schema: SchemaRef::new("com.acme/HttpParams@1").unwrap(),
                 receipt_schema: SchemaRef::new("com.acme/HttpReceipt@1").unwrap(),
                 origin_scope: crate::OriginScope::Both,
             },
         )]);
 
-        let err = validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &effects,
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
+        let err = validate_manifest(&manifest, &modules, &schemas, &effects).unwrap_err();
         assert!(matches!(
             err,
             ValidationError::EffectBindingDuplicateKind { kind } if kind == "http.request"
@@ -917,7 +680,6 @@ mod tests {
     #[test]
     fn validate_manifest_rejects_internal_effect_binding_kind() {
         let mut manifest = base_manifest();
-        manifest.defaults = None;
         manifest.effect_bindings.push(EffectBinding {
             kind: crate::EffectKind::new("workspace.read_bytes"),
             adapter_id: "workspace.default".into(),
@@ -959,22 +721,13 @@ mod tests {
             DefEffect {
                 name: "com.acme/workspace.read_bytes@1".into(),
                 kind: crate::EffectKind::new("workspace.read_bytes"),
-                cap_type: crate::CapType::workspace(),
                 params_schema: SchemaRef::new("com.acme/WorkspaceParams@1").unwrap(),
                 receipt_schema: SchemaRef::new("com.acme/WorkspaceReceipt@1").unwrap(),
                 origin_scope: crate::OriginScope::Both,
             },
         )]);
 
-        let err = validate_manifest(
-            &manifest,
-            &modules,
-            &schemas,
-            &effects,
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
+        let err = validate_manifest(&manifest, &modules, &schemas, &effects).unwrap_err();
         assert!(matches!(
             err,
             ValidationError::EffectBindingInternalKind { kind } if kind == "workspace.read_bytes"

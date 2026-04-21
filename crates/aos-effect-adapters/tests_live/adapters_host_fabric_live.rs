@@ -413,7 +413,6 @@ where
 fn intent_for<P: Serialize>(kind: &str, params: &P, seed: u8) -> EffectIntent {
     EffectIntent::from_raw_params(
         EffectKind::new(kind),
-        "cap_fabric_live",
         serde_cbor::to_vec(params).expect("encode params"),
         [seed; 32],
     )
