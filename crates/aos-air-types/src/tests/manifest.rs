@@ -12,8 +12,6 @@ fn manifest_json_round_trip() {
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [],
         "effects": [],
-        "caps": [],
-        "policies": [],
         "secrets": []
     });
     assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
@@ -28,7 +26,7 @@ fn named_ref_requires_hash() {
 }
 
 #[test]
-fn manifest_with_defaults_routing_and_subscriptions_validates() {
+fn manifest_with_routing_and_subscriptions_validates() {
     let manifest_json = json!({
         "$kind": "manifest",
         "air_version": "1",
@@ -39,25 +37,6 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
             "kind": "http.request",
             "adapter_id": "http.default"
         }],
-        "caps": [{"name": "com.acme/Cap@1", "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}],
-        "policies": [{"name": "com.acme/Policy@1", "hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}],
-        "defaults": {
-            "policy": "com.acme/Policy@1",
-            "cap_grants": [
-                {
-                    "name": "cap_http",
-                    "cap": "com.acme/http@1",
-                    "params": {"record": {}}
-                }
-            ]
-        },
-        "module_bindings": {
-            "com.acme/Workflow@1": {
-                "slots": {
-                    "http": "cap_http"
-                }
-            }
-        },
         "routing": {
             "subscriptions": [{
                 "event": "com.acme/Event@1",
@@ -72,15 +51,6 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
     });
     assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
     let manifest: Manifest = serde_json::from_value(manifest_json).expect("manifest");
-    assert!(
-        manifest
-            .defaults
-            .as_ref()
-            .expect("defaults")
-            .policy
-            .is_some()
-    );
-    assert_eq!(manifest.module_bindings.len(), 1);
     let routing = manifest.routing.expect("routing");
     assert_eq!(routing.subscriptions.len(), 1);
     assert_eq!(manifest.effect_bindings.len(), 1);
@@ -94,8 +64,6 @@ fn manifest_rejects_legacy_events_alias() {
         "schemas": [{"name": "com.acme/Event@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [],
         "effects": [],
-        "caps": [],
-        "policies": [],
         "routing": {
             "events": [{
                 "event": "com.acme/Event@1",
@@ -110,14 +78,19 @@ fn manifest_rejects_legacy_events_alias() {
 }
 
 #[test]
-fn module_binding_requires_slots_schema() {
+fn manifest_rejects_authority_fields() {
     let manifest_json = json!({
         "$kind": "manifest",
         "air_version": "1",
         "schemas": [],
         "modules": [],
+        "effects": [],
         "caps": [],
         "policies": [],
+        "defaults": {
+            "policy": "com.acme/Policy@1",
+            "cap_grants": []
+        },
         "module_bindings": {
             "com.acme/Workflow@1": {}
         }
@@ -128,7 +101,7 @@ fn module_binding_requires_slots_schema() {
             &manifest_json
         )))
         .is_err(),
-        "schema should require slots object inside module binding"
+        "schema should reject legacy cap/policy authority fields"
     );
 }
 
@@ -140,8 +113,6 @@ fn manifest_with_secrets_round_trip() {
         "schemas": [],
         "modules": [],
         "effects": [],
-        "caps": [],
-        "policies": [],
         "secrets": [{
             "name": "payments/stripe@1",
             "hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

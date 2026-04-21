@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, ModuleKind, RoutingEvent,
-    SecretEntry, TypeExpr, builtins,
+    TypeExpr, builtins,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -77,8 +77,8 @@ pub fn validate_manifest(
     modules: &HashMap<String, DefModule>,
     schemas: &HashMap<String, DefSchema>,
     effects: &HashMap<String, DefEffect>,
-    caps: &HashMap<String, DefCap>,
-    policies: &HashMap<String, DefPolicy>,
+    _caps: &HashMap<String, DefCap>,
+    _policies: &HashMap<String, DefPolicy>,
 ) -> Result<(), ValidationError> {
     let schema_exists =
         |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
@@ -100,62 +100,6 @@ pub fn validate_manifest(
         .values()
         .map(|def| def.kind.as_str().to_string())
         .collect();
-
-    let mut defcap_types: HashMap<String, String> = HashMap::new();
-    for builtin in builtins::builtin_caps() {
-        defcap_types.insert(
-            builtin.cap.name.clone(),
-            builtin.cap.cap_type.as_str().to_string(),
-        );
-    }
-    for cap in caps.values() {
-        defcap_types.insert(cap.name.clone(), cap.cap_type.as_str().to_string());
-    }
-
-    let defcap_listed = |name: &str| {
-        manifest.caps.iter().any(|cap| cap.name.as_str() == name)
-            || builtins::find_builtin_cap(name).is_some()
-    };
-
-    let mut grant_map: HashMap<String, String> = HashMap::new();
-    if let Some(defaults) = manifest.defaults.as_ref() {
-        for grant in &defaults.cap_grants {
-            if grant_map
-                .insert(grant.name.clone(), grant.cap.clone())
-                .is_some()
-            {
-                return Err(ValidationError::DuplicateCapabilityGrant {
-                    cap: grant.name.clone(),
-                });
-            }
-            if !defcap_listed(grant.cap.as_str()) || !defcap_types.contains_key(grant.cap.as_str())
-            {
-                return Err(ValidationError::CapabilityDefinitionNotFound {
-                    cap: grant.cap.clone(),
-                });
-            }
-        }
-    }
-
-    let grant_exists = |name: &str| grant_map.contains_key(name);
-    let cap_type_for_grant = |grant_name: &str| -> Result<String, ValidationError> {
-        let cap_name =
-            grant_map
-                .get(grant_name)
-                .ok_or_else(|| ValidationError::CapabilityNotFound {
-                    cap: grant_name.to_string(),
-                })?;
-        if !defcap_listed(cap_name.as_str()) {
-            return Err(ValidationError::CapabilityDefinitionNotFound {
-                cap: cap_name.clone(),
-            });
-        }
-        defcap_types.get(cap_name.as_str()).cloned().ok_or_else(|| {
-            ValidationError::CapabilityDefinitionNotFound {
-                cap: cap_name.clone(),
-            }
-        })
-    };
 
     if let Some(routing) = manifest.routing.as_ref() {
         for RoutingEvent {
@@ -364,66 +308,6 @@ pub fn validate_manifest(
         }
     }
 
-    for policy in policies.values() {
-        for rule in &policy.rules {
-            if let Some(kind) = rule.when.effect_kind.as_ref()
-                && !known_effect_kinds.contains(kind.as_str())
-            {
-                return Err(ValidationError::EffectNotFound {
-                    kind: kind.as_str().to_string(),
-                });
-            }
-            if let Some(cap) = rule.when.cap_name.as_ref()
-                && !grant_exists(cap.as_str())
-            {
-                return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
-            }
-        }
-    }
-
-    for binding in manifest.module_bindings.values() {
-        for cap in binding.slots.values() {
-            if !grant_exists(cap.as_str()) {
-                return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
-            }
-        }
-    }
-
-    for secret in &manifest.secrets {
-        let SecretEntry::Decl(secret) = secret else {
-            continue;
-        };
-        if let Some(policy) = secret.policy.as_ref() {
-            for cap in &policy.allowed_caps {
-                if !grant_exists(cap.as_str()) {
-                    return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
-                }
-            }
-        }
-    }
-
-    for module in modules.values() {
-        if let Some(abi) = module.abi.workflow.as_ref() {
-            let Some(binding) = manifest.module_bindings.get(&module.name) else {
-                continue;
-            };
-            for (slot, expected) in &abi.cap_slots {
-                let Some(grant_name) = binding.slots.get(slot) else {
-                    continue;
-                };
-                let found = cap_type_for_grant(grant_name.as_str())?;
-                if found != expected.as_str() {
-                    return Err(ValidationError::CapabilityTypeMismatch {
-                        cap: grant_name.clone(),
-                        effect: format!("slot:{slot}"),
-                        expected: expected.as_str().to_string(),
-                        found,
-                    });
-                }
-            }
-        }
-    }
-
     Ok(())
 }
 
@@ -600,8 +484,8 @@ fn key_type_matches(
 mod tests {
     use super::*;
     use crate::{
-        CapGrant, DefModule, EffectBinding, ManifestDefaults, ModuleAbi, ModuleBinding, NamedRef,
-        Routing, SchemaRef, TypePrimitive, TypePrimitiveText, TypeRecord, WorkflowAbi,
+        DefModule, EffectBinding, ModuleAbi, NamedRef, Routing, SchemaRef, TypePrimitive,
+        TypePrimitiveText, TypeRecord, WorkflowAbi,
     };
     use indexmap::IndexMap;
 
@@ -631,20 +515,10 @@ mod tests {
             modules: vec![named_ref("com.acme/workflow@1")],
             effects: Vec::new(),
             effect_bindings: Vec::new(),
-            caps: vec![named_ref("com.acme/http@1")],
+            caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),
-            defaults: Some(ManifestDefaults {
-                policy: None,
-                cap_grants: vec![CapGrant {
-                    name: "http_cap".into(),
-                    cap: "com.acme/http@1".into(),
-                    params: crate::ValueLiteral::Record(crate::ValueRecord {
-                        record: IndexMap::new(),
-                    }),
-                    expiry_ns: None,
-                }],
-            }),
+            defaults: None,
             module_bindings: IndexMap::new(),
             routing: None,
         }
@@ -690,22 +564,16 @@ mod tests {
                 },
             ),
         ]);
-        let effects = HashMap::new();
-        let caps = HashMap::from([(
-            String::from("com.acme/http@1"),
-            DefCap {
-                name: "com.acme/http@1".into(),
-                cap_type: crate::CapType::http_out(),
-                schema: text_type(),
-                enforcer: crate::CapEnforcer {
-                    module: "sys/CapAllowAll@1".into(),
-                },
-            },
-        )]);
-        let policies = HashMap::new();
-
         assert!(
-            validate_manifest(&manifest, &modules, &schemas, &effects, &caps, &policies).is_ok()
+            validate_manifest(
+                &manifest,
+                &modules,
+                &schemas,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .is_ok()
         );
     }
 
@@ -756,12 +624,11 @@ mod tests {
     }
 
     #[test]
-    fn validate_manifest_rejects_missing_binding_grant() {
+    fn validate_manifest_ignores_legacy_module_bindings() {
         let mut manifest = base_manifest();
-        manifest.defaults = None;
         manifest.module_bindings.insert(
             "com.acme/workflow@1".into(),
-            ModuleBinding {
+            crate::ModuleBinding {
                 slots: IndexMap::from([(String::from("http"), String::from("missing_grant"))]),
             },
         );
@@ -784,7 +651,7 @@ mod tests {
             ),
         ]);
 
-        let err = validate_manifest(
+        validate_manifest(
             &manifest,
             &modules,
             &schemas,
@@ -792,11 +659,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
         )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::CapabilityNotFound { cap } if cap == "missing_grant"
-        ));
+        .expect("legacy module bindings are ignored by simplified AIR validation");
     }
 
     #[test]

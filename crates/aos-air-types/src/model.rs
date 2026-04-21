@@ -516,8 +516,20 @@ pub struct DefEffect {
     pub kind: EffectKind,
     pub params_schema: SchemaRef,
     pub receipt_schema: SchemaRef,
+    #[serde(
+        default = "legacy_effect_cap_type",
+        skip_serializing_if = "is_legacy_effect_cap_type"
+    )]
     pub cap_type: CapType,
     pub origin_scope: OriginScope,
+}
+
+fn legacy_effect_cap_type() -> CapType {
+    CapType::new(CapType::INTERNAL_LEGACY)
+}
+
+fn is_legacy_effect_cap_type(cap_type: &CapType) -> bool {
+    cap_type.as_str() == CapType::INTERNAL_LEGACY
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -525,6 +537,7 @@ pub struct DefEffect {
 pub struct CapType(String);
 
 impl CapType {
+    pub const INTERNAL_LEGACY: &'static str = "aos.internal";
     pub const HTTP_OUT: &'static str = "http.out";
     pub const BLOB: &'static str = "blob";
     pub const TIMER: &'static str = "timer";
@@ -658,7 +671,9 @@ pub struct Manifest {
     pub effects: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effect_bindings: Vec<EffectBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub caps: Vec<NamedRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub policies: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<SecretEntry>,
@@ -1076,8 +1091,6 @@ mod tests {
                     "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                 }
             ],
-            "caps": [],
-            "policies": [],
             "routing": {
                 "subscriptions": [
                     {
@@ -1091,5 +1104,21 @@ mod tests {
         let node: AirNode = serde_json::from_value(manifest_json.clone()).expect("deserialize");
         let round_trip = serde_json::to_value(node).expect("serialize");
         assert_eq!(manifest_json, round_trip);
+    }
+
+    #[test]
+    fn defeffect_omits_public_cap_type() {
+        let effect_json = json!({
+            "$kind": "defeffect",
+            "name": "com.acme/send@1",
+            "kind": "email.send",
+            "params_schema": "com.acme/SendParams@1",
+            "receipt_schema": "com.acme/SendReceipt@1",
+            "origin_scope": "workflow"
+        });
+
+        let node: AirNode = serde_json::from_value(effect_json.clone()).expect("deserialize");
+        let round_trip = serde_json::to_value(node).expect("serialize");
+        assert_eq!(effect_json, round_trip);
     }
 }

@@ -21,8 +21,6 @@
         "defschema",
         "defmodule",
         "defeffect",
-        "defcap",
-        "defpolicy",
         "defsecret",
         "manifest"
       ]
@@ -303,32 +301,6 @@
         { "type": "array", "items": { "$ref": "#/$defs/Value" } },
         { "type": "object", "additionalProperties": { "$ref": "#/$defs/Value" } }
       ]
-    },
-
-    "CapGrant": {
-      "type": "object",
-      "description": "Capability grant instance. References a defcap and provides concrete parameter values (allowlists/ceilings) and optional expiry.",
-      "properties": {
-        "name": {
-          "$ref": "#/$defs/CapGrantName",
-          "description": "Unique grant name referenced by plans/modules"
-        },
-        "cap": {
-          "$ref": "#/$defs/Name",
-          "description": "defcap name this grant instantiates"
-        },
-        "params": {
-          "$ref": "#/$defs/Value",
-          "description": "Concrete parameter values conforming to the defcap's schema. Enforced at enqueue."
-        },
-        "expiry_ns": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Optional expiration time (nanoseconds since epoch). Grant denied after expiry."
-        }
-      },
-      "required": ["name", "cap", "params"],
-      "additionalProperties": false
     }
   },
   "additionalProperties": false

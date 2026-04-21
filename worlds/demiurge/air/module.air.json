@@ -10,11 +10,7 @@
       "effects_emitted": [
         "blob.put",
         "host.session.open"
-      ],
-      "cap_slots": {
-        "blob": "blob",
-        "host": "host"
-      }
+      ]
     }
   }
 }

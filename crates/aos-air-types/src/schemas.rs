@@ -22,13 +22,15 @@ embed_schema! {
     COMMON => "../../../spec/schemas/common.schema.json",
     DEFSCHEMA => "../../../spec/schemas/defschema.schema.json",
     DEFMODULE => "../../../spec/schemas/defmodule.schema.json",
-    DEFCAP => "../../../spec/schemas/defcap.schema.json",
-    DEFPOLICY => "../../../spec/schemas/defpolicy.schema.json",
+    DEFEFFECT => "../../../spec/schemas/defeffect.schema.json",
+    DEFSECRET => "../../../spec/schemas/defsecret.schema.json",
     MANIFEST => "../../../spec/schemas/manifest.schema.json",
     PATCH => "../../../spec/schemas/patch.schema.json",
 }
 
-// Legacy schema kept for archival/tests only; not part of active schema set.
+// Legacy schemas kept for archival/tests only; not part of the active public schema set.
+pub const DEFCAP: &str = include_str!("../../../spec/schemas/defcap.schema.json");
+pub const DEFPOLICY: &str = include_str!("../../../spec/schemas/defpolicy.schema.json");
 pub const DEFPLAN: &str = include_str!("../../../spec/schemas/defplan.schema.json");
 
 pub fn find(name: &str) -> Option<&'static str> {

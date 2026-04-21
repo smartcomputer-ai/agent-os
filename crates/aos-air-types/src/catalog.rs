@@ -34,11 +34,16 @@ impl EffectCatalog {
             if catalog.by_kind.contains_key(&key) {
                 continue;
             }
+            let cap_type = if def.cap_type.as_str() == CapType::INTERNAL_LEGACY {
+                legacy_cap_type_for_kind(&def.kind).unwrap_or_else(|| def.cap_type.clone())
+            } else {
+                def.cap_type.clone()
+            };
             catalog.by_kind.insert(
                 key,
                 EffectCatalogEntry {
                     kind: def.kind.clone(),
-                    cap_type: def.cap_type.clone(),
+                    cap_type,
                     params_schema: def.params_schema.clone(),
                     receipt_schema: def.receipt_schema.clone(),
                     origin_scope: def.origin_scope,
@@ -70,5 +75,71 @@ impl EffectCatalog {
 
     pub fn kinds(&self) -> impl Iterator<Item = &EffectKind> {
         self.by_kind.values().map(|e| &e.kind)
+    }
+}
+
+fn legacy_cap_type_for_kind(kind: &EffectKind) -> Option<CapType> {
+    let cap_type = match kind.as_str() {
+        EffectKind::HTTP_REQUEST => CapType::http_out(),
+        EffectKind::BLOB_PUT | EffectKind::BLOB_GET => CapType::blob(),
+        EffectKind::TIMER_SET => CapType::timer(),
+        EffectKind::PORTAL_SEND => CapType::portal(),
+        EffectKind::HOST_SESSION_OPEN
+        | EffectKind::HOST_EXEC
+        | EffectKind::HOST_SESSION_SIGNAL
+        | EffectKind::HOST_FS_READ_FILE
+        | EffectKind::HOST_FS_WRITE_FILE
+        | EffectKind::HOST_FS_EDIT_FILE
+        | EffectKind::HOST_FS_APPLY_PATCH
+        | EffectKind::HOST_FS_GREP
+        | EffectKind::HOST_FS_GLOB
+        | EffectKind::HOST_FS_STAT
+        | EffectKind::HOST_FS_EXISTS
+        | EffectKind::HOST_FS_LIST_DIR => CapType::host(),
+        EffectKind::LLM_GENERATE => CapType::llm_basic(),
+        EffectKind::VAULT_PUT | EffectKind::VAULT_ROTATE => CapType::secret(),
+        EffectKind::WORKSPACE_RESOLVE
+        | EffectKind::WORKSPACE_EMPTY_ROOT
+        | EffectKind::WORKSPACE_LIST
+        | EffectKind::WORKSPACE_READ_REF
+        | EffectKind::WORKSPACE_READ_BYTES
+        | EffectKind::WORKSPACE_WRITE_BYTES
+        | EffectKind::WORKSPACE_WRITE_REF
+        | EffectKind::WORKSPACE_REMOVE
+        | EffectKind::WORKSPACE_DIFF
+        | EffectKind::WORKSPACE_ANNOTATIONS_GET
+        | EffectKind::WORKSPACE_ANNOTATIONS_SET => CapType::workspace(),
+        EffectKind::INTROSPECT_MANIFEST
+        | EffectKind::INTROSPECT_WORKFLOW_STATE
+        | EffectKind::INTROSPECT_JOURNAL_HEAD
+        | EffectKind::INTROSPECT_LIST_CELLS => CapType::query(),
+        "governance.propose" | "governance.shadow" | "governance.approve" | "governance.apply" => {
+            CapType::new("governance")
+        }
+        _ => return None,
+    };
+    Some(cap_type)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infers_legacy_builtin_cap_type_when_defeffect_omits_it() {
+        let def = DefEffect {
+            name: "sys/http.request@1".into(),
+            kind: EffectKind::http_request(),
+            params_schema: SchemaRef::new("sys/HttpRequestParams@1").unwrap(),
+            receipt_schema: SchemaRef::new("sys/HttpRequestReceipt@1").unwrap(),
+            cap_type: CapType::new(CapType::INTERNAL_LEGACY),
+            origin_scope: OriginScope::Both,
+        };
+
+        let catalog = EffectCatalog::from_defs([def]);
+        assert_eq!(
+            catalog.cap_type(&EffectKind::http_request()),
+            Some(&CapType::http_out())
+        );
     }
 }

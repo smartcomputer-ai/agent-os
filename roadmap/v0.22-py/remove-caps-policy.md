@@ -1,6 +1,6 @@
 # Remove Caps And Policies From v0.22
 
-Status: roadmap note / implementation outline
+Status: in progress — Phase 1 schema/spec simplification started
 
 ## Context
 

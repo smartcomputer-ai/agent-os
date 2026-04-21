@@ -25,6 +25,8 @@ use crate::secret::{SecretResolver, normalize_secret_variants};
 use aos_air_types::catalog::EffectCatalog;
 use aos_air_types::schema_index::SchemaIndex;
 
+pub const INTERNAL_ALLOW_CAP_NAME: &str = "__aos_internal_allow";
+
 #[derive(Default)]
 pub struct EffectQueue {
     intents: Vec<EffectIntent>,
@@ -160,6 +162,24 @@ impl EffectManager {
         )
     }
 
+    pub fn enqueue_workflow_effect_authorized(
+        &mut self,
+        workflow_name: &str,
+        effect: &WorkflowEffect,
+    ) -> Result<EffectIntent, KernelError> {
+        let source = EffectSource::Workflow {
+            name: workflow_name.to_string(),
+        };
+        let runtime_kind = EffectKind::new(effect.kind.clone());
+        let idempotency_key = normalize_idempotency_key(effect.idempotency_key.as_deref())?;
+        self.enqueue_authorized_effect(
+            source,
+            runtime_kind,
+            effect.params_cbor.clone(),
+            idempotency_key,
+        )
+    }
+
     pub fn queued(&self) -> &[EffectIntent] {
         self.queue.as_slice()
     }
@@ -222,26 +242,9 @@ impl EffectManager {
         idempotency_key: [u8; 32],
         resolved: &CapGrantResolution,
     ) -> Result<EffectIntent, KernelError> {
-        let params_cbor = if let Some(preprocessor) = &self.param_preprocessor {
-            preprocessor.preprocess(&source, &runtime_kind, params_cbor)?
-        } else {
-            params_cbor
-        };
-        let params_cbor = if runtime_kind.as_str() == aos_effects::EffectKind::BLOB_PUT {
-            normalize_blob_put_params(params_cbor)?
-        } else {
-            params_cbor
-        };
-
-        let canonical_params = normalize_effect_params(
-            &self.effect_catalog,
-            &self.schema_index,
-            &runtime_kind,
-            &params_cbor,
-        )
-        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
-        let canonical_params = normalize_secret_variants(&canonical_params)
-            .map_err(|err| KernelError::SecretResolution(err.to_string()))?;
+        self.ensure_origin_scope(&source, &runtime_kind)?;
+        let canonical_params =
+            self.canonicalize_effect_params(&source, &runtime_kind, params_cbor)?;
         let grant = &resolved.grant;
         let enforcer_module = resolved.enforcer.module.as_str();
         let grant_hash = resolved.grant_hash;
@@ -347,6 +350,78 @@ impl EffectManager {
                 rule_index: policy_detail.rule_index,
             }),
         }
+    }
+
+    fn enqueue_authorized_effect(
+        &mut self,
+        source: EffectSource,
+        runtime_kind: EffectKind,
+        params_cbor: Vec<u8>,
+        idempotency_key: [u8; 32],
+    ) -> Result<EffectIntent, KernelError> {
+        self.ensure_origin_scope(&source, &runtime_kind)?;
+        let canonical_params =
+            self.canonicalize_effect_params(&source, &runtime_kind, params_cbor)?;
+        let intent = EffectIntent::from_raw_params(
+            runtime_kind,
+            INTERNAL_ALLOW_CAP_NAME,
+            canonical_params,
+            idempotency_key,
+        )
+        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        Ok(intent)
+    }
+
+    fn ensure_origin_scope(
+        &self,
+        source: &EffectSource,
+        runtime_kind: &EffectKind,
+    ) -> Result<(), KernelError> {
+        let scope = self
+            .effect_catalog
+            .origin_scope(runtime_kind)
+            .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?;
+        let allowed = match source {
+            EffectSource::Workflow { .. } => scope.allows_workflows(),
+            EffectSource::Plan { .. } => scope.allows_plans(),
+        };
+        if allowed {
+            Ok(())
+        } else {
+            Err(KernelError::UnsupportedEffectKind(format!(
+                "{} is not allowed for {} origins",
+                runtime_kind.as_str(),
+                source.origin_kind()
+            )))
+        }
+    }
+
+    fn canonicalize_effect_params(
+        &self,
+        source: &EffectSource,
+        runtime_kind: &EffectKind,
+        params_cbor: Vec<u8>,
+    ) -> Result<Vec<u8>, KernelError> {
+        let params_cbor = if let Some(preprocessor) = &self.param_preprocessor {
+            preprocessor.preprocess(source, runtime_kind, params_cbor)?
+        } else {
+            params_cbor
+        };
+        let params_cbor = if runtime_kind.as_str() == aos_effects::EffectKind::BLOB_PUT {
+            normalize_blob_put_params(params_cbor)?
+        } else {
+            params_cbor
+        };
+
+        let canonical_params = normalize_effect_params(
+            &self.effect_catalog,
+            &self.schema_index,
+            runtime_kind,
+            &params_cbor,
+        )
+        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        normalize_secret_variants(&canonical_params)
+            .map_err(|err| KernelError::SecretResolution(err.to_string()))
     }
 
     pub fn drain(&mut self) -> Result<Vec<EffectIntent>, KernelError> {
@@ -1071,10 +1146,7 @@ mod tests {
 
     #[test]
     fn workflow_origin_can_enqueue_http_when_authorized() {
-        let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
-            .build()
-            .expect("grant");
-        let mut mgr = effect_manager_with_grants(vec![(grant, CapType::http_out())]);
+        let mut mgr = effect_manager_with_grants(vec![]);
         let params = HttpRequestParams {
             method: "GET".into(),
             url: "https://example.com/workflow".into(),
@@ -1086,8 +1158,9 @@ mod tests {
             serde_cbor::to_vec(&params).unwrap(),
         );
         let intent = mgr
-            .enqueue_workflow_effect("com.acme/Workflow@1", "cap_http", &effect)
+            .enqueue_workflow_effect_authorized("com.acme/Workflow@1", &effect)
             .expect("enqueue");
         assert_eq!(intent.kind.as_str(), EffectKind::HTTP_REQUEST);
+        assert_eq!(intent.cap_name, INTERNAL_ALLOW_CAP_NAME);
     }
 }

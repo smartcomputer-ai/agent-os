@@ -75,8 +75,7 @@
         "state": "sys/WorkspaceHistory@1",
         "event": "sys/WorkspaceCommit@1",
         "context": "sys/WorkflowContext@1",
-        "effects_emitted": [],
-        "cap_slots": {}
+        "effects_emitted": []
       }
     },
     "$comment": "Built-in workspace workflow; wasm_hash patched at load time in examples."
@@ -91,8 +90,7 @@
         "state": "sys/HttpPublishRegistry@1",
         "event": "sys/HttpPublishSet@1",
         "context": "sys/WorkflowContext@1",
-        "effects_emitted": [],
-        "cap_slots": {}
+        "effects_emitted": []
       }
     },
     "$comment": "Built-in HTTP publish registry workflow; wasm_hash patched at load time in examples."

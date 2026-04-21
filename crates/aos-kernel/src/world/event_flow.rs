@@ -536,23 +536,6 @@ impl<S: Store + 'static> Kernel<S> {
                     effect.kind
                 )));
             }
-            let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
-            let bound_grant = self
-                .module_cap_bindings
-                .get(&workflow_name)
-                .and_then(|binding| binding.get(&slot));
-            let default_grant = if bound_grant.is_none() && slot == "default" {
-                self.effect_manager
-                    .unique_grant_for_effect_kind(effect.kind.as_str())?
-            } else {
-                None
-            };
-            let grant = bound_grant
-                .or_else(|| default_grant.as_ref())
-                .ok_or_else(|| KernelError::CapabilityBindingMissing {
-                    workflow: workflow_name.clone(),
-                    slot: slot.clone(),
-                })?;
             let mut effect_for_enqueue = effect.clone();
             let derived_idempotency = derive_workflow_intent_idempotency_key(
                 workflow_name.as_str(),
@@ -563,11 +546,10 @@ impl<S: Store + 'static> Kernel<S> {
             )
             .map_err(KernelError::WorkflowOutput)?;
             effect_for_enqueue.idempotency_key = Some(derived_idempotency.to_vec());
-            let intent = match self.effect_manager.enqueue_workflow_effect_with_grant(
-                &workflow_name,
-                grant,
-                &effect_for_enqueue,
-            ) {
+            let intent = match self
+                .effect_manager
+                .enqueue_workflow_effect_authorized(&workflow_name, &effect_for_enqueue)
+            {
                 Ok(intent) => intent,
                 Err(err) => {
                     self.record_decisions()?;

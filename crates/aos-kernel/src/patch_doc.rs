@@ -1,8 +1,7 @@
-use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use crate::Store;
-use aos_air_types::{AirNode, HashRef, Manifest, ManifestDefaults, NamedRef};
+use aos_air_types::{AirNode, HashRef, Manifest, NamedRef};
 use aos_cbor::Hash;
 use serde::{Deserialize, Serialize};
 
@@ -37,17 +36,11 @@ pub enum PatchOp {
     SetManifestRefs {
         set_manifest_refs: SetManifestRefs,
     },
-    SetDefaults {
-        set_defaults: SetDefaults,
-    },
     SetRoutingEvents {
         set_routing_events: SetRoutingEvents,
     },
     SetRoutingInboxes {
         set_routing_inboxes: SetRoutingInboxes,
-    },
-    SetModuleBindings {
-        set_module_bindings: SetModuleBindings,
     },
     SetSecrets {
         set_secrets: SetSecrets,
@@ -96,12 +89,6 @@ pub struct ManifestRefRemove {
     pub name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct SetDefaults {
-    pub policy: Option<Option<String>>,
-    pub cap_grants: Option<Vec<aos_air_types::CapGrant>>,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SetRoutingEvents {
     pub pre_hash: String,
@@ -112,12 +99,6 @@ pub struct SetRoutingEvents {
 pub struct SetRoutingInboxes {
     pub pre_hash: String,
     pub inboxes: Vec<aos_air_types::InboxRoute>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SetModuleBindings {
-    pub pre_hash: String,
-    pub bindings: IndexMap<String, aos_air_types::ModuleBinding>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -189,9 +170,6 @@ pub fn compile_patch_document<S: Store>(
                 }
                 apply_manifest_refs(&mut manifest, set_manifest_refs)?;
             }
-            PatchOp::SetDefaults { set_defaults } => {
-                apply_defaults(&mut manifest, set_defaults);
-            }
             PatchOp::SetRoutingEvents { set_routing_events } => {
                 apply_routing_events(&mut manifest, set_routing_events)?;
             }
@@ -199,11 +177,6 @@ pub fn compile_patch_document<S: Store>(
                 set_routing_inboxes,
             } => {
                 apply_routing_inboxes(&mut manifest, set_routing_inboxes)?;
-            }
-            PatchOp::SetModuleBindings {
-                set_module_bindings,
-            } => {
-                apply_module_bindings(&mut manifest, set_module_bindings)?;
             }
             PatchOp::SetSecrets { set_secrets } => {
                 apply_secrets(&mut manifest, set_secrets)?;
@@ -237,8 +210,11 @@ fn enforce_kind(expected: &str, node: &AirNode) -> Result<(), KernelError> {
     let actual = match node {
         AirNode::Defmodule(_) => "defmodule",
         AirNode::Defschema(_) => "defschema",
-        AirNode::Defcap(_) => "defcap",
-        AirNode::Defpolicy(_) => "defpolicy",
+        AirNode::Defcap(_) | AirNode::Defpolicy(_) => {
+            return Err(KernelError::Manifest(
+                "defcap and defpolicy are not supported in public patch documents".to_string(),
+            ));
+        }
         AirNode::Defeffect(_) => "defeffect",
         AirNode::Defsecret(_) => "defsecret",
         AirNode::Manifest(_) => "manifest",
@@ -341,19 +317,6 @@ fn apply_manifest_refs(manifest: &mut Manifest, refs: SetManifestRefs) -> Result
     Ok(())
 }
 
-fn apply_defaults(manifest: &mut Manifest, op: SetDefaults) {
-    let defaults = manifest.defaults.get_or_insert_with(|| ManifestDefaults {
-        policy: None,
-        cap_grants: vec![],
-    });
-    if let Some(policy) = op.policy {
-        defaults.policy = policy;
-    }
-    if let Some(cap_grants) = op.cap_grants {
-        defaults.cap_grants = cap_grants;
-    }
-}
-
 fn apply_routing_events(manifest: &mut Manifest, op: SetRoutingEvents) -> Result<(), KernelError> {
     let current = manifest
         .routing
@@ -391,15 +354,6 @@ fn apply_routing_inboxes(
     Ok(())
 }
 
-fn apply_module_bindings(
-    manifest: &mut Manifest,
-    op: SetModuleBindings,
-) -> Result<(), KernelError> {
-    verify_block_pre_hash(&manifest.module_bindings, &op.pre_hash, "module_bindings")?;
-    manifest.module_bindings = op.bindings;
-    Ok(())
-}
-
 fn apply_secrets(manifest: &mut Manifest, op: SetSecrets) -> Result<(), KernelError> {
     verify_block_pre_hash(&manifest.secrets, &op.pre_hash, "secrets")?;
     manifest.secrets = op.secrets;
@@ -431,8 +385,6 @@ fn refs_for_kind_mut<'a>(
         "defschema" => Ok(&mut manifest.schemas),
         "defmodule" => Ok(&mut manifest.modules),
         "defeffect" => Ok(&mut manifest.effects),
-        "defcap" => Ok(&mut manifest.caps),
-        "defpolicy" => Ok(&mut manifest.policies),
         _ => Err(KernelError::Manifest(format!(
             "unsupported manifest ref kind: {kind}"
         ))),
@@ -453,8 +405,6 @@ fn rewrite_manifest_refs(manifest: &mut Manifest, hash_map: &HashMap<String, Has
     rewrite(&mut manifest.schemas);
     rewrite(&mut manifest.modules);
     rewrite(&mut manifest.effects);
-    rewrite(&mut manifest.caps);
-    rewrite(&mut manifest.policies);
 
     for entry in &mut manifest.secrets {
         if let aos_air_types::SecretEntry::Ref(named) = entry
