@@ -537,7 +537,7 @@ Target complete schema:
     },
     "secrets": {
       "type": "array",
-      "items": { "$ref": "#/$defs/SecretEntry" }
+      "items": { "$ref": "#/$defs/NamedRef" }
     },
     "routing": { "$ref": "#/$defs/Routing" }
   },
@@ -553,42 +553,12 @@ Target complete schema:
       "required": ["name", "hash"],
       "additionalProperties": false
     },
-    "SecretEntry": {
-      "oneOf": [
-        { "$ref": "#/$defs/NamedRef" },
-        { "$ref": "#/$defs/SecretDecl" }
-      ]
-    },
-    "SecretDecl": {
-      "type": "object",
-      "properties": {
-        "alias": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_.-]*(/[A-Za-z][A-Za-z0-9_.-]*)*$"
-        },
-        "version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "binding_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "expected_digest": { "$ref": "common.schema.json#/$defs/Hash" }
-      },
-      "required": ["alias", "version", "binding_id"],
-      "additionalProperties": false
-    },
     "Routing": {
       "type": "object",
       "properties": {
         "subscriptions": {
           "type": "array",
           "items": { "$ref": "#/$defs/RoutingSubscription" }
-        },
-        "inboxes": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/InboxRoute" }
         }
       },
       "additionalProperties": false
@@ -605,38 +575,32 @@ Target complete schema:
       },
       "required": ["event", "op"],
       "additionalProperties": false
-    },
-    "InboxRoute": {
-      "type": "object",
-      "properties": {
-        "source": {
-          "type": "string",
-          "minLength": 1
-        },
-        "op": {
-          "$ref": "common.schema.json#/$defs/Name",
-          "description": "Workflow op that will receive messages from this inbox."
-        }
-      },
-      "required": ["source", "op"],
-      "additionalProperties": false
     }
   }
 }
 ```
+
+Manifest secrets are refs to `defsecret` nodes only. AIR v2 does not allow inline `SecretDecl`
+entries in the manifest; adding or changing a secret declaration uses normal definition replacement
+plus a manifest ref update.
+
+`routing.subscriptions` is the only public domain ingress table. It maps typed domain events to
+workflow ops and may fan out one event to multiple workflows. The old `routing.inboxes` lane was a
+direct source-to-workflow route for messages that skipped the domain-event bus. AIR v2 removes it;
+external ingress should first become a typed domain event and then route through subscriptions.
 
 Removed from `Manifest`:
 
 ```text
 effects
 effect_bindings
+routing.inboxes
 ```
 
 Removed from routing:
 
 ```text
 RoutingSubscription.module
-InboxRoute.workflow
 ```
 
 ## `defeffect.schema.json`
@@ -651,7 +615,11 @@ There is no AIR v2 compatibility schema for `defeffect`.
 
 ## `patch.schema.json`
 
-Patch documents should accept `defop` through `common.schema.json#/$defs/DefKind`. The schema does not need op-specific patch operations.
+Patch documents should accept `defop` through `common.schema.json#/$defs/DefKind`. The schema does
+not need op-specific patch operations.
+
+Patch document format should move to version `"2"` because the operation surface changes with AIR
+v2. AIR v2 does not keep patch compatibility with v1 patch documents.
 
 Target field-level changes:
 
@@ -659,11 +627,37 @@ Target field-level changes:
 {
   "$id": "https://aos.dev/air/v2/patch.schema.json",
   "title": "AIR v2 Manifest Patch",
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["2"],
+      "default": "2"
+    }
+  },
   "$defs": {
     "node_json": {
       "description": "Authoring form of any AIR node: defschema, defmodule, defop, defsecret.",
       "type": "object",
       "minProperties": 1
+    },
+    "set_routing_subscriptions": {
+      "type": "object",
+      "properties": {
+        "set_routing_subscriptions": {
+          "type": "object",
+          "properties": {
+            "pre_hash": { "$ref": "common.schema.json#/$defs/Hash" },
+            "subscriptions": {
+              "type": "array",
+              "items": { "$ref": "manifest.schema.json#/$defs/RoutingSubscription" }
+            }
+          },
+          "required": ["pre_hash", "subscriptions"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["set_routing_subscriptions"],
+      "additionalProperties": false
     }
   }
 }
@@ -672,11 +666,21 @@ Target field-level changes:
 Patch operation semantics:
 
 ```text
-add_def / replace_def / remove_def accept kind = defop.
-set_manifest_refs accepts kind = defop and updates manifest.ops.
-set_routing_events uses RoutingSubscription.op.
-set_routing_inboxes uses InboxRoute.op.
+add_def / replace_def / remove_def accept defschema, defmodule, defop, and defsecret.
+set_manifest_refs updates manifest.schemas, manifest.modules, manifest.ops, or manifest.secrets.
+set_routing_subscriptions replaces routing.subscriptions and uses RoutingSubscription.op.
 ```
+
+Removed patch operations:
+
+```text
+set_routing_inboxes
+set_secrets
+```
+
+`set_routing_inboxes` is removed with `routing.inboxes`. `set_secrets` is removed because secrets
+are ordinary `defsecret` refs in `manifest.secrets`; use `add_def`/`replace_def` plus
+`set_manifest_refs` instead.
 
 ## Schema Set
 
@@ -709,21 +713,19 @@ JSON Schema covers structure only. Semantic validation still needs:
 5. Every workflow op schema ref exists.
 6. Every effect op params and receipt schema ref exists.
 7. Every routing subscription references an active workflow op.
-8. Every inbox route references an active workflow op.
-9. Every workflow `effects_emitted[]` entry references an active effect op.
-10. Workflow key-field validation uses the target op's `workflow.key_schema`, not the referenced module.
-11. Effect semantic kind duplicates are allowed only if the runtime has a deterministic dispatch rule by op identity. Recommendation: allow duplicates because op identity is canonical.
-12. The referenced module runtime kind must support the op kind.
-13. Effect execution path must resolve from the referenced module runtime and op implementation.
-14. Artifact kind compatibility is enforced by the `defmodule` schema: `wasm` accepts `wasm_module`; `python` accepts `python_bundle` or `workspace_root`; `builtin` has no artifact.
-15. `wasm_module.hash` must identify compiled WASM bytes.
-16. `python_bundle.root_hash` and `workspace_root.root_hash` must identify a workspace/tree root that the Python runner can hydrate.
-17. Python artifact metadata must satisfy the declared `runtime.python` version and provide a compatible target for the runner host.
+8. Every workflow `effects_emitted[]` entry references an active effect op.
+9. Workflow key-field validation uses the target op's `workflow.key_schema`, not the referenced module.
+10. Effect semantic kind duplicates are allowed only if the runtime has a deterministic dispatch rule by op identity. Recommendation: allow duplicates because op identity is canonical.
+11. The referenced module runtime kind must support the op kind.
+12. Effect execution path must resolve from the referenced module runtime and op implementation.
+13. Artifact kind compatibility is enforced by the `defmodule` schema: `wasm` accepts `wasm_module`; `python` accepts `python_bundle` or `workspace_root`; `builtin` has no artifact.
+14. `wasm_module.hash` must identify compiled WASM bytes.
+15. `python_bundle.root_hash` and `workspace_root.root_hash` must identify a workspace/tree root that the Python runner can hydrate.
+16. Python artifact metadata must satisfy the declared `runtime.python` version and provide a compatible target for the runner host.
 
 ## Open Schema Decisions
 
 - Whether `manifest.routing` should be required. Current target keeps it optional.
-- Whether inline `SecretDecl` remains in manifest v2. Current target keeps the current ability.
 
 ## Done When
 

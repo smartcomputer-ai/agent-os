@@ -24,8 +24,14 @@ This is the structural phase. It should establish the new data model before the 
   - add required `ops`
   - remove `effects`
   - remove `effect_bindings`
+  - keep `secrets` as `NamedRef[]` only; do not allow inline secret declarations
   - route subscriptions by `op`, not `module`
+  - remove `routing.inboxes`
 - Update `patch.schema.json` and common schema def-kind enums to understand `defop`.
+  - use patch document version `"2"`
+  - rename `set_routing_events` to `set_routing_subscriptions`
+  - remove `set_routing_inboxes`
+  - remove `set_secrets`; secret refs are handled through `set_manifest_refs`
 - Convert `spec/defs/builtin-effects.air.json` into built-in effect ops.
 - Convert built-in workflow module definitions into module-plus-workflow-op definitions.
 - Update schema embedding in `crates/aos-air-types/src/schemas.rs`.

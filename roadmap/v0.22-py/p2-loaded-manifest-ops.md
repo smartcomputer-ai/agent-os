@@ -20,6 +20,11 @@ After this phase, the kernel should no longer ask for workflow/effect metadata f
 - Update authoring manifest loading to collect `AirNode::Defop`.
 - Update governance patch canonicalization and summaries to include `defop`.
 - Update patch document application so `set_manifest_refs` supports `defop`.
+- Update patch document application for v2 manifest shape:
+  - `set_manifest_refs` supports `defschema`, `defmodule`, `defop`, and `defsecret`
+  - `set_routing_subscriptions` replaces the old `set_routing_events`
+  - `set_routing_inboxes` is removed
+  - `set_secrets` is removed; secret refs are ordinary manifest refs
 - Update query/list-defs surfaces to return `defop`.
 - Remove compatibility fallback that auto-includes built-in effects when `manifest.effects` is empty.
 
