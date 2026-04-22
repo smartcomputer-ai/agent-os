@@ -242,4 +242,3 @@ workflows and effects.
 - Workflows and effects remain definition-hash-bound in durable runtime records.
 - No checked-in active fixture relies on `defop`.
 - The repository remains clean for old AIR v1 effect-binding and effect-kind concepts.
-- Replay from new forked AIR v2 journals remains byte-identical.
