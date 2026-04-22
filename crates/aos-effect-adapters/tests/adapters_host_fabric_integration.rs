@@ -446,8 +446,13 @@ async fn fabric_exec_async_start_emits_progress_frames_before_terminal_receipt()
     );
     let context = AdapterStartContext {
         origin_module_id: "com.acme/Workflow@1".to_string(),
+        origin_workflow_op_hash: None,
         origin_instance_key: Some(vec![1, 2, 3]),
-        effect_kind: EffectKind::HOST_EXEC.to_string(),
+        effect_op: "sys/host.exec@1".to_string(),
+        effect_op_hash: None,
+        executor_module: Some("sys/Host@1".to_string()),
+        executor_module_hash: None,
+        executor_entrypoint: Some(EffectKind::HOST_EXEC.to_string()),
         emitted_at_seq: 42,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel(16);
@@ -479,7 +484,7 @@ async fn fabric_exec_async_start_emits_progress_frames_before_terminal_receipt()
     assert_eq!(first_frame.adapter_id, "host.exec.fabric");
     assert_eq!(first_frame.origin_module_id, context.origin_module_id);
     assert_eq!(first_frame.origin_instance_key, context.origin_instance_key);
-    assert_eq!(first_frame.effect_kind, context.effect_kind);
+    assert_eq!(first_frame.effect_op, context.effect_op);
     assert_eq!(first_frame.emitted_at_seq, context.emitted_at_seq);
     assert_eq!(first_frame.seq, 1);
     assert_eq!(first_frame.kind, "host.exec.progress");
@@ -524,8 +529,13 @@ async fn fabric_exec_async_start_fast_exec_emits_only_terminal_receipt() {
     );
     let context = AdapterStartContext {
         origin_module_id: "com.acme/Workflow@1".to_string(),
+        origin_workflow_op_hash: None,
         origin_instance_key: None,
-        effect_kind: EffectKind::HOST_EXEC.to_string(),
+        effect_op: "sys/host.exec@1".to_string(),
+        effect_op_hash: None,
+        executor_module: Some("sys/Host@1".to_string()),
+        executor_module_hash: None,
+        executor_entrypoint: Some(EffectKind::HOST_EXEC.to_string()),
         emitted_at_seq: 43,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel(16);

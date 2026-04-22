@@ -38,6 +38,18 @@ impl EffectSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectIntent {
+    /// Canonical AIR v2 effect op identity. `kind` remains a compatibility carrier for the
+    /// executor entrypoint; durable kernel records should use this op name/hash pair.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_entrypoint: Option<String>,
     pub kind: EffectKind,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
@@ -55,8 +67,44 @@ impl EffectIntent {
         params_cbor: Vec<u8>,
         idempotency_key: IdempotencyKey,
     ) -> Result<Self, IntentEncodeError> {
-        let hash = compute_intent_hash(kind.as_str(), &params_cbor, &idempotency_key)?;
+        Self::from_raw_params_with_op(
+            kind.as_str().to_string(),
+            None,
+            None,
+            None,
+            None,
+            kind,
+            params_cbor,
+            idempotency_key,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_raw_params_with_op(
+        effect_op: String,
+        effect_op_hash: Option<String>,
+        executor_module: Option<String>,
+        executor_module_hash: Option<String>,
+        executor_entrypoint: Option<String>,
+        kind: EffectKind,
+        params_cbor: Vec<u8>,
+        idempotency_key: IdempotencyKey,
+    ) -> Result<Self, IntentEncodeError> {
+        let hash = compute_intent_hash(
+            &effect_op,
+            effect_op_hash.as_deref(),
+            executor_module.as_deref(),
+            executor_module_hash.as_deref(),
+            kind.as_str(),
+            &params_cbor,
+            &idempotency_key,
+        )?;
         Ok(Self {
+            effect_op,
+            effect_op_hash,
+            executor_module,
+            executor_module_hash,
+            executor_entrypoint,
             kind,
             params_cbor,
             idempotency_key,
@@ -80,10 +128,7 @@ impl<'a, P> IntentBuilder<'a, P> {
         }
     }
 
-    pub fn builder(
-        kind: impl Into<EffectKind>,
-        params: &'a P,
-    ) -> Self {
+    pub fn builder(kind: impl Into<EffectKind>, params: &'a P) -> Self {
         Self::new(kind.into(), params)
     }
 
@@ -97,8 +142,21 @@ impl<'a, P> IntentBuilder<'a, P> {
         P: Serialize,
     {
         let params_cbor = to_canonical_cbor(self.params)?;
-        let hash = compute_intent_hash(self.kind.as_str(), &params_cbor, &self.idempotency_key)?;
+        let hash = compute_intent_hash(
+            self.kind.as_str(),
+            None,
+            None,
+            None,
+            self.kind.as_str(),
+            &params_cbor,
+            &self.idempotency_key,
+        )?;
         Ok(EffectIntent {
+            effect_op: self.kind.as_str().to_string(),
+            effect_op_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: None,
             kind: self.kind,
             params_cbor,
             idempotency_key: self.idempotency_key,
@@ -108,13 +166,24 @@ impl<'a, P> IntentBuilder<'a, P> {
 }
 
 fn compute_intent_hash(
-    kind: &str,
+    effect_op: &str,
+    effect_op_hash: Option<&str>,
+    executor_module: Option<&str>,
+    executor_module_hash: Option<&str>,
+    executor_entrypoint: &str,
     params_cbor: &[u8],
     idempotency_key: &IdempotencyKey,
 ) -> Result<[u8; 32], serde_cbor::Error> {
     #[derive(Serialize)]
     struct Envelope<'a> {
-        kind: &'a str,
+        effect_op: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        effect_op_hash: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        executor_module: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        executor_module_hash: Option<&'a str>,
+        executor_entrypoint: &'a str,
         #[serde(with = "serde_bytes")]
         params: &'a [u8],
         #[serde(with = "serde_bytes")]
@@ -122,7 +191,11 @@ fn compute_intent_hash(
     }
 
     let bytes = to_canonical_cbor(&Envelope {
-        kind,
+        effect_op,
+        effect_op_hash,
+        executor_module,
+        executor_module_hash,
+        executor_entrypoint,
         params: params_cbor,
         idempotency_key,
     })?;

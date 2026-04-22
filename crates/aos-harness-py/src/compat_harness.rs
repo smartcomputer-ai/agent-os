@@ -322,7 +322,23 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
     fn restore_open_work(&mut self) -> Result<()> {
         for pending in self.kernel.pending_workflow_receipts_snapshot() {
             let intent = EffectIntent {
-                kind: pending.effect_kind.clone().into(),
+                effect_op: if pending.effect_op.is_empty() {
+                    pending
+                        .executor_entrypoint
+                        .clone()
+                        .unwrap_or_else(|| pending.effect_op.clone())
+                } else {
+                    pending.effect_op.clone()
+                },
+                effect_op_hash: pending.effect_op_hash.clone(),
+                executor_module: pending.executor_module.clone(),
+                executor_module_hash: pending.executor_module_hash.clone(),
+                executor_entrypoint: pending.executor_entrypoint.clone(),
+                kind: pending
+                    .executor_entrypoint
+                    .clone()
+                    .unwrap_or_else(|| pending.effect_op.clone())
+                    .into(),
                 params_cbor: pending.params_cbor.clone(),
                 idempotency_key: pending.idempotency_key,
                 intent_hash: pending.intent_hash,

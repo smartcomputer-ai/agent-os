@@ -2,13 +2,22 @@ use std::sync::Arc;
 
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::builtins::BlobPutParams;
-use aos_effects::{EffectIntent, EffectKind, EffectSource, normalize_effect_params};
+use aos_effects::{EffectIntent, EffectKind, EffectSource, normalize_effect_op_params};
 use aos_wasm_abi::WorkflowEffect;
 
 use crate::error::KernelError;
 use crate::secret::{SecretResolver, normalize_secret_variants};
 use aos_air_types::catalog::EffectCatalog;
 use aos_air_types::schema_index::SchemaIndex;
+
+#[derive(Debug, Clone)]
+pub struct EffectOpRuntimeIdentity {
+    pub op_name: String,
+    pub op_hash: Option<String>,
+    pub executor_module: Option<String>,
+    pub executor_module_hash: Option<String>,
+    pub executor_entrypoint: String,
+}
 
 #[derive(Default)]
 pub struct EffectQueue {
@@ -96,6 +105,27 @@ impl EffectManager {
         self.enqueue_authorized_effect(
             source,
             runtime_kind,
+            None,
+            effect.params_cbor.clone(),
+            idempotency_key,
+        )
+    }
+
+    pub fn enqueue_workflow_effect_op_authorized(
+        &mut self,
+        workflow_name: &str,
+        effect: &WorkflowEffect,
+        identity: EffectOpRuntimeIdentity,
+    ) -> Result<EffectIntent, KernelError> {
+        let source = EffectSource::Workflow {
+            name: workflow_name.to_string(),
+        };
+        let runtime_kind = EffectKind::new(identity.executor_entrypoint.clone());
+        let idempotency_key = normalize_idempotency_key(effect.idempotency_key.as_deref())?;
+        self.enqueue_authorized_effect(
+            source,
+            runtime_kind,
+            Some(identity),
             effect.params_cbor.clone(),
             idempotency_key,
         )
@@ -115,21 +145,49 @@ impl EffectManager {
         let source = EffectSource::Plan {
             name: plan_name.to_string(),
         };
-        self.enqueue_authorized_effect(source, kind.clone(), params_cbor, idempotency_key)
+        self.enqueue_authorized_effect(source, kind.clone(), None, params_cbor, idempotency_key)
     }
 
     fn enqueue_authorized_effect(
         &mut self,
         source: EffectSource,
         runtime_kind: EffectKind,
+        op_identity: Option<EffectOpRuntimeIdentity>,
         params_cbor: Vec<u8>,
         idempotency_key: [u8; 32],
     ) -> Result<EffectIntent, KernelError> {
-        self.ensure_effect_known(&runtime_kind)?;
-        let canonical_params =
-            self.canonicalize_effect_params(&source, &runtime_kind, params_cbor)?;
-        let intent = EffectIntent::from_raw_params(runtime_kind, canonical_params, idempotency_key)
-            .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        let canonical_params = if let Some(identity) = op_identity.as_ref() {
+            self.ensure_effect_op_known(&identity.op_name)?;
+            self.canonicalize_effect_op_params(
+                &source,
+                identity.op_name.as_str(),
+                &runtime_kind,
+                params_cbor,
+            )?
+        } else {
+            self.ensure_effect_known(&runtime_kind)?;
+            self.canonicalize_effect_op_params(
+                &source,
+                runtime_kind.as_str(),
+                &runtime_kind,
+                params_cbor,
+            )?
+        };
+        let intent = if let Some(identity) = op_identity {
+            EffectIntent::from_raw_params_with_op(
+                identity.op_name,
+                identity.op_hash,
+                identity.executor_module,
+                identity.executor_module_hash,
+                Some(identity.executor_entrypoint),
+                runtime_kind,
+                canonical_params,
+                idempotency_key,
+            )
+        } else {
+            EffectIntent::from_raw_params(runtime_kind, canonical_params, idempotency_key)
+        }
+        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
         Ok(intent)
     }
 
@@ -147,9 +205,18 @@ impl EffectManager {
         }
     }
 
-    fn canonicalize_effect_params(
+    fn ensure_effect_op_known(&self, effect_op: &str) -> Result<(), KernelError> {
+        if self.effect_catalog.params_schema(effect_op).is_some() {
+            Ok(())
+        } else {
+            Err(KernelError::UnsupportedEffectKind(effect_op.into()))
+        }
+    }
+
+    fn canonicalize_effect_op_params(
         &self,
         source: &EffectSource,
+        effect_op: &str,
         runtime_kind: &EffectKind,
         params_cbor: Vec<u8>,
     ) -> Result<Vec<u8>, KernelError> {
@@ -158,16 +225,18 @@ impl EffectManager {
         } else {
             params_cbor
         };
-        let params_cbor = if runtime_kind.as_str() == aos_effects::EffectKind::BLOB_PUT {
+        let params_cbor = if effect_op == "sys/blob.put@1"
+            || runtime_kind.as_str() == aos_effects::EffectKind::BLOB_PUT
+        {
             normalize_blob_put_params(params_cbor)?
         } else {
             params_cbor
         };
 
-        let canonical_params = normalize_effect_params(
+        let canonical_params = normalize_effect_op_params(
             &self.effect_catalog,
             &self.schema_index,
-            runtime_kind,
+            effect_op,
             &params_cbor,
         )
         .map_err(|err| KernelError::EffectManager(err.to_string()))?;

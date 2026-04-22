@@ -56,6 +56,8 @@ mod serde_bytes_vec {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct EffectReceiptEnvelope {
     pub origin_module_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_workflow_op_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -63,7 +65,16 @@ pub struct EffectReceiptEnvelope {
     )]
     pub origin_instance_key: Option<Vec<u8>>,
     pub intent_id: String,
-    pub effect_kind: String,
+    #[serde(default, alias = "effect_kind")]
+    pub effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_entrypoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,6 +102,8 @@ impl EffectReceiptEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct EffectReceiptRejected {
     pub origin_module_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_workflow_op_hash: Option<String>,
     #[serde(
         default,
         with = "serde_bytes_opt",
@@ -98,7 +111,16 @@ pub struct EffectReceiptRejected {
     )]
     pub origin_instance_key: Option<Vec<u8>>,
     pub intent_id: String,
-    pub effect_kind: String,
+    #[serde(default, alias = "effect_kind")]
+    pub effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_entrypoint: Option<String>,
     pub params_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issuer_ref: Option<String>,
@@ -115,6 +137,8 @@ pub struct EffectReceiptRejected {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct EffectStreamFrameEnvelope {
     pub origin_module_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_workflow_op_hash: Option<String>,
     #[serde(
         default,
         with = "serde_bytes_opt",
@@ -122,7 +146,16 @@ pub struct EffectStreamFrameEnvelope {
     )]
     pub origin_instance_key: Option<Vec<u8>>,
     pub intent_id: String,
-    pub effect_kind: String,
+    #[serde(default, alias = "effect_kind")]
+    pub effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_entrypoint: Option<String>,
     pub params_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issuer_ref: Option<String>,
@@ -161,11 +194,11 @@ impl<'a> EffectContinuationRef<'a> {
         }
     }
 
-    pub fn effect_kind(self) -> &'a str {
+    pub fn effect_op(self) -> &'a str {
         match self {
-            Self::Receipt(value) => value.effect_kind.as_str(),
-            Self::Rejected(value) => value.effect_kind.as_str(),
-            Self::Stream(value) => value.effect_kind.as_str(),
+            Self::Receipt(value) => value.effect_op.as_str(),
+            Self::Rejected(value) => value.effect_op.as_str(),
+            Self::Stream(value) => value.effect_op.as_str(),
         }
     }
 
@@ -263,7 +296,7 @@ impl From<EffectStreamFrameEnvelope> for EffectContinuation {
 /// Durable workflow-side handle for a pending effect intent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct PendingEffect {
-    pub effect_kind: String,
+    pub effect_op: String,
     pub params_hash: String,
     pub intent_id: Option<String>,
     pub issuer_ref: Option<String>,
@@ -274,13 +307,13 @@ pub struct PendingEffect {
 
 impl PendingEffect {
     pub fn new(
-        effect_kind: impl Into<String>,
+        effect_op: impl Into<String>,
         params_hash: impl Into<String>,
         cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Self {
         Self {
-            effect_kind: effect_kind.into(),
+            effect_op: effect_op.into(),
             params_hash: params_hash.into(),
             intent_id: None,
             issuer_ref: None,
@@ -301,25 +334,25 @@ impl PendingEffect {
     }
 
     pub fn from_params<T: Serialize>(
-        effect_kind: impl Into<String>,
+        effect_op: impl Into<String>,
         params: &T,
         cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Result<Self, serde_cbor::Error> {
-        Self::from_params_with_issuer_ref(effect_kind, params, cap_slot, emitted_at_ns, None)
+        Self::from_params_with_issuer_ref(effect_op, params, cap_slot, emitted_at_ns, None)
     }
 
     pub fn from_params_with_issuer_ref<T: Serialize>(
-        effect_kind: impl Into<String>,
+        effect_op: impl Into<String>,
         params: &T,
         cap_slot: Option<String>,
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<Self, serde_cbor::Error> {
-        let effect_kind = effect_kind.into();
+        let effect_op = effect_op.into();
         Ok(Self::new(
-            effect_kind.as_str(),
-            pending_effect_params_hash(effect_kind.as_str(), params)?,
+            effect_op.as_str(),
+            pending_effect_params_hash(effect_op.as_str(), params)?,
             cap_slot,
             emitted_at_ns,
         )
@@ -327,7 +360,7 @@ impl PendingEffect {
     }
 
     pub fn matches(&self, continuation: EffectContinuationRef<'_>) -> bool {
-        if self.effect_kind != continuation.effect_kind() {
+        if self.effect_op != continuation.effect_op() {
             return false;
         }
 
@@ -404,9 +437,8 @@ impl PendingEffects {
         self.by_params_hash.clear();
     }
 
-    pub fn contains_effect_kind(&self, effect_kind: &str) -> bool {
-        self.values()
-            .any(|pending| pending.effect_kind == effect_kind)
+    pub fn contains_effect_op(&self, effect_op: &str) -> bool {
+        self.values().any(|pending| pending.effect_op == effect_op)
     }
 
     pub fn insert(&mut self, pending: PendingEffect) -> Option<PendingEffect> {
@@ -416,24 +448,24 @@ impl PendingEffects {
 
     pub fn begin<T: Serialize>(
         &mut self,
-        effect_kind: impl Into<String>,
+        effect_op: impl Into<String>,
         params: &T,
         cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Result<PendingEffect, serde_cbor::Error> {
-        self.begin_with_issuer_ref(effect_kind, params, cap_slot, emitted_at_ns, None)
+        self.begin_with_issuer_ref(effect_op, params, cap_slot, emitted_at_ns, None)
     }
 
     pub fn begin_with_issuer_ref<T: Serialize>(
         &mut self,
-        effect_kind: impl Into<String>,
+        effect_op: impl Into<String>,
         params: &T,
         cap_slot: Option<String>,
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<PendingEffect, serde_cbor::Error> {
         let pending = PendingEffect::from_params_with_issuer_ref(
-            effect_kind,
+            effect_op,
             params,
             cap_slot,
             emitted_at_ns,
@@ -499,7 +531,7 @@ impl PendingEffects {
         continuation.params_hash().and_then(|params_hash| {
             self.by_params_hash
                 .get(params_hash)
-                .filter(|pending| pending.effect_kind == continuation.effect_kind())
+                .filter(|pending| pending.effect_op == continuation.effect_op())
                 .map(|_| params_hash.to_string())
         })
     }
@@ -512,7 +544,7 @@ pub enum PendingEffectLookupError {
         matches: usize,
     },
     AmbiguousParamsHash {
-        effect_kind: String,
+        effect_op: String,
         params_hash: String,
         matches: usize,
     },
@@ -529,12 +561,12 @@ impl core::fmt::Display for PendingEffectLookupError {
                 "multiple pending effects match issuer_ref {issuer_ref}: {matches}"
             ),
             Self::AmbiguousParamsHash {
-                effect_kind,
+                effect_op,
                 params_hash,
                 matches,
             } => write!(
                 f,
-                "multiple pending effects match {effect_kind} with params_hash {params_hash}: {matches}"
+                "multiple pending effects match {effect_op} with params_hash {params_hash}: {matches}"
             ),
         }
     }
@@ -597,25 +629,25 @@ where
     pub fn begin<T: Serialize>(
         &mut self,
         key: K,
-        effect_kind: impl Into<String>,
+        effect_op: impl Into<String>,
         params: &T,
         cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Result<PendingEffect, serde_cbor::Error> {
-        self.begin_with_issuer_ref(key, effect_kind, params, cap_slot, emitted_at_ns, None)
+        self.begin_with_issuer_ref(key, effect_op, params, cap_slot, emitted_at_ns, None)
     }
 
     pub fn begin_with_issuer_ref<T: Serialize>(
         &mut self,
         key: K,
-        effect_kind: impl Into<String>,
+        effect_op: impl Into<String>,
         params: &T,
         cap_slot: Option<String>,
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<PendingEffect, serde_cbor::Error> {
         let pending = PendingEffect::from_params_with_issuer_ref(
-            effect_kind,
+            effect_op,
             params,
             cap_slot,
             emitted_at_ns,
@@ -705,8 +737,7 @@ where
             .by_key
             .iter()
             .filter(|(_, pending)| {
-                pending.effect_kind == continuation.effect_kind()
-                    && pending.params_hash == params_hash
+                pending.effect_op == continuation.effect_op() && pending.params_hash == params_hash
             })
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
@@ -714,7 +745,7 @@ where
             0 => Ok(None),
             1 => Ok(matches.into_iter().next()),
             count => Err(PendingEffectLookupError::AmbiguousParamsHash {
-                effect_kind: continuation.effect_kind().to_string(),
+                effect_op: continuation.effect_op().to_string(),
                 params_hash: params_hash.to_string(),
                 matches: count,
             }),
@@ -928,10 +959,10 @@ pub fn effect_params_hash<T: Serialize>(params: &T) -> Result<String, serde_cbor
 /// kernel's continuation envelopes for effect payloads that need workflow-side
 /// reconstruction.
 pub fn pending_effect_params_hash<T: Serialize>(
-    effect_kind: &str,
+    effect_op: &str,
     params: &T,
 ) -> Result<String, serde_cbor::Error> {
-    let cbor = if effect_kind == "blob.put" {
+    let cbor = if effect_op == "sys/blob.put@1" {
         let mut params: aos_effect_types::BlobPutParams =
             serde_cbor::from_slice(&serde_cbor::to_vec(params)?)?;
         if params.refs.is_none() {
@@ -1018,204 +1049,219 @@ define_sys_effect_helpers!(
     (
         http_request,
         http_request_tracked,
-        "http.request",
+        "sys/http.request@1",
         HttpRequestParams
     ),
-    (blob_put, blob_put_tracked, "blob.put", BlobPutParams),
-    (blob_get, blob_get_tracked, "blob.get", BlobGetParams),
-    (timer_set, timer_set_tracked, "timer.set", TimerSetParams),
+    (blob_put, blob_put_tracked, "sys/blob.put@1", BlobPutParams),
+    (blob_get, blob_get_tracked, "sys/blob.get@1", BlobGetParams),
+    (
+        timer_set,
+        timer_set_tracked,
+        "sys/timer.set@1",
+        TimerSetParams
+    ),
     (
         host_session_open,
         host_session_open_tracked,
-        "host.session.open",
+        "sys/host.session.open@1",
         HostSessionOpenParams
     ),
-    (host_exec, host_exec_tracked, "host.exec", HostExecParams),
+    (
+        host_exec,
+        host_exec_tracked,
+        "sys/host.exec@1",
+        HostExecParams
+    ),
     (
         host_session_signal,
         host_session_signal_tracked,
-        "host.session.signal",
+        "sys/host.session.signal@1",
         HostSessionSignalParams
     ),
     (
         host_fs_read_file,
         host_fs_read_file_tracked,
-        "host.fs.read_file",
+        "sys/host.fs.read_file@1",
         HostFsReadFileParams
     ),
     (
         host_fs_write_file,
         host_fs_write_file_tracked,
-        "host.fs.write_file",
+        "sys/host.fs.write_file@1",
         HostFsWriteFileParams
     ),
     (
         host_fs_edit_file,
         host_fs_edit_file_tracked,
-        "host.fs.edit_file",
+        "sys/host.fs.edit_file@1",
         HostFsEditFileParams
     ),
     (
         host_fs_apply_patch,
         host_fs_apply_patch_tracked,
-        "host.fs.apply_patch",
+        "sys/host.fs.apply_patch@1",
         HostFsApplyPatchParams
     ),
     (
         host_fs_grep,
         host_fs_grep_tracked,
-        "host.fs.grep",
+        "sys/host.fs.grep@1",
         HostFsGrepParams
     ),
     (
         host_fs_glob,
         host_fs_glob_tracked,
-        "host.fs.glob",
+        "sys/host.fs.glob@1",
         HostFsGlobParams
     ),
     (
         host_fs_stat,
         host_fs_stat_tracked,
-        "host.fs.stat",
+        "sys/host.fs.stat@1",
         HostFsStatParams
     ),
     (
         host_fs_exists,
         host_fs_exists_tracked,
-        "host.fs.exists",
+        "sys/host.fs.exists@1",
         HostFsExistsParams
     ),
     (
         host_fs_list_dir,
         host_fs_list_dir_tracked,
-        "host.fs.list_dir",
+        "sys/host.fs.list_dir@1",
         HostFsListDirParams
     ),
     (
         llm_generate,
         llm_generate_tracked,
-        "llm.generate",
+        "sys/llm.generate@1",
         LlmGenerateParams
     ),
-    (vault_put, vault_put_tracked, "vault.put", VaultPutParams),
+    (
+        vault_put,
+        vault_put_tracked,
+        "sys/vault.put@1",
+        VaultPutParams
+    ),
     (
         vault_rotate,
         vault_rotate_tracked,
-        "vault.rotate",
+        "sys/vault.rotate@1",
         VaultRotateParams
     ),
     (
         governance_propose,
         governance_propose_tracked,
-        "governance.propose",
+        "sys/governance.propose@1",
         GovProposeParams
     ),
     (
         governance_shadow,
         governance_shadow_tracked,
-        "governance.shadow",
+        "sys/governance.shadow@1",
         GovShadowParams
     ),
     (
         governance_approve,
         governance_approve_tracked,
-        "governance.approve",
+        "sys/governance.approve@1",
         GovApproveParams
     ),
     (
         governance_apply,
         governance_apply_tracked,
-        "governance.apply",
+        "sys/governance.apply@1",
         GovApplyParams
     ),
     (
         workspace_resolve,
         workspace_resolve_tracked,
-        "workspace.resolve",
+        "sys/workspace.resolve@1",
         WorkspaceResolveParams
     ),
     (
         workspace_empty_root,
         workspace_empty_root_tracked,
-        "workspace.empty_root",
+        "sys/workspace.empty_root@1",
         WorkspaceEmptyRootParams
     ),
     (
         workspace_list,
         workspace_list_tracked,
-        "workspace.list",
+        "sys/workspace.list@1",
         WorkspaceListParams
     ),
     (
         workspace_read_ref,
         workspace_read_ref_tracked,
-        "workspace.read_ref",
+        "sys/workspace.read_ref@1",
         WorkspaceReadRefParams
     ),
     (
         workspace_read_bytes,
         workspace_read_bytes_tracked,
-        "workspace.read_bytes",
+        "sys/workspace.read_bytes@1",
         WorkspaceReadBytesParams
     ),
     (
         workspace_write_bytes,
         workspace_write_bytes_tracked,
-        "workspace.write_bytes",
+        "sys/workspace.write_bytes@1",
         WorkspaceWriteBytesParams
     ),
     (
         workspace_write_ref,
         workspace_write_ref_tracked,
-        "workspace.write_ref",
+        "sys/workspace.write_ref@1",
         WorkspaceWriteRefParams
     ),
     (
         workspace_remove,
         workspace_remove_tracked,
-        "workspace.remove",
+        "sys/workspace.remove@1",
         WorkspaceRemoveParams
     ),
     (
         workspace_diff,
         workspace_diff_tracked,
-        "workspace.diff",
+        "sys/workspace.diff@1",
         WorkspaceDiffParams
     ),
     (
         workspace_annotations_get,
         workspace_annotations_get_tracked,
-        "workspace.annotations_get",
+        "sys/workspace.annotations_get@1",
         WorkspaceAnnotationsGetParams
     ),
     (
         workspace_annotations_set,
         workspace_annotations_set_tracked,
-        "workspace.annotations_set",
+        "sys/workspace.annotations_set@1",
         WorkspaceAnnotationsSetParams
     ),
     (
         introspect_manifest,
         introspect_manifest_tracked,
-        "introspect.manifest",
+        "sys/introspect.manifest@1",
         IntrospectManifestParams
     ),
     (
         introspect_workflow_state,
         introspect_workflow_state_tracked,
-        "introspect.workflow_state",
+        "sys/introspect.workflow_state@1",
         IntrospectWorkflowStateParams
     ),
     (
         introspect_journal_head,
         introspect_journal_head_tracked,
-        "introspect.journal_head",
+        "sys/introspect.journal_head@1",
         IntrospectJournalHeadParams
     ),
     (
         introspect_list_cells,
         introspect_list_cells_tracked,
-        "introspect.list_cells",
+        "sys/introspect.list_cells@1",
         IntrospectListCellsParams
     )
 );
@@ -1225,7 +1271,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use aos_air_types::{
-        builtins::{builtin_effects, builtin_schemas},
+        builtins::{builtin_ops, builtin_schemas},
         catalog::EffectCatalog,
         schema_index::SchemaIndex,
     };
@@ -1239,8 +1285,8 @@ mod tests {
         out
     }
 
-    fn kernel_normalized_params_hash<T: Serialize>(effect_kind: &str, params: &T) -> String {
-        if effect_kind == "blob.put" {
+    fn kernel_normalized_params_hash<T: Serialize>(effect_op: &str, params: &T) -> String {
+        if effect_op == "sys/blob.put@1" {
             let mut params: BlobPutParams =
                 serde_cbor::from_slice(&serde_cbor::to_vec(params).expect("encode params"))
                     .expect("decode blob.put params");
@@ -1253,20 +1299,16 @@ mod tests {
             return hash_bytes(&normalized);
         }
 
-        let catalog = EffectCatalog::from_defs(builtin_effects().iter().map(|e| e.effect.clone()));
+        let catalog = EffectCatalog::from_defs(builtin_ops().iter().map(|op| op.op.clone()));
         let mut schemas = HashMap::new();
         for builtin in builtin_schemas() {
             schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
         }
         let schema_index = SchemaIndex::new(schemas);
         let raw = serde_cbor::to_vec(params).expect("encode params");
-        let normalized = aos_effects::normalize_effect_params(
-            &catalog,
-            &schema_index,
-            &aos_effects::EffectKind::new(effect_kind),
-            &raw,
-        )
-        .expect("kernel normalize params");
+        let normalized =
+            aos_effects::normalize_effect_op_params(&catalog, &schema_index, effect_op, &raw)
+                .expect("kernel normalize params");
         hash_bytes(&normalized)
     }
 
@@ -1284,7 +1326,7 @@ mod tests {
     fn stream_frame_decodes_payload() {
         let frame = EffectStreamFrameEnvelope {
             intent_id: fake_hash('a'),
-            effect_kind: "llm.session.start".into(),
+            effect_op: "llm.session.start".into(),
             issuer_ref: Some("stream-1".into()),
             seq: 2,
             kind: "tool_call.requested".into(),
@@ -1300,12 +1342,12 @@ mod tests {
     fn pending_effects_bind_stream_then_settle_receipt() {
         let mut pending = PendingEffects::new();
         let handle = pending
-            .begin("llm.generate", &vec!["m1"], Some("llm".into()), 11)
+            .begin("sys/llm.generate@1", &vec!["m1"], Some("llm".into()), 11)
             .unwrap();
 
         let stream = EffectStreamFrameEnvelope {
             intent_id: fake_hash('i'),
-            effect_kind: "llm.generate".into(),
+            effect_op: "sys/llm.generate@1".into(),
             params_hash: Some(handle.params_hash.clone()),
             issuer_ref: Some("run-1".into()),
             seq: 1,
@@ -1324,7 +1366,7 @@ mod tests {
 
         let receipt = EffectReceiptEnvelope {
             intent_id: stream.intent_id.clone(),
-            effect_kind: "llm.generate".into(),
+            effect_op: "sys/llm.generate@1".into(),
             params_hash: Some(handle.params_hash.clone()),
             issuer_ref: Some("run-1".into()),
             receipt_payload: serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap(),
@@ -1344,14 +1386,18 @@ mod tests {
     #[test]
     fn settle_matches_by_intent_id_when_params_hash_missing() {
         let mut pending = PendingEffects::new();
-        let mut handle =
-            PendingEffect::new("host.session.open", fake_hash('p'), Some("host".into()), 9);
+        let mut handle = PendingEffect::new(
+            "sys/host.session.open@1",
+            fake_hash('p'),
+            Some("host".into()),
+            9,
+        );
         handle.intent_id = Some(fake_hash('i'));
         pending.insert(handle.clone());
 
         let rejected = EffectReceiptRejected {
             intent_id: fake_hash('i'),
-            effect_kind: "host.session.open".into(),
+            effect_op: "sys/host.session.open@1".into(),
             issuer_ref: Some("open-1".into()),
             status: "error".into(),
             error_code: "receipt.invalid_payload".into(),
@@ -1370,13 +1416,14 @@ mod tests {
     #[test]
     fn settle_falls_back_to_params_hash_when_continuation_has_no_issuer_ref() {
         let mut pending = PendingEffects::new();
-        let handle = PendingEffect::new("llm.generate", fake_hash('p'), Some("llm".into()), 9)
-            .with_issuer_ref("run-1");
+        let handle =
+            PendingEffect::new("sys/llm.generate@1", fake_hash('p'), Some("llm".into()), 9)
+                .with_issuer_ref("run-1");
         pending.insert(handle.clone());
 
         let receipt = EffectReceiptEnvelope {
             intent_id: fake_hash('i'),
-            effect_kind: "llm.generate".into(),
+            effect_op: "sys/llm.generate@1".into(),
             params_hash: Some(handle.params_hash.clone()),
             receipt_payload: serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap(),
             status: "ok".into(),
@@ -1398,14 +1445,14 @@ mod tests {
             refs: None,
         };
         let handle = pending
-            .begin("blob.put", &params, Some("blob".into()), 7)
+            .begin("sys/blob.put@1", &params, Some("blob".into()), 7)
             .expect("begin blob.put");
 
         let receipt = EffectReceiptEnvelope {
             intent_id: fake_hash('i'),
-            effect_kind: "blob.put".into(),
+            effect_op: "sys/blob.put@1".into(),
             params_hash: Some(
-                pending_effect_params_hash("blob.put", &params)
+                pending_effect_params_hash("sys/blob.put@1", &params)
                     .expect("normalized blob.put params hash"),
             ),
             receipt_payload: serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap(),
@@ -1427,11 +1474,11 @@ mod tests {
             body_ref: None,
         };
         let pending =
-            PendingEffect::from_params("http.request", &params, Some("default".into()), 7)
+            PendingEffect::from_params("sys/http.request@1", &params, Some("default".into()), 7)
                 .expect("build pending http.request");
         assert_eq!(
             pending.params_hash,
-            kernel_normalized_params_hash("http.request", &params)
+            kernel_normalized_params_hash("sys/http.request@1", &params)
         );
     }
 
@@ -1442,11 +1489,11 @@ mod tests {
             blob_ref: None,
             refs: None,
         };
-        let pending = PendingEffect::from_params("blob.put", &params, Some("blob".into()), 7)
+        let pending = PendingEffect::from_params("sys/blob.put@1", &params, Some("blob".into()), 7)
             .expect("build pending blob.put");
         assert_eq!(
             pending.params_hash,
-            kernel_normalized_params_hash("blob.put", &params)
+            kernel_normalized_params_hash("sys/blob.put@1", &params)
         );
     }
 
@@ -1458,12 +1505,16 @@ mod tests {
             bytes: b"hello".to_vec(),
             mode: None,
         };
-        let pending =
-            PendingEffect::from_params("workspace.write_bytes", &params, Some("default".into()), 7)
-                .expect("build pending workspace.write_bytes");
+        let pending = PendingEffect::from_params(
+            "sys/workspace.write_bytes@1",
+            &params,
+            Some("default".into()),
+            7,
+        )
+        .expect("build pending workspace.write_bytes");
         assert_eq!(
             pending.params_hash,
-            kernel_normalized_params_hash("workspace.write_bytes", &params)
+            kernel_normalized_params_hash("sys/workspace.write_bytes@1", &params)
         );
     }
 }

@@ -348,8 +348,13 @@ async fn run_long_exec_with_progress<A: AsyncEffectAdapter + ?Sized>(
     let intent = intent_for(EffectKind::HOST_EXEC, &params, 64);
     let context = AdapterStartContext {
         origin_module_id: "live/FabricHostE2E@1".to_string(),
+        origin_workflow_op_hash: None,
         origin_instance_key: None,
-        effect_kind: EffectKind::HOST_EXEC.to_string(),
+        effect_op: "sys/host.exec@1".to_string(),
+        effect_op_hash: None,
+        executor_module: Some("sys/Host@1".to_string()),
+        executor_module_hash: None,
+        executor_entrypoint: Some(EffectKind::HOST_EXEC.to_string()),
         emitted_at_seq: 1,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel(16);

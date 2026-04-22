@@ -87,7 +87,11 @@ impl ShadowExecutor {
             for opened in drain.opened_effects {
                 let intent = opened.intent;
                 predicted_effects.push(PredictedEffect {
-                    kind: intent.kind.as_str().to_string(),
+                    op: if intent.effect_op.is_empty() {
+                        intent.kind.as_str().to_string()
+                    } else {
+                        intent.effect_op.clone()
+                    },
                     intent_hash: hex::encode(intent.intent_hash),
                     params_json: params_to_json(&intent.params_cbor),
                 });
@@ -121,7 +125,7 @@ impl ShadowExecutor {
                         .as_ref()
                         .map(|key| base64::prelude::BASE64_STANDARD.encode(key)),
                     intent_hash: hex::encode(inflight.intent_id),
-                    effect_kind: inflight.effect_kind.clone(),
+                    effect_op: inflight.effect_op.clone(),
                     emitted_at_seq: inflight.emitted_at_seq,
                 });
             }
@@ -169,8 +173,8 @@ mod tests {
     use crate::governance::ManifestPatch;
     use aos_air_types::EmptyObject;
     use aos_air_types::{
-        AirNode, DefSchema, HashRef, Manifest, NamedRef, SecretDecl, SecretEntry, TypeExpr,
-        TypePrimitive, TypePrimitiveText,
+        AirNode, DefSchema, DefSecret, HashRef, Manifest, NamedRef, TypeExpr, TypePrimitive,
+        TypePrimitiveText,
     };
 
     fn empty_manifest() -> Manifest {
@@ -178,8 +182,7 @@ mod tests {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: vec![],
-            effects: vec![],
-            effect_bindings: vec![],
+            ops: vec![],
             secrets: vec![],
             routing: None,
         }
@@ -261,17 +264,23 @@ mod tests {
     #[test]
     fn shadow_executor_uses_placeholder_when_secrets_present() {
         let store = Arc::new(MemStore::new());
+        let secret = DefSecret {
+            name: "payments/stripe@1".into(),
+            binding_id: "stripe:prod".into(),
+            expected_digest: None,
+        };
         let patch = ManifestPatch {
             manifest: Manifest {
-                secrets: vec![SecretEntry::Decl(SecretDecl {
-                    alias: "payments/stripe".into(),
-                    version: 1,
-                    binding_id: "stripe:prod".into(),
-                    expected_digest: None,
-                })],
+                secrets: vec![NamedRef {
+                    name: secret.name.clone(),
+                    hash: HashRef::new(
+                        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+                    )
+                    .unwrap(),
+                }],
                 ..empty_manifest()
             },
-            nodes: vec![],
+            nodes: vec![AirNode::Defsecret(secret)],
         };
         let patch_hash = hash_of_patch(&patch);
         let manifest_hash = hash_of_manifest(&patch);

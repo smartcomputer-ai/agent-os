@@ -637,6 +637,7 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: workflow.into(),
+            workflow_op_hash: None,
             key: None,
             cell_mode: false,
         };
@@ -796,10 +797,15 @@ mod tests {
         let payload = serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap();
         let envelope = EffectReceiptEnvelope {
             origin_module_id: "com.acme/Workflow@1".into(),
+            origin_workflow_op_hash: None,
             origin_instance_key: Some(b"key-1".to_vec()),
             intent_id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .into(),
-            effect_kind: "http.request".into(),
+            effect_op: "sys/http.request@1".into(),
+            effect_op_hash: None,
+            executor_module: Some("sys/Http@1".into()),
+            executor_module_hash: None,
+            executor_entrypoint: Some("http.request".into()),
             params_hash: None,
             issuer_ref: None,
             receipt_payload: payload,
@@ -845,14 +851,14 @@ mod tests {
                 let mut pending = core::mem::take(&mut ctx.state.pending);
                 let handle = ctx.effects().emit_tracked(
                     &mut pending,
-                    "llm.generate",
+                    "sys/llm.generate@1",
                     &TrackedParams {
                         prompt: "hello".into(),
                     },
                     Some("llm"),
                 );
                 ctx.state.pending = pending;
-                assert_eq!(handle.effect_kind, "llm.generate");
+                assert_eq!(handle.effect_op, "sys/llm.generate@1");
                 Ok(())
             }
         }
@@ -874,7 +880,7 @@ mod tests {
         let pending = state.pending.values().next().expect("pending handle");
         assert_eq!(pending.issuer_ref, decoded.effects[0].issuer_ref);
         let expected = PendingEffect::from_params(
-            "llm.generate",
+            "sys/llm.generate@1",
             &TrackedParams {
                 prompt: "hello".into(),
             },
@@ -920,7 +926,7 @@ mod tests {
                     .blob_put_tracked(&mut pending, &params, "blob");
                 ctx.state.pending = pending;
                 let expected =
-                    PendingEffect::from_params("blob.put", &params, Some("blob".into()), 1)
+                    PendingEffect::from_params("sys/blob.put@1", &params, Some("blob".into()), 1)
                         .expect("expected blob pending handle");
                 assert_eq!(handle.params_hash, expected.params_hash);
                 Ok(())
@@ -941,7 +947,7 @@ mod tests {
             serde_cbor::from_slice(decoded.state.as_ref().expect("state")).expect("state decode");
         let pending = state.pending.values().next().expect("pending handle");
         let expected = PendingEffect::from_params(
-            "blob.put",
+            "sys/blob.put@1",
             &BlobPutParams {
                 bytes: b"hello".to_vec(),
                 blob_ref: None,

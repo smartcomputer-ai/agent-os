@@ -144,13 +144,7 @@ fn build_effect_manager(
     let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
         GovernanceParamPreprocessor::new(store.clone(), loaded.manifest.clone()),
     ));
-    let manager = EffectManager::new(
-        effect_catalog,
-        schema_index,
-        param_preprocessor,
-        None,
-        None,
-    );
+    let manager = EffectManager::new(effect_catalog, schema_index, param_preprocessor, None, None);
     Ok(manager)
 }
 

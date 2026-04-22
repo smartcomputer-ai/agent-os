@@ -19,8 +19,13 @@ const SYS_BLOB_GET_RESULT_SCHEMA: &str = "sys/BlobGetResult@1";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowEffectContext {
     pub origin_module_id: String,
+    pub origin_workflow_op_hash: Option<String>,
     pub origin_instance_key: Option<Vec<u8>>,
-    pub effect_kind: String,
+    pub effect_op: String,
+    pub effect_op_hash: Option<String>,
+    pub executor_module: Option<String>,
+    pub executor_module_hash: Option<String>,
+    pub executor_entrypoint: Option<String>,
     pub params_cbor: Vec<u8>,
     pub idempotency_key: [u8; 32],
     pub issuer_ref: Option<String>,
@@ -33,7 +38,7 @@ impl WorkflowEffectContext {
     pub fn new(
         origin_module_id: String,
         origin_instance_key: Option<Vec<u8>>,
-        effect_kind: String,
+        effect_op: String,
         params_cbor: Vec<u8>,
         idempotency_key: [u8; 32],
         issuer_ref: Option<String>,
@@ -43,8 +48,13 @@ impl WorkflowEffectContext {
     ) -> Self {
         Self {
             origin_module_id,
+            origin_workflow_op_hash: None,
             origin_instance_key,
-            effect_kind,
+            effect_op,
+            effect_op_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: None,
             params_cbor,
             idempotency_key,
             issuer_ref,
@@ -53,11 +63,37 @@ impl WorkflowEffectContext {
             module_version,
         }
     }
+
+    pub fn with_op_identity(
+        mut self,
+        origin_workflow_op_hash: Option<String>,
+        effect_op: String,
+        effect_op_hash: Option<String>,
+        executor_module: Option<String>,
+        executor_module_hash: Option<String>,
+        executor_entrypoint: Option<String>,
+    ) -> Self {
+        self.origin_workflow_op_hash = origin_workflow_op_hash;
+        self.effect_op = effect_op;
+        self.effect_op_hash = effect_op_hash;
+        self.executor_module = executor_module;
+        self.executor_module_hash = executor_module_hash;
+        self.executor_entrypoint = executor_entrypoint;
+        self
+    }
+
+    pub fn executor_entrypoint(&self) -> &str {
+        self.executor_entrypoint
+            .as_deref()
+            .unwrap_or(self.effect_op.as_str())
+    }
 }
 
 #[derive(Serialize)]
 struct WorkflowReceiptEnvelope {
     origin_module_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin_workflow_op_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -65,7 +101,15 @@ struct WorkflowReceiptEnvelope {
     )]
     origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
-    effect_kind: String,
+    effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor_entrypoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     params_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -84,6 +128,8 @@ struct WorkflowReceiptEnvelope {
 #[derive(Serialize)]
 struct WorkflowStreamFrameEnvelope {
     origin_module_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin_workflow_op_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -91,7 +137,15 @@ struct WorkflowStreamFrameEnvelope {
     )]
     origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
-    effect_kind: String,
+    effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor_entrypoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     params_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -111,6 +165,8 @@ struct WorkflowStreamFrameEnvelope {
 #[derive(Serialize)]
 struct WorkflowReceiptRejected {
     origin_module_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin_workflow_op_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -118,7 +174,15 @@ struct WorkflowReceiptRejected {
     )]
     origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
-    effect_kind: String,
+    effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor_entrypoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     params_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -136,7 +200,7 @@ struct WorkflowReceiptRejected {
 struct TimerReceiptEvent {
     intent_hash: String,
     workflow: String,
-    effect_kind: String,
+    effect_op: String,
     adapter_id: String,
     status: ReceiptStatus,
     requested: TimerSetParams,
@@ -151,7 +215,7 @@ struct TimerReceiptEvent {
 struct BlobReceiptEvent<TParams, TReceipt> {
     intent_hash: String,
     workflow: String,
-    effect_kind: String,
+    effect_op: String,
     adapter_id: String,
     status: ReceiptStatus,
     requested: TParams,
@@ -168,9 +232,14 @@ pub fn build_workflow_receipt_event(
 ) -> Result<DomainEvent, KernelError> {
     let payload = WorkflowReceiptEnvelope {
         origin_module_id: ctx.origin_module_id.clone(),
+        origin_workflow_op_hash: ctx.origin_workflow_op_hash.clone(),
         origin_instance_key: ctx.origin_instance_key.clone(),
         intent_id: hash_to_hex(&ctx.intent_id),
-        effect_kind: ctx.effect_kind.clone(),
+        effect_op: ctx.effect_op.clone(),
+        effect_op_hash: ctx.effect_op_hash.clone(),
+        executor_module: ctx.executor_module.clone(),
+        executor_module_hash: ctx.executor_module_hash.clone(),
+        executor_entrypoint: ctx.executor_entrypoint.clone(),
         params_hash: Some(Hash::of_bytes(&ctx.params_cbor).to_hex()),
         issuer_ref: ctx.issuer_ref.clone(),
         receipt_payload: receipt.payload_cbor.clone(),
@@ -191,9 +260,14 @@ pub fn build_workflow_receipt_rejected_event(
 ) -> Result<DomainEvent, KernelError> {
     let payload = WorkflowReceiptRejected {
         origin_module_id: ctx.origin_module_id.clone(),
+        origin_workflow_op_hash: ctx.origin_workflow_op_hash.clone(),
         origin_instance_key: ctx.origin_instance_key.clone(),
         intent_id: hash_to_hex(&ctx.intent_id),
-        effect_kind: ctx.effect_kind.clone(),
+        effect_op: ctx.effect_op.clone(),
+        effect_op_hash: ctx.effect_op_hash.clone(),
+        executor_module: ctx.executor_module.clone(),
+        executor_module_hash: ctx.executor_module_hash.clone(),
+        executor_entrypoint: ctx.executor_entrypoint.clone(),
         params_hash: Some(Hash::of_bytes(&ctx.params_cbor).to_hex()),
         issuer_ref: ctx.issuer_ref.clone(),
         adapter_id: receipt.adapter_id.clone(),
@@ -213,9 +287,14 @@ pub fn build_workflow_stream_frame_event(
 ) -> Result<DomainEvent, KernelError> {
     let payload = WorkflowStreamFrameEnvelope {
         origin_module_id: ctx.origin_module_id.clone(),
+        origin_workflow_op_hash: ctx.origin_workflow_op_hash.clone(),
         origin_instance_key: ctx.origin_instance_key.clone(),
         intent_id: hash_to_hex(&ctx.intent_id),
-        effect_kind: ctx.effect_kind.clone(),
+        effect_op: ctx.effect_op.clone(),
+        effect_op_hash: ctx.effect_op_hash.clone(),
+        executor_module: ctx.executor_module.clone(),
+        executor_module_hash: ctx.executor_module_hash.clone(),
+        executor_entrypoint: ctx.executor_entrypoint.clone(),
         params_hash: Some(Hash::of_bytes(&ctx.params_cbor).to_hex()),
         issuer_ref: ctx.issuer_ref.clone(),
         emitted_at_seq: ctx.emitted_at_seq,
@@ -234,7 +313,10 @@ pub fn build_legacy_workflow_receipt_event(
     ctx: &WorkflowEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<Option<DomainEvent>, KernelError> {
-    let event = match ctx.effect_kind.as_str() {
+    let event = match ctx.effect_op.as_str() {
+        "sys/timer.set@1" => Some(build_timer_event(ctx, receipt)?),
+        "sys/blob.put@1" => Some(build_blob_put_event(ctx, receipt)?),
+        "sys/blob.get@1" => Some(build_blob_get_event(ctx, receipt)?),
         aos_effects::EffectKind::TIMER_SET => Some(build_timer_event(ctx, receipt)?),
         aos_effects::EffectKind::BLOB_PUT => Some(build_blob_put_event(ctx, receipt)?),
         aos_effects::EffectKind::BLOB_GET => Some(build_blob_get_event(ctx, receipt)?),
@@ -252,7 +334,7 @@ fn build_timer_event(
     let payload = TimerReceiptEvent {
         intent_hash: hash_to_hex(&ctx.intent_id),
         workflow: ctx.origin_module_id.clone(),
-        effect_kind: ctx.effect_kind.clone(),
+        effect_op: ctx.effect_op.clone(),
         adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
         requested,
@@ -272,7 +354,7 @@ fn build_blob_put_event(
     let payload = BlobReceiptEvent {
         intent_hash: hash_to_hex(&ctx.intent_id),
         workflow: ctx.origin_module_id.clone(),
-        effect_kind: ctx.effect_kind.clone(),
+        effect_op: ctx.effect_op.clone(),
         adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
         requested,
@@ -292,7 +374,7 @@ fn build_blob_get_event(
     let payload = BlobReceiptEvent {
         intent_hash: hash_to_hex(&ctx.intent_id),
         workflow: ctx.origin_module_id.clone(),
-        effect_kind: ctx.effect_kind.clone(),
+        effect_op: ctx.effect_op.clone(),
         adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
         requested,
@@ -383,7 +465,7 @@ mod tests {
 
     #[test]
     fn workflow_receipt_event_is_structured() {
-        let mut ctx = base_context(aos_effects::EffectKind::HTTP_REQUEST);
+        let mut ctx = base_context("sys/http.request@1");
         ctx.params_cbor = vec![1, 2, 3];
         let mut receipt = base_receipt();
         receipt.payload_cbor = vec![4, 5, 6];
@@ -396,7 +478,7 @@ mod tests {
             #[serde(default, with = "super::serde_bytes_opt")]
             origin_instance_key: Option<Vec<u8>>,
             intent_id: String,
-            effect_kind: String,
+            effect_op: String,
             params_hash: Option<String>,
             #[serde(with = "serde_bytes")]
             receipt_payload: Vec<u8>,
@@ -412,7 +494,7 @@ mod tests {
         assert_eq!(decoded.origin_module_id, "com.acme/Workflow@1");
         assert_eq!(decoded.origin_instance_key, Some(b"order-123".to_vec()));
         assert_eq!(decoded.intent_id, hash_to_hex(&[7u8; 32]));
-        assert_eq!(decoded.effect_kind, aos_effects::EffectKind::HTTP_REQUEST);
+        assert_eq!(decoded.effect_op, "sys/http.request@1");
         assert_eq!(decoded.receipt_payload, vec![4, 5, 6]);
         assert_eq!(decoded.emitted_at_seq, 42);
         assert_eq!(decoded.adapter_id, "adapter.test");
@@ -432,7 +514,7 @@ mod tests {
 
     #[test]
     fn workflow_rejected_receipt_event_is_structured() {
-        let mut ctx = base_context(aos_effects::EffectKind::HTTP_REQUEST);
+        let mut ctx = base_context("sys/http.request@1");
         ctx.params_cbor = vec![1, 2, 3];
         let mut receipt = base_receipt();
         receipt.payload_cbor = vec![0xff, 0xa0];
@@ -451,7 +533,7 @@ mod tests {
             #[serde(default, with = "super::serde_bytes_opt")]
             origin_instance_key: Option<Vec<u8>>,
             intent_id: String,
-            effect_kind: String,
+            effect_op: String,
             params_hash: Option<String>,
             adapter_id: String,
             status: ReceiptStatus,
@@ -466,7 +548,7 @@ mod tests {
         assert_eq!(decoded.origin_module_id, "com.acme/Workflow@1");
         assert_eq!(decoded.origin_instance_key, Some(b"order-123".to_vec()));
         assert_eq!(decoded.intent_id, hash_to_hex(&[7u8; 32]));
-        assert_eq!(decoded.effect_kind, aos_effects::EffectKind::HTTP_REQUEST);
+        assert_eq!(decoded.effect_op, "sys/http.request@1");
         assert_eq!(decoded.adapter_id, "adapter.test");
         assert_eq!(decoded.status, ReceiptStatus::Ok);
         assert_eq!(decoded.error_code, "receipt.invalid_payload");
@@ -479,14 +561,19 @@ mod tests {
 
     #[test]
     fn workflow_stream_frame_event_is_structured() {
-        let mut ctx = base_context(aos_effects::EffectKind::HTTP_REQUEST);
+        let mut ctx = base_context("sys/http.request@1");
         ctx.params_cbor = vec![1, 2, 3];
         let frame = EffectStreamFrame {
             intent_hash: [7u8; 32],
             adapter_id: "adapter.test".into(),
             origin_module_id: "com.acme/Workflow@1".into(),
+            origin_workflow_op_hash: None,
             origin_instance_key: Some(b"order-123".to_vec()),
-            effect_kind: aos_effects::EffectKind::HTTP_REQUEST.into(),
+            effect_op: "sys/http.request@1".into(),
+            effect_op_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: None,
             emitted_at_seq: 42,
             seq: 3,
             kind: "progress.token".into(),
@@ -503,7 +590,7 @@ mod tests {
             #[serde(default, with = "super::serde_bytes_opt")]
             origin_instance_key: Option<Vec<u8>>,
             intent_id: String,
-            effect_kind: String,
+            effect_op: String,
             params_hash: Option<String>,
             emitted_at_seq: u64,
             seq: u64,
@@ -520,7 +607,7 @@ mod tests {
         assert_eq!(decoded.origin_module_id, "com.acme/Workflow@1");
         assert_eq!(decoded.origin_instance_key, Some(b"order-123".to_vec()));
         assert_eq!(decoded.intent_id, hash_to_hex(&[7u8; 32]));
-        assert_eq!(decoded.effect_kind, aos_effects::EffectKind::HTTP_REQUEST);
+        assert_eq!(decoded.effect_op, "sys/http.request@1");
         assert_eq!(decoded.emitted_at_seq, 42);
         assert_eq!(decoded.seq, 3);
         assert_eq!(decoded.kind, "progress.token");

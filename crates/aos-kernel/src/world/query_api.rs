@@ -177,8 +177,7 @@ mod tests {
             air_version: CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: vec![],
-            effects: vec![],
-            effect_bindings: vec![],
+            ops: vec![],
             secrets: vec![],
             routing: None,
         }
@@ -194,7 +193,7 @@ mod tests {
             manifest,
             secrets: vec![],
             modules: HashMap::new(),
-            effects: HashMap::new(),
+            ops: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: aos_air_types::catalog::EffectCatalog::default(),
         };

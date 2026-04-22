@@ -9,13 +9,24 @@ pub struct EffectStreamFrame {
     pub intent_hash: [u8; 32],
     pub adapter_id: String,
     pub origin_module_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_workflow_op_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         with = "serde_bytes_opt"
     )]
     pub origin_instance_key: Option<Vec<u8>>,
-    pub effect_kind: String,
+    #[serde(default, alias = "effect_kind")]
+    pub effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_entrypoint: Option<String>,
     pub emitted_at_seq: u64,
     pub seq: u64,
     pub kind: String,

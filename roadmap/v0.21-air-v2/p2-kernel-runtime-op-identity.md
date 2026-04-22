@@ -1,6 +1,6 @@
 # P2: Kernel Runtime Op Identity Cut
 
-Status: planned.
+Status: implemented for core runtime crates; fixture/test-common convergence remains deferred to P3.
 
 ## Goal
 
@@ -78,6 +78,26 @@ Note: since this is a bigger refactor, it is acceptable to have modules breaking
   journal frame is durably flushed.
 - Make Python runtime execution return a clear unsupported-runtime error if reached before the later
   Python implementation phase.
+
+## Progress
+
+- [x] Core runtime now uses `LoadedManifest.ops`/`DefOp` for workflow/effect contracts.
+- [x] Domain routing uses `routing.subscriptions[].op`.
+- [x] Workflow invocation resolves `impl.module` and calls the WASM export named by
+  `impl.entrypoint`.
+- [x] Workflow context carries workflow op identity plus op definition hash.
+- [x] Workflow effect emission resolves and authorizes against `workflow.effects_emitted[]`.
+- [x] Effect params and receipts are normalized/validated through the resolved effect op schemas.
+- [x] Effect intent hashes, journal records, snapshots, open work, receipts, stream frames, replay,
+  and adapter start context now carry effect op name/hash and executor metadata.
+- [x] Receipt and stream built-in envelope schemas include v2 op identity fields.
+- [x] Kernel unit tests and affected AIR/effects/wasm-sdk suites pass under the op model.
+- [ ] Migrate old AIR fixture/test-common batches under `crates/aos-node/tests/**`,
+  `crates/aos-kernel/tests/**`, `crates/aos-smoke/fixtures/**`, and `crates/aos-agent/air/**`.
+  This remains deferred per the instruction to hold off on fixtures and other AIR batches.
+- [ ] Rename/remove stale node compatibility names that still say `strict_effect_bindings`.
+  Production dispatch no longer reads `manifest.effect_bindings`, but these diagnostics/config
+  labels are still transitional.
 
 ## Runtime Invariants
 

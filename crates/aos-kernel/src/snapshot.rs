@@ -142,6 +142,16 @@ pub fn receipts_to_vecdeque(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectIntentSnapshot {
     pub intent_hash: [u8; 32],
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_entrypoint: Option<String>,
     pub kind: String,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
@@ -153,6 +163,11 @@ impl EffectIntentSnapshot {
     pub fn from_intent(intent: &EffectIntent) -> Self {
         Self {
             intent_hash: intent.intent_hash,
+            effect_op: intent.effect_op.clone(),
+            effect_op_hash: intent.effect_op_hash.clone(),
+            executor_module: intent.executor_module.clone(),
+            executor_module_hash: intent.executor_module_hash.clone(),
+            executor_entrypoint: intent.executor_entrypoint.clone(),
             kind: intent.kind.as_str().to_string(),
             params_cbor: intent.params_cbor.clone(),
             idempotency_key: intent.idempotency_key,
@@ -161,6 +176,15 @@ impl EffectIntentSnapshot {
 
     pub fn into_intent(self) -> EffectIntent {
         EffectIntent {
+            effect_op: if self.effect_op.is_empty() {
+                self.kind.clone()
+            } else {
+                self.effect_op
+            },
+            effect_op_hash: self.effect_op_hash,
+            executor_module: self.executor_module,
+            executor_module_hash: self.executor_module_hash,
+            executor_entrypoint: self.executor_entrypoint,
             kind: RuntimeEffectKind::new(self.kind),
             params_cbor: self.params_cbor,
             idempotency_key: self.idempotency_key,
@@ -173,7 +197,17 @@ impl EffectIntentSnapshot {
 pub struct WorkflowReceiptSnapshot {
     pub intent_hash: [u8; 32],
     pub origin_module_id: String,
-    pub effect_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_workflow_op_hash: Option<String>,
+    pub effect_op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_op_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_entrypoint: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -212,7 +246,8 @@ pub struct WorkflowInflightIntentSnapshot {
         with = "serde_bytes_opt"
     )]
     pub origin_instance_key: Option<Vec<u8>>,
-    pub effect_kind: String,
+    #[serde(default, alias = "effect_kind")]
+    pub effect_op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_hash: Option<String>,
     pub emitted_at_seq: u64,
@@ -238,7 +273,12 @@ impl WorkflowReceiptSnapshot {
         Self {
             intent_hash,
             origin_module_id: ctx.origin_module_id.clone(),
-            effect_kind: ctx.effect_kind.clone(),
+            origin_workflow_op_hash: ctx.origin_workflow_op_hash.clone(),
+            effect_op: ctx.effect_op.clone(),
+            effect_op_hash: ctx.effect_op_hash.clone(),
+            executor_module: ctx.executor_module.clone(),
+            executor_module_hash: ctx.executor_module_hash.clone(),
+            executor_entrypoint: ctx.executor_entrypoint.clone(),
             origin_instance_key: ctx.origin_instance_key.clone(),
             params_cbor: ctx.params_cbor.clone(),
             idempotency_key: ctx.idempotency_key,
@@ -252,13 +292,21 @@ impl WorkflowReceiptSnapshot {
         WorkflowEffectContext::new(
             self.origin_module_id,
             self.origin_instance_key,
-            self.effect_kind,
+            self.effect_op.clone(),
             self.params_cbor,
             self.idempotency_key,
             self.issuer_ref,
             self.intent_hash,
             self.emitted_at_seq,
             self.module_version,
+        )
+        .with_op_identity(
+            self.origin_workflow_op_hash,
+            self.effect_op,
+            self.effect_op_hash,
+            self.executor_module,
+            self.executor_module_hash,
+            self.executor_entrypoint,
         )
     }
 }
@@ -320,7 +368,7 @@ mod tests {
                     intent_id: [9u8; 32],
                     origin_module_id: "com.acme/Workflow@1".into(),
                     origin_instance_key: None,
-                    effect_kind: "http.request".into(),
+                    effect_op: "sys/http.request@1".into(),
                     params_hash: None,
                     emitted_at_seq: 7,
                     last_stream_seq: 4,

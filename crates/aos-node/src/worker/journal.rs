@@ -4,7 +4,7 @@ use aos_kernel::WorldInput;
 use aos_node::{
     CheckpointBackend, CreateWorldSource, EffectExecutionClass, HostControl, JournalBackend,
     JournalCommit, JournalDisposition, JournalFlush, JournalSourceAck, SubmissionPayload,
-    WorldCheckpointRef, WorldId, classify_effect_kind, partition_for_world,
+    WorldCheckpointRef, WorldId, classify_effect_op_identity, partition_for_world,
 };
 
 use super::commands::{
@@ -204,7 +204,13 @@ impl HostedWorkerCore {
             }
 
             for opened in &slice.opened_effects {
-                match classify_effect_kind(opened.intent.kind.as_str()) {
+                let class = self
+                    .state
+                    .registered_worlds
+                    .get(&world_id)
+                    .map(|registered| registered.effect_runtime.classify_intent(&opened.intent))
+                    .unwrap_or_else(|| classify_effect_op_identity(&opened.intent));
+                match class {
                     EffectExecutionClass::InlineInternal => {
                         if let Some(receipt) =
                             world.kernel.handle_internal_intent(&opened.intent)?
@@ -701,8 +707,7 @@ mod tests {
             air_version: CURRENT_AIR_VERSION.to_string(),
             schemas: Vec::new(),
             modules: Vec::new(),
-            effects: Vec::new(),
-            effect_bindings: Vec::new(),
+            ops: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };

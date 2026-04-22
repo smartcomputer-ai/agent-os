@@ -9,7 +9,7 @@ use aos_kernel::{Kernel, KernelConfig, ManifestLoader, Store};
 use aos_node::{
     CheckpointBackend, CreateWorldRequest, CreateWorldSource, EffectExecutionClass, EffectRuntime,
     JournalBackend, SharedEffectRuntime, SnapshotRecord, TimerScheduler, UniverseId, WorldId,
-    WorldLogFrame, classify_effect_kind, partition_for_world,
+    WorldLogFrame, classify_effect_op_identity, partition_for_world,
 };
 
 use crate::blobstore::HostedCas;
@@ -332,7 +332,7 @@ impl HostedWorkerCore {
         EffectRuntime::from_loaded_manifest_with_shared(
             shared,
             loaded,
-            world_config.strict_effect_bindings,
+            world_config.strict_op_routes,
         )
         .map_err(WorkerError::Runtime)
     }
@@ -366,7 +366,13 @@ impl HostedWorkerCore {
 
             for pending in &pending {
                 let intent = effect_intent_from_pending(pending)?;
-                match classify_effect_kind(intent.kind.as_str()) {
+                let class = self
+                    .state
+                    .registered_worlds
+                    .get(&world_id)
+                    .map(|registered| registered.effect_runtime.classify_intent(&intent))
+                    .unwrap_or_else(|| classify_effect_op_identity(&intent));
+                match class {
                     EffectExecutionClass::ExternalAsync => {
                         external_intents
                             .push((intent, Some(adapter_start_context_from_pending(pending))));

@@ -32,6 +32,21 @@ pub fn normalize_effect_params(
     Ok(normalized.bytes)
 }
 
+pub fn normalize_effect_op_params(
+    catalog: &EffectCatalog,
+    schemas: &SchemaIndex,
+    effect_op: &str,
+    params_cbor: &[u8],
+) -> Result<Vec<u8>, NormalizeError> {
+    let schema_name = catalog
+        .params_schema(effect_op)
+        .map(|schema| schema.as_str())
+        .ok_or_else(|| NormalizeError::UnknownEffect(effect_op.to_string()))?;
+    let normalized =
+        normalize_cbor_by_name(schemas, schema_name, params_cbor).map_err(map_error)?;
+    Ok(normalized.bytes)
+}
+
 fn params_schema_name<'a>(catalog: &'a EffectCatalog, kind: &EffectKind) -> Option<&'a str> {
     catalog
         .params_schema_for_runtime(kind.as_str())

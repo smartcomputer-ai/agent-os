@@ -121,7 +121,7 @@
           "text": {},
           "$comment": "Name-formatted string"
         },
-        "effect_kind": {
+        "effect_op": {
           "text": {}
         },
         "adapter_id": {
@@ -627,7 +627,7 @@
           "text": {},
           "$comment": "Name-formatted string"
         },
-        "effect_kind": {
+        "effect_op": {
           "text": {}
         },
         "adapter_id": {
@@ -665,7 +665,7 @@
           "text": {},
           "$comment": "Name-formatted string"
         },
-        "effect_kind": {
+        "effect_op": {
           "text": {}
         },
         "adapter_id": {
@@ -1389,7 +1389,7 @@
               "intent_hash": {
                 "hash": {}
               },
-              "effect_kind": {
+              "effect_op": {
                 "text": {}
               },
               "emitted_at_seq": {

@@ -12,7 +12,7 @@
     },
     "impl": {
       "module": "sys/workspace_wasm@1",
-      "entrypoint": "workflow"
+      "entrypoint": "step"
     }
   },
   {
@@ -27,7 +27,7 @@
     },
     "impl": {
       "module": "sys/http_publish_wasm@1",
-      "entrypoint": "workflow"
+      "entrypoint": "step"
     }
   },
   {

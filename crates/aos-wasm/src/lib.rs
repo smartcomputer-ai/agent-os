@@ -95,6 +95,16 @@ impl WorkflowRuntime {
         instance_pre: &InstancePre<()>,
         input: &WorkflowInput,
     ) -> Result<WorkflowOutput> {
+        self.run_precompiled_export(instance_pre, STEP_EXPORT, input)
+    }
+
+    /// Execute an already prepared instance by invoking the named workflow export.
+    pub fn run_precompiled_export(
+        &self,
+        instance_pre: &InstancePre<()>,
+        export_name: &str,
+        input: &WorkflowInput,
+    ) -> Result<WorkflowOutput> {
         let mut store = Store::new(&self.engine, ());
         let instance = instance_pre.instantiate(&mut store)?;
         let memory = instance
@@ -104,13 +114,13 @@ impl WorkflowRuntime {
             .get_typed_func::<i32, i32>(&mut store, ALLOC_EXPORT)
             .context("wasm export 'alloc' not found")?;
         let legacy_step =
-            instance.get_typed_func::<(i32, i32), (i32, i32)>(&mut store, STEP_EXPORT);
+            instance.get_typed_func::<(i32, i32), (i32, i32)>(&mut store, export_name);
         let modern_step = match legacy_step {
             Ok(step) => StepImpl::Legacy(step),
             Err(_) => StepImpl::Modern(
                 instance
-                    .get_typed_func::<(i32, i32, i32), ()>(&mut store, STEP_EXPORT)
-                    .context("wasm export 'step' not found")?,
+                    .get_typed_func::<(i32, i32, i32), ()>(&mut store, export_name)
+                    .with_context(|| format!("wasm export '{export_name}' not found"))?,
             ),
         };
 

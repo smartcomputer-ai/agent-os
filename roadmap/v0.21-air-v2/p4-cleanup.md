@@ -22,3 +22,7 @@ runtime identity, and repo fixtures to AIR v2.
 
 - This was originally listed in P1 semantic validation, but is cleanup-sized compared with the
   core schema/catalog/model cut and should not block the fixture/runtime migration phases.
+
+## My notes:
+- Remove effect_kind
+- Consider adding clear abstractions for 1) calling workflows, 2) calling effects (already exists, I think)

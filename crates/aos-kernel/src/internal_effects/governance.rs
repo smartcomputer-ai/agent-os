@@ -69,7 +69,7 @@ where
                         None => None,
                     };
                     Ok(GovPredictedEffect {
-                        kind: effect.kind,
+                        op: effect.op,
                         intent_hash,
                         params_json,
                     })
@@ -84,7 +84,7 @@ where
                         origin_module_id: pending.origin_module_id,
                         origin_instance_key_b64: pending.origin_instance_key_b64,
                         intent_hash: hash_ref_from_hex(&pending.intent_hash)?,
-                        effect_kind: pending.effect_kind,
+                        effect_op: pending.effect_op,
                         emitted_at_seq: pending.emitted_at_seq,
                     })
                 })

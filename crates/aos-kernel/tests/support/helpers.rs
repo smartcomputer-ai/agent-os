@@ -5,8 +5,8 @@
 #![allow(dead_code)]
 
 use aos_air_types::{
-    DefSchema, EmptyObject, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveInt,
-    TypePrimitiveText, TypeRecord, TypeRef, TypeVariant, WorkflowAbi,
+    DefSchema, EmptyObject, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText,
+    TypeRecord, TypeRef, TypeVariant, WorkflowAbi,
 };
 use aos_effects::builtins::TimerSetParams;
 #[path = "fixtures.rs"]

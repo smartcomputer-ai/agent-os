@@ -2,9 +2,9 @@ use super::*;
 use crate::MemStore;
 use crate::journal::{Journal, JournalEntry, JournalKind};
 use aos_air_types::{
-    CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, Routing,
-    RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord, WorkflowAbi,
-    catalog::EffectCatalog,
+    CURRENT_AIR_VERSION, DefModule, DefOp, DefSchema, HashRef, ModuleRuntime, NamedRef, OpImpl,
+    OpKind, Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText,
+    TypeRecord, WasmArtifact, WorkflowDeterminism, WorkflowOp, catalog::EffectCatalog,
 };
 use indexmap::IndexMap;
 use serde_cbor::Value as CborValue;
@@ -30,8 +30,7 @@ pub(crate) fn minimal_manifest() -> Manifest {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![],
-        effects: vec![],
-        effect_bindings: vec![],
+        ops: vec![],
         secrets: vec![],
         routing: None,
     }
@@ -85,8 +84,7 @@ pub(crate) fn loaded_manifest_with_schema(
             hash: HashRef::new(schema_hash.to_hex()).unwrap(),
         }],
         modules: vec![],
-        effects: vec![],
-        effect_bindings: vec![],
+        ops: vec![],
         secrets: vec![],
         routing: None,
     };
@@ -94,7 +92,7 @@ pub(crate) fn loaded_manifest_with_schema(
         manifest,
         secrets: vec![],
         modules: HashMap::new(),
-        effects: HashMap::new(),
+        ops: HashMap::new(),
         schemas: HashMap::from([(schema_name.into(), schema)]),
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
@@ -130,26 +128,55 @@ pub(crate) fn append_record(journal: &mut Journal, record: JournalRecord) {
         .expect("append record");
 }
 
-pub(crate) fn minimal_kernel_with_router() -> Kernel<crate::MemStore> {
-    let store = crate::MemStore::default();
-    let module = DefModule {
-        name: "com.acme/Workflow@1".into(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: HashRef::new(hash(1)).unwrap(),
-        key_schema: Some(SchemaRef::new("com.acme/Key@1").unwrap()),
-        abi: ModuleAbi {
-            workflow: Some(WorkflowAbi {
-                state: SchemaRef::new("com.acme/State@1").unwrap(),
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
-                annotations: None,
-                effects_emitted: vec![],
-            }),
-            pure: None,
+pub(crate) fn workflow_module(name: &str, hash_num: u64) -> DefModule {
+    DefModule {
+        name: name.into(),
+        runtime: ModuleRuntime::Wasm {
+            artifact: WasmArtifact::WasmModule {
+                hash: HashRef::new(hash(hash_num)).unwrap(),
+            },
         },
-    };
+    }
+}
+
+pub(crate) fn workflow_op(
+    name: &str,
+    module_name: &str,
+    key_schema: Option<&str>,
+    effects_emitted: Vec<String>,
+) -> DefOp {
+    DefOp {
+        name: name.into(),
+        op_kind: OpKind::Workflow,
+        workflow: Some(WorkflowOp {
+            state: SchemaRef::new("com.acme/State@1").unwrap(),
+            event: SchemaRef::new("com.acme/Event@1").unwrap(),
+            context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
+            annotations: None,
+            key_schema: key_schema.map(|schema| SchemaRef::new(schema).unwrap()),
+            effects_emitted,
+            determinism: WorkflowDeterminism::Strict,
+        }),
+        effect: None,
+        implementation: OpImpl {
+            module: module_name.into(),
+            entrypoint: "step".into(),
+        },
+    }
+}
+
+fn minimal_kernel_with_route(
+    key_schema: Option<&str>,
+    key_field: Option<&str>,
+) -> Kernel<MemStore> {
+    let store = MemStore::default();
+    let workflow = "com.acme/Workflow@1";
+    let module = workflow_module(workflow, 1);
+    let op = workflow_op(workflow, workflow, key_schema, vec![]);
     let mut modules = HashMap::new();
     modules.insert(module.name.clone(), module);
+    let mut ops = HashMap::new();
+    ops.insert(op.name.clone(), op);
     let mut schemas = HashMap::new();
     schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
     schemas.insert(
@@ -161,199 +188,47 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<crate::MemStore> {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![NamedRef {
-            name: "com.acme/Workflow@1".into(),
+            name: workflow.into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
-        effects: vec![],
-        effect_bindings: vec![],
+        ops: vec![NamedRef {
+            name: workflow.into(),
+            hash: HashRef::new(hash(2)).unwrap(),
+        }],
         secrets: vec![],
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                module: "com.acme/Workflow@1".to_string(),
-                key_field: Some("id".into()),
+                op: workflow.to_string(),
+                key_field: key_field.map(str::to_string),
             }],
-            inboxes: vec![],
         }),
     };
     let loaded = LoadedManifest {
         manifest,
         secrets: vec![],
         modules,
-        effects: HashMap::new(),
+        ops,
         schemas,
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };
     Kernel::from_loaded_manifest(Arc::new(store), loaded, Journal::new()).unwrap()
+}
+
+pub(crate) fn minimal_kernel_with_router() -> Kernel<crate::MemStore> {
+    minimal_kernel_with_route(Some("com.acme/Key@1"), Some("id"))
 }
 
 pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<crate::MemStore> {
-    let store = crate::MemStore::default();
-    let module = DefModule {
-        name: "com.acme/Workflow@1".into(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: HashRef::new(hash(1)).unwrap(),
-        key_schema: None,
-        abi: ModuleAbi {
-            workflow: Some(WorkflowAbi {
-                state: SchemaRef::new("com.acme/State@1").unwrap(),
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
-                annotations: None,
-                effects_emitted: vec![],
-            }),
-            pure: None,
-        },
-    };
-    let mut modules = HashMap::new();
-    modules.insert(module.name.clone(), module);
-    let mut schemas = HashMap::new();
-    schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
-    schemas.insert(
-        "com.acme/Event@1".into(),
-        schema_event_record("com.acme/Event@1"),
-    );
-    let manifest = Manifest {
-        air_version: CURRENT_AIR_VERSION.to_string(),
-        schemas: vec![],
-        modules: vec![NamedRef {
-            name: "com.acme/Workflow@1".into(),
-            hash: HashRef::new(hash(1)).unwrap(),
-        }],
-        effects: vec![],
-        effect_bindings: vec![],
-        secrets: vec![],
-        routing: Some(Routing {
-            subscriptions: vec![RoutingEvent {
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                module: "com.acme/Workflow@1".to_string(),
-                key_field: Some("id".into()),
-            }],
-            inboxes: vec![],
-        }),
-    };
-    let loaded = LoadedManifest {
-        manifest,
-        secrets: vec![],
-        modules,
-        effects: HashMap::new(),
-        schemas,
-        effect_catalog: EffectCatalog::from_defs(Vec::new()),
-    };
-    Kernel::from_loaded_manifest(Arc::new(store), loaded, Journal::new()).unwrap()
+    minimal_kernel_with_route(None, Some("id"))
 }
 
 pub(crate) fn minimal_kernel_non_keyed() -> Kernel<crate::MemStore> {
-    let store = crate::MemStore::default();
-    let module = DefModule {
-        name: "com.acme/Workflow@1".into(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: HashRef::new(hash(1)).unwrap(),
-        key_schema: None,
-        abi: ModuleAbi {
-            workflow: Some(WorkflowAbi {
-                state: SchemaRef::new("com.acme/State@1").unwrap(),
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
-                annotations: None,
-                effects_emitted: vec![],
-            }),
-            pure: None,
-        },
-    };
-    let mut modules = HashMap::new();
-    modules.insert(module.name.clone(), module);
-    let mut schemas = HashMap::new();
-    schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
-    schemas.insert(
-        "com.acme/Event@1".into(),
-        schema_event_record("com.acme/Event@1"),
-    );
-    let manifest = Manifest {
-        air_version: CURRENT_AIR_VERSION.to_string(),
-        schemas: vec![],
-        modules: vec![NamedRef {
-            name: "com.acme/Workflow@1".into(),
-            hash: HashRef::new(hash(1)).unwrap(),
-        }],
-        effects: vec![],
-        effect_bindings: vec![],
-        secrets: vec![],
-        routing: Some(Routing {
-            subscriptions: vec![RoutingEvent {
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                module: "com.acme/Workflow@1".to_string(),
-                key_field: None,
-            }],
-            inboxes: vec![],
-        }),
-    };
-    let loaded = LoadedManifest {
-        manifest,
-        secrets: vec![],
-        modules,
-        effects: HashMap::new(),
-        schemas,
-        effect_catalog: EffectCatalog::from_defs(Vec::new()),
-    };
-    Kernel::from_loaded_manifest(Arc::new(store), loaded, Journal::new()).unwrap()
+    minimal_kernel_with_route(None, None)
 }
 
 pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<crate::MemStore> {
-    let store = crate::MemStore::default();
-    let module = DefModule {
-        name: "com.acme/Workflow@1".into(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: HashRef::new(hash(1)).unwrap(),
-        key_schema: Some(SchemaRef::new("com.acme/Key@1").unwrap()),
-        abi: ModuleAbi {
-            workflow: Some(WorkflowAbi {
-                state: SchemaRef::new("com.acme/State@1").unwrap(),
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
-                annotations: None,
-                effects_emitted: vec![],
-            }),
-            pure: None,
-        },
-    };
-    let mut modules = HashMap::new();
-    modules.insert(module.name.clone(), module);
-    let mut schemas = HashMap::new();
-    schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
-    schemas.insert(
-        "com.acme/Event@1".into(),
-        schema_event_record("com.acme/Event@1"),
-    );
-    schemas.insert("com.acme/Key@1".into(), schema_text("com.acme/Key@1"));
-    let manifest = Manifest {
-        air_version: CURRENT_AIR_VERSION.to_string(),
-        schemas: vec![],
-        modules: vec![NamedRef {
-            name: "com.acme/Workflow@1".into(),
-            hash: HashRef::new(hash(1)).unwrap(),
-        }],
-        effects: vec![],
-        effect_bindings: vec![],
-        secrets: vec![],
-        routing: Some(Routing {
-            subscriptions: vec![RoutingEvent {
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                module: "com.acme/Workflow@1".to_string(),
-                key_field: None,
-            }],
-            inboxes: vec![],
-        }),
-    };
-    let loaded = LoadedManifest {
-        manifest,
-        secrets: vec![],
-        modules,
-        effects: HashMap::new(),
-        schemas,
-        effect_catalog: EffectCatalog::from_defs(Vec::new()),
-    };
-    Kernel::from_loaded_manifest(Arc::new(store), loaded, Journal::new()).unwrap()
+    minimal_kernel_with_route(Some("com.acme/Key@1"), None)
 }
 
 pub(crate) fn empty_manifest() -> Manifest {
@@ -361,8 +236,7 @@ pub(crate) fn empty_manifest() -> Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![],
-        effects: vec![],
-        effect_bindings: vec![],
+        ops: vec![],
         secrets: vec![],
         routing: None,
     }
@@ -383,7 +257,7 @@ pub(crate) fn kernel_with_store_and_journal(
         manifest,
         secrets: vec![],
         modules: HashMap::new(),
-        effects: HashMap::new(),
+        ops: HashMap::new(),
         schemas: HashMap::new(),
         effect_catalog: EffectCatalog::from_defs(Vec::new()),
     };

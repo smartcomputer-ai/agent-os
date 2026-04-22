@@ -61,13 +61,22 @@ impl<S: Store> WorkflowRegistry<S> {
     }
 
     pub fn invoke(&self, name: &str, input: &WorkflowInput) -> Result<WorkflowOutput, KernelError> {
+        self.invoke_export(name, "step", input)
+    }
+
+    pub fn invoke_export(
+        &self,
+        name: &str,
+        export_name: &str,
+        input: &WorkflowInput,
+    ) -> Result<WorkflowOutput, KernelError> {
         let module = self
             .modules
             .get(name)
             .ok_or_else(|| KernelError::WorkflowNotFound(name.to_string()))?;
         let output = self
             .runtime
-            .run_precompiled(module.instance_pre.as_ref(), input)
+            .run_precompiled_export(module.instance_pre.as_ref(), export_name, input)
             .map_err(KernelError::Wasm)?;
         Ok(output)
     }

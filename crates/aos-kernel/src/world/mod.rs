@@ -161,7 +161,7 @@ pub struct Kernel<S: Store> {
     manifest_hash: Hash,
     secrets: Vec<DefSecret>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
-    effect_defs: HashMap<Name, DefOp>,
+    op_defs: HashMap<Name, DefOp>,
     schema_defs: HashMap<Name, DefSchema>,
     workflows: WorkflowRegistry<S>,
     pures: Arc<Mutex<PureRegistry<S>>>,
@@ -212,7 +212,7 @@ pub(crate) enum WorkflowRuntimeStatus {
 pub(crate) struct WorkflowInflightIntentMeta {
     pub origin_module_id: String,
     pub origin_instance_key: Option<Vec<u8>>,
-    pub effect_kind: String,
+    pub effect_op: String,
     pub params_hash: Option<String>,
     pub emitted_at_seq: u64,
     pub last_stream_seq: u64,
@@ -1003,7 +1003,7 @@ impl<S: Store + 'static> KernelBuilder<S> {
 impl<S: Store + 'static> Kernel<S> {
     fn workflow_op(&self, workflow_name: &str) -> Result<&DefOp, KernelError> {
         let op = self
-            .effect_defs
+            .op_defs
             .get(workflow_name)
             .ok_or_else(|| KernelError::WorkflowNotFound(workflow_name.to_string()))?;
         if op.op_kind != OpKind::Workflow {
@@ -1031,22 +1031,59 @@ impl<S: Store + 'static> Kernel<S> {
         wasm_hash_string(workflow_name, module_def)
     }
 
-    fn workflow_effect_declares(&self, workflow_name: &str, runtime_kind: &str) -> bool {
+    fn op_hash(&self, op: &DefOp) -> Result<String, KernelError> {
+        Hash::of_cbor(&AirNode::Defop(op.clone()))
+            .map(|hash| hash.to_hex())
+            .map_err(|err| KernelError::Manifest(err.to_string()))
+    }
+
+    fn module_hash(&self, module: &DefModule) -> Result<String, KernelError> {
+        Hash::of_cbor(&AirNode::Defmodule(module.clone()))
+            .map(|hash| hash.to_hex())
+            .map_err(|err| KernelError::Manifest(err.to_string()))
+    }
+
+    fn workflow_op_hash(&self, workflow_name: &str) -> Result<String, KernelError> {
+        self.op_hash(self.workflow_op(workflow_name)?)
+    }
+
+    fn resolve_declared_effect_op(
+        &self,
+        workflow_name: &str,
+        emitted_effect: &str,
+    ) -> Result<&DefOp, KernelError> {
+        let workflow_op = self.workflow_op(workflow_name)?;
+        let workflow = workflow_op
+            .workflow
+            .as_ref()
+            .expect("workflow_op requires workflow metadata");
+        for declared in &workflow.effects_emitted {
+            let Some(effect_op) = self.op_defs.get(declared) else {
+                continue;
+            };
+            if effect_op.op_kind != OpKind::Effect {
+                continue;
+            }
+            if declared.as_str() == emitted_effect || effect_op.name.as_str() == emitted_effect {
+                return Ok(effect_op);
+            }
+        }
+        Err(KernelError::WorkflowOutput(format!(
+            "module '{workflow_name}' emitted undeclared effect op '{emitted_effect}'; declare the effect op in workflow.effects_emitted"
+        )))
+    }
+
+    fn workflow_effect_declares(&self, workflow_name: &str, effect_op: &str) -> bool {
         let Ok(op) = self.workflow_op(workflow_name) else {
             return false;
         };
         let Some(workflow) = op.workflow.as_ref() else {
             return false;
         };
-        workflow.effects_emitted.iter().any(|declared| {
-            declared.as_str() == runtime_kind
-                || declared.as_str() == format!("sys/{runtime_kind}@1")
-                || self
-                    .effect_defs
-                    .get(declared)
-                    .map(|effect_op| effect_op.implementation.entrypoint == runtime_kind)
-                    .unwrap_or(false)
-        })
+        workflow
+            .effects_emitted
+            .iter()
+            .any(|declared| declared.as_str() == effect_op)
     }
 
     fn ensure_cell_index_root(&mut self, workflow: &Name) -> Result<Hash, KernelError> {
@@ -1089,11 +1126,16 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn restore_effect_intent(&mut self, record: EffectIntentRecord) -> Result<(), KernelError> {
-        let effect_kind = record.kind.clone();
+        let effect_op = if record.effect_op.is_empty() {
+            record.kind.clone()
+        } else {
+            record.effect_op.clone()
+        };
         let params_cbor = record.params_cbor.clone();
         match record.origin {
             IntentOriginRecord::Workflow {
                 name,
+                workflow_op_hash,
                 instance_key,
                 issuer_ref,
                 emitted_at_seq,
@@ -1110,7 +1152,7 @@ impl<S: Store + 'static> Kernel<S> {
                         WorkflowEffectContext::new(
                             name.clone(),
                             instance_key.clone(),
-                            effect_kind.clone(),
+                            effect_op.clone(),
                             params_cbor.clone(),
                             record.idempotency_key,
                             issuer_ref.clone(),
@@ -1118,12 +1160,20 @@ impl<S: Store + 'static> Kernel<S> {
                             emitted_at_seq.unwrap_or_default(),
                             None,
                         )
+                        .with_op_identity(
+                            workflow_op_hash.clone(),
+                            effect_op.clone(),
+                            record.effect_op_hash.clone(),
+                            record.executor_module.clone(),
+                            record.executor_module_hash.clone(),
+                            record.executor_entrypoint.clone(),
+                        )
                     });
                 self.record_workflow_inflight_intent(
                     &name,
                     instance_key.as_deref(),
                     record.intent_hash,
-                    &effect_kind,
+                    &effect_op,
                     &params_cbor,
                     emitted_at_seq.unwrap_or_default(),
                 );
@@ -1179,7 +1229,7 @@ impl<S: Store + 'static> Kernel<S> {
         module_id: &str,
         instance_key: Option<&[u8]>,
         intent_hash: [u8; 32],
-        effect_kind: &str,
+        effect_op: &str,
         params_cbor: &[u8],
         emitted_at_seq: u64,
     ) {
@@ -1199,7 +1249,7 @@ impl<S: Store + 'static> Kernel<S> {
             WorkflowInflightIntentMeta {
                 origin_module_id: module_id.to_string(),
                 origin_instance_key: instance_key.map(|k| k.to_vec()),
-                effect_kind: effect_kind.to_string(),
+                effect_op: effect_op.to_string(),
                 params_hash: Some(Hash::of_bytes(params_cbor).to_hex()),
                 emitted_at_seq,
                 last_stream_seq: 0,
@@ -1390,7 +1440,7 @@ impl<S: Store + 'static> Kernel<S> {
     /// List workflow module names from the active manifest.
     pub fn workflow_names(&self) -> Vec<String> {
         let mut names: Vec<_> = self
-            .effect_defs
+            .op_defs
             .iter()
             .filter_map(|(name, def)| {
                 (def.op_kind == OpKind::Workflow && def.workflow.is_some()).then(|| name.clone())
@@ -1408,7 +1458,7 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(def) = self.module_defs.get(name) {
             return Some(AirNode::Defmodule(def.clone()));
         }
-        self.effect_defs
+        self.op_defs
             .get(name)
             .map(|def| AirNode::Defop(def.clone()))
     }
@@ -1486,7 +1536,7 @@ impl<S: Store + 'static> Kernel<S> {
             );
         }
 
-        for (name, def) in self.effect_defs.iter() {
+        for (name, def) in self.op_defs.iter() {
             push_if(
                 &mut entries,
                 "defop",
@@ -1633,7 +1683,11 @@ impl<S: Store + 'static> Kernel<S> {
             .into_iter()
             .filter_map(|effect| {
                 aos_effects::EffectIntent::from_raw_params(
-                    effect.effect_kind.into(),
+                    effect
+                        .executor_entrypoint
+                        .clone()
+                        .unwrap_or_else(|| effect.effect_op.clone())
+                        .into(),
                     effect.params_cbor,
                     effect.idempotency_key,
                 )
@@ -1669,7 +1723,7 @@ impl<S: Store + 'static> Kernel<S> {
                         intent_id: *intent_id,
                         origin_module_id: meta.origin_module_id.clone(),
                         origin_instance_key: meta.origin_instance_key.clone(),
-                        effect_kind: meta.effect_kind.clone(),
+                        effect_op: meta.effect_op.clone(),
                         params_hash: meta.params_hash.clone(),
                         emitted_at_seq: meta.emitted_at_seq,
                         last_stream_seq: meta.last_stream_seq,
@@ -1831,13 +1885,20 @@ impl<S: Store + 'static> Kernel<S> {
         intent: &EffectIntent,
         origin: IntentOriginRecord,
     ) -> Result<(), KernelError> {
-        let stored_params = if intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT {
+        let stored_params = if intent.effect_op == "sys/blob.put@1"
+            || intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT
+        {
             self.externalize_journal_cbor(&intent.params_cbor)?
         } else {
             JournalCborStorage::inline(intent.params_cbor.clone())
         };
         let record = JournalRecord::EffectIntent(EffectIntentRecord {
             intent_hash: intent.intent_hash,
+            effect_op: intent.effect_op.clone(),
+            effect_op_hash: intent.effect_op_hash.clone(),
+            executor_module: intent.executor_module.clone(),
+            executor_module_hash: intent.executor_module_hash.clone(),
+            executor_entrypoint: intent.executor_entrypoint.clone(),
             kind: intent.kind.as_str().to_string(),
             params_cbor: stored_params.inline,
             params_ref: stored_params.cbor_ref,
@@ -1891,7 +1952,7 @@ impl<S: Store + 'static> Kernel<S> {
         let externalize_payload = self
             .pending_workflow_receipts
             .get(&receipt.intent_hash)
-            .is_some_and(|ctx| ctx.effect_kind == aos_effects::EffectKind::BLOB_GET);
+            .is_some_and(|ctx| ctx.effect_op == "sys/blob.get@1");
         let stored_payload = if externalize_payload {
             self.externalize_journal_cbor(&receipt.payload_cbor)?
         } else {
@@ -1927,8 +1988,13 @@ impl<S: Store + 'static> Kernel<S> {
             intent_hash: frame.intent_hash,
             adapter_id: frame.adapter_id.clone(),
             origin_module_id: frame.origin_module_id.clone(),
+            origin_workflow_op_hash: frame.origin_workflow_op_hash.clone(),
             origin_instance_key: frame.origin_instance_key.clone(),
-            effect_kind: frame.effect_kind.clone(),
+            effect_op: frame.effect_op.clone(),
+            effect_op_hash: frame.effect_op_hash.clone(),
+            executor_module: frame.executor_module.clone(),
+            executor_module_hash: frame.executor_module_hash.clone(),
+            executor_entrypoint: frame.executor_entrypoint.clone(),
             emitted_at_seq: frame.emitted_at_seq,
             seq: frame.seq,
             frame_kind: frame.kind.clone(),

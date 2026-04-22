@@ -225,7 +225,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.manifest_hash = Hash::of_bytes(&manifest_bytes);
         self.secrets = loaded.secrets;
         self.module_defs = loaded.modules;
-        self.effect_defs = loaded.ops;
+        self.op_defs = loaded.ops;
         self.schema_defs = loaded.schemas;
         self.router = runtime.router;
 
@@ -282,7 +282,7 @@ mod tests {
             manifest: empty_manifest(),
             secrets: vec![],
             modules: HashMap::new(),
-            effects: HashMap::new(),
+            ops: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: aos_air_types::catalog::EffectCatalog::new(),
         };
@@ -303,7 +303,7 @@ mod tests {
             WorkflowInflightIntentMeta {
                 origin_module_id: "com.acme/Workflow@1".into(),
                 origin_instance_key: None,
-                effect_kind: "sys/http.request@1".into(),
+                effect_op: "sys/http.request@1".into(),
                 params_hash: None,
                 emitted_at_seq: 0,
                 last_stream_seq: 0,
@@ -324,7 +324,7 @@ mod tests {
             WorkflowEffectContext::new(
                 "com.acme/Workflow@1".into(),
                 None,
-                "timer.set".into(),
+                "sys/timer.set@1".into(),
                 vec![],
                 [2u8; 32],
                 None,
@@ -334,6 +334,11 @@ mod tests {
             ),
         );
         kernel.effect_manager.restore_queue(vec![EffectIntent {
+            effect_op: "introspect.manifest".into(),
+            effect_op_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: Some("introspect.manifest".into()),
             kind: EffectKind::new("introspect.manifest"),
             params_cbor: vec![],
             idempotency_key: [0u8; 32],

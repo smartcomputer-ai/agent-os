@@ -12,8 +12,8 @@ mod workspace;
 const INTROSPECT_ADAPTER_ID: &str = "kernel.introspect";
 const GOVERNANCE_ADAPTER_ID: &str = "kernel.governance";
 
-/// Kinds handled entirely inside the kernel (no host adapter).
-pub(crate) static INTERNAL_EFFECT_KINDS: &[&str] = &[
+/// Executor entrypoints handled entirely inside the kernel (no host adapter).
+pub(crate) static INTERNAL_EFFECT_ENTRYPOINTS: &[&str] = &[
     "introspect.manifest",
     "introspect.workflow_state",
     "introspect.journal_head",
@@ -88,11 +88,15 @@ where
         &mut self,
         intent: &EffectIntent,
     ) -> Result<Option<EffectReceipt>, KernelError> {
-        if !INTERNAL_EFFECT_KINDS.contains(&intent.kind.as_str()) {
+        let entrypoint = intent
+            .executor_entrypoint
+            .as_deref()
+            .unwrap_or_else(|| intent.kind.as_str());
+        if !INTERNAL_EFFECT_ENTRYPOINTS.contains(&entrypoint) {
             return Ok(None);
         }
 
-        let receipt_result = match intent.kind.as_str() {
+        let receipt_result = match entrypoint {
             EffectKind::INTROSPECT_MANIFEST => self.handle_manifest(intent),
             EffectKind::INTROSPECT_WORKFLOW_STATE => self.handle_workflow_state(intent),
             EffectKind::INTROSPECT_JOURNAL_HEAD => self.handle_journal_head(intent),
@@ -115,7 +119,7 @@ where
             _ => unreachable!("guard ensures only internal kinds reach here"),
         };
 
-        let adapter_id = if intent.kind.as_str().starts_with("governance.") {
+        let adapter_id = if entrypoint.starts_with("governance.") {
             GOVERNANCE_ADAPTER_ID
         } else {
             INTROSPECT_ADAPTER_ID
@@ -163,11 +167,11 @@ mod tests {
 
     fn write_minimal_manifest(path: &std::path::Path) {
         let manifest = json!({
-            "air_version": "1",
+            "air_version": "2",
             "schemas": [],
             "modules": [],
             "plans": [],
-            "effects": [],
+            "ops": [],
             "caps": [],
             "policies": [],
             "triggers": []
@@ -224,6 +228,11 @@ mod tests {
         let mut kernel = open_kernel();
         // bogus CBOR payload
         let intent = EffectIntent {
+            effect_op: EffectKind::INTROSPECT_MANIFEST.into(),
+            effect_op_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: Some(EffectKind::INTROSPECT_MANIFEST.into()),
             kind: EffectKind::introspect_manifest(),
             params_cbor: b"\x01\x02\x03".to_vec(),
             idempotency_key: [0; 32],
