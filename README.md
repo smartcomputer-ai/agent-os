@@ -15,8 +15,8 @@ AgentOS makes determinism and governed evolution first-class. Build portable, fo
 The current runtime is written in Rust and supports the following features:
 
 - **Deterministic kernel**: Single-threaded worlds with replay-identical state
-- **AIR (Agent Intermediate Representation)**: Typed control plane for schemas, modules, effects, routing, secrets, and manifests (homoiconic in spirit, where agents can read and edit their own runtime)
-- **Explicit effects**: No ambient I/O. Workflows request declared effect kinds, the kernel records open work, and adapters return signed receipts
+- **AIR (Agent Intermediate Representation)**: Typed control plane for schemas, modules, workflows, effects, routing, secrets, and manifests (homoiconic in spirit, where agents can read and edit their own runtime)
+- **Explicit effects**: No ambient I/O. Workflows request declared `defeffect` definitions, the kernel records open work, and adapters return signed receipts
 - **Full auditability**: Signed receipts for every external action enable complete forensic replay
 - **Safe self-modification**: Governed evolution through propose, shadow, approve, apply, execute, receipt, and audit phases with review gates and full provenance.
 
@@ -26,12 +26,12 @@ Start here:
 
 1. **[spec/01-overview.md](spec/01-overview.md)** — Core concepts, mental model, why this exists
 2. **[spec/02-architecture.md](spec/02-architecture.md)** — Runtime components, event flow, storage layout
-3. **[spec/03-air.md](spec/03-air.md)** — Complete AIR v1 spec (schemas, modules, effects, routing, secrets, manifests)
-4. **[spec/04-workflows.md](spec/04-workflows.md)** — Workflow module runtime contract, orchestration patterns, and keyed cells
+3. **[spec/03-air.md](spec/03-air.md)** — Complete AIR v2 spec (`defschema`, `defmodule`, `defworkflow`, `defeffect`, `defsecret`, manifests, and routing)
+4. **[spec/04-workflows.md](spec/04-workflows.md)** — Workflow runtime contract, orchestration patterns, declared effects, and keyed cells
 5. **[spec/05-effects.md](spec/05-effects.md)** — Async effects, durable open work, adapters, receipts, and continuation admission
 6. **[spec/06-backends.md](spec/06-backends.md)** — SQLite/Kafka journals, local/object-store CAS, checkpoint metadata, and recovery
 
-Fabric, the AOS-owned host/session execution substrate for `host.*` effects, is documented under
+Fabric, the AOS-owned host/session execution substrate for `sys/host.*@1` effects, is documented under
 **[roadmap/v0.20-fabric/](roadmap/v0.20-fabric/)** and **[dev/fabric/](dev/fabric/)**.
 
 For implementation guidance, project structure, and coding conventions, see **[AGENTS.md](AGENTS.md)**.
