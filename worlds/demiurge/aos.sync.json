@@ -14,14 +14,14 @@
           "version": "0.1.0",
           "manifest_path": "../../Cargo.toml",
           "air_dir": "air",
-          "defs_hash": "sha256:b046b62130d0660c744b27b2fdfd1eb0926e8243c10f9f75d710ab87787445f8"
+          "defs_hash": "sha256:f32afcc422d5389d3a0d7bba9c53ff2c2e4faa877755228174be6c10e2cd9a15"
         }
       }
     ]
   },
   "build": {
     "workflow_dir": "workflow",
-    "module": "demiurge/Demiurge@1"
+    "module": "demiurge/Demiurge_wasm@1"
   },
   "modules": {
     "pull": false

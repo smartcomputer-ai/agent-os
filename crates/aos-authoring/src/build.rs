@@ -742,6 +742,7 @@ fn imported_cargo_target_dir(
 fn module_bin_name(module_name: &str) -> Option<String> {
     let tail = module_name.rsplit('/').next()?;
     let name = tail.split('@').next()?;
+    let name = name.strip_suffix("_wasm").unwrap_or(name);
     if name.is_empty() {
         return None;
     }
@@ -887,5 +888,17 @@ mod tests {
         assert!(!temp.path().join(".aos/cas").exists());
         assert!(temp.path().join(".aos/cache/modules").exists());
         Ok(())
+    }
+
+    #[test]
+    fn module_bin_name_ignores_wasm_suffix() {
+        assert_eq!(
+            module_bin_name("aos.agent/SessionWorkflow_wasm@1").as_deref(),
+            Some("session_workflow")
+        );
+        assert_eq!(
+            module_bin_name("demo/CounterSM_wasm@1").as_deref(),
+            Some("counter_sm")
+        );
     }
 }
