@@ -85,7 +85,7 @@ pub fn canonicalize_patch<S: Store>(
 fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), KernelError> {
     let mut schema_hashes = HashMap::new();
     let mut module_hashes = HashMap::new();
-    let mut effect_hashes = HashMap::new();
+    let mut op_hashes = HashMap::new();
 
     for node in &patch.nodes {
         match node {
@@ -101,11 +101,11 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
                 })?;
                 module_hashes.insert(module.name.clone(), hash);
             }
-            AirNode::Defeffect(effect) => {
-                let hash = Hash::of_cbor(&AirNode::Defeffect(effect.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash effect '{}': {err}", effect.name))
+            AirNode::Defop(op) => {
+                let hash = Hash::of_cbor(&AirNode::Defop(op.clone())).map_err(|err| {
+                    KernelError::Manifest(format!("hash op '{}': {err}", op.name))
                 })?;
-                effect_hashes.insert(effect.name.clone(), hash);
+                op_hashes.insert(op.name.clone(), hash);
             }
             _ => {}
         }
@@ -131,12 +131,12 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
         }
     }
 
-    for reference in &mut patch.manifest.effects {
-        if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
+    for reference in &mut patch.manifest.ops {
+        if let Some(builtin) = builtins::find_builtin_op(reference.name.as_str()) {
             reference.hash = builtin.hash_ref.clone();
-        } else if let Some(hash) = effect_hashes.get(&reference.name) {
+        } else if let Some(hash) = op_hashes.get(&reference.name) {
             reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("effect hash '{}': {err}", reference.name))
+                KernelError::Manifest(format!("op hash '{}': {err}", reference.name))
             })?;
         }
     }
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn normalize_patch_manifest_refs_keeps_builtin_module_hash() {
         let original_hash = format!("sha256:{}", "1".repeat(64));
-        assert!(builtins::find_builtin_module("sys/Workspace@1").is_some());
+        assert!(builtins::find_builtin_module("sys/workspace_wasm@1").is_some());
 
         let mut patch = ManifestPatch {
             manifest: Manifest {
@@ -192,8 +192,7 @@ mod tests {
                     name: "sys/Workspace@1".into(),
                     hash: HashRef::new(original_hash.clone()).expect("valid hash"),
                 }],
-                effects: Vec::new(),
-                effect_bindings: Vec::new(),
+                ops: Vec::new(),
                 secrets: Vec::new(),
                 routing: None,
             },

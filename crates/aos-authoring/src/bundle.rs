@@ -6,15 +6,13 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    AirNode, DefEffect, DefModule, DefSchema, DefSecret, HashRef, Manifest, NamedRef, SecretEntry,
-    builtins,
+    AirNode, DefModule, DefOp, DefSchema, DefSecret, HashRef, Manifest, NamedRef, builtins,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::LoadedManifest;
 use aos_kernel::Store;
 use aos_kernel::patch_doc::{
-    AddDef, ManifestRef, PatchDocument, PatchOp, SetManifestRefs, SetRoutingEvents,
-    SetRoutingInboxes, SetSecrets,
+    AddDef, ManifestRef, PatchDocument, PatchOp, SetManifestRefs, SetRoutingSubscriptions,
 };
 
 use crate::manifest_loader;
@@ -30,7 +28,7 @@ pub struct WorldBundle {
     pub manifest: Manifest,
     pub schemas: Vec<DefSchema>,
     pub modules: Vec<DefModule>,
-    pub effects: Vec<DefEffect>,
+    pub ops: Vec<DefOp>,
     pub secrets: Vec<DefSecret>,
     pub wasm_blobs: Option<std::collections::BTreeMap<String, Vec<u8>>>,
 }
@@ -175,17 +173,11 @@ pub fn build_patch_document(
     base_manifest_hash: &str,
 ) -> Result<PatchDocument> {
     let mut patches = Vec::new();
-    let mut secrets_pre_state = base_manifest.secrets.clone();
     let referenced_secret_names: std::collections::BTreeSet<String> = bundle
         .manifest
         .secrets
         .iter()
-        .filter_map(|entry| match entry {
-            aos_air_types::SecretEntry::Ref(named) if !is_sys_name(named.name.as_str()) => {
-                Some(named.name.to_string())
-            }
-            _ => None,
-        })
+        .filter_map(|named| (!is_sys_name(named.name.as_str())).then(|| named.name.to_string()))
         .collect();
 
     for schema in &bundle.schemas {
@@ -210,14 +202,14 @@ pub fn build_patch_document(
             },
         });
     }
-    for effect in &bundle.effects {
-        if is_sys_name(effect.name.as_str()) {
+    for op in &bundle.ops {
+        if is_sys_name(op.name.as_str()) {
             continue;
         }
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
-                kind: "defeffect".to_string(),
-                node: AirNode::Defeffect(effect.clone()),
+                kind: "defop".to_string(),
+                node: AirNode::Defop(op.clone()),
             },
         });
     }
@@ -227,7 +219,6 @@ pub fn build_patch_document(
         {
             continue;
         }
-        apply_placeholder_secret_ref(&mut secrets_pre_state, secret.name.as_str())?;
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
                 kind: "defsecret".to_string(),
@@ -246,11 +237,13 @@ pub fn build_patch_document(
         &filter_sys_refs(&bundle.manifest.modules),
     ));
     add_refs.extend(manifest_refs_from(
-        "defeffect",
-        &filter_sys_refs(&bundle.manifest.effects),
+        "defop",
+        &filter_sys_refs(&bundle.manifest.ops),
     ));
-    // Secrets are updated atomically via SetSecrets below. Adding defsecret refs
-    // here would mutate manifest.secrets before SetSecrets pre-hash verification.
+    add_refs.extend(manifest_refs_from(
+        "defsecret",
+        &filter_sys_refs(&bundle.manifest.secrets),
+    ));
     if !add_refs.is_empty() {
         patches.push(PatchOp::SetManifestRefs {
             set_manifest_refs: SetManifestRefs {
@@ -274,43 +267,15 @@ pub fn build_patch_document(
         .as_ref()
         .map(|r| r.subscriptions.clone())
         .unwrap_or_default();
-    patches.push(PatchOp::SetRoutingEvents {
-        set_routing_events: SetRoutingEvents {
+    patches.push(PatchOp::SetRoutingSubscriptions {
+        set_routing_subscriptions: SetRoutingSubscriptions {
             pre_hash,
             subscriptions,
         },
     });
 
-    let base_inboxes = base_manifest
-        .routing
-        .as_ref()
-        .map(|r| r.inboxes.clone())
-        .unwrap_or_default();
-    let pre_hash = Hash::of_cbor(&base_inboxes)
-        .context("hash base routing.inboxes")?
-        .to_hex();
-    let inboxes = bundle
-        .manifest
-        .routing
-        .as_ref()
-        .map(|r| r.inboxes.clone())
-        .unwrap_or_default();
-    patches.push(PatchOp::SetRoutingInboxes {
-        set_routing_inboxes: SetRoutingInboxes { pre_hash, inboxes },
-    });
-
-    let pre_hash = Hash::of_cbor(&secrets_pre_state)
-        .context("hash pre-state secrets for set_secrets")?
-        .to_hex();
-    patches.push(PatchOp::SetSecrets {
-        set_secrets: SetSecrets {
-            pre_hash,
-            secrets: bundle.manifest.secrets.clone(),
-        },
-    });
-
     Ok(PatchDocument {
-        version: "1".to_string(),
+        version: "2".to_string(),
         base_manifest_hash: base_manifest_hash.to_string(),
         patches,
     })
@@ -325,7 +290,7 @@ pub fn manifest_node_hash(manifest: &Manifest) -> Result<String> {
 struct StoredBundleHashes {
     schemas: std::collections::HashMap<String, HashRef>,
     modules: std::collections::HashMap<String, HashRef>,
-    effects: std::collections::HashMap<String, HashRef>,
+    ops: std::collections::HashMap<String, HashRef>,
     secrets: std::collections::HashMap<String, HashRef>,
 }
 
@@ -349,13 +314,13 @@ fn store_bundle_defs<S: Store>(store: &S, bundle: &WorldBundle) -> Result<Stored
             HashRef::new(hash.to_hex()).context("hash defmodule")?,
         );
     }
-    for effect in &bundle.effects {
+    for op in &bundle.ops {
         let hash = store
-            .put_node(&AirNode::Defeffect(effect.clone()))
-            .context("store defeffect")?;
-        stored.effects.insert(
-            effect.name.to_string(),
-            HashRef::new(hash.to_hex()).context("hash defeffect")?,
+            .put_node(&AirNode::Defop(op.clone()))
+            .context("store defop")?;
+        stored.ops.insert(
+            op.name.to_string(),
+            HashRef::new(hash.to_hex()).context("hash defop")?,
         );
     }
     for secret in &bundle.secrets {
@@ -377,22 +342,9 @@ fn patch_manifest_for_genesis(
     let mut manifest = manifest.clone();
     patch_named_refs_for_genesis("schema", &mut manifest.schemas, &stored.schemas)?;
     patch_named_refs_for_genesis("module", &mut manifest.modules, &stored.modules)?;
-    patch_named_refs_for_genesis("effect", &mut manifest.effects, &stored.effects)?;
-    let mut secret_refs = manifest_secret_refs(&manifest.secrets)?;
-    patch_named_refs_for_genesis("secret", &mut secret_refs, &stored.secrets)?;
-    manifest.secrets = secret_refs.into_iter().map(SecretEntry::Ref).collect();
+    patch_named_refs_for_genesis("op", &mut manifest.ops, &stored.ops)?;
+    patch_named_refs_for_genesis("secret", &mut manifest.secrets, &stored.secrets)?;
     Ok(manifest)
-}
-
-fn manifest_secret_refs(entries: &[SecretEntry]) -> Result<Vec<NamedRef>> {
-    let mut refs = Vec::with_capacity(entries.len());
-    for entry in entries {
-        match entry {
-            SecretEntry::Ref(reference) => refs.push(reference.clone()),
-            SecretEntry::Decl(_) => bail!("inline secret declarations are unsupported in bundles"),
-        }
-    }
-    Ok(refs)
 }
 
 fn patch_named_refs_for_genesis(
@@ -409,13 +361,13 @@ fn patch_named_refs_for_genesis(
                     builtins::find_builtin_module(reference.name.as_str())
                         .map(|builtin| builtin.hash_ref.clone())
                 }),
-                "effect" => builtins::find_builtin_effect(reference.name.as_str())
+                "op" => builtins::find_builtin_op(reference.name.as_str())
                     .map(|builtin| builtin.hash_ref.clone()),
                 _ => None,
             }
         } else {
             match kind {
-                "schema" | "module" | "effect" | "secret" => {
+                "schema" | "module" | "op" | "secret" => {
                     stored.get(reference.name.as_str()).cloned()
                 }
                 _ => bail!("unsupported manifest ref kind '{kind}'"),
@@ -462,7 +414,7 @@ pub fn write_air_layout_with_options(
 
     let (schemas, sys_schemas) = split_sys_defs(&bundle.schemas, options.include_sys);
     let (modules, sys_modules) = split_sys_defs(&bundle.modules, options.include_sys);
-    let (effects, sys_effects) = split_sys_defs(&bundle.effects, options.include_sys);
+    let (ops, sys_ops) = split_sys_defs(&bundle.ops, options.include_sys);
     let (secrets, sys_secrets) = split_sys_defs(&bundle.secrets, options.include_sys);
 
     write_json(
@@ -470,7 +422,7 @@ pub fn write_air_layout_with_options(
         &AirNode::Manifest(bundle.manifest.clone()),
     )?;
     if options.defs_bundle {
-        let defs = collect_def_nodes(schemas, modules, effects, secrets);
+        let defs = collect_def_nodes(schemas, modules, ops, secrets);
         write_node_array_with_options(
             &air_dir.join("defs.air.json"),
             defs,
@@ -487,8 +439,8 @@ pub fn write_air_layout_with_options(
             options.strip_wasm_hashes,
         )?;
         write_node_array(
-            &air_dir.join("effects.air.json"),
-            effects.iter().cloned().map(AirNode::Defeffect).collect(),
+            &air_dir.join("ops.air.json"),
+            ops.iter().cloned().map(AirNode::Defop).collect(),
         )?;
         write_node_array(
             &air_dir.join("secrets.air.json"),
@@ -497,7 +449,7 @@ pub fn write_air_layout_with_options(
     }
 
     if options.include_sys {
-        let sys_nodes = collect_sys_nodes(sys_schemas, sys_modules, sys_effects, sys_secrets);
+        let sys_nodes = collect_sys_nodes(sys_schemas, sys_modules, sys_ops, sys_secrets);
         write_node_array(&air_dir.join("sys.air.json"), sys_nodes)?;
     }
 
@@ -514,7 +466,7 @@ impl WorldBundle {
             manifest: loaded.manifest,
             schemas: loaded.schemas.into_values().collect(),
             modules: loaded.modules.into_values().collect(),
-            effects: loaded.effects.into_values().collect(),
+            ops: loaded.ops.into_values().collect(),
             secrets: Vec::new(),
             wasm_blobs: None,
         };
@@ -527,7 +479,7 @@ impl WorldBundle {
             manifest: loaded.manifest,
             schemas: loaded.schemas.into_values().collect(),
             modules: loaded.modules.into_values().collect(),
-            effects: loaded.effects.into_values().collect(),
+            ops: loaded.ops.into_values().collect(),
             secrets,
             wasm_blobs: None,
         }
@@ -537,7 +489,7 @@ impl WorldBundle {
     fn sort_defs(&mut self) {
         self.schemas.sort_by(|a, b| a.name.cmp(&b.name));
         self.modules.sort_by(|a, b| a.name.cmp(&b.name));
-        self.effects.sort_by(|a, b| a.name.cmp(&b.name));
+        self.ops.sort_by(|a, b| a.name.cmp(&b.name));
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
@@ -566,28 +518,6 @@ fn filter_sys_refs(refs: &[aos_air_types::NamedRef]) -> Vec<aos_air_types::Named
         .filter(|r| !is_sys_name(r.name.as_str()))
         .cloned()
         .collect()
-}
-
-fn apply_placeholder_secret_ref(
-    secrets: &mut Vec<aos_air_types::SecretEntry>,
-    name: &str,
-) -> Result<()> {
-    let zero_hash = HashRef::new(format!("sha256:{}", "0".repeat(64)))?;
-    if let Some(pos) = secrets
-        .iter()
-        .position(|entry| matches!(entry, aos_air_types::SecretEntry::Ref(named) if named.name.as_str() == name))
-    {
-        secrets[pos] = aos_air_types::SecretEntry::Ref(aos_air_types::NamedRef {
-            name: name.to_string(),
-            hash: zero_hash,
-        });
-    } else {
-        secrets.push(aos_air_types::SecretEntry::Ref(aos_air_types::NamedRef {
-            name: name.to_string(),
-            hash: zero_hash,
-        }));
-    }
-    Ok(())
 }
 
 fn write_json(path: &Path, value: &AirNode) -> Result<()> {
@@ -630,7 +560,22 @@ fn strip_module_wasm_hash(value: &mut serde_json::Value) {
     };
     let kind = map.get("$kind").and_then(|v| v.as_str());
     if kind == Some("defmodule") {
-        map.remove("wasm_hash");
+        strip_module_artifact_hash(map);
+    }
+}
+
+fn strip_module_artifact_hash(map: &mut serde_json::Map<String, serde_json::Value>) {
+    let Some(serde_json::Value::Object(runtime)) = map.get_mut("runtime") else {
+        return;
+    };
+    if runtime.get("kind").and_then(|value| value.as_str()) != Some("wasm") {
+        return;
+    }
+    let Some(serde_json::Value::Object(artifact)) = runtime.get_mut("artifact") else {
+        return;
+    };
+    if artifact.get("kind").and_then(|value| value.as_str()) == Some("wasm_module") {
+        artifact.remove("hash");
     }
 }
 
@@ -652,13 +597,13 @@ fn split_sys_defs<T: HasName + Clone>(defs: &[T], include_sys: bool) -> (Vec<T>,
 fn collect_sys_nodes(
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
-    effects: Vec<DefEffect>,
+    ops: Vec<DefOp>,
     secrets: Vec<DefSecret>,
 ) -> Vec<AirNode> {
     let mut nodes = Vec::new();
     nodes.extend(schemas.into_iter().map(AirNode::Defschema));
     nodes.extend(modules.into_iter().map(AirNode::Defmodule));
-    nodes.extend(effects.into_iter().map(AirNode::Defeffect));
+    nodes.extend(ops.into_iter().map(AirNode::Defop));
     nodes.extend(secrets.into_iter().map(AirNode::Defsecret));
     nodes
 }
@@ -666,13 +611,13 @@ fn collect_sys_nodes(
 fn collect_def_nodes(
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
-    effects: Vec<DefEffect>,
+    ops: Vec<DefOp>,
     secrets: Vec<DefSecret>,
 ) -> Vec<AirNode> {
     let mut nodes = Vec::new();
     nodes.extend(schemas.into_iter().map(AirNode::Defschema));
     nodes.extend(modules.into_iter().map(AirNode::Defmodule));
-    nodes.extend(effects.into_iter().map(AirNode::Defeffect));
+    nodes.extend(ops.into_iter().map(AirNode::Defop));
     nodes.extend(secrets.into_iter().map(AirNode::Defsecret));
     nodes
 }
@@ -693,7 +638,7 @@ impl HasName for DefModule {
     }
 }
 
-impl HasName for DefEffect {
+impl HasName for DefOp {
     fn name(&self) -> &str {
         self.name.as_str()
     }
@@ -710,8 +655,8 @@ fn extend_with_builtins(bundle: &mut WorldBundle) {
     for schema in &bundle.schemas {
         existing.insert(schema.name.clone());
     }
-    for effect in &bundle.effects {
-        existing.insert(effect.name.clone());
+    for op in &bundle.ops {
+        existing.insert(op.name.clone());
     }
     for module in &bundle.modules {
         existing.insert(module.name.clone());
@@ -722,9 +667,9 @@ fn extend_with_builtins(bundle: &mut WorldBundle) {
             bundle.schemas.push(builtin.schema.clone());
         }
     }
-    for builtin in builtins::builtin_effects() {
-        if existing.insert(builtin.effect.name.clone()) {
-            bundle.effects.push(builtin.effect.clone());
+    for builtin in builtins::builtin_ops() {
+        if existing.insert(builtin.op.name.clone()) {
+            bundle.ops.push(builtin.op.clone());
         }
     }
     for builtin in builtins::builtin_modules() {
@@ -737,7 +682,7 @@ fn extend_with_builtins(bundle: &mut WorldBundle) {
 fn bundle_from_catalog(catalog: aos_kernel::Catalog, include_sys: bool) -> WorldBundle {
     let mut schemas = Vec::new();
     let mut modules = Vec::new();
-    let mut effects = Vec::new();
+    let mut ops = Vec::new();
     let mut secrets = Vec::new();
 
     for (name, entry) in catalog.nodes {
@@ -747,7 +692,7 @@ fn bundle_from_catalog(catalog: aos_kernel::Catalog, include_sys: bool) -> World
         match entry.node {
             AirNode::Defschema(schema) => schemas.push(schema),
             AirNode::Defmodule(module) => modules.push(module),
-            AirNode::Defeffect(effect) => effects.push(effect),
+            AirNode::Defop(op) => ops.push(op),
             AirNode::Defsecret(secret) => secrets.push(secret),
             AirNode::Manifest(_) => {}
         }
@@ -757,7 +702,7 @@ fn bundle_from_catalog(catalog: aos_kernel::Catalog, include_sys: bool) -> World
         manifest: catalog.manifest,
         schemas,
         modules,
-        effects,
+        ops,
         secrets,
         wasm_blobs: None,
     }
@@ -768,24 +713,45 @@ mod tests {
     use super::*;
     use aos_air_types::DefSecret;
     use aos_air_types::{
-        CURRENT_AIR_VERSION, DefModule, DefSchema, EmptyObject, HashRef, ModuleAbi, ModuleKind,
-        NamedRef, SchemaRef, SecretEntry, TypeExpr, TypePrimitive, TypePrimitiveBool, WorkflowAbi,
+        CURRENT_AIR_VERSION, DefModule, DefSchema, EmptyObject, HashRef, ModuleRuntime, NamedRef,
+        TypeExpr, TypePrimitive, TypePrimitiveBool, WasmArtifact,
     };
     use aos_kernel::patch_doc::compile_patch_document;
     use aos_kernel::{MemStore, Store};
     use tempfile::tempdir;
 
-    #[test]
-    fn manifest_node_hash_matches_store() {
-        let manifest = Manifest {
+    fn empty_manifest() -> Manifest {
+        Manifest {
             air_version: CURRENT_AIR_VERSION.to_string(),
             schemas: Vec::new(),
             modules: Vec::new(),
-            effects: Vec::new(),
-            effect_bindings: vec![],
+            ops: Vec::new(),
             secrets: Vec::new(),
             routing: None,
-        };
+        }
+    }
+
+    fn wasm_module(name: &str, hash: HashRef) -> DefModule {
+        DefModule {
+            name: name.into(),
+            runtime: ModuleRuntime::Wasm {
+                artifact: WasmArtifact::WasmModule { hash },
+            },
+        }
+    }
+
+    fn wasm_hash(module: &DefModule) -> &HashRef {
+        match &module.runtime {
+            ModuleRuntime::Wasm {
+                artifact: WasmArtifact::WasmModule { hash },
+            } => hash,
+            _ => panic!("expected wasm module"),
+        }
+    }
+
+    #[test]
+    fn manifest_node_hash_matches_store() {
+        let manifest = empty_manifest();
         let store = MemStore::new();
         let stored = store.put_node(&manifest).expect("store manifest");
         let computed = manifest_node_hash(&manifest).expect("compute hash");
@@ -811,8 +777,7 @@ mod tests {
                 hash: HashRef::new(schema_hash.to_hex()).expect("hash ref"),
             }],
             modules: Vec::new(),
-            effects: Vec::new(),
-            effect_bindings: vec![],
+            ops: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
@@ -843,22 +808,10 @@ mod tests {
     #[test]
     fn import_genesis_rewrites_manifest_refs_to_imported_defs() {
         let store = MemStore::new();
-        let old_module = DefModule {
-            name: "demo/Workflow@1".into(),
-            module_kind: ModuleKind::Workflow,
-            wasm_hash: HashRef::new(format!("sha256:{}", "0".repeat(64))).expect("zero hash"),
-            key_schema: None,
-            abi: ModuleAbi {
-                workflow: Some(WorkflowAbi {
-                    state: SchemaRef::new("demo/State@1").expect("state schema"),
-                    event: SchemaRef::new("demo/Event@1").expect("event schema"),
-                    context: None,
-                    annotations: None,
-                    effects_emitted: Vec::new(),
-                }),
-                pure: None,
-            },
-        };
+        let old_module = wasm_module(
+            "demo/Workflow@1",
+            HashRef::new(format!("sha256:{}", "0".repeat(64))).expect("zero hash"),
+        );
         let old_hash = store
             .put_node(&AirNode::Defmodule(old_module.clone()))
             .expect("store old module");
@@ -869,21 +822,20 @@ mod tests {
                 name: old_module.name.clone(),
                 hash: HashRef::new(old_hash.to_hex()).expect("module hash ref"),
             }],
-            effects: Vec::new(),
-            effect_bindings: vec![],
+            ops: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
 
-        let new_module = DefModule {
-            wasm_hash: HashRef::new(Hash::of_bytes(b"patched-wasm").to_hex()).expect("wasm hash"),
-            ..old_module
-        };
+        let new_module = wasm_module(
+            "demo/Workflow@1",
+            HashRef::new(Hash::of_bytes(b"patched-wasm").to_hex()).expect("wasm hash"),
+        );
         let bundle = WorldBundle {
             manifest,
             schemas: Vec::new(),
             modules: vec![new_module.clone()],
-            effects: Vec::new(),
+            ops: Vec::new(),
             secrets: Vec::new(),
             wasm_blobs: None,
         };
@@ -908,7 +860,7 @@ mod tests {
         let imported_module: DefModule = store
             .get_node(Hash::from_hex_str(imported_ref.as_str()).expect("parse imported ref"))
             .expect("load imported module");
-        assert_eq!(imported_module.wasm_hash, new_module.wasm_hash);
+        assert_eq!(wasm_hash(&imported_module), wasm_hash(&new_module));
     }
 
     #[test]
@@ -918,8 +870,7 @@ mod tests {
             air_version: CURRENT_AIR_VERSION.to_string(),
             schemas: Vec::new(),
             modules: Vec::new(),
-            effects: Vec::new(),
-            effect_bindings: vec![],
+            ops: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
@@ -932,13 +883,13 @@ mod tests {
             .schemas
             .iter()
             .any(|s| s.name.as_str().starts_with("sys/"));
-        let has_sys_effect = exported
+        let has_sys_op = exported
             .bundle
-            .effects
+            .ops
             .iter()
             .any(|e| e.name.as_str().starts_with("sys/"));
         assert!(has_sys_schema, "expected built-in sys schema");
-        assert!(has_sys_effect, "expected built-in sys effect");
+        assert!(has_sys_op, "expected built-in sys op");
     }
 
     #[test]
@@ -960,8 +911,7 @@ mod tests {
                 hash: HashRef::new(schema_hash.to_hex()).expect("hash ref"),
             }],
             modules: Vec::new(),
-            effects: Vec::new(),
-            effect_bindings: vec![],
+            ops: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
@@ -969,7 +919,7 @@ mod tests {
             manifest: manifest.clone(),
             schemas: vec![schema.clone()],
             modules: Vec::new(),
-            effects: Vec::new(),
+            ops: Vec::new(),
             secrets: Vec::new(),
             wasm_blobs: None,
         };
@@ -1013,8 +963,7 @@ mod tests {
             air_version: CURRENT_AIR_VERSION.to_string(),
             schemas: Vec::new(),
             modules: Vec::new(),
-            effects: Vec::new(),
-            effect_bindings: vec![],
+            ops: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
@@ -1030,15 +979,15 @@ mod tests {
             .expect("store secret")
             .to_hex();
         let mut bundle_manifest = base_manifest.clone();
-        bundle_manifest.secrets = vec![SecretEntry::Ref(NamedRef {
+        bundle_manifest.secrets = vec![NamedRef {
             name: secret.name.clone(),
             hash: HashRef::new(secret_hash).expect("hash ref"),
-        })];
+        }];
         let bundle = WorldBundle {
             manifest: bundle_manifest,
             schemas: Vec::new(),
             modules: Vec::new(),
-            effects: Vec::new(),
+            ops: Vec::new(),
             secrets: vec![secret],
             wasm_blobs: None,
         };

@@ -18,7 +18,9 @@ pub(crate) fn assert_json_schema(schema_json: &str, instance: &Value) {
     let mut options = JSONSchema::options();
     for id in [
         "common.schema.json",
-        "https://aos.dev/air/v1/common.schema.json",
+        "https://aos.dev/air/v2/common.schema.json",
+        "manifest.schema.json",
+        "https://aos.dev/air/v2/manifest.schema.json",
     ] {
         options.with_document(id.to_string(), COMMON_SCHEMA.clone());
     }

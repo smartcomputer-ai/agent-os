@@ -8,10 +8,10 @@ use crate::{Manifest, NamedRef};
 fn manifest_json_round_trip() {
     let manifest_json = json!({
         "$kind": "manifest",
-        "air_version": "1",
+        "air_version": "2",
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [],
-        "effects": [],
+        "ops": [],
         "secrets": []
     });
     assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
@@ -29,23 +29,15 @@ fn named_ref_requires_hash() {
 fn manifest_with_routing_and_subscriptions_validates() {
     let manifest_json = json!({
         "$kind": "manifest",
-        "air_version": "1",
+        "air_version": "2",
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
-        "modules": [{"name": "com.acme/Workflow@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
-        "effects": [],
-        "effect_bindings": [{
-            "kind": "http.request",
-            "adapter_id": "http.default"
-        }],
+        "modules": [{"name": "com.acme/order_wasm@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+        "ops": [{"name": "com.acme/order.step@1", "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],
         "routing": {
             "subscriptions": [{
                 "event": "com.acme/Event@1",
-                "module": "com.acme/Workflow@1",
+                "op": "com.acme/order.step@1",
                 "key_field": "id"
-            }],
-            "inboxes": [{
-                "source": "mailbox://alerts",
-                "workflow": "com.acme/Workflow@1"
             }]
         }
     });
@@ -53,27 +45,51 @@ fn manifest_with_routing_and_subscriptions_validates() {
     let manifest: Manifest = serde_json::from_value(manifest_json).expect("manifest");
     let routing = manifest.routing.expect("routing");
     assert_eq!(routing.subscriptions.len(), 1);
-    assert_eq!(manifest.effect_bindings.len(), 1);
+    assert_eq!(routing.subscriptions[0].op, "com.acme/order.step@1");
 }
 
 #[test]
-fn manifest_rejects_legacy_events_alias() {
+fn manifest_rejects_v1_effects_field() {
     let manifest_json = json!({
         "$kind": "manifest",
-        "air_version": "1",
-        "schemas": [{"name": "com.acme/Event@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+        "air_version": "2",
+        "schemas": [],
         "modules": [],
-        "effects": [],
+        "ops": [],
+        "effects": []
+    });
+    assert!(
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::MANIFEST,
+            &manifest_json
+        )))
+        .is_err(),
+        "schema should reject legacy manifest.effects"
+    );
+}
+
+#[test]
+fn manifest_rejects_v1_routing_module() {
+    let manifest_json = json!({
+        "$kind": "manifest",
+        "air_version": "2",
+        "schemas": [],
+        "modules": [],
+        "ops": [],
         "routing": {
-            "events": [{
+            "subscriptions": [{
                 "event": "com.acme/Event@1",
-                "workflow": "com.acme/Workflow@1"
+                "module": "com.acme/Workflow@1"
             }]
         }
     });
     assert!(
-        serde_json::from_value::<Manifest>(manifest_json).is_err(),
-        "legacy routing.events alias should be rejected"
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::MANIFEST,
+            &manifest_json
+        )))
+        .is_err(),
+        "schema should reject routing subscriptions by module"
     );
 }
 
@@ -81,10 +97,10 @@ fn manifest_rejects_legacy_events_alias() {
 fn manifest_rejects_authority_fields() {
     let manifest_json = json!({
         "$kind": "manifest",
-        "air_version": "1",
+        "air_version": "2",
         "schemas": [],
         "modules": [],
-        "effects": [],
+        "ops": [],
         "caps": [],
         "policies": [],
         "defaults": {
@@ -109,10 +125,10 @@ fn manifest_rejects_authority_fields() {
 fn manifest_with_secrets_round_trip() {
     let manifest_json = json!({
         "$kind": "manifest",
-        "air_version": "1",
+        "air_version": "2",
         "schemas": [],
         "modules": [],
-        "effects": [],
+        "ops": [],
         "secrets": [{
             "name": "payments/stripe@1",
             "hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

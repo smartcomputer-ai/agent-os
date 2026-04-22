@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aos.dev/air/v1/common.schema.json",
-  "title": "AIR v1 Common Definitions",
+  "$id": "https://aos.dev/air/v2/common.schema.json",
+  "title": "AIR v2 Common Definitions",
   "type": "object",
   "$defs": {
     "Name": {
@@ -14,22 +14,26 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
+    "RootKind": {
+      "title": "AIR root document kind",
+      "type": "string",
+      "enum": [
+        "defschema",
+        "defmodule",
+        "defop",
+        "defsecret",
+        "manifest"
+      ]
+    },
     "DefKind": {
       "title": "AIR definition kind",
       "type": "string",
       "enum": [
         "defschema",
         "defmodule",
-        "defeffect",
-        "defsecret",
-        "manifest"
+        "defop",
+        "defsecret"
       ]
-    },
-    "EffectKind": {
-      "title": "Effect kind (namespaced string)",
-      "description": "Open-ended effect kind identifier. Built-in catalog is documented in spec/03-air.md and backed by canonical schemas in spec/defs/builtin-schemas.air.json.",
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
     },
     "VarName": {
       "type": "string",

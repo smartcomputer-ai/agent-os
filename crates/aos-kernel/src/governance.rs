@@ -4,7 +4,7 @@ use crate::Store;
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
-    AirNode, DefEffect, DefModule, DefSchema, Manifest, Name, SecretDecl, SecretEntry, builtins,
+    AirNode, DefModule, DefOp, DefSchema, DefSecret, Manifest, Name, builtins,
     catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
@@ -144,29 +144,24 @@ impl ManifestPatch {
     pub fn to_loaded_manifest<S: Store>(&self, store: &S) -> Result<LoadedManifest, KernelError> {
         let manifest = self.manifest.clone();
         let mut modules: HashMap<Name, DefModule> = HashMap::new();
-        let mut effects: HashMap<Name, DefEffect> = HashMap::new();
+        let mut ops: HashMap<Name, DefOp> = HashMap::new();
         let mut schemas: HashMap<Name, DefSchema> = HashMap::new();
-        let mut secrets: Vec<SecretDecl> = Vec::new();
+        let mut secrets: Vec<DefSecret> = Vec::new();
 
         for node in &self.nodes {
             match node {
                 AirNode::Defmodule(m) => {
                     modules.insert(m.name.clone(), m.clone());
                 }
-                AirNode::Defeffect(e) => {
-                    effects.insert(e.name.clone(), e.clone());
+                AirNode::Defop(o) => {
+                    ops.insert(o.name.clone(), o.clone());
                 }
                 AirNode::Defschema(s) => {
                     schemas.insert(s.name.clone(), s.clone());
                 }
                 AirNode::Defsecret(s) => {
-                    let (alias, version) = parse_secret_name(&s.name)?;
-                    secrets.push(SecretDecl {
-                        alias,
-                        version,
-                        binding_id: s.binding_id.clone(),
-                        expected_digest: s.expected_digest.clone(),
-                    });
+                    parse_secret_name(&s.name)?;
+                    secrets.push(s.clone());
                 }
                 AirNode::Manifest(_) => {}
             }
@@ -184,15 +179,10 @@ impl ManifestPatch {
                     .or_insert(builtin.schema.clone());
             }
         }
-        for builtin in builtins::builtin_effects() {
-            if manifest
-                .effects
-                .iter()
-                .any(|nr| nr.name == builtin.effect.name)
-            {
-                effects
-                    .entry(builtin.effect.name.clone())
-                    .or_insert(builtin.effect.clone());
+        for builtin in builtins::builtin_ops() {
+            if manifest.ops.iter().any(|nr| nr.name == builtin.op.name) {
+                ops.entry(builtin.op.name.clone())
+                    .or_insert(builtin.op.clone());
             }
         }
         for builtin in builtins::builtin_modules() {
@@ -237,60 +227,47 @@ impl ManifestPatch {
                 }
             },
         )?;
-        load_defs_from_manifest(
-            store,
-            &manifest.effects,
-            &mut effects,
-            "defeffect",
-            |node| {
-                if let AirNode::Defeffect(effect) = node {
-                    Ok(effect)
-                } else {
-                    Err(KernelError::Manifest(
-                        "manifest effect ref did not point to defeffect".into(),
-                    ))
+        load_defs_from_manifest(store, &manifest.ops, &mut ops, "defop", |node| {
+            if let AirNode::Defop(op) = node {
+                Ok(op)
+            } else {
+                Err(KernelError::Manifest(
+                    "manifest op ref did not point to defop".into(),
+                ))
+            }
+        })?;
+        for reference in &manifest.secrets {
+            if secrets.iter().any(|secret| secret.name == reference.name) {
+                continue;
+            }
+            let hash = parse_manifest_hash(reference.hash.as_str())?;
+            let node: AirNode = store
+                .get_node(hash)
+                .map_err(|err| KernelError::Manifest(format!("load secret: {err}")))?;
+            match node {
+                AirNode::Defsecret(secret) => {
+                    parse_secret_name(&secret.name)?;
+                    secrets.push(secret);
                 }
-            },
-        )?;
-        for entry in &manifest.secrets {
-            match entry {
-                SecretEntry::Decl(secret) => secrets.push(secret.clone()),
-                SecretEntry::Ref(reference) => {
-                    let hash = parse_manifest_hash(reference.hash.as_str())?;
-                    let node: AirNode = store
-                        .get_node(hash)
-                        .map_err(|err| KernelError::Manifest(format!("load secret: {err}")))?;
-                    match node {
-                        AirNode::Defsecret(secret) => {
-                            let (alias, version) = parse_secret_name(&secret.name)?;
-                            secrets.push(SecretDecl {
-                                alias,
-                                version,
-                                binding_id: secret.binding_id.clone(),
-                                expected_digest: secret.expected_digest.clone(),
-                            });
-                        }
-                        _ => {
-                            return Err(KernelError::Manifest(
-                                "manifest secret ref did not point to defsecret".into(),
-                            ));
-                        }
-                    }
+                _ => {
+                    return Err(KernelError::Manifest(
+                        "manifest secret ref did not point to defsecret".into(),
+                    ));
                 }
             }
         }
 
-        if effects.is_empty() {
-            for builtin in builtins::builtin_effects() {
-                effects.insert(builtin.effect.name.clone(), builtin.effect.clone());
+        if ops.is_empty() {
+            for builtin in builtins::builtin_ops() {
+                ops.insert(builtin.op.name.clone(), builtin.op.clone());
             }
         }
-        let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
+        let effect_catalog = EffectCatalog::from_defs(ops.values().cloned());
         Ok(LoadedManifest {
             manifest,
             secrets,
             modules,
-            effects,
+            ops,
             schemas,
             effect_catalog,
         })

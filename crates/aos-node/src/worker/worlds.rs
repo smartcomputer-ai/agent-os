@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
+use aos_air_types::OpKind;
 use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_kernel::journal::{Journal, JournalRecord};
 use aos_kernel::{Kernel, KernelConfig, ManifestLoader, Store};
@@ -258,10 +259,10 @@ impl HostedWorkerCore {
             self.build_registered_effect_runtime(universe_id, Arc::clone(&store), &loaded)?;
         let async_state = self.build_async_world_state();
         let workflow_modules = loaded
-            .modules
+            .ops
             .values()
-            .filter(|module| matches!(module.module_kind, aos_air_types::ModuleKind::Workflow))
-            .map(|module| module.name.to_string())
+            .filter(|op| op.op_kind == OpKind::Workflow)
+            .map(|op| op.name.to_string())
             .collect::<Vec<_>>();
 
         let registered = RegisteredWorld {
@@ -498,10 +499,10 @@ impl HostedWorkerCore {
         let effect_runtime =
             self.build_registered_effect_runtime(universe_id, Arc::clone(&store), &loaded)?;
         let workflow_modules = loaded
-            .modules
+            .ops
             .values()
-            .filter(|module| matches!(module.module_kind, aos_air_types::ModuleKind::Workflow))
-            .map(|module| module.name.to_string())
+            .filter(|op| op.op_kind == OpKind::Workflow)
+            .map(|op| op.name.to_string())
             .collect::<Vec<_>>();
         self.state.registered_worlds.insert(
             world_id,

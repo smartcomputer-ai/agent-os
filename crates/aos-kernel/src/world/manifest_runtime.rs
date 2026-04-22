@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::Store;
 use aos_air_types::{
-    AirNode, DefModule, HashRef, Manifest, Name, NamedRef, TypeExpr, TypePrimitive, builtins,
+    AirNode, DefOp, HashRef, Manifest, Name, NamedRef, OpKind, TypeExpr, TypePrimitive, builtins,
     catalog::EffectCatalog, schema_index::SchemaIndex,
 };
 use aos_cbor::Hash;
@@ -25,10 +25,7 @@ pub(super) fn assemble_runtime<S: Store>(
     loaded: &LoadedManifest,
 ) -> Result<RuntimeAssembly, KernelError> {
     let schema_index = Arc::new(build_schema_index_from_loaded(store, loaded)?);
-    let workflow_schemas = Arc::new(build_workflow_schemas(
-        &loaded.modules,
-        schema_index.as_ref(),
-    )?);
+    let workflow_schemas = Arc::new(build_workflow_schemas(&loaded.ops, schema_index.as_ref())?);
     let router = build_router(&loaded.manifest, workflow_schemas.as_ref())?;
     let effect_catalog = Arc::new(loaded.effect_catalog.clone());
 
@@ -56,12 +53,14 @@ pub(super) fn build_schema_index_from_loaded<S: Store>(
 }
 
 fn build_workflow_schemas(
-    modules: &HashMap<Name, DefModule>,
+    ops: &HashMap<Name, DefOp>,
     schema_index: &SchemaIndex,
 ) -> Result<HashMap<Name, WorkflowSchema>, KernelError> {
     let mut map = HashMap::new();
-    for (name, module) in modules {
-        if let Some(workflow) = module.abi.workflow.as_ref() {
+    for (name, op) in ops {
+        if op.op_kind == OpKind::Workflow
+            && let Some(workflow) = op.workflow.as_ref()
+        {
             let schema_name = workflow.event.as_str();
             let event_schema = schema_index
                 .get(schema_name)
@@ -71,7 +70,7 @@ fn build_workflow_schemas(
                     ))
                 })?
                 .clone();
-            let key_schema = if let Some(key_ref) = &module.key_schema {
+            let key_schema = if let Some(key_ref) = &workflow.key_schema {
                 let schema_name = key_ref.as_str();
                 Some(
                     schema_index
@@ -115,10 +114,10 @@ fn build_router(
     };
 
     for route in &routing.subscriptions {
-        let workflow_schema = workflow_schemas.get(&route.module).ok_or_else(|| {
+        let workflow_schema = workflow_schemas.get(&route.op).ok_or_else(|| {
             KernelError::Manifest(format!(
-                "schema for workflow '{}' not found while building router",
-                route.module
+                "schema for workflow op '{}' not found while building router",
+                route.op
             ))
         })?;
         let route_event = route.event.as_str();
@@ -131,7 +130,7 @@ fn build_router(
                 workflow_schema,
                 route.key_field.clone(),
                 EventWrap::Identity,
-                &route.module,
+                &route.op,
             );
             match &workflow_schema.event_schema {
                 TypeExpr::Ref(reference) => {
@@ -143,7 +142,7 @@ fn build_router(
                         workflow_schema,
                         route.key_field.clone(),
                         EventWrap::Identity,
-                        &route.module,
+                        &route.op,
                     );
                 }
                 TypeExpr::Variant(variant) => {
@@ -163,7 +162,7 @@ fn build_router(
                                 workflow_schema,
                                 route.key_field.clone(),
                                 EventWrap::Variant { tag: tag.clone() },
-                                &route.module,
+                                &route.op,
                             );
                         }
                     }
@@ -179,7 +178,7 @@ fn build_router(
                 workflow_schema,
                 route.key_field.clone(),
                 wrap,
-                &route.module,
+                &route.op,
             );
         }
     }
@@ -254,7 +253,7 @@ pub(super) fn persist_loaded_manifest<S: Store>(
 ) -> Result<(), KernelError> {
     let mut schema_hashes = HashMap::new();
     let mut module_hashes = HashMap::new();
-    let mut effect_hashes = HashMap::new();
+    let mut op_hashes = HashMap::new();
 
     for schema in loaded.schemas.values() {
         let hash = store.put_node(&AirNode::Defschema(schema.clone()))?;
@@ -264,9 +263,9 @@ pub(super) fn persist_loaded_manifest<S: Store>(
         let hash = store.put_node(&AirNode::Defmodule(module.clone()))?;
         module_hashes.insert(module.name.clone(), hash);
     }
-    for effect in loaded.effects.values() {
-        let hash = store.put_node(&AirNode::Defeffect(effect.clone()))?;
-        effect_hashes.insert(effect.name.clone(), hash);
+    for op in loaded.ops.values() {
+        let hash = store.put_node(&AirNode::Defop(op.clone()))?;
+        op_hashes.insert(op.name.clone(), hash);
     }
 
     for reference in loaded.manifest.schemas.iter_mut() {
@@ -303,19 +302,19 @@ pub(super) fn persist_loaded_manifest<S: Store>(
         )));
     }
 
-    for reference in loaded.manifest.effects.iter_mut() {
-        if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
+    for reference in loaded.manifest.ops.iter_mut() {
+        if let Some(builtin) = builtins::find_builtin_op(reference.name.as_str()) {
             reference.hash = builtin.hash_ref.clone();
             continue;
         }
-        if let Some(hash) = effect_hashes.get(&reference.name) {
+        if let Some(hash) = op_hashes.get(&reference.name) {
             reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("effect hash '{}': {err}", reference.name))
+                KernelError::Manifest(format!("op hash '{}': {err}", reference.name))
             })?;
             continue;
         }
         return Err(KernelError::Manifest(format!(
-            "manifest references unknown effect '{}'",
+            "manifest references unknown op '{}'",
             reference.name
         )));
     }

@@ -1258,7 +1258,7 @@ mod tests {
             manifest: kernel.manifest.clone(),
             secrets: kernel.secrets.clone(),
             modules: kernel.module_defs.clone(),
-            effects: kernel.effect_defs.clone(),
+            ops: kernel.effect_defs.clone(),
             schemas: kernel.schema_defs.clone(),
             effect_catalog: EffectCatalog::from_defs(kernel.effect_defs.values().cloned()),
         };

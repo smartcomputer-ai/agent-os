@@ -1,0 +1,306 @@
+[
+  {
+    "$kind": "defop",
+    "name": "sys/Workspace@1",
+    "op_kind": "workflow",
+    "workflow": {
+      "state": "sys/WorkspaceHistory@1",
+      "event": "sys/WorkspaceCommit@1",
+      "context": "sys/WorkflowContext@1",
+      "key_schema": "sys/WorkspaceName@1",
+      "effects_emitted": []
+    },
+    "impl": {
+      "module": "sys/workspace_wasm@1",
+      "entrypoint": "workflow"
+    }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/HttpPublish@1",
+    "op_kind": "workflow",
+    "workflow": {
+      "state": "sys/HttpPublishRegistry@1",
+      "event": "sys/HttpPublishSet@1",
+      "context": "sys/WorkflowContext@1",
+      "effects_emitted": []
+    },
+    "impl": {
+      "module": "sys/http_publish_wasm@1",
+      "entrypoint": "workflow"
+    }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/http.request@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HttpRequestParams@1", "receipt": "sys/HttpRequestReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "http.request" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/blob.put@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/BlobPutParams@1", "receipt": "sys/BlobPutReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "blob.put" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/blob.get@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/BlobGetParams@1", "receipt": "sys/BlobGetReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "blob.get" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/timer.set@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/TimerSetParams@1", "receipt": "sys/TimerSetReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "timer.set" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/portal.send@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/PortalSendParams@1", "receipt": "sys/PortalSendReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "portal.send" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.session.open@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostSessionOpenParams@1", "receipt": "sys/HostSessionOpenReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.session.open" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.exec@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostExecParams@1", "receipt": "sys/HostExecReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.exec" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.session.signal@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostSessionSignalParams@1", "receipt": "sys/HostSessionSignalReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.session.signal" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.fs.read_file@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostFsReadFileParams@1", "receipt": "sys/HostFsReadFileReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.fs.read_file" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.fs.write_file@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostFsWriteFileParams@1", "receipt": "sys/HostFsWriteFileReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.fs.write_file" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.fs.edit_file@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostFsEditFileParams@1", "receipt": "sys/HostFsEditFileReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.fs.edit_file" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.fs.apply_patch@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostFsApplyPatchParams@1", "receipt": "sys/HostFsApplyPatchReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.fs.apply_patch" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.fs.grep@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostFsGrepParams@1", "receipt": "sys/HostFsGrepReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.fs.grep" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.fs.glob@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostFsGlobParams@1", "receipt": "sys/HostFsGlobReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.fs.glob" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.fs.stat@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostFsStatParams@1", "receipt": "sys/HostFsStatReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.fs.stat" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.fs.exists@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostFsExistsParams@1", "receipt": "sys/HostFsExistsReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.fs.exists" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/host.fs.list_dir@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/HostFsListDirParams@1", "receipt": "sys/HostFsListDirReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "host.fs.list_dir" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/llm.generate@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/LlmGenerateParams@1", "receipt": "sys/LlmGenerateReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "llm.generate" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/vault.put@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/VaultPutParams@1", "receipt": "sys/VaultPutReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "vault.put" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/vault.rotate@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/VaultRotateParams@1", "receipt": "sys/VaultRotateReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "vault.rotate" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/governance.propose@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/GovProposeParams@1", "receipt": "sys/GovProposeReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "governance.propose" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/governance.shadow@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/GovShadowParams@1", "receipt": "sys/GovShadowReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "governance.shadow" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/governance.approve@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/GovApproveParams@1", "receipt": "sys/GovApproveReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "governance.approve" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/governance.apply@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/GovApplyParams@1", "receipt": "sys/GovApplyReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "governance.apply" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.resolve@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceResolveParams@1", "receipt": "sys/WorkspaceResolveReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.resolve" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.empty_root@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceEmptyRootParams@1", "receipt": "sys/WorkspaceEmptyRootReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.empty_root" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.list@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceListParams@1", "receipt": "sys/WorkspaceListReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.list" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.read_ref@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceReadRefParams@1", "receipt": "sys/WorkspaceReadRefReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.read_ref" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.read_bytes@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceReadBytesParams@1", "receipt": "sys/WorkspaceReadBytesReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.read_bytes" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.write_bytes@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceWriteBytesParams@1", "receipt": "sys/WorkspaceWriteBytesReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.write_bytes" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.write_ref@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceWriteRefParams@1", "receipt": "sys/WorkspaceWriteRefReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.write_ref" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.remove@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceRemoveParams@1", "receipt": "sys/WorkspaceRemoveReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.remove" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.diff@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceDiffParams@1", "receipt": "sys/WorkspaceDiffReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.diff" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.annotations_get@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceAnnotationsGetParams@1", "receipt": "sys/WorkspaceAnnotationsGetReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.annotations_get" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/workspace.annotations_set@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/WorkspaceAnnotationsSetParams@1", "receipt": "sys/WorkspaceAnnotationsSetReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "workspace.annotations_set" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/introspect.manifest@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/IntrospectManifestParams@1", "receipt": "sys/IntrospectManifestReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "introspect.manifest" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/introspect.workflow_state@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/IntrospectWorkflowStateParams@1", "receipt": "sys/IntrospectWorkflowStateReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "introspect.workflow_state" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/introspect.journal_head@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/IntrospectJournalHeadParams@1", "receipt": "sys/IntrospectJournalHeadReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "introspect.journal_head" }
+  },
+  {
+    "$kind": "defop",
+    "name": "sys/introspect.list_cells@1",
+    "op_kind": "effect",
+    "effect": { "params": "sys/IntrospectListCellsParams@1", "receipt": "sys/IntrospectListCellsReceipt@1" },
+    "impl": { "module": "sys/builtin_effects@1", "entrypoint": "introspect.list_cells" }
+  }
+]

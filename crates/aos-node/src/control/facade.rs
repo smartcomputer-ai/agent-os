@@ -1245,7 +1245,7 @@ fn def_matches_kind(def: &AirNode, kind: &str) -> bool {
         (AirNode::Defschema(_), "defschema")
             | (AirNode::Defmodule(_), "defmodule")
             | (AirNode::Defsecret(_), "defsecret")
-            | (AirNode::Defeffect(_), "defeffect")
+            | (AirNode::Defop(_), "defop")
             | (AirNode::Manifest(_), "manifest")
     )
 }

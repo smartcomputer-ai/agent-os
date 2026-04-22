@@ -18,7 +18,7 @@ pub struct PatchDocument {
 }
 
 fn default_patch_version() -> String {
-    "1".to_string()
+    "2".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,14 +36,8 @@ pub enum PatchOp {
     SetManifestRefs {
         set_manifest_refs: SetManifestRefs,
     },
-    SetRoutingEvents {
-        set_routing_events: SetRoutingEvents,
-    },
-    SetRoutingInboxes {
-        set_routing_inboxes: SetRoutingInboxes,
-    },
-    SetSecrets {
-        set_secrets: SetSecrets,
+    SetRoutingSubscriptions {
+        set_routing_subscriptions: SetRoutingSubscriptions,
     },
 }
 
@@ -90,28 +84,16 @@ pub struct ManifestRefRemove {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SetRoutingEvents {
+pub struct SetRoutingSubscriptions {
     pub pre_hash: String,
     pub subscriptions: Vec<aos_air_types::RoutingEvent>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SetRoutingInboxes {
-    pub pre_hash: String,
-    pub inboxes: Vec<aos_air_types::InboxRoute>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SetSecrets {
-    pub pre_hash: String,
-    pub secrets: Vec<aos_air_types::SecretEntry>,
 }
 
 pub fn compile_patch_document<S: Store>(
     store: &S,
     doc: PatchDocument,
 ) -> Result<ManifestPatch, KernelError> {
-    if doc.version != "1" {
+    if doc.version != "2" {
         return Err(KernelError::Manifest(format!(
             "unsupported patch document version: {}",
             doc.version
@@ -170,16 +152,10 @@ pub fn compile_patch_document<S: Store>(
                 }
                 apply_manifest_refs(&mut manifest, set_manifest_refs)?;
             }
-            PatchOp::SetRoutingEvents { set_routing_events } => {
-                apply_routing_events(&mut manifest, set_routing_events)?;
-            }
-            PatchOp::SetRoutingInboxes {
-                set_routing_inboxes,
+            PatchOp::SetRoutingSubscriptions {
+                set_routing_subscriptions,
             } => {
-                apply_routing_inboxes(&mut manifest, set_routing_inboxes)?;
-            }
-            PatchOp::SetSecrets { set_secrets } => {
-                apply_secrets(&mut manifest, set_secrets)?;
+                apply_routing_subscriptions(&mut manifest, set_routing_subscriptions)?;
             }
         }
     }
@@ -210,7 +186,7 @@ fn enforce_kind(expected: &str, node: &AirNode) -> Result<(), KernelError> {
     let actual = match node {
         AirNode::Defmodule(_) => "defmodule",
         AirNode::Defschema(_) => "defschema",
-        AirNode::Defeffect(_) => "defeffect",
+        AirNode::Defop(_) => "defop",
         AirNode::Defsecret(_) => "defsecret",
         AirNode::Manifest(_) => "manifest",
     };
@@ -233,32 +209,6 @@ fn update_manifest_ref_hash(
     pre_hash: Option<&str>,
     remove: Option<RemoveAction>,
 ) -> Result<(), KernelError> {
-    if kind == "defsecret" {
-        if let Some(pos) = manifest.secrets.iter().position(
-            |e| matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name),
-        ) {
-            if let aos_air_types::SecretEntry::Ref(nr) = &manifest.secrets[pos]
-                && let Some(pre) = pre_hash
-                && nr.hash.as_str() != pre
-            {
-                return Err(KernelError::Manifest(format!(
-                    "pre_hash mismatch for {name}"
-                )));
-            }
-            if remove.is_some() {
-                manifest.secrets.remove(pos);
-            }
-        } else if remove.is_none() {
-            manifest
-                .secrets
-                .push(aos_air_types::SecretEntry::Ref(NamedRef {
-                    name: name.into(),
-                    hash: zero_hash_ref()?,
-                }));
-        }
-        return Ok(());
-    }
-
     let refs = refs_for_kind_mut(manifest, kind)?;
     if let Some(idx) = refs.iter().position(|r| r.name.as_str() == name) {
         if let Some(pre) = pre_hash
@@ -282,10 +232,6 @@ fn update_manifest_ref_hash(
 
 fn apply_manifest_refs(manifest: &mut Manifest, refs: SetManifestRefs) -> Result<(), KernelError> {
     for add in refs.add {
-        if add.kind == "defsecret" {
-            apply_secret_ref_add(manifest, &add.name, &add.hash)?;
-            continue;
-        }
         let target = refs_for_kind_mut(manifest, &add.kind)?;
         let hash = HashRef::new(add.hash).map_err(|e| KernelError::Manifest(e.to_string()))?;
         if let Some(pos) = target.iter().position(|r| r.name.as_str() == add.name) {
@@ -299,10 +245,6 @@ fn apply_manifest_refs(manifest: &mut Manifest, refs: SetManifestRefs) -> Result
     }
 
     for rem in refs.remove {
-        if rem.kind == "defsecret" {
-            apply_secret_ref_remove(manifest, &rem.name);
-            continue;
-        }
         let target = refs_for_kind_mut(manifest, &rem.kind)?;
         if let Some(pos) = target.iter().position(|r| r.name.as_str() == rem.name) {
             target.remove(pos);
@@ -312,7 +254,10 @@ fn apply_manifest_refs(manifest: &mut Manifest, refs: SetManifestRefs) -> Result
     Ok(())
 }
 
-fn apply_routing_events(manifest: &mut Manifest, op: SetRoutingEvents) -> Result<(), KernelError> {
+fn apply_routing_subscriptions(
+    manifest: &mut Manifest,
+    op: SetRoutingSubscriptions,
+) -> Result<(), KernelError> {
     let current = manifest
         .routing
         .as_ref()
@@ -323,35 +268,8 @@ fn apply_routing_events(manifest: &mut Manifest, op: SetRoutingEvents) -> Result
         .routing
         .get_or_insert_with(|| aos_air_types::Routing {
             subscriptions: vec![],
-            inboxes: vec![],
         });
     routing.subscriptions = op.subscriptions;
-    Ok(())
-}
-
-fn apply_routing_inboxes(
-    manifest: &mut Manifest,
-    op: SetRoutingInboxes,
-) -> Result<(), KernelError> {
-    let current = manifest
-        .routing
-        .as_ref()
-        .map(|r| r.inboxes.clone())
-        .unwrap_or_default();
-    verify_block_pre_hash(&current, &op.pre_hash, "routing.inboxes")?;
-    let routing = manifest
-        .routing
-        .get_or_insert_with(|| aos_air_types::Routing {
-            subscriptions: vec![],
-            inboxes: vec![],
-        });
-    routing.inboxes = op.inboxes;
-    Ok(())
-}
-
-fn apply_secrets(manifest: &mut Manifest, op: SetSecrets) -> Result<(), KernelError> {
-    verify_block_pre_hash(&manifest.secrets, &op.pre_hash, "secrets")?;
-    manifest.secrets = op.secrets;
     Ok(())
 }
 
@@ -379,7 +297,8 @@ fn refs_for_kind_mut<'a>(
     match kind {
         "defschema" => Ok(&mut manifest.schemas),
         "defmodule" => Ok(&mut manifest.modules),
-        "defeffect" => Ok(&mut manifest.effects),
+        "defop" => Ok(&mut manifest.ops),
+        "defsecret" => Ok(&mut manifest.secrets),
         _ => Err(KernelError::Manifest(format!(
             "unsupported manifest ref kind: {kind}"
         ))),
@@ -399,23 +318,15 @@ fn rewrite_manifest_refs(manifest: &mut Manifest, hash_map: &HashMap<String, Has
 
     rewrite(&mut manifest.schemas);
     rewrite(&mut manifest.modules);
-    rewrite(&mut manifest.effects);
-
-    for entry in &mut manifest.secrets {
-        if let aos_air_types::SecretEntry::Ref(named) = entry
-            && let Some(h) = hash_map.get(&named.name)
-            && let Ok(hash_ref) = HashRef::new(h.to_hex())
-        {
-            named.hash = hash_ref;
-        }
-    }
+    rewrite(&mut manifest.ops);
+    rewrite(&mut manifest.secrets);
 }
 
 fn node_name(node: &AirNode) -> Option<&str> {
     match node {
         AirNode::Defschema(s) => Some(s.name.as_str()),
         AirNode::Defmodule(m) => Some(m.name.as_str()),
-        AirNode::Defeffect(e) => Some(e.name.as_str()),
+        AirNode::Defop(o) => Some(o.name.as_str()),
         AirNode::Defsecret(s) => Some(s.name.as_str()),
         AirNode::Manifest(_) => None,
     }
@@ -431,11 +342,6 @@ fn insert_placeholder_ref(
     kind: &str,
     name: &str,
 ) -> Result<(), KernelError> {
-    if kind == "defsecret" {
-        apply_secret_ref_add(manifest, name, &format!("sha256:{}", "0".repeat(64)))?;
-        return Ok(());
-    }
-
     let target = refs_for_kind_mut(manifest, kind)?;
     if !target.iter().any(|r| r.name.as_str() == name) {
         target.push(NamedRef {
@@ -444,41 +350,6 @@ fn insert_placeholder_ref(
         });
     }
     Ok(())
-}
-
-fn apply_secret_ref_add(
-    manifest: &mut Manifest,
-    name: &str,
-    hash: &str,
-) -> Result<(), KernelError> {
-    let hash_ref =
-        HashRef::new(hash.to_string()).map_err(|e| KernelError::Manifest(e.to_string()))?;
-    if let Some(pos) = manifest
-        .secrets
-        .iter()
-        .position(|entry| matches!(entry, aos_air_types::SecretEntry::Ref(named) if named.name.as_str() == name))
-    {
-        manifest.secrets[pos] = aos_air_types::SecretEntry::Ref(NamedRef {
-            name: name.to_string(),
-            hash: hash_ref,
-        });
-    } else {
-        manifest.secrets.push(aos_air_types::SecretEntry::Ref(NamedRef {
-            name: name.to_string(),
-            hash: hash_ref,
-        }));
-    }
-    Ok(())
-}
-
-fn apply_secret_ref_remove(manifest: &mut Manifest, name: &str) {
-    if let Some(pos) = manifest
-        .secrets
-        .iter()
-        .position(|entry| matches!(entry, aos_air_types::SecretEntry::Ref(named) if named.name.as_str() == name))
-    {
-        manifest.secrets.remove(pos);
-    }
 }
 
 fn reject_sys_name(name: &str, action: &str) -> Result<(), KernelError> {

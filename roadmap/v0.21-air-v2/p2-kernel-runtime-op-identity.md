@@ -10,6 +10,8 @@ After this phase, workflows, effect intents, open work, receipts, streams, conti
 and effect dispatch should be keyed by workflow op and effect op identity. The runtime should no
 longer use module identity as workflow identity, or effect kind strings as effect identity.
 
+Note: since this is a bigger refactor, it is acceptable to have modules breaking while we do p1-p3. It is fine to just refacor a few crates like crates/aos-air-types, then aos-kernel, etc and only then move to next.
+
 ## Non-Goals
 
 - Do not implement Python workflow or Python effect execution.

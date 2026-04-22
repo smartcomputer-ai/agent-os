@@ -99,10 +99,6 @@ impl<S: Store + 'static> Kernel<S> {
                 })?;
         let event_value = normalized.value;
         for binding in bindings {
-            let module_def = self
-                .module_defs
-                .get(&binding.workflow)
-                .ok_or_else(|| KernelError::WorkflowNotFound(binding.workflow.clone()))?;
             let workflow_schema =
                 self.workflow_schemas
                     .get(&binding.workflow)
@@ -112,7 +108,7 @@ impl<S: Store + 'static> Kernel<S> {
                             binding.workflow
                         ))
                     })?;
-            let keyed = module_def.key_schema.is_some();
+            let keyed = workflow_schema.key_schema.is_some();
 
             match (keyed, &binding.key_field) {
                 (true, None) => {
@@ -153,20 +149,10 @@ impl<S: Store + 'static> Kernel<S> {
 
             let key_bytes = if keyed {
                 if let Some(field) = &binding.key_field {
-                    let key_schema_ref = module_def
+                    let key_schema = workflow_schema
                         .key_schema
                         .as_ref()
                         .expect("keyed workflows have key_schema");
-                    let key_schema =
-                        self.schema_index
-                            .get(key_schema_ref.as_str())
-                            .ok_or_else(|| {
-                                KernelError::Manifest(format!(
-                                    "key schema '{}' not found for workflow '{}'",
-                                    key_schema_ref.as_str(),
-                                    binding.workflow
-                                ))
-                            })?;
                     let value_for_key = if binding.route_event_schema == event.schema {
                         &event_value
                     } else {
@@ -241,27 +227,23 @@ impl<S: Store + 'static> Kernel<S> {
             metrics.domain_events += 1;
         }
         let workflow_name = event.workflow.clone();
-        let (keyed, wants_context) = {
-            let module_def = self
-                .module_defs
-                .get(&workflow_name)
-                .ok_or_else(|| KernelError::WorkflowNotFound(workflow_name.clone()))?;
-            if module_def.module_kind != aos_air_types::ModuleKind::Workflow {
-                return Err(KernelError::Manifest(format!(
-                    "module '{workflow_name}' is not a workflow/workflow module"
-                )));
-            }
-            self.workflows.ensure_loaded(&workflow_name, module_def)?;
+        let (keyed, wants_context, module_name) = {
+            let op = self.workflow_op(&workflow_name)?;
+            let workflow = op
+                .workflow
+                .as_ref()
+                .expect("workflow_op requires workflow metadata");
             (
-                module_def.key_schema.is_some(),
-                module_def
-                    .abi
-                    .workflow
-                    .as_ref()
-                    .and_then(|abi| abi.context.as_ref())
-                    .is_some(),
+                workflow.key_schema.is_some(),
+                workflow.context.is_some(),
+                op.implementation.module.clone(),
             )
         };
+        let module_def = self
+            .module_defs
+            .get(&module_name)
+            .ok_or_else(|| KernelError::WorkflowNotFound(module_name.clone()))?;
+        self.workflows.ensure_loaded(&workflow_name, module_def)?;
         let key = event.event.key.clone();
         if keyed && key.is_none() {
             return Err(KernelError::Manifest(format!(
@@ -427,13 +409,6 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<(), KernelError> {
         Self::enforce_workflow_output_limits(&output)?;
 
-        let declared_effects = self
-            .module_defs
-            .get(&workflow_name)
-            .and_then(|module| module.abi.workflow.as_ref())
-            .map(|abi| abi.effects_emitted.clone())
-            .unwrap_or_default();
-
         if keyed {
             self.ensure_cell_index_root(&workflow_name)?;
         }
@@ -445,10 +420,7 @@ impl<S: Store + 'static> Kernel<S> {
         };
         let key_hash = Hash::of_bytes(&key_bytes);
         let state_for_workflow = output.state.clone();
-        let module_version = self
-            .module_defs
-            .get(&workflow_name)
-            .map(|module| module.wasm_hash.as_str().to_string());
+        let module_version = self.workflow_wasm_hash(&workflow_name).ok();
         match output.state {
             Some(state) => {
                 let state_hash = Hash::of_bytes(&state);
@@ -521,10 +493,7 @@ impl<S: Store + 'static> Kernel<S> {
             self.process_domain_event(event)?;
         }
         for (effect_index, effect) in output.effects.iter().enumerate() {
-            if !declared_effects
-                .iter()
-                .any(|kind| kind.as_str() == effect.kind.as_str())
-            {
+            if !self.workflow_effect_declares(&workflow_name, effect.kind.as_str()) {
                 return Err(KernelError::WorkflowOutput(format!(
                     "module '{workflow_name}' emitted undeclared effect kind '{}'; declare it in abi.workflow.effects_emitted",
                     effect.kind
@@ -571,9 +540,7 @@ impl<S: Store + 'static> Kernel<S> {
                     effect.issuer_ref.clone(),
                     intent.intent_hash,
                     emitted_at_seq,
-                    self.module_defs
-                        .get(&workflow_name)
-                        .map(|module| module.wasm_hash.as_str().to_string()),
+                    self.workflow_wasm_hash(&workflow_name).ok(),
                 ),
             );
             self.record_workflow_inflight_intent(

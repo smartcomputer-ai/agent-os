@@ -33,7 +33,9 @@ pub fn normalize_effect_params(
 }
 
 fn params_schema_name<'a>(catalog: &'a EffectCatalog, kind: &EffectKind) -> Option<&'a str> {
-    catalog.params_schema(kind).map(|schema| schema.as_str())
+    catalog
+        .params_schema_for_runtime(kind.as_str())
+        .map(|schema| schema.as_str())
 }
 
 fn map_error(err: ValueNormalizeError) -> NormalizeError {
@@ -48,9 +50,7 @@ fn map_error(err: ValueNormalizeError) -> NormalizeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_air_types::{
-        builtins::builtin_effects, builtins::builtin_schemas, catalog::EffectCatalog,
-    };
+    use aos_air_types::{builtins::builtin_ops, builtins::builtin_schemas, catalog::EffectCatalog};
     use serde_cbor::Value as CborValue;
     use std::collections::BTreeMap;
     use std::collections::HashMap;
@@ -74,7 +74,7 @@ mod tests {
     }
 
     fn catalog_and_schemas() -> (EffectCatalog, SchemaIndex) {
-        let catalog = EffectCatalog::from_defs(builtin_effects().iter().map(|e| e.effect.clone()));
+        let catalog = EffectCatalog::from_defs(builtin_ops().iter().map(|e| e.op.clone()));
         let mut map = HashMap::new();
         for builtin in builtin_schemas() {
             map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());

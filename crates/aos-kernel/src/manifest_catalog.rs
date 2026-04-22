@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path};
 
 use aos_air_types::{
-    AirNode, CURRENT_AIR_VERSION, Manifest, NamedRef, SecretDecl, SecretEntry, SecretRef, builtins,
+    AirNode, CURRENT_AIR_VERSION, DefSecret, Manifest, NamedRef, SecretRef, builtins,
 };
 use aos_cbor::Hash;
 use serde_json::Value as JsonValue;
@@ -19,14 +19,14 @@ pub struct CatalogEntry {
 pub struct Catalog {
     pub manifest: Manifest,
     pub nodes: HashMap<String, CatalogEntry>,
-    pub resolved_secrets: Vec<SecretDecl>,
+    pub resolved_secrets: Vec<DefSecret>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NodeKind {
     Schema,
     Module,
-    Effect,
+    Op,
     Secret,
 }
 
@@ -35,7 +35,7 @@ impl NodeKind {
         match self {
             NodeKind::Schema => "defschema",
             NodeKind::Module => "defmodule",
-            NodeKind::Effect => "defeffect",
+            NodeKind::Op => "defop",
             NodeKind::Secret => "defsecret",
         }
     }
@@ -45,7 +45,7 @@ impl NodeKind {
             (self, node),
             (NodeKind::Schema, AirNode::Defschema(_))
                 | (NodeKind::Module, AirNode::Defmodule(_))
-                | (NodeKind::Effect, AirNode::Defeffect(_))
+                | (NodeKind::Op, AirNode::Defop(_))
                 | (NodeKind::Secret, AirNode::Defsecret(_))
         )
     }
@@ -73,8 +73,8 @@ pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResul
     let mut nodes = HashMap::new();
     load_refs(store, &manifest.schemas, NodeKind::Schema, &mut nodes)?;
     load_refs(store, &manifest.modules, NodeKind::Module, &mut nodes)?;
-    load_refs(store, &manifest.effects, NodeKind::Effect, &mut nodes)?;
-    load_secret_refs(store, &manifest.secrets, &mut nodes)?;
+    load_refs(store, &manifest.ops, NodeKind::Op, &mut nodes)?;
+    load_refs(store, &manifest.secrets, NodeKind::Secret, &mut nodes)?;
 
     let resolved_secrets = resolve_secrets(&manifest, &nodes)?;
     validate_secrets(&resolved_secrets)?;
@@ -115,7 +115,7 @@ fn load_refs<S: Store>(
     for reference in refs {
         if is_sys_name(reference.name.as_str()) {
             match kind {
-                NodeKind::Schema | NodeKind::Effect | NodeKind::Module => {}
+                NodeKind::Schema | NodeKind::Op | NodeKind::Module => {}
                 _ => {
                     return Err(StoreError::ReservedSysName {
                         kind: kind.label(),
@@ -164,15 +164,15 @@ fn load_refs<S: Store>(
             continue;
         }
 
-        if kind == NodeKind::Effect
-            && let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str())
+        if kind == NodeKind::Op
+            && let Some(builtin) = builtins::find_builtin_op(reference.name.as_str())
         {
-            ensure_builtin_effect_hash(reference, builtin)?;
+            ensure_builtin_op_hash(reference, builtin)?;
             nodes.insert(
                 reference.name.clone(),
                 CatalogEntry {
                     hash: builtin.hash,
-                    node: AirNode::Defeffect(builtin.effect.clone()),
+                    node: AirNode::Defop(builtin.op.clone()),
                 },
             );
             continue;
@@ -196,24 +196,6 @@ fn load_refs<S: Store>(
         nodes.insert(reference.name.clone(), CatalogEntry { hash, node });
     }
     Ok(())
-}
-
-fn load_secret_refs<S: Store>(
-    store: &S,
-    secrets: &[SecretEntry],
-    nodes: &mut HashMap<String, CatalogEntry>,
-) -> StoreResult<()> {
-    let refs: Vec<NamedRef> = secrets
-        .iter()
-        .filter_map(|entry| match entry {
-            SecretEntry::Ref(named) => Some(named.clone()),
-            SecretEntry::Decl(_) => None,
-        })
-        .collect();
-    if refs.is_empty() {
-        return Ok(());
-    }
-    load_refs(store, &refs, NodeKind::Secret, nodes)
 }
 
 fn parse_hash_str(value: &str) -> StoreResult<Hash> {
@@ -263,10 +245,7 @@ fn ensure_builtin_hash(reference: &NamedRef, builtin: &builtins::BuiltinSchema) 
     Ok(())
 }
 
-fn ensure_builtin_effect_hash(
-    reference: &NamedRef,
-    builtin: &builtins::BuiltinEffect,
-) -> StoreResult<()> {
+fn ensure_builtin_op_hash(reference: &NamedRef, builtin: &builtins::BuiltinOp) -> StoreResult<()> {
     let actual = parse_hash_str(reference.hash.as_str())?;
     if actual != builtin.hash {
         return Err(StoreError::HashMismatch {
@@ -281,55 +260,43 @@ fn ensure_builtin_effect_hash(
 fn resolve_secrets(
     manifest: &Manifest,
     nodes: &HashMap<String, CatalogEntry>,
-) -> StoreResult<Vec<SecretDecl>> {
+) -> StoreResult<Vec<DefSecret>> {
     let mut decls = Vec::new();
-    for entry in &manifest.secrets {
-        match entry {
-            SecretEntry::Decl(decl) => decls.push(decl.clone()),
-            SecretEntry::Ref(named) => {
-                let Some(node) = nodes.get(&named.name) else {
-                    return Err(StoreError::UnknownSecret {
-                        alias: named.name.clone(),
-                        version: 0,
-                        context: "defsecret not loaded".into(),
-                    });
-                };
-                let AirNode::Defsecret(def) = &node.node else {
-                    return Err(StoreError::NodeKindMismatch {
-                        name: named.name.clone(),
-                        expected: NodeKind::Secret.label(),
-                    });
-                };
-                let (alias, version) = parse_secret_name(&def.name)?;
-                decls.push(SecretDecl {
-                    alias,
-                    version,
-                    binding_id: def.binding_id.clone(),
-                    expected_digest: def.expected_digest.clone(),
-                });
-            }
-        }
+    for named in &manifest.secrets {
+        let Some(node) = nodes.get(&named.name) else {
+            return Err(StoreError::UnknownSecret {
+                alias: named.name.clone(),
+                version: 0,
+                context: "defsecret not loaded".into(),
+            });
+        };
+        let AirNode::Defsecret(def) = &node.node else {
+            return Err(StoreError::NodeKindMismatch {
+                name: named.name.clone(),
+                expected: NodeKind::Secret.label(),
+            });
+        };
+        parse_secret_name(&def.name)?;
+        decls.push(def.clone());
     }
     Ok(decls)
 }
 
-fn validate_secrets(declarations: &[SecretDecl]) -> StoreResult<()> {
+fn validate_secrets(declarations: &[DefSecret]) -> StoreResult<()> {
     index_secret_decls(declarations).map(|_| ())
 }
 
 fn index_secret_decls<'a>(
-    secrets: &'a [SecretDecl],
-) -> StoreResult<HashMap<(String, u64), &'a SecretDecl>> {
+    secrets: &'a [DefSecret],
+) -> StoreResult<HashMap<(String, u64), &'a DefSecret>> {
     let mut map = HashMap::new();
     for secret in secrets {
+        let (alias, version) = parse_secret_name(&secret.name)?;
         if secret.binding_id.trim().is_empty() {
-            return Err(StoreError::SecretMissingBinding {
-                alias: secret.alias.clone(),
-                version: secret.version,
-            });
+            return Err(StoreError::SecretMissingBinding { alias, version });
         }
 
-        let key = (secret.alias.clone(), secret.version);
+        let key = parse_secret_name(&secret.name)?;
         if map.insert(key.clone(), secret).is_some() {
             return Err(StoreError::DuplicateSecret {
                 alias: key.0,
@@ -342,9 +309,9 @@ fn index_secret_decls<'a>(
 
 fn resolve_secret<'a>(
     reference: &SecretRef,
-    declarations: &'a HashMap<(String, u64), &'a SecretDecl>,
+    declarations: &'a HashMap<(String, u64), &'a DefSecret>,
     context: &str,
-) -> StoreResult<&'a SecretDecl> {
+) -> StoreResult<&'a DefSecret> {
     if reference.version < 1 {
         return Err(StoreError::InvalidSecretVersion {
             alias: reference.alias.clone(),
@@ -422,11 +389,11 @@ mod tests {
             .collect()
     }
 
-    fn builtin_effect_refs() -> Vec<NamedRef> {
-        builtins::builtin_effects()
+    fn builtin_op_refs() -> Vec<NamedRef> {
+        builtins::builtin_ops()
             .iter()
             .map(|b| NamedRef {
-                name: b.effect.name.clone(),
+                name: b.op.name.clone(),
                 hash: b.hash_ref.clone(),
             })
             .collect()
@@ -454,8 +421,7 @@ mod tests {
                 refs
             },
             modules: vec![],
-            effects: builtin_effect_refs(),
-            effect_bindings: vec![],
+            ops: builtin_op_refs(),
             secrets: vec![],
             routing: None,
         };
@@ -464,5 +430,4 @@ mod tests {
         let catalog = load_manifest_from_bytes(&store, &manifest_bytes).expect("load");
         assert!(catalog.nodes.contains_key("com.acme/Event@1"));
     }
-
 }

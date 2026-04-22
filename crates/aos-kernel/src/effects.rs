@@ -125,7 +125,7 @@ impl EffectManager {
         params_cbor: Vec<u8>,
         idempotency_key: [u8; 32],
     ) -> Result<EffectIntent, KernelError> {
-        self.ensure_origin_scope(&source, &runtime_kind)?;
+        self.ensure_effect_known(&runtime_kind)?;
         let canonical_params =
             self.canonicalize_effect_params(&source, &runtime_kind, params_cbor)?;
         let intent = EffectIntent::from_raw_params(runtime_kind, canonical_params, idempotency_key)
@@ -133,27 +133,17 @@ impl EffectManager {
         Ok(intent)
     }
 
-    fn ensure_origin_scope(
-        &self,
-        source: &EffectSource,
-        runtime_kind: &EffectKind,
-    ) -> Result<(), KernelError> {
-        let scope = self
+    fn ensure_effect_known(&self, runtime_kind: &EffectKind) -> Result<(), KernelError> {
+        if self
             .effect_catalog
-            .origin_scope(runtime_kind)
-            .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?;
-        let allowed = match source {
-            EffectSource::Workflow { .. } => scope.allows_workflows(),
-            EffectSource::Plan { .. } => scope.allows_plans(),
-        };
-        if allowed {
+            .params_schema_for_runtime(runtime_kind.as_str())
+            .is_some()
+        {
             Ok(())
         } else {
-            Err(KernelError::UnsupportedEffectKind(format!(
-                "{} is not allowed for {} origins",
-                runtime_kind.as_str(),
-                source.origin_kind()
-            )))
+            Err(KernelError::UnsupportedEffectKind(
+                runtime_kind.as_str().into(),
+            ))
         }
     }
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aos.dev/air/v1/defschema.schema.json",
-  "title": "AIR v1 defschema",
+  "$id": "https://aos.dev/air/v2/defschema.schema.json",
+  "title": "AIR v2 defschema",
   "type": "object",
   "properties": {
     "$kind": { "const": "defschema" },

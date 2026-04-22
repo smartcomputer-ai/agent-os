@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use aos_air_types::{HashRef, SecretDecl};
+use aos_air_types::{DefSecret, HashRef};
 use aos_cbor::Hash;
 use thiserror::Error;
 
@@ -27,14 +27,30 @@ pub trait SecretResolver: Send + Sync {
 /// Catalog of declared secrets from the manifest for quick lookup.
 #[derive(Clone, Default)]
 pub struct SecretCatalog {
-    by_key: HashMap<(String, u64), SecretDecl>,
+    by_key: HashMap<(String, u64), SecretCatalogEntry>,
+}
+
+#[derive(Clone)]
+pub struct SecretCatalogEntry {
+    pub binding_id: String,
+    pub version: u64,
+    pub expected_digest: Option<HashRef>,
 }
 
 impl SecretCatalog {
-    pub fn new(decls: &[SecretDecl]) -> Self {
+    pub fn new(decls: &[DefSecret]) -> Self {
         let mut by_key = HashMap::new();
         for decl in decls {
-            by_key.insert((decl.alias.clone(), decl.version), decl.clone());
+            if let Some((alias, version)) = parse_secret_name(&decl.name) {
+                by_key.insert(
+                    (alias, version),
+                    SecretCatalogEntry {
+                        binding_id: decl.binding_id.clone(),
+                        version,
+                        expected_digest: decl.expected_digest.clone(),
+                    },
+                );
+            }
         }
         Self { by_key }
     }
@@ -43,9 +59,16 @@ impl SecretCatalog {
         self.by_key.is_empty()
     }
 
-    pub fn lookup(&self, alias: &str, version: u64) -> Option<&SecretDecl> {
+    pub fn lookup(&self, alias: &str, version: u64) -> Option<&SecretCatalogEntry> {
         self.by_key.get(&(alias.to_string(), version))
     }
+}
+
+fn parse_secret_name(name: &str) -> Option<(String, u64)> {
+    let mut parts = name.rsplitn(2, '@');
+    let version = parts.next()?.parse::<u64>().ok()?;
+    let alias = parts.next()?.to_string();
+    Some((alias, version))
 }
 
 /// Walks effect params CBOR for SecretRef variants and validates them against the catalog and resolver.
@@ -470,9 +493,8 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("binding".to_string(), b"token123".to_vec());
         let resolver = MapSecretResolver::new(map);
-        let decl = SecretDecl {
-            alias: "auth/api".into(),
-            version: 1,
+        let decl = DefSecret {
+            name: "auth/api@1".into(),
             binding_id: "binding".into(),
             expected_digest: None,
         };
@@ -557,9 +579,8 @@ mod tests {
             "normalized params should retain SecretRef variant"
         );
 
-        let catalog = SecretCatalog::new(&[SecretDecl {
-            alias: "auth/api".into(),
-            version: 1,
+        let catalog = SecretCatalog::new(&[DefSecret {
+            name: "auth/api@1".into(),
             binding_id: "binding".into(),
             expected_digest: None,
         }]);

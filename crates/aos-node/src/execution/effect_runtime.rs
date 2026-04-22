@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 
+use aos_air_types::OpKind;
 use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_effect_adapters::default_registry;
 use aos_effect_adapters::registry::AdapterRegistry;
@@ -356,13 +357,13 @@ pub fn classify_effect_kind(kind: &str) -> EffectExecutionClass {
 
 fn collect_effect_routes(loaded: &LoadedManifest) -> HashMap<String, String> {
     loaded
-        .manifest
-        .effect_bindings
-        .iter()
-        .map(|binding| {
+        .ops
+        .values()
+        .filter(|op| op.op_kind == OpKind::Effect)
+        .map(|op| {
             (
-                binding.kind.as_str().to_string(),
-                binding.adapter_id.clone(),
+                op.implementation.entrypoint.clone(),
+                op.implementation.module.clone(),
             )
         })
         .collect()
@@ -375,8 +376,12 @@ fn preflight_external_effect_routes(
     strict_effect_bindings: bool,
 ) -> Result<EffectRouteDiagnostics, RuntimeError> {
     let mut required_kinds: BTreeSet<String> = BTreeSet::new();
-    for effect in loaded.effects.values() {
-        let kind = effect.kind.as_str();
+    for op in loaded
+        .ops
+        .values()
+        .filter(|op| op.op_kind == OpKind::Effect)
+    {
+        let kind = op.implementation.entrypoint.as_str();
         if matches!(
             classify_effect_kind(kind),
             EffectExecutionClass::ExternalAsync
@@ -397,19 +402,28 @@ fn preflight_external_effect_routes(
     }
 
     let mut origins: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for module in loaded.modules.values() {
-        let Some(workflow_abi) = module.abi.workflow.as_ref() else {
+    for op in loaded
+        .ops
+        .values()
+        .filter(|op| op.op_kind == OpKind::Workflow)
+    {
+        let Some(workflow) = op.workflow.as_ref() else {
             continue;
         };
-        for kind in &workflow_abi.effects_emitted {
+        for declared in &workflow.effects_emitted {
+            let kind = loaded
+                .ops
+                .get(declared)
+                .map(|effect_op| effect_op.implementation.entrypoint.as_str())
+                .unwrap_or_else(|| declared.as_str());
             if matches!(
-                classify_effect_kind(kind.as_str()),
+                classify_effect_kind(kind),
                 EffectExecutionClass::ExternalAsync
             ) {
                 origins
-                    .entry(kind.as_str().to_string())
+                    .entry(kind.to_string())
                     .or_default()
-                    .push(module.name.clone());
+                    .push(op.name.clone());
             }
         }
     }

@@ -39,10 +39,10 @@ impl ShadowExecutor {
 
         let loaded = config.patch.to_loaded_manifest(store.as_ref())?;
         let module_effect_allowlists = loaded
-            .modules
+            .ops
             .values()
-            .filter_map(|module| {
-                let workflow = module.abi.workflow.as_ref()?;
+            .filter_map(|op| {
+                let workflow = op.workflow.as_ref()?;
                 let mut effects = workflow
                     .effects_emitted
                     .iter()
@@ -50,7 +50,7 @@ impl ShadowExecutor {
                     .collect::<Vec<_>>();
                 effects.sort();
                 Some(ModuleEffectAllowlist {
-                    module: module.name.clone(),
+                    module: op.name.clone(),
                     effects_emitted: effects,
                 })
             })
@@ -167,11 +167,11 @@ mod tests {
     use super::*;
     use crate::MemStore;
     use crate::governance::ManifestPatch;
+    use aos_air_types::EmptyObject;
     use aos_air_types::{
         AirNode, DefSchema, HashRef, Manifest, NamedRef, SecretDecl, SecretEntry, TypeExpr,
         TypePrimitive, TypePrimitiveText,
     };
-    use aos_air_types::EmptyObject;
 
     fn empty_manifest() -> Manifest {
         Manifest {

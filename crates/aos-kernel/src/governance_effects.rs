@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::Store;
-use aos_air_types::{HashRef, Manifest, NamedRef, Routing, SecretEntry};
+use aos_air_types::{HashRef, Manifest, NamedRef, Routing};
 use aos_cbor::{Hash, to_canonical_cbor};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
@@ -531,16 +531,17 @@ fn build_patch_summary(
         &mut def_changes,
     );
     refs_changed |= push_named_ref_changes(
-        "defeffect",
-        &base_manifest.effects,
-        &patch.manifest.effects,
+        "defop",
+        &base_manifest.ops,
+        &patch.manifest.ops,
         &mut def_changes,
     );
-    refs_changed |= diff_secret_refs(
+    refs_changed |= push_named_ref_changes(
+        "defsecret",
         &base_manifest.secrets,
         &patch.manifest.secrets,
         &mut def_changes,
-    )?;
+    );
 
     def_changes.sort_by(|a, b| {
         let a_key = (&a.kind, &a.name, change_rank(a.action));
@@ -551,17 +552,12 @@ fn build_patch_summary(
     let mut manifest_sections = HashSet::new();
     let base_routing = base_manifest.routing.clone().unwrap_or_else(|| Routing {
         subscriptions: Vec::new(),
-        inboxes: Vec::new(),
     });
     let next_routing = patch.manifest.routing.clone().unwrap_or_else(|| Routing {
         subscriptions: Vec::new(),
-        inboxes: Vec::new(),
     });
     if section_changed(&base_routing.subscriptions, &next_routing.subscriptions)? {
-        manifest_sections.insert("routing_events".to_string());
-    }
-    if section_changed(&base_routing.inboxes, &next_routing.inboxes)? {
-        manifest_sections.insert("routing_inboxes".to_string());
+        manifest_sections.insert("routing_subscriptions".to_string());
     }
     if section_changed(&base_manifest.secrets, &patch.manifest.secrets)? {
         manifest_sections.insert("secrets".to_string());
@@ -589,14 +585,11 @@ fn build_patch_summary(
     }
     for section in &manifest_sections {
         match section.as_str() {
-            "routing_events" => {
-                ops.insert("set_routing_events".to_string());
-            }
-            "routing_inboxes" => {
-                ops.insert("set_routing_inboxes".to_string());
+            "routing_subscriptions" => {
+                ops.insert("set_routing_subscriptions".to_string());
             }
             "secrets" => {
-                ops.insert("set_secrets".to_string());
+                ops.insert("set_manifest_refs".to_string());
             }
             "manifest_refs" => {}
             _ => {}
@@ -637,72 +630,6 @@ fn push_named_ref_changes(
         changed = true;
     }
     changed
-}
-
-fn diff_secret_refs(
-    base: &[SecretEntry],
-    next: &[SecretEntry],
-    changes: &mut Vec<GovDefChange>,
-) -> Result<bool, KernelError> {
-    let base_map = map_secrets(base)?;
-    let next_map = map_secrets(next)?;
-    let mut changed = false;
-    for (name, hash) in &next_map {
-        match base_map.get(name) {
-            None => {
-                changes.push(GovDefChange {
-                    kind: "defsecret".to_string(),
-                    name: name.clone(),
-                    action: GovChangeAction::Added,
-                });
-                changed = true;
-            }
-            Some(existing) if existing != hash => {
-                changes.push(GovDefChange {
-                    kind: "defsecret".to_string(),
-                    name: name.clone(),
-                    action: GovChangeAction::Changed,
-                });
-                changed = true;
-            }
-            _ => {}
-        }
-    }
-    for name in base_map.keys() {
-        if !next_map.contains_key(name) {
-            changes.push(GovDefChange {
-                kind: "defsecret".to_string(),
-                name: name.clone(),
-                action: GovChangeAction::Removed,
-            });
-            changed = true;
-        }
-    }
-    Ok(changed)
-}
-
-fn map_secrets(secrets: &[SecretEntry]) -> Result<HashMap<String, String>, KernelError> {
-    let mut map = HashMap::new();
-    for entry in secrets {
-        let (name, hash) = secret_entry_identity(entry)?;
-        map.insert(name, hash);
-    }
-    Ok(map)
-}
-
-fn secret_entry_identity(entry: &SecretEntry) -> Result<(String, String), KernelError> {
-    match entry {
-        SecretEntry::Ref(reference) => Ok((
-            reference.name.as_str().to_string(),
-            reference.hash.as_str().to_string(),
-        )),
-        SecretEntry::Decl(decl) => {
-            let name = format!("{}@{}", decl.alias, decl.version);
-            let hash = Hash::of_cbor(entry)
-                .map_err(|err| KernelError::Manifest(format!("hash secret decl: {err}")))?;
-            Ok((name, hash.to_hex()))
-        }
-    }
 }
 
 fn section_changed<T: Serialize>(base: &T, next: &T) -> Result<bool, KernelError> {

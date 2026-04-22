@@ -408,8 +408,8 @@ pub struct VariantExpr {
 pub enum AirNode {
     Defschema(DefSchema),
     Defmodule(DefModule),
+    Defop(DefOp),
     Defsecret(DefSecret),
-    Defeffect(DefEffect),
     Manifest(Manifest),
 }
 
@@ -423,96 +423,137 @@ pub struct DefSchema {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DefModule {
     pub name: Name,
-    pub module_kind: ModuleKind,
-    pub wasm_hash: HashRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_schema: Option<SchemaRef>,
-    pub abi: ModuleAbi,
+    pub runtime: ModuleRuntime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModuleRuntime {
+    Wasm {
+        artifact: WasmArtifact,
+    },
+    Python {
+        python: String,
+        artifact: PythonArtifact,
+    },
+    Builtin {},
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WasmArtifact {
+    WasmModule { hash: HashRef },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PythonArtifact {
+    PythonBundle {
+        root_hash: HashRef,
+    },
+    WorkspaceRoot {
+        root_hash: HashRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum ModuleKind {
+pub enum OpKind {
     Workflow,
-    Pure,
+    Effect,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleAbi {
+pub struct DefOp {
+    pub name: Name,
+    pub op_kind: OpKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow: Option<WorkflowAbi>,
+    pub workflow: Option<WorkflowOp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pure: Option<PureAbi>,
+    pub effect: Option<EffectOp>,
+    #[serde(rename = "impl")]
+    pub implementation: OpImpl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkflowAbi {
+pub struct WorkflowOp {
     pub state: SchemaRef,
     pub event: SchemaRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<SchemaRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotations: Option<SchemaRef>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub effects_emitted: Vec<EffectKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_schema: Option<SchemaRef>,
+    pub effects_emitted: Vec<Name>,
+    #[serde(
+        default = "default_workflow_determinism",
+        skip_serializing_if = "is_strict_workflow_determinism"
+    )]
+    pub determinism: WorkflowDeterminism,
+}
+
+fn default_workflow_determinism() -> WorkflowDeterminism {
+    WorkflowDeterminism::Strict
+}
+
+fn is_strict_workflow_determinism(value: &WorkflowDeterminism) -> bool {
+    matches!(value, WorkflowDeterminism::Strict)
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowDeterminism {
+    Strict,
+    Checked,
+    DecisionLog,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PureAbi {
-    pub input: SchemaRef,
-    pub output: SchemaRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context: Option<SchemaRef>,
+pub struct EffectOp {
+    pub params: SchemaRef,
+    pub receipt: SchemaRef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpImpl {
+    pub module: Name,
+    pub entrypoint: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum OriginScope {
-    Workflow,
-    Plan,
-    Both,
+pub enum RootKind {
+    Defschema,
+    Defmodule,
+    Defop,
+    Defsecret,
+    Manifest,
 }
 
-impl OriginScope {
-    pub fn allows_plans(self) -> bool {
-        matches!(self, OriginScope::Plan | OriginScope::Both)
-    }
-
-    pub fn allows_workflows(self) -> bool {
-        matches!(self, OriginScope::Workflow | OriginScope::Both)
-    }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DefKind {
+    Defschema,
+    Defmodule,
+    Defop,
+    Defsecret,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DefEffect {
-    pub name: Name,
-    pub kind: EffectKind,
-    pub params_schema: SchemaRef,
-    pub receipt_schema: SchemaRef,
-    pub origin_scope: OriginScope,
-}
-
-pub const CURRENT_AIR_VERSION: &str = "1";
+pub const CURRENT_AIR_VERSION: &str = "2";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub air_version: String,
     pub schemas: Vec<NamedRef>,
     pub modules: Vec<NamedRef>,
+    pub ops: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub effects: Vec<NamedRef>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub effect_bindings: Vec<EffectBinding>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub secrets: Vec<SecretEntry>,
+    pub secrets: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<Routing>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EffectBinding {
-    pub kind: EffectKind,
-    pub adapter_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -522,260 +563,20 @@ pub struct NamedRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum SecretEntry {
-    Ref(NamedRef),
-    Decl(SecretDecl),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretDecl {
-    pub alias: SecretAlias,
-    pub version: u64,
-    pub binding_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected_digest: Option<HashRef>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Routing {
-    #[serde(default, alias = "events", skip_serializing_if = "Vec::is_empty")]
-    pub subscriptions: Vec<RoutingSubscription>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inboxes: Vec<InboxRoute>,
+    pub subscriptions: Vec<RoutingSubscription>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingSubscription {
     pub event: SchemaRef,
-    pub module: Name,
+    pub op: Name,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_field: Option<String>,
 }
 
 pub type RoutingEvent = RoutingSubscription;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InboxRoute {
-    pub source: String,
-    pub workflow: Name,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct EffectKind(String);
-
-impl EffectKind {
-    pub const HTTP_REQUEST: &'static str = "http.request";
-    pub const BLOB_PUT: &'static str = "blob.put";
-    pub const BLOB_GET: &'static str = "blob.get";
-    pub const TIMER_SET: &'static str = "timer.set";
-    pub const PORTAL_SEND: &'static str = "portal.send";
-    pub const HOST_SESSION_OPEN: &'static str = "host.session.open";
-    pub const HOST_EXEC: &'static str = "host.exec";
-    pub const HOST_SESSION_SIGNAL: &'static str = "host.session.signal";
-    pub const HOST_FS_READ_FILE: &'static str = "host.fs.read_file";
-    pub const HOST_FS_WRITE_FILE: &'static str = "host.fs.write_file";
-    pub const HOST_FS_EDIT_FILE: &'static str = "host.fs.edit_file";
-    pub const HOST_FS_APPLY_PATCH: &'static str = "host.fs.apply_patch";
-    pub const HOST_FS_GREP: &'static str = "host.fs.grep";
-    pub const HOST_FS_GLOB: &'static str = "host.fs.glob";
-    pub const HOST_FS_STAT: &'static str = "host.fs.stat";
-    pub const HOST_FS_EXISTS: &'static str = "host.fs.exists";
-    pub const HOST_FS_LIST_DIR: &'static str = "host.fs.list_dir";
-    pub const LLM_GENERATE: &'static str = "llm.generate";
-    pub const VAULT_PUT: &'static str = "vault.put";
-    pub const VAULT_ROTATE: &'static str = "vault.rotate";
-    pub const INTROSPECT_MANIFEST: &'static str = "introspect.manifest";
-    pub const INTROSPECT_WORKFLOW_STATE: &'static str = "introspect.workflow_state";
-    pub const INTROSPECT_JOURNAL_HEAD: &'static str = "introspect.journal_head";
-    pub const INTROSPECT_LIST_CELLS: &'static str = "introspect.list_cells";
-    pub const WORKSPACE_RESOLVE: &'static str = "workspace.resolve";
-    pub const WORKSPACE_EMPTY_ROOT: &'static str = "workspace.empty_root";
-    pub const WORKSPACE_LIST: &'static str = "workspace.list";
-    pub const WORKSPACE_READ_REF: &'static str = "workspace.read_ref";
-    pub const WORKSPACE_READ_BYTES: &'static str = "workspace.read_bytes";
-    pub const WORKSPACE_WRITE_BYTES: &'static str = "workspace.write_bytes";
-    pub const WORKSPACE_WRITE_REF: &'static str = "workspace.write_ref";
-    pub const WORKSPACE_REMOVE: &'static str = "workspace.remove";
-    pub const WORKSPACE_DIFF: &'static str = "workspace.diff";
-    pub const WORKSPACE_ANNOTATIONS_GET: &'static str = "workspace.annotations_get";
-    pub const WORKSPACE_ANNOTATIONS_SET: &'static str = "workspace.annotations_set";
-
-    pub fn new(kind: impl Into<String>) -> Self {
-        Self(kind.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn http_request() -> Self {
-        Self::new(Self::HTTP_REQUEST)
-    }
-
-    pub fn blob_put() -> Self {
-        Self::new(Self::BLOB_PUT)
-    }
-
-    pub fn blob_get() -> Self {
-        Self::new(Self::BLOB_GET)
-    }
-
-    pub fn timer_set() -> Self {
-        Self::new(Self::TIMER_SET)
-    }
-
-    pub fn portal_send() -> Self {
-        Self::new(Self::PORTAL_SEND)
-    }
-
-    pub fn host_session_open() -> Self {
-        Self::new(Self::HOST_SESSION_OPEN)
-    }
-
-    pub fn host_exec() -> Self {
-        Self::new(Self::HOST_EXEC)
-    }
-
-    pub fn host_session_signal() -> Self {
-        Self::new(Self::HOST_SESSION_SIGNAL)
-    }
-
-    pub fn host_fs_read_file() -> Self {
-        Self::new(Self::HOST_FS_READ_FILE)
-    }
-
-    pub fn host_fs_write_file() -> Self {
-        Self::new(Self::HOST_FS_WRITE_FILE)
-    }
-
-    pub fn host_fs_edit_file() -> Self {
-        Self::new(Self::HOST_FS_EDIT_FILE)
-    }
-
-    pub fn host_fs_apply_patch() -> Self {
-        Self::new(Self::HOST_FS_APPLY_PATCH)
-    }
-
-    pub fn host_fs_grep() -> Self {
-        Self::new(Self::HOST_FS_GREP)
-    }
-
-    pub fn host_fs_glob() -> Self {
-        Self::new(Self::HOST_FS_GLOB)
-    }
-
-    pub fn host_fs_stat() -> Self {
-        Self::new(Self::HOST_FS_STAT)
-    }
-
-    pub fn host_fs_exists() -> Self {
-        Self::new(Self::HOST_FS_EXISTS)
-    }
-
-    pub fn host_fs_list_dir() -> Self {
-        Self::new(Self::HOST_FS_LIST_DIR)
-    }
-
-    pub fn llm_generate() -> Self {
-        Self::new(Self::LLM_GENERATE)
-    }
-
-    pub fn vault_put() -> Self {
-        Self::new(Self::VAULT_PUT)
-    }
-
-    pub fn vault_rotate() -> Self {
-        Self::new(Self::VAULT_ROTATE)
-    }
-
-    pub fn introspect_manifest() -> Self {
-        Self::new(Self::INTROSPECT_MANIFEST)
-    }
-
-    pub fn introspect_workflow_state() -> Self {
-        Self::new(Self::INTROSPECT_WORKFLOW_STATE)
-    }
-
-    pub fn introspect_journal_head() -> Self {
-        Self::new(Self::INTROSPECT_JOURNAL_HEAD)
-    }
-
-    pub fn introspect_list_cells() -> Self {
-        Self::new(Self::INTROSPECT_LIST_CELLS)
-    }
-
-    pub fn workspace_resolve() -> Self {
-        Self::new(Self::WORKSPACE_RESOLVE)
-    }
-
-    pub fn workspace_empty_root() -> Self {
-        Self::new(Self::WORKSPACE_EMPTY_ROOT)
-    }
-
-    pub fn workspace_list() -> Self {
-        Self::new(Self::WORKSPACE_LIST)
-    }
-
-    pub fn workspace_read_ref() -> Self {
-        Self::new(Self::WORKSPACE_READ_REF)
-    }
-
-    pub fn workspace_read_bytes() -> Self {
-        Self::new(Self::WORKSPACE_READ_BYTES)
-    }
-
-    pub fn workspace_write_bytes() -> Self {
-        Self::new(Self::WORKSPACE_WRITE_BYTES)
-    }
-
-    pub fn workspace_write_ref() -> Self {
-        Self::new(Self::WORKSPACE_WRITE_REF)
-    }
-
-    pub fn workspace_remove() -> Self {
-        Self::new(Self::WORKSPACE_REMOVE)
-    }
-
-    pub fn workspace_diff() -> Self {
-        Self::new(Self::WORKSPACE_DIFF)
-    }
-
-    pub fn workspace_annotations_get() -> Self {
-        Self::new(Self::WORKSPACE_ANNOTATIONS_GET)
-    }
-
-    pub fn workspace_annotations_set() -> Self {
-        Self::new(Self::WORKSPACE_ANNOTATIONS_SET)
-    }
-}
-
-impl<S: Into<String>> From<S> for EffectKind {
-    fn from(value: S) -> Self {
-        EffectKind::new(value)
-    }
-}
-
-impl std::fmt::Display for EffectKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for EffectKind {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::new(s.to_owned()))
-    }
-}
-
-impl AsRef<str> for EffectKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -871,7 +672,7 @@ mod tests {
     fn manifest_round_trip() {
         let manifest_json = json!({
             "$kind": "manifest",
-            "air_version": "1",
+            "air_version": "2",
             "schemas": [
                 {
                     "name": "com.acme/Order@1",
@@ -880,15 +681,21 @@ mod tests {
             ],
             "modules": [
                 {
-                    "name": "com.acme/order_workflow@1",
+                    "name": "com.acme/order_wasm@1",
                     "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+            ],
+            "ops": [
+                {
+                    "name": "com.acme/order.step@1",
+                    "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
                 }
             ],
             "routing": {
                 "subscriptions": [
                     {
                         "event": "com.acme/OrderCreated@1",
-                        "module": "com.acme/order_workflow@1"
+                        "op": "com.acme/order.step@1"
                     }
                 ]
             }
@@ -900,14 +707,19 @@ mod tests {
     }
 
     #[test]
-    fn defeffect_omits_public_cap_type() {
+    fn defop_effect_round_trip() {
         let effect_json = json!({
-            "$kind": "defeffect",
+            "$kind": "defop",
             "name": "com.acme/send@1",
-            "kind": "email.send",
-            "params_schema": "com.acme/SendParams@1",
-            "receipt_schema": "com.acme/SendReceipt@1",
-            "origin_scope": "workflow"
+            "op_kind": "effect",
+            "effect": {
+                "params": "com.acme/SendParams@1",
+                "receipt": "com.acme/SendReceipt@1"
+            },
+            "impl": {
+                "module": "com.acme/send_adapter@1",
+                "entrypoint": "send"
+            }
         });
 
         let node: AirNode = serde_json::from_value(effect_json.clone()).expect("deserialize");

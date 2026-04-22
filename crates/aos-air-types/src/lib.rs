@@ -1,4 +1,4 @@
-//! AIR v1 core data model and semantic validation (informed by spec/03-air.md).
+//! AIR v2 core data model and semantic validation.
 
 pub mod builtins;
 pub mod catalog;

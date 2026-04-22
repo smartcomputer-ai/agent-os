@@ -844,10 +844,10 @@ fn import_defs_hash(root: &Path) -> Result<String> {
                     let node = AirNode::Defsecret(secret);
                     add_def_entry(&mut entries, &mut seen, "defsecret", name.as_str(), &node)?;
                 }
-                AirNode::Defeffect(effect) => {
-                    let name = effect.name.clone();
-                    let node = AirNode::Defeffect(effect);
-                    add_def_entry(&mut entries, &mut seen, "defeffect", name.as_str(), &node)?;
+                AirNode::Defop(op) => {
+                    let name = op.name.clone();
+                    let node = AirNode::Defop(op);
+                    add_def_entry(&mut entries, &mut seen, "defop", name.as_str(), &node)?;
                 }
             }
         }
@@ -1021,7 +1021,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
             if let Some(Value::String(kind)) = map.get("$kind") {
                 match kind.as_str() {
                     "manifest" => normalize_manifest_authoring(map),
-                    "defmodule" => ensure_hash_field(map, "wasm_hash"),
+                    "defmodule" => ensure_module_artifact_hash(map),
                     _ => {}
                 }
             }
@@ -1034,7 +1034,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in ["schemas", "modules", "plans", "effects", "secrets"] {
+    for key in ["schemas", "modules", "ops", "secrets"] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {
@@ -1042,6 +1042,21 @@ fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
                 }
             }
         }
+    }
+}
+
+fn ensure_module_artifact_hash(map: &mut serde_json::Map<String, Value>) {
+    let Some(Value::Object(runtime)) = map.get_mut("runtime") else {
+        return;
+    };
+    if runtime.get("kind").and_then(Value::as_str) != Some("wasm") {
+        return;
+    }
+    let Some(Value::Object(artifact)) = runtime.get_mut("artifact") else {
+        return;
+    };
+    if artifact.get("kind").and_then(Value::as_str) == Some("wasm_module") {
+        ensure_hash_field(artifact, "hash");
     }
 }
 

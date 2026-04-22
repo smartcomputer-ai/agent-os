@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use aos_air_types::{DefModule, ModuleRuntime, WasmArtifact};
 use aos_cbor::Hash;
 use aos_kernel::{LoadedManifest, Store};
 use base64::Engine;
@@ -88,13 +89,15 @@ impl NodeWorldHarness {
         }
         for module in loaded.modules.values() {
             store.put_node(module)?;
-            let wasm_hash = Hash::from_hex_str(module.wasm_hash.as_str())?;
-            if let Ok(bytes) = source_store.get_blob(wasm_hash) {
-                store.put_blob(&bytes)?;
+            if let Some(hash_ref) = wasm_module_hash(module) {
+                let wasm_hash = Hash::from_hex_str(hash_ref.as_str())?;
+                if let Ok(bytes) = source_store.get_blob(wasm_hash) {
+                    store.put_blob(&bytes)?;
+                }
             }
         }
-        for effect in loaded.effects.values() {
-            store.put_node(effect)?;
+        for op in loaded.ops.values() {
+            store.put_node(op)?;
         }
         let manifest_hash = store.put_node(&loaded.manifest)?.to_hex();
         self.runtime.create_world(
@@ -107,6 +110,15 @@ impl NodeWorldHarness {
             },
         )?;
         Ok(())
+    }
+}
+
+fn wasm_module_hash(module: &DefModule) -> Option<&aos_air_types::HashRef> {
+    match &module.runtime {
+        ModuleRuntime::Wasm {
+            artifact: WasmArtifact::WasmModule { hash },
+        } => Some(hash),
+        _ => None,
     }
 }
 

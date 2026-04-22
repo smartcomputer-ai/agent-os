@@ -8,9 +8,8 @@ use uuid::Uuid;
 
 use crate::Store;
 use aos_air_types::{
-    AirNode, DefEffect, DefModule, DefSchema, Manifest, Name, SecretDecl, SecretEntry, TypeExpr,
-    TypePrimitive, builtins, schema_index::SchemaIndex,
-    value_normalize::normalize_cbor_by_name,
+    AirNode, DefModule, DefOp, DefSchema, DefSecret, Manifest, Name, OpKind, TypeExpr,
+    TypePrimitive, builtins, schema_index::SchemaIndex, value_normalize::normalize_cbor_by_name,
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, EffectStreamFrame};
@@ -35,6 +34,7 @@ use crate::journal::{
     ProposedRecord, ShadowReportRecord, SnapshotRecord, StreamFrameRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
+use crate::module_runtime::{is_wasm_module, wasm_hash_string};
 use crate::pure::PureRegistry;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::WorkflowEffectContext;
@@ -159,9 +159,9 @@ pub struct Kernel<S: Store> {
     store: Arc<S>,
     manifest: Manifest,
     manifest_hash: Hash,
-    secrets: Vec<SecretDecl>,
+    secrets: Vec<DefSecret>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
-    effect_defs: HashMap<Name, DefEffect>,
+    effect_defs: HashMap<Name, DefOp>,
     schema_defs: HashMap<Name, DefSchema>,
     workflows: WorkflowRegistry<S>,
     pures: Arc<Mutex<PureRegistry<S>>>,
@@ -428,7 +428,7 @@ fn normalize_def_kind(input: &str) -> Option<&'static str> {
     match input {
         "defschema" | "schema" => Some("defschema"),
         "defmodule" | "module" => Some("defmodule"),
-        "defeffect" | "effect" => Some("defeffect"),
+        "defop" | "op" | "defeffect" | "effect" => Some("defop"),
         _ => None,
     }
 }
@@ -1001,6 +1001,54 @@ impl<S: Store + 'static> KernelBuilder<S> {
 }
 
 impl<S: Store + 'static> Kernel<S> {
+    fn workflow_op(&self, workflow_name: &str) -> Result<&DefOp, KernelError> {
+        let op = self
+            .effect_defs
+            .get(workflow_name)
+            .ok_or_else(|| KernelError::WorkflowNotFound(workflow_name.to_string()))?;
+        if op.op_kind != OpKind::Workflow {
+            return Err(KernelError::Manifest(format!(
+                "op '{workflow_name}' is not a workflow op"
+            )));
+        }
+        if op.workflow.is_none() {
+            return Err(KernelError::Manifest(format!(
+                "workflow op '{workflow_name}' is missing workflow metadata"
+            )));
+        }
+        Ok(op)
+    }
+
+    fn workflow_module_def(&self, workflow_name: &str) -> Result<&DefModule, KernelError> {
+        let op = self.workflow_op(workflow_name)?;
+        self.module_defs
+            .get(&op.implementation.module)
+            .ok_or_else(|| KernelError::WorkflowNotFound(op.implementation.module.clone()))
+    }
+
+    fn workflow_wasm_hash(&self, workflow_name: &str) -> Result<String, KernelError> {
+        let module_def = self.workflow_module_def(workflow_name)?;
+        wasm_hash_string(workflow_name, module_def)
+    }
+
+    fn workflow_effect_declares(&self, workflow_name: &str, runtime_kind: &str) -> bool {
+        let Ok(op) = self.workflow_op(workflow_name) else {
+            return false;
+        };
+        let Some(workflow) = op.workflow.as_ref() else {
+            return false;
+        };
+        workflow.effects_emitted.iter().any(|declared| {
+            declared.as_str() == runtime_kind
+                || declared.as_str() == format!("sys/{runtime_kind}@1")
+                || self
+                    .effect_defs
+                    .get(declared)
+                    .map(|effect_op| effect_op.implementation.entrypoint == runtime_kind)
+                    .unwrap_or(false)
+        })
+    }
+
     fn ensure_cell_index_root(&mut self, workflow: &Name) -> Result<Hash, KernelError> {
         if let Some(root) = self.workflow_index_roots.get(workflow) {
             return Ok(*root);
@@ -1022,37 +1070,17 @@ impl<S: Store + 'static> Kernel<S> {
             .module_defs
             .get(name)
             .ok_or_else(|| KernelError::PureNotFound(name.to_string()))?;
-        if module_def.module_kind != aos_air_types::ModuleKind::Pure {
+        if !is_wasm_module(module_def) {
             return Err(KernelError::Manifest(format!(
-                "module '{name}' is not a pure module"
+                "module '{name}' is not a wasm module"
             )));
         }
-        let wants_context = module_def
-            .abi
-            .pure
-            .as_ref()
-            .and_then(|abi| abi.context.as_ref())
-            .is_some();
-        if wants_context && input.ctx.is_none() {
-            return Err(KernelError::Manifest(format!(
-                "pure module '{name}' requires call context"
-            )));
-        }
-        let input = if wants_context {
-            input.clone()
-        } else {
-            PureInput {
-                version: input.version,
-                input: input.input.clone(),
-                ctx: None,
-            }
-        };
         let mut pures = self
             .pures
             .lock()
             .map_err(|_| KernelError::Manifest("pure registry lock poisoned".into()))?;
         pures.ensure_loaded(name, module_def)?;
-        pures.invoke(name, &input)
+        pures.invoke(name, input)
     }
 
     /// Access underlying store (Arc clone).
@@ -1294,20 +1322,18 @@ impl<S: Store + 'static> Kernel<S> {
         let Some(state_bytes) = self.workflow_state_bytes(workflow, key)? else {
             return Ok(Vec::new());
         };
-        let module = self
-            .module_defs
-            .get(workflow)
-            .ok_or_else(|| KernelError::WorkflowNotFound(workflow.to_string()))?;
-        let workflow_abi = module.abi.workflow.as_ref().ok_or_else(|| {
-            KernelError::Manifest(format!("module '{workflow}' is not a workflow"))
-        })?;
+        let op = self.workflow_op(workflow)?;
+        let workflow_meta = op
+            .workflow
+            .as_ref()
+            .expect("workflow_op requires workflow metadata");
         let schema = self
             .schema_index
-            .get(workflow_abi.state.as_str())
+            .get(workflow_meta.state.as_str())
             .ok_or_else(|| {
                 KernelError::Manifest(format!(
                     "state schema '{}' not found for workflow '{workflow}'",
-                    workflow_abi.state
+                    workflow_meta.state
                 ))
             })?;
         let value: CborValue = serde_cbor::from_slice(&state_bytes)
@@ -1364,9 +1390,11 @@ impl<S: Store + 'static> Kernel<S> {
     /// List workflow module names from the active manifest.
     pub fn workflow_names(&self) -> Vec<String> {
         let mut names: Vec<_> = self
-            .module_defs
+            .effect_defs
             .iter()
-            .filter_map(|(name, def)| def.abi.workflow.as_ref().map(|_| name.clone()))
+            .filter_map(|(name, def)| {
+                (def.op_kind == OpKind::Workflow && def.workflow.is_some()).then(|| name.clone())
+            })
             .collect();
         names.sort();
         names
@@ -1382,7 +1410,7 @@ impl<S: Store + 'static> Kernel<S> {
         }
         self.effect_defs
             .get(name)
-            .map(|def| AirNode::Defeffect(def.clone()))
+            .map(|def| AirNode::Defop(def.clone()))
     }
 
     /// Hash of the most recent snapshot blob, if any.
@@ -1461,14 +1489,20 @@ impl<S: Store + 'static> Kernel<S> {
         for (name, def) in self.effect_defs.iter() {
             push_if(
                 &mut entries,
-                "defeffect",
+                "defop",
                 name.as_str(),
                 || DefListing {
-                    kind: "defeffect".into(),
+                    kind: "defop".into(),
                     name: name.clone(),
-                    hash: hash_def(AirNode::Defeffect(def.clone())),
-                    params_schema: Some(def.params_schema.as_str().to_string()),
-                    receipt_schema: Some(def.receipt_schema.as_str().to_string()),
+                    hash: hash_def(AirNode::Defop(def.clone())),
+                    params_schema: def
+                        .effect
+                        .as_ref()
+                        .map(|effect| effect.params.as_str().to_string()),
+                    receipt_schema: def
+                        .effect
+                        .as_ref()
+                        .map(|effect| effect.receipt.as_str().to_string()),
                     plan_steps: None,
                 },
                 &kind_filter,

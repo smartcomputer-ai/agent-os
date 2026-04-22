@@ -392,8 +392,14 @@ impl<S: Store + 'static> Kernel<S> {
         let receipt_schema = self
             .effect_defs
             .values()
-            .find(|def| def.kind.as_str() == context.effect_kind)
-            .map(|def| def.receipt_schema.as_str().to_string())
+            .find(|def| {
+                def.op_kind == OpKind::Effect
+                    && (def.name.as_str() == context.effect_kind
+                        || def.name.as_str() == format!("sys/{}@1", context.effect_kind)
+                        || def.implementation.entrypoint == context.effect_kind)
+            })
+            .and_then(|def| def.effect.as_ref())
+            .map(|effect| effect.receipt.as_str().to_string())
             .ok_or_else(|| KernelError::UnsupportedEffectKind(context.effect_kind.clone()))?;
         let normalized =
             normalize_cbor_by_name(&self.schema_index, &receipt_schema, &receipt.payload_cbor)
@@ -504,16 +510,12 @@ impl<S: Store + 'static> Kernel<S> {
         &'a self,
         workflow_name: &str,
     ) -> Result<(String, &'a TypeExpr), KernelError> {
-        let module_def = self
-            .module_defs
-            .get(workflow_name)
-            .ok_or_else(|| KernelError::WorkflowNotFound(workflow_name.to_string()))?;
-        let workflow_abi = module_def.abi.workflow.as_ref().ok_or_else(|| {
-            KernelError::Manifest(format!(
-                "module '{workflow_name}' is not a workflow/workflow"
-            ))
-        })?;
-        let workflow_event_schema_name = workflow_abi.event.as_str().to_string();
+        let op = self.workflow_op(workflow_name)?;
+        let workflow = op
+            .workflow
+            .as_ref()
+            .expect("workflow_op requires workflow metadata");
+        let workflow_event_schema_name = workflow.event.as_str().to_string();
         let workflow_event_schema = self
             .schema_index
             .get(workflow_event_schema_name.as_str())

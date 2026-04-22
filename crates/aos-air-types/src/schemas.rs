@@ -1,6 +1,6 @@
 //! Embedded AIR JSON Schema documents. Source of truth lives under `spec/schemas/`.
 
-pub const AIR_SPEC_VERSION: &str = "1.0";
+pub const AIR_SPEC_VERSION: &str = "2.0";
 
 macro_rules! embed_schema {
     ($($const:ident => $path:literal),+ $(,)?) => {
@@ -22,7 +22,7 @@ embed_schema! {
     COMMON => "../../../spec/schemas/common.schema.json",
     DEFSCHEMA => "../../../spec/schemas/defschema.schema.json",
     DEFMODULE => "../../../spec/schemas/defmodule.schema.json",
-    DEFEFFECT => "../../../spec/schemas/defeffect.schema.json",
+    DEFOP => "../../../spec/schemas/defop.schema.json",
     DEFSECRET => "../../../spec/schemas/defsecret.schema.json",
     MANIFEST => "../../../spec/schemas/manifest.schema.json",
     PATCH => "../../../spec/schemas/patch.schema.json",

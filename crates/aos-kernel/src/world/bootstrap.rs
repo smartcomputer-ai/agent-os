@@ -10,7 +10,7 @@ impl<S: Store + 'static> Kernel<S> {
         let mut loaded = loaded;
         let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
         let runtime = manifest_runtime::assemble_runtime(store.as_ref(), &loaded)?;
-        let effect_defs = loaded.effects.clone();
+        let effect_defs = loaded.ops.clone();
         let schema_defs = loaded.schemas.clone();
 
         // Persist the loaded manifest + defs into the store so governance/patch doc
@@ -84,17 +84,24 @@ impl<S: Store + 'static> Kernel<S> {
             cell_snapshot_put_blob_count: 0,
         };
         if config.eager_module_load {
-            for (name, module_def) in kernel.module_defs.iter() {
-                match module_def.module_kind {
-                    aos_air_types::ModuleKind::Workflow => {
-                        kernel.workflows.ensure_loaded(name, module_def)?;
-                    }
-                    aos_air_types::ModuleKind::Pure => {
-                        let mut pures = kernel.pures.lock().map_err(|_| {
-                            KernelError::Manifest("pure registry lock poisoned".into())
+            for (name, op) in kernel.effect_defs.iter() {
+                if op.op_kind == OpKind::Workflow {
+                    let module_def = kernel
+                        .module_defs
+                        .get(&op.implementation.module)
+                        .ok_or_else(|| {
+                            KernelError::WorkflowNotFound(op.implementation.module.clone())
                         })?;
-                        pures.ensure_loaded(name, module_def)?;
-                    }
+                    kernel.workflows.ensure_loaded(name, module_def)?;
+                }
+            }
+            for (name, module_def) in kernel.module_defs.iter() {
+                if is_wasm_module(module_def) {
+                    let mut pures = kernel
+                        .pures
+                        .lock()
+                        .map_err(|_| KernelError::Manifest("pure registry lock poisoned".into()))?;
+                    pures.ensure_loaded(name, module_def)?;
                 }
             }
         }

@@ -225,7 +225,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.manifest_hash = Hash::of_bytes(&manifest_bytes);
         self.secrets = loaded.secrets;
         self.module_defs = loaded.modules;
-        self.effect_defs = loaded.effects;
+        self.effect_defs = loaded.ops;
         self.schema_defs = loaded.schemas;
         self.router = runtime.router;
 
