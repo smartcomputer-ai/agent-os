@@ -136,11 +136,8 @@ pub enum DemiurgeWorkflowEvent {
     TaskSubmitted(TaskSubmitted),
     #[aos(schema_ref = "aos.agent/SessionLifecycleChanged@1")]
     SessionLifecycleChanged(SessionLifecycleChanged),
-    #[aos(schema_ref = "sys/EffectReceiptEnvelope@1")]
     Receipt(EffectReceiptEnvelope),
-    #[aos(schema_ref = "sys/EffectReceiptRejected@1")]
     ReceiptRejected(EffectReceiptRejected),
-    #[aos(schema_ref = "sys/EffectStreamFrame@1")]
     StreamFrame(aos_agent::EffectStreamFrameEnvelope),
     #[default]
     #[aos(schema_ref = "aos.agent/SessionNoop@1")]

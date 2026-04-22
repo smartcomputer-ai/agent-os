@@ -99,8 +99,11 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
     let schema_expr = generated_schema.expr;
 
     Ok(quote! {
-        impl ::aos_wasm_sdk::AirSchemaExport for #ident {
+        impl ::aos_wasm_sdk::AirSchemaRef for #ident {
             const AIR_SCHEMA_NAME: &'static str = #schema_name_lit;
+        }
+
+        impl ::aos_wasm_sdk::AirSchemaExport for #ident {
             const AIR_SCHEMA_JSON: &'static str = #schema_lit;
 
             fn air_schema_json() -> ::aos_wasm_sdk::__aos_export::String {
@@ -380,7 +383,7 @@ fn generated_schema_ref_for_type(ty: &Type) -> GeneratedJson {
             let mut out = ::aos_wasm_sdk::__aos_export::String::from(r#"{"ref":"#);
             ::aos_wasm_sdk::push_air_json_string(
                 &mut out,
-                <#ty_tokens as ::aos_wasm_sdk::AirSchemaExport>::AIR_SCHEMA_NAME,
+                <#ty_tokens as ::aos_wasm_sdk::AirSchemaRef>::AIR_SCHEMA_NAME,
             );
             out.push('}');
             out

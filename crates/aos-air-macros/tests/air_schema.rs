@@ -44,6 +44,14 @@ enum DemoEvent {
     ExternalNoop,
 }
 
+#[derive(AirSchema)]
+#[aos(schema = "demo/SysEvent@1")]
+#[allow(dead_code)]
+enum SysEvent {
+    Receipt(aos_wasm_sdk::EffectReceiptEnvelope),
+    BlobPut(aos_wasm_sdk::BlobPutParams),
+}
+
 #[aos_wasm_sdk::air_workflow(
     name = "demo/Counter@1",
     module = "demo/Counter_wasm@1",
@@ -131,6 +139,29 @@ fn derive_air_schema_supports_unit_and_ref_variants() {
         variant.variant.get("ExternalNoop"),
         Some(TypeExpr::Ref(_))
     ));
+}
+
+#[test]
+fn derive_air_schema_infers_sys_refs_from_sdk_types() {
+    let node: AirNode =
+        serde_json::from_str(&SysEvent::air_schema_json()).expect("parse generated AIR");
+    let AirNode::Defschema(schema) = node else {
+        panic!("expected defschema");
+    };
+    let TypeExpr::Variant(variant) = schema.ty else {
+        panic!("expected variant schema");
+    };
+    let Some(TypeExpr::Ref(receipt_ref)) = variant.variant.get("Receipt") else {
+        panic!("expected receipt ref");
+    };
+    assert_eq!(
+        receipt_ref.reference.as_str(),
+        "sys/EffectReceiptEnvelope@1"
+    );
+    let Some(TypeExpr::Ref(blob_ref)) = variant.variant.get("BlobPut") else {
+        panic!("expected blob ref");
+    };
+    assert_eq!(blob_ref.reference.as_str(), "sys/BlobPutParams@1");
 }
 
 #[test]
