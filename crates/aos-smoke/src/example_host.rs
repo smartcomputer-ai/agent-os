@@ -215,7 +215,7 @@ impl ExampleHost {
                     store.clone(),
                     &host_config.adapters,
                     &loaded,
-                    host_config.world.strict_op_routes,
+                    host_config.world.strict_effect_routes,
                     tx,
                 )
                 .context("build example host effect runtime")?;

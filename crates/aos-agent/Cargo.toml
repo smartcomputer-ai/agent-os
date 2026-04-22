@@ -11,10 +11,6 @@ path = "src/lib.rs"
 name = "session_workflow"
 path = "src/bin/session_workflow.rs"
 
-[[bin]]
-name = "session_event_echo"
-path = "src/bin/session_event_echo.rs"
-
 [dependencies]
 aos-air-types.workspace = true
 aos-effect-types.workspace = true

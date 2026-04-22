@@ -132,6 +132,8 @@ mod tests {
                 schemas: vec![],
                 modules: vec![],
                 ops: vec![],
+                workflows: vec![],
+                effects: vec![],
                 secrets: vec![],
                 routing: None,
             })

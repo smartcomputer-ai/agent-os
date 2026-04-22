@@ -45,6 +45,7 @@ pub fn default_registry<S: Store + 'static>(
     registry.register(Box::new(host_adapters.fs_exists));
     registry.register(Box::new(host_adapters.fs_list_dir));
 
+    let has_fabric = config.fabric.is_some();
     if let Some(fabric_cfg) = &config.fabric {
         let fabric_adapters = make_fabric_host_adapter_set(store.clone(), fabric_cfg.clone());
         registry.register(Box::new(fabric_adapters.session_open));
@@ -90,6 +91,9 @@ pub fn default_registry<S: Store + 'static>(
     }
 
     register_builtin_route_aliases(&mut registry);
+    if has_fabric {
+        register_fabric_host_route_overrides(&mut registry);
+    }
 
     for (route_id, provider) in &config.adapter_routes {
         if !registry.register_route(route_id.as_str(), provider.adapter_kind.as_str()) {
@@ -131,6 +135,70 @@ fn register_builtin_route_aliases(registry: &mut AdapterRegistry) {
     }
 }
 
+fn register_fabric_host_route_overrides(registry: &mut AdapterRegistry) {
+    for (entrypoint, canonical, fabric) in [
+        (
+            "host.session.open",
+            effect_ops::HOST_SESSION_OPEN,
+            "host.session.open.fabric",
+        ),
+        ("host.exec", effect_ops::HOST_EXEC, "host.exec.fabric"),
+        (
+            "host.session.signal",
+            effect_ops::HOST_SESSION_SIGNAL,
+            "host.session.signal.fabric",
+        ),
+        (
+            "host.fs.read_file",
+            effect_ops::HOST_FS_READ_FILE,
+            "host.fs.read_file.fabric",
+        ),
+        (
+            "host.fs.write_file",
+            effect_ops::HOST_FS_WRITE_FILE,
+            "host.fs.write_file.fabric",
+        ),
+        (
+            "host.fs.edit_file",
+            effect_ops::HOST_FS_EDIT_FILE,
+            "host.fs.edit_file.fabric",
+        ),
+        (
+            "host.fs.apply_patch",
+            effect_ops::HOST_FS_APPLY_PATCH,
+            "host.fs.apply_patch.fabric",
+        ),
+        (
+            "host.fs.grep",
+            effect_ops::HOST_FS_GREP,
+            "host.fs.grep.fabric",
+        ),
+        (
+            "host.fs.glob",
+            effect_ops::HOST_FS_GLOB,
+            "host.fs.glob.fabric",
+        ),
+        (
+            "host.fs.stat",
+            effect_ops::HOST_FS_STAT,
+            "host.fs.stat.fabric",
+        ),
+        (
+            "host.fs.exists",
+            effect_ops::HOST_FS_EXISTS,
+            "host.fs.exists.fabric",
+        ),
+        (
+            "host.fs.list_dir",
+            effect_ops::HOST_FS_LIST_DIR,
+            "host.fs.list_dir.fabric",
+        ),
+    ] {
+        let _ = registry.register_route(entrypoint, fabric);
+        let _ = registry.register_route(canonical, fabric);
+    }
+}
+
 fn register_route_alias_pair(registry: &mut AdapterRegistry, entrypoint: &str, canonical: &str) {
     let entrypoint_known = registry.has_route(entrypoint);
     let canonical_known = registry.has_route(canonical);
@@ -164,5 +232,36 @@ mod tests {
         assert!(registry.has_route("host.exec"));
         assert!(registry.has_route(effect_ops::HOST_EXEC));
         assert!(registry.has_route("host.exec.default"));
+    }
+
+    #[test]
+    fn default_registry_routes_builtin_host_entrypoints_to_fabric_when_configured() {
+        let store = Arc::new(MemStore::default());
+        let mut config = EffectAdapterConfig::default();
+        config.fabric = Some(crate::config::FabricAdapterConfig {
+            controller_url: "http://127.0.0.1:1".into(),
+            bearer_token: None,
+            request_timeout: std::time::Duration::from_secs(1),
+            exec_progress_interval: std::time::Duration::from_secs(1),
+            default_image: None,
+            default_runtime_class: None,
+            default_network_mode: None,
+        });
+
+        let registry = default_registry(store, &config);
+        let mappings = registry.route_mappings();
+
+        assert_eq!(
+            mappings.get("host.exec").map(String::as_str),
+            Some("host.exec.fabric")
+        );
+        assert_eq!(
+            mappings.get(effect_ops::HOST_EXEC).map(String::as_str),
+            Some("host.exec.fabric")
+        );
+        assert_eq!(
+            mappings.get("host.exec.default").map(String::as_str),
+            Some("host.exec.fabric")
+        );
     }
 }

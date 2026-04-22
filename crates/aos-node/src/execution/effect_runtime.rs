@@ -22,21 +22,21 @@ pub enum EffectExecutionClass {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EffectRouteDiagnostics {
-    pub strict_op_routes: bool,
+    pub strict_effect_routes: bool,
     pub compatibility_fallback_enabled: bool,
     pub world_requires: BTreeMap<String, String>,
     pub host_provides: BTreeMap<String, String>,
-    pub compatibility_fallback_ops: Vec<String>,
+    pub compatibility_fallback_effects: Vec<String>,
 }
 
 impl From<&EffectRouteDiagnostics> for aos_kernel::TraceRouteDiagnostics {
     fn from(value: &EffectRouteDiagnostics) -> Self {
         Self {
-            strict_op_routes: value.strict_op_routes,
+            strict_effect_routes: value.strict_effect_routes,
             compatibility_fallback_enabled: value.compatibility_fallback_enabled,
             world_requires: value.world_requires.clone(),
             host_provides: value.host_provides.clone(),
-            compatibility_fallback_ops: value.compatibility_fallback_ops.clone(),
+            compatibility_fallback_effects: value.compatibility_fallback_effects.clone(),
         }
     }
 }
@@ -186,24 +186,24 @@ where
         store: Arc<S>,
         adapter_config: &EffectAdapterConfig,
         loaded: &LoadedManifest,
-        strict_op_routes: bool,
+        strict_effect_routes: bool,
         continuation_tx: mpsc::Sender<EffectRuntimeEvent<W>>,
     ) -> Result<Self, RuntimeError> {
         let shared = SharedEffectRuntime::new(store, adapter_config, continuation_tx);
-        Self::from_loaded_manifest_with_shared(shared, loaded, strict_op_routes)
+        Self::from_loaded_manifest_with_shared(shared, loaded, strict_effect_routes)
     }
 
     pub fn from_loaded_manifest_with_shared(
         shared: SharedEffectRuntime<W>,
         loaded: &LoadedManifest,
-        strict_op_routes: bool,
+        strict_effect_routes: bool,
     ) -> Result<Self, RuntimeError> {
         let effect_routes = collect_effect_routes(loaded, shared.adapter_registry.as_ref())?;
         let route_diagnostics = preflight_external_effect_routes(
             loaded,
             &effect_routes,
             shared.adapter_registry.as_ref(),
-            strict_op_routes,
+            strict_effect_routes,
         )?;
         Ok(Self {
             shared,
@@ -216,28 +216,28 @@ where
         store: Arc<S>,
         adapter_config: &EffectAdapterConfig,
         effect_routes: HashMap<String, String>,
-        strict_op_routes: bool,
+        strict_effect_routes: bool,
         continuation_tx: mpsc::Sender<EffectRuntimeEvent<W>>,
     ) -> Self {
         let shared = SharedEffectRuntime::new(store, adapter_config, continuation_tx);
-        Self::from_effect_routes_with_shared(shared, effect_routes, strict_op_routes)
+        Self::from_effect_routes_with_shared(shared, effect_routes, strict_effect_routes)
     }
 
     pub fn from_effect_routes_with_shared(
         shared: SharedEffectRuntime<W>,
         effect_routes: HashMap<String, String>,
-        strict_op_routes: bool,
+        strict_effect_routes: bool,
     ) -> Self {
         let host_provides = shared.host_route_mappings();
         let world_requires: BTreeMap<String, String> = effect_routes
             .iter()
-            .map(|(op, route_id)| (op.clone(), route_id.clone()))
+            .map(|(effect, route_id)| (effect.clone(), route_id.clone()))
             .collect();
         let effect_routes = effect_routes
             .into_iter()
-            .map(|(op, route_id)| {
+            .map(|(effect, route_id)| {
                 (
-                    op,
+                    effect,
                     EffectExecutionRoute {
                         class: EffectExecutionClass::ExternalAsync,
                         route_id: Some(route_id),
@@ -249,11 +249,11 @@ where
             shared,
             effect_routes,
             route_diagnostics: EffectRouteDiagnostics {
-                strict_op_routes: strict_op_routes,
-                compatibility_fallback_enabled: !strict_op_routes,
+                strict_effect_routes: strict_effect_routes,
+                compatibility_fallback_enabled: !strict_effect_routes,
                 world_requires,
                 host_provides,
-                compatibility_fallback_ops: Vec::new(),
+                compatibility_fallback_effects: Vec::new(),
             },
         }
     }
@@ -418,9 +418,9 @@ fn preflight_external_effect_routes(
     loaded: &LoadedManifest,
     effect_routes: &HashMap<String, EffectExecutionRoute>,
     registry: &AdapterRegistry,
-    strict_op_routes: bool,
+    strict_effect_routes: bool,
 ) -> Result<EffectRouteDiagnostics, RuntimeError> {
-    let mut required_ops: BTreeSet<String> = BTreeSet::new();
+    let mut required_effects: BTreeSet<String> = BTreeSet::new();
     for effect in loaded.effects.values() {
         if matches!(
             effect_routes
@@ -428,18 +428,18 @@ fn preflight_external_effect_routes(
                 .map(|route| route.class),
             Some(EffectExecutionClass::ExternalAsync)
         ) {
-            required_ops.insert(effect.name.clone());
+            required_effects.insert(effect.name.clone());
         }
     }
 
     let host_provides = registry.route_mappings();
-    if required_ops.is_empty() {
+    if required_effects.is_empty() {
         return Ok(EffectRouteDiagnostics {
-            strict_op_routes: strict_op_routes,
+            strict_effect_routes: strict_effect_routes,
             compatibility_fallback_enabled: false,
             world_requires: BTreeMap::new(),
             host_provides,
-            compatibility_fallback_ops: Vec::new(),
+            compatibility_fallback_effects: Vec::new(),
         });
     }
 
@@ -465,7 +465,7 @@ fn preflight_external_effect_routes(
     }
 
     let mut world_requires = BTreeMap::new();
-    for effect_name in required_ops {
+    for effect_name in required_effects {
         if let Some(route) = effect_routes.get(&effect_name) {
             let Some(route_id) = route.route_id.as_ref() else {
                 continue;
@@ -479,7 +479,7 @@ fn preflight_external_effect_routes(
             continue;
         }
 
-        if strict_op_routes {
+        if strict_effect_routes {
             let emitted_by = origins
                 .get(&effect_name)
                 .cloned()
@@ -496,11 +496,11 @@ fn preflight_external_effect_routes(
     }
 
     Ok(EffectRouteDiagnostics {
-        strict_op_routes: strict_op_routes,
+        strict_effect_routes: strict_effect_routes,
         compatibility_fallback_enabled: false,
         world_requires,
         host_provides,
-        compatibility_fallback_ops: Vec::new(),
+        compatibility_fallback_effects: Vec::new(),
     })
 }
 

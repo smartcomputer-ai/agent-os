@@ -18,11 +18,11 @@ pub struct TraceQuery {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TraceRouteDiagnostics {
-    pub strict_op_routes: bool,
+    pub strict_effect_routes: bool,
     pub compatibility_fallback_enabled: bool,
     pub world_requires: std::collections::BTreeMap<String, String>,
     pub host_provides: std::collections::BTreeMap<String, String>,
-    pub compatibility_fallback_ops: Vec<String>,
+    pub compatibility_fallback_effects: Vec<String>,
 }
 
 pub fn trace_get<S: Store + 'static>(
@@ -374,11 +374,11 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
 
     let adapter_routes = route_diagnostics.map(|diag| {
         json!({
-            "strict_op_routes": diag.strict_op_routes,
+            "strict_effect_routes": diag.strict_effect_routes,
             "compatibility_fallback_enabled": diag.compatibility_fallback_enabled,
             "world_requires": diag.world_requires,
             "host_provides": diag.host_provides,
-            "compatibility_fallback_ops": diag.compatibility_fallback_ops,
+            "compatibility_fallback_effects": diag.compatibility_fallback_effects,
         })
     });
 

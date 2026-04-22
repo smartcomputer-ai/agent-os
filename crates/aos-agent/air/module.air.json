@@ -49,15 +49,5 @@
       "module": "aos.agent/SessionWorkflow_wasm@1",
       "entrypoint": "step"
     }
-  },
-  {
-    "$kind": "defmodule",
-    "name": "aos.agent/SessionEventEcho@1",
-    "runtime": {
-      "kind": "wasm",
-      "artifact": {
-        "kind": "wasm_module"
-      }
-    }
   }
 ]

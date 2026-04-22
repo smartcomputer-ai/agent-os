@@ -330,7 +330,7 @@ impl HostedWorkerCore {
         EffectRuntime::from_loaded_manifest_with_shared(
             shared,
             loaded,
-            world_config.strict_op_routes,
+            world_config.strict_effect_routes,
         )
         .map_err(WorkerError::Runtime)
     }
