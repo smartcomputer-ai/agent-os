@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{AirNode, Name};
@@ -7,6 +8,7 @@ use aos_air_types::{AirNode, Name};
 use crate::manifest_loader::parse_air_nodes_from_str;
 
 pub const GENERATED_AIR_DIR: &str = "air/generated";
+pub const DEFAULT_AIR_EXPORT_BIN: &str = "aos-air-export";
 
 /// Materialize generated AIR JSON fragments under `<world>/air/generated/`.
 ///
@@ -81,6 +83,45 @@ pub fn write_generated_air_export_json(
         serde_json::from_str(export_json).context("parse generated AIR export JSON")?;
     let refs: Vec<&str> = fragments.iter().map(String::as_str).collect();
     write_generated_air_nodes(world_root, &refs)
+}
+
+/// Run a Cargo export binary and materialize its Rust-authored AIR stdout.
+///
+/// The export binary should print `aos_wasm_sdk::air_exports_json(AOS_AIR_NODES_JSON)` and avoid
+/// any other stdout. Cargo stderr is preserved for diagnostics when the command fails.
+pub fn write_generated_air_from_cargo_export(
+    world_root: &Path,
+    manifest_path: &Path,
+    package_name: Option<&str>,
+    bin_name: Option<&str>,
+) -> Result<Vec<PathBuf>> {
+    let bin_name = bin_name.unwrap_or(DEFAULT_AIR_EXPORT_BIN);
+    let mut command = Command::new("cargo");
+    command
+        .arg("run")
+        .arg("--quiet")
+        .arg("--manifest-path")
+        .arg(manifest_path);
+    if let Some(package_name) = package_name.filter(|value| !value.trim().is_empty()) {
+        command.arg("--package").arg(package_name);
+    }
+    command.arg("--bin").arg(bin_name);
+
+    let output = command
+        .output()
+        .with_context(|| format!("run Cargo AIR export for {}", manifest_path.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "cargo AIR export failed for {} --bin {}: {}",
+            manifest_path.display(),
+            bin_name,
+            stderr.trim()
+        );
+    }
+
+    let stdout = String::from_utf8(output.stdout).context("decode Cargo AIR export stdout")?;
+    write_generated_air_export_json(world_root, &stdout)
 }
 
 #[derive(Default)]

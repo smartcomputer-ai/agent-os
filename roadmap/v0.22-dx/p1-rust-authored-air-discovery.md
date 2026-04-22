@@ -206,6 +206,14 @@ Host-side tooling can then pass the captured stdout to:
 aos_authoring::write_generated_air_export_json(world_root, &stdout)?;
 ```
 
+The first CLI surface is the same bridge:
+
+```text
+aos air generate --world-root <world-root> \
+  --manifest-path <workflow/Cargo.toml> \
+  --bin aos-air-export
+```
+
 Supported first subset:
 
 1. structs with named fields -> `record`,

@@ -17,7 +17,8 @@ pub use build::{
 };
 pub use bundle::{WorldBundle, build_patch_document, load_air_bundle};
 pub use generated::{
-    GENERATED_AIR_DIR, write_generated_air_export_json, write_generated_air_nodes,
+    DEFAULT_AIR_EXPORT_BIN, GENERATED_AIR_DIR, write_generated_air_export_json,
+    write_generated_air_from_cargo_export, write_generated_air_nodes,
 };
 pub use local::{local_kernel_config, local_state_paths, reset_local_runtime_state};
 pub use manifest_loader::{
