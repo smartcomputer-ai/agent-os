@@ -10,7 +10,6 @@ impl<S: Store + 'static> Kernel<S> {
         let mut loaded = loaded;
         let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
         let runtime = manifest_runtime::assemble_runtime(store.as_ref(), &loaded)?;
-        let op_defs = loaded.ops.clone();
         let schema_defs = loaded.schemas.clone();
 
         // Persist the loaded manifest + defs into the store so governance/patch doc
@@ -34,7 +33,8 @@ impl<S: Store + 'static> Kernel<S> {
             manifest: loaded.manifest.clone(),
             manifest_hash,
             module_defs: loaded.modules,
-            op_defs,
+            workflow_defs: loaded.workflows,
+            effect_defs: loaded.effects,
             schema_defs,
             schema_index: runtime.schema_index.clone(),
             workflow_schemas: runtime.workflow_schemas.clone(),
@@ -84,19 +84,22 @@ impl<S: Store + 'static> Kernel<S> {
             cell_snapshot_put_blob_count: 0,
         };
         if config.eager_module_load {
-            for (name, op) in kernel.op_defs.iter() {
-                if op.op_kind == OpKind::Workflow {
-                    let module_def = kernel
-                        .module_defs
-                        .get(&op.implementation.module)
-                        .ok_or_else(|| {
-                            KernelError::WorkflowNotFound(op.implementation.module.clone())
-                        })?;
-                    kernel.workflows.ensure_loaded(name, module_def)?;
+            let mut workflow_module_names = HashSet::new();
+            for (name, workflow) in kernel.workflow_defs.iter() {
+                workflow_module_names.insert(workflow.implementation.module.clone());
+                if builtins::find_builtin_workflow(name.as_str()).is_some() {
+                    continue;
                 }
+                let module_def = kernel
+                    .module_defs
+                    .get(&workflow.implementation.module)
+                    .ok_or_else(|| {
+                        KernelError::WorkflowNotFound(workflow.implementation.module.clone())
+                    })?;
+                kernel.workflows.ensure_loaded(name, module_def)?;
             }
             for (name, module_def) in kernel.module_defs.iter() {
-                if is_wasm_module(module_def) {
+                if is_wasm_module(module_def) && !workflow_module_names.contains(name) {
                     let mut pures = kernel
                         .pures
                         .lock()
@@ -169,7 +172,8 @@ mod tests {
             manifest,
             secrets: vec![secret],
             modules: HashMap::new(),
-            ops: HashMap::new(),
+            workflows: HashMap::new(),
+            effects: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: EffectCatalog::new(),
         };

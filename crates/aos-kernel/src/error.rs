@@ -23,7 +23,7 @@ pub enum KernelError {
     #[error("unsupported workflow receipt kind '{0}'")]
     UnsupportedWorkflowReceipt(String),
     #[error("unsupported effect kind '{0}'")]
-    UnsupportedEffectOp(String),
+    UnsupportedEffect(String),
     #[error("invalid idempotency key: {0}")]
     IdempotencyKeyInvalid(String),
     #[error("journal error: {0}")]
@@ -83,7 +83,7 @@ impl KernelError {
             KernelError::UnknownReceipt(_) => "receipt.unknown",
             KernelError::ReceiptDecode(_) => "receipt.decode",
             KernelError::UnsupportedWorkflowReceipt(_) => "receipt.workflow_unsupported",
-            KernelError::UnsupportedEffectOp(_) => "effect.op_unsupported",
+            KernelError::UnsupportedEffect(_) => "effect.op_unsupported",
             KernelError::IdempotencyKeyInvalid(_) => "idempotency.invalid",
             KernelError::Journal(_) => "journal.error",
             KernelError::SnapshotUnavailable(_) => "snapshot.unavailable",

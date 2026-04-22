@@ -96,7 +96,7 @@ fn workflow_snapshot_preserves_effect_queue() {
     let intents = replay_world.drain_effects().expect("drain effects");
     assert_eq!(intents.len(), 1);
     assert_eq!(
-        intents[0].effect_op.as_str(),
+        intents[0].effect.as_str(),
         aos_effects::effect_ops::TIMER_SET
     );
 }
@@ -121,7 +121,7 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
     assert_eq!(queued.len(), 1);
     let initial_intent = queued.remove(0);
     assert_eq!(
-        initial_intent.effect_op.as_str(),
+        initial_intent.effect.as_str(),
         aos_effects::effect_ops::TIMER_SET
     );
 
@@ -138,7 +138,7 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
     let mut replay_queued = replay_world.drain_effects().expect("drain replay queue");
     assert_eq!(replay_queued.len(), 1);
     assert_eq!(
-        replay_queued.remove(0).effect_op.as_str(),
+        replay_queued.remove(0).effect.as_str(),
         aos_effects::effect_ops::TIMER_SET
     );
 
@@ -159,7 +159,7 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
     let mut resumed = replay_world.drain_effects().expect("drain resumed queue");
     assert_eq!(resumed.len(), 1);
     assert_eq!(
-        resumed.remove(0).effect_op.as_str(),
+        resumed.remove(0).effect.as_str(),
         aos_effects::effect_ops::BLOB_PUT
     );
 }
@@ -191,7 +191,7 @@ fn workflow_authorized_effect_snapshot_replay_has_no_cap_decisions() {
     let intents = replay_world.drain_effects().expect("drain effects");
     assert_eq!(intents.len(), 1);
     assert_eq!(
-        intents[0].effect_op.as_str(),
+        intents[0].effect.as_str(),
         aos_effects::effect_ops::TIMER_SET
     );
 }
@@ -284,10 +284,7 @@ fn workflow_manifest_records_restore_queued_intent_without_policy_reevaluation()
         "restored queued intent should bypass replay-time policy reevaluation"
     );
     let effect = intents.remove(0);
-    assert_eq!(
-        effect.effect_op.as_str(),
-        aos_effects::effect_ops::TIMER_SET
-    );
+    assert_eq!(effect.effect.as_str(), aos_effects::effect_ops::TIMER_SET);
 
     let receipt = EffectReceipt {
         intent_hash: effect.intent_hash,
@@ -306,7 +303,7 @@ fn workflow_manifest_records_restore_queued_intent_without_policy_reevaluation()
     let mut followups = replay_world.drain_effects().expect("drain followups");
     assert_eq!(followups.len(), 1);
     assert_eq!(
-        followups.remove(0).effect_op.as_str(),
+        followups.remove(0).effect.as_str(),
         aos_effects::effect_ops::BLOB_PUT
     );
 }

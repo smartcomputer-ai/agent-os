@@ -7,7 +7,7 @@ The kernel must be replay-identical: given the same manifest, checkpoint/snapsho
 and receipts, it reconstructs the same state. Network calls, timers, LLM providers, host file tools,
 blob services, and secret stores do not have that property.
 
-AgentOS handles this by making external work explicit. Workflow ops request work by emitting typed
+AgentOS handles this by making external work explicit. Workflows request work by emitting typed
 effect intents. The owner records that work durably before anything outside the world may start.
 Async executors perform the work outside the deterministic kernel and return stream frames or
 terminal receipts. Those continuations re-enter as ordinary world input and are admitted only by the
@@ -17,7 +17,7 @@ owner.
 
 This spec covers:
 
-- effect op declarations and runtime classes
+- effect declarations and runtime classes
 - effect intent canonicalization and admission
 - durable open work
 - the post-flush publication fence
@@ -52,10 +52,10 @@ emits a request for `sys/http.request@1`. The receipt is later delivered as inpu
 
 ## 3) Vocabulary
 
-**Effect op**: A `defop` with `op_kind = "effect"`. It names parameter and receipt schemas and an
-implementation module/entrypoint.
+**Effect**: A `defeffect` definition. It names parameter and receipt schemas and an implementation
+module/entrypoint.
 
-**Effect intent**: A canonical request to perform one effect op. It includes effect op identity,
+**Effect intent**: A canonical request to perform one effect. It includes effect identity,
 canonical params, origin metadata, idempotency input, and `intent_hash`.
 
 **Open work**: Owner-side durable state saying that one effect intent is pending terminal
@@ -68,7 +68,7 @@ journal backend.
 **Effect runtime**: The async edge runtime that starts opened async effects after durable flush,
 tracks only ephemeral execution state, and sends continuations back through world input.
 
-**Adapter/executor**: Code that performs a concrete effect op route, such as HTTP, LLM, blob, timer,
+**Adapter/executor**: Code that performs a concrete effect route, such as HTTP, LLM, blob, timer,
 vault, or host/session work. Adapters are non-authoritative.
 
 **Stream frame**: A non-terminal continuation for an open effect. Stream frames report progress or
@@ -79,7 +79,7 @@ outcome and settles the effect when admitted by the owner.
 
 ## 4) Effect Runtime Classes
 
-Not all effect ops execute the same way. The runtime class determines what happens after the kernel
+Not all effects execute the same way. The runtime class determines what happens after the kernel
 opens work and the node durably flushes the frame.
 
 ### 4.1 Internal deterministic effects
@@ -124,7 +124,8 @@ state. That state is operational cache. It is not authoritative world state.
 
 ### 5.1 Declaration
 
-An effect op is declared as `defop(op_kind = "effect")` and listed in `manifest.ops`. The effect op
+An effect is declared as `defeffect`. Built-in `sys/*` effects are ambiently available; user effects
+are listed in `manifest.effects`. The effect definition
 supplies:
 
 - parameter schema
@@ -132,18 +133,18 @@ supplies:
 - implementation module
 - implementation entrypoint
 
-Workflow ops that may emit an effect op must list that effect op in
-`workflow.effects_emitted`. This structural allowlist is checked before open work is recorded.
+Workflows that may emit an effect must list that effect in `effects_emitted`. This structural
+allowlist is checked before open work is recorded.
 
 ### 5.2 Emission
 
-During a workflow step, a workflow op may return zero or more effect intents. These returned intents
+During a workflow step, a workflow may return zero or more effect intents. These returned intents
 are data, not side effects. At this point no external operation has started.
 
 The kernel attaches origin identity to each emitted intent. Origin identity includes:
 
-- workflow op identity
-- workflow op hash when available
+- workflow identity
+- workflow hash when available
 - keyed instance identity when present
 - emitted sequence/position
 - workflow-requested idempotency value when present
@@ -152,8 +153,8 @@ The kernel attaches origin identity to each emitted intent. Origin identity incl
 
 Before an intent is accepted, the kernel canonicalizes effect params:
 
-1. Resolve the effect op from the active manifest.
-2. Decode params against the effect op's parameter schema.
+1. Resolve the effect from active definitions or the ambient built-in catalog.
+2. Decode params against the effect's parameter schema.
 3. Validate shape and type constraints.
 4. Normalize values using AIR canonicalization rules.
 5. Re-encode params as canonical CBOR.
@@ -166,10 +167,10 @@ Authoring sugar and SDK convenience shapes must not perturb intent identity.
 The public AIR v2 surface has no caps, cap grants, or policy language. Effect admission is
 structural. An effect may proceed only when all of these checks pass:
 
-1. The effect op exists in the active manifest or built-in catalog.
-2. Params validate against the effect op params schema and canonicalize successfully.
-3. Workflow-origin effects come from a workflow op.
-4. The effect op is listed in the origin workflow op's `workflow.effects_emitted`.
+1. The effect exists in active definitions or the ambient built-in catalog.
+2. Params validate against the effect params schema and canonicalize successfully.
+3. Workflow-origin effects come from a workflow.
+4. The effect is listed in the origin workflow's `effects_emitted`.
 
 Rejected effects fail deterministically at owner admission. They do not start external work. Hosted
 deployments can add admission policy outside public AIR.
@@ -181,7 +182,7 @@ Open work includes enough information to:
 
 - route future continuations to the origin workflow instance
 - identify the effect by `intent_hash`
-- bind the effect op identity and resolved op hash
+- bind the effect identity and resolved effect hash
 - preserve quiescence/apply safety
 - rebuild runtime execution cache after restart
 - explain the cause/effect chain during audit
@@ -231,7 +232,7 @@ Stream frames and terminal receipts re-enter as world input. The owner validates
 - target world
 - `intent_hash`
 - open-work existence
-- effect op identity and op hash when present
+- effect identity and hash when present
 - continuation schema
 - per-effect stream sequence/fencing
 - terminal settlement rules
@@ -250,17 +251,17 @@ all-zero key when omitted.
 For workflow-origin effects, `intent_hash` is not merely a hash of effect params. The kernel first
 derives the effective idempotency input from stable origin identity and emission position:
 
-- origin workflow op
-- origin workflow op hash when available
+- origin workflow
+- origin workflow hash when available
 - origin instance key when keyed
-- effect op
-- effect op hash when available
+- effect
+- effect hash when available
 - canonical params
 - workflow-requested idempotency value
 - effect index within the step
 - emitted sequence
 
-The final hash is computed over effect op identity, canonical params, and effective idempotency
+The final hash is computed over effect identity, canonical params, and effective idempotency
 input. This makes `intent_hash` a per-emission open-work identity.
 
 Executors may maintain separate operational identities such as `attempt_id`, `operation_id`, route
@@ -282,16 +283,16 @@ The recommended continuation shape is:
 1. zero or more stream frames
 2. exactly one terminal receipt
 
-Receipts must be schema-bound to the effect op's receipt schema. If receipt payload decoding or
+Receipts must be schema-bound to the effect's receipt schema. If receipt payload decoding or
 normalization fails, the owner settles the effect through the workflow receipt-fault path described
 in [spec/04-workflows.md](04-workflows.md).
 
 Generic receipt and stream envelopes carry:
 
-- origin workflow op identity and optional hash
+- origin workflow identity and optional hash
 - origin instance key when keyed
 - intent hash identity
-- effect op identity and optional hash
+- effect identity and optional hash
 - executor module, executor module hash, and executor entrypoint when resolved
 - params hash, issuer ref, payload bytes or payload ref, status/sequence data, cost, and signature
 
@@ -364,7 +365,7 @@ Flush failure and adapter failure are different:
 
 ## 12) Relationship To Workflows
 
-Workflow ops own:
+Workflows own:
 
 - business state
 - retry and compensation decisions

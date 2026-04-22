@@ -162,14 +162,14 @@ fn on_run_requested(
         })),
     };
 
-    ctx.effects().emit_raw(LLM_GENERATE_EFFECT, &params, Some("default"));
+    ctx.effects().emit_raw(LLM_GENERATE_EFFECT, &params);
 }
 
 fn on_receipt(
     ctx: &mut WorkflowCtx<LiveState, ()>,
     envelope: EffectReceiptEnvelope,
 ) -> Result<(), ReduceError> {
-    if envelope.effect_op != LLM_GENERATE_EFFECT {
+    if envelope.effect != LLM_GENERATE_EFFECT {
         return Ok(());
     }
 

@@ -22,7 +22,7 @@ const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 #[derive(Debug)]
 pub enum WorkspaceAction {
     Emit {
-        effect_op: ToolEffectOp,
+        effect: ToolEffectOp,
         params_json: Value,
         state_json: String,
     },
@@ -783,10 +783,10 @@ fn advance_state(
                 let op = operations[next_index].clone();
                 match apply_effect_for_op(current_root_hash.as_str(), &op)? {
                     ApplyEffect::Effect {
-                        effect_op,
+                        effect,
                         params_json,
                     } => emit(
-                        effect_op,
+                        effect,
                         params_json,
                         WorkspaceState::ApplyRun {
                             resolved,
@@ -1512,7 +1512,7 @@ fn resolve_ref_receipt(
 
 enum ApplyEffect {
     Effect {
-        effect_op: ToolEffectOp,
+        effect: ToolEffectOp,
         params_json: Value,
     },
     BlobPut {
@@ -1528,7 +1528,7 @@ fn apply_effect_for_op(
 ) -> Result<ApplyEffect, crate::tools::types::ToolMappingError> {
     match op.op.as_str() {
         "remove" => Ok(ApplyEffect::Effect {
-            effect_op: ToolEffectOp::WorkspaceRemove,
+            effect: ToolEffectOp::WorkspaceRemove,
             params_json: json!({
                 "root_hash": current_root_hash,
                 "path": op.path,
@@ -1557,7 +1557,7 @@ fn apply_effect_for_op(
             }
             if let Some(blob_hash) = op.blob_hash.as_ref() {
                 return Ok(ApplyEffect::Effect {
-                    effect_op: ToolEffectOp::WorkspaceWriteRef,
+                    effect: ToolEffectOp::WorkspaceWriteRef,
                     params_json: json!({
                         "root_hash": current_root_hash,
                         "path": op.path,
@@ -1661,7 +1661,7 @@ fn parse_args<T: for<'de> Deserialize<'de>>(
 }
 
 fn emit(
-    effect_op: ToolEffectOp,
+    effect: ToolEffectOp,
     params_json: Value,
     state: WorkspaceState,
 ) -> Result<WorkspaceAction, crate::tools::types::ToolMappingError> {
@@ -1671,7 +1671,7 @@ fn emit(
         ))
     })?;
     Ok(WorkspaceAction::Emit {
-        effect_op,
+        effect,
         params_json,
         state_json,
     })

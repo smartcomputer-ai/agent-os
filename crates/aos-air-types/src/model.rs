@@ -1,6 +1,6 @@
 use crate::{HashRef, SchemaRef, SecretRef};
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::Value as JsonValue;
 
 pub type Name = String;
@@ -408,7 +408,8 @@ pub struct VariantExpr {
 pub enum AirNode {
     Defschema(DefSchema),
     Defmodule(DefModule),
-    Defop(DefOp),
+    Defworkflow(DefWorkflow),
+    Defeffect(DefEffect),
     Defsecret(DefSecret),
     Manifest(Manifest),
 }
@@ -458,27 +459,9 @@ pub enum PythonArtifact {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum OpKind {
-    Workflow,
-    Effect,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DefOp {
+pub struct DefWorkflow {
     pub name: Name,
-    pub op_kind: OpKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow: Option<WorkflowOp>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect: Option<EffectOp>,
-    #[serde(rename = "impl")]
-    pub implementation: OpImpl,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkflowOp {
     pub state: SchemaRef,
     pub event: SchemaRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -493,6 +476,17 @@ pub struct WorkflowOp {
         skip_serializing_if = "is_strict_workflow_determinism"
     )]
     pub determinism: WorkflowDeterminism,
+    #[serde(rename = "impl")]
+    pub implementation: Impl,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefEffect {
+    pub name: Name,
+    pub params: SchemaRef,
+    pub receipt: SchemaRef,
+    #[serde(rename = "impl")]
+    pub implementation: Impl,
 }
 
 fn default_workflow_determinism() -> WorkflowDeterminism {
@@ -512,13 +506,7 @@ pub enum WorkflowDeterminism {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EffectOp {
-    pub params: SchemaRef,
-    pub receipt: SchemaRef,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpImpl {
+pub struct Impl {
     pub module: Name,
     pub entrypoint: String,
 }
@@ -528,7 +516,8 @@ pub struct OpImpl {
 pub enum RootKind {
     Defschema,
     Defmodule,
-    Defop,
+    Defworkflow,
+    Defeffect,
     Defsecret,
     Manifest,
 }
@@ -538,22 +527,78 @@ pub enum RootKind {
 pub enum DefKind {
     Defschema,
     Defmodule,
-    Defop,
+    Defworkflow,
+    Defeffect,
     Defsecret,
 }
 
 pub const CURRENT_AIR_VERSION: &str = "2";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Manifest {
     pub air_version: String,
     pub schemas: Vec<NamedRef>,
     pub modules: Vec<NamedRef>,
+    /// Temporary runtime-only compatibility storage. Not part of public AIR v2.
+    #[serde(default, skip)]
     pub ops: Vec<NamedRef>,
+    #[serde(default)]
+    pub workflows: Vec<NamedRef>,
+    #[serde(default)]
+    pub effects: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<Routing>,
+}
+
+impl<'de> Deserialize<'de> for Manifest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ManifestWire {
+            #[serde(rename = "$kind", default)]
+            kind: Option<String>,
+            air_version: String,
+            schemas: Vec<NamedRef>,
+            modules: Vec<NamedRef>,
+            workflows: Vec<NamedRef>,
+            effects: Vec<NamedRef>,
+            #[serde(default)]
+            secrets: Vec<NamedRef>,
+            #[serde(default)]
+            routing: Option<Routing>,
+            #[serde(default)]
+            ops: Option<de::IgnoredAny>,
+        }
+
+        let wire = ManifestWire::deserialize(deserializer)?;
+        if let Some(kind) = wire.kind
+            && kind != "manifest"
+        {
+            return Err(de::Error::custom(format!(
+                "invalid manifest $kind '{kind}'"
+            )));
+        }
+        if wire.ops.is_some() {
+            return Err(de::Error::custom(
+                "manifest.ops is not part of AIR v2; use workflows/effects",
+            ));
+        }
+        Ok(Self {
+            air_version: wire.air_version,
+            schemas: wire.schemas,
+            modules: wire.modules,
+            ops: Vec::new(),
+            workflows: wire.workflows,
+            effects: wire.effects,
+            secrets: wire.secrets,
+            routing: wire.routing,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -571,7 +616,7 @@ pub struct Routing {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingSubscription {
     pub event: SchemaRef,
-    pub op: Name,
+    pub workflow: Name,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_field: Option<String>,
 }
@@ -685,17 +730,18 @@ mod tests {
                     "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                 }
             ],
-            "ops": [
+            "workflows": [
                 {
                     "name": "com.acme/order.step@1",
                     "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
                 }
             ],
+            "effects": [],
             "routing": {
                 "subscriptions": [
                     {
                         "event": "com.acme/OrderCreated@1",
-                        "op": "com.acme/order.step@1"
+                        "workflow": "com.acme/order.step@1"
                     }
                 ]
             }
@@ -707,15 +753,12 @@ mod tests {
     }
 
     #[test]
-    fn defop_effect_round_trip() {
+    fn defeffect_round_trip() {
         let effect_json = json!({
-            "$kind": "defop",
+            "$kind": "defeffect",
             "name": "com.acme/send@1",
-            "op_kind": "effect",
-            "effect": {
-                "params": "com.acme/SendParams@1",
-                "receipt": "com.acme/SendReceipt@1"
-            },
+            "params": "com.acme/SendParams@1",
+            "receipt": "com.acme/SendReceipt@1",
             "impl": {
                 "module": "com.acme/send_adapter@1",
                 "entrypoint": "send"

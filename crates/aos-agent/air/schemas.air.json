@@ -73,7 +73,7 @@
       "variant": {
         "Effect": {
           "record": {
-            "effect_op": { "text": {} },
+            "effect": { "text": {} }
           }
         },
         "DomainEvent": {

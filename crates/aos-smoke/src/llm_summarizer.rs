@@ -81,7 +81,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let intents = host.kernel_mut().drain_effects()?;
     let llm_intent = intents
         .into_iter()
-        .find(|intent| intent.effect_op.as_str() == effect_ops::LLM_GENERATE)
+        .find(|intent| intent.effect.as_str() == effect_ops::LLM_GENERATE)
         .ok_or_else(|| anyhow!("expected one llm.generate intent"))?;
 
     let output_ref =

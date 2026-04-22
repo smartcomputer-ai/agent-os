@@ -39,20 +39,19 @@ impl ShadowExecutor {
 
         let loaded = config.patch.to_loaded_manifest(store.as_ref())?;
         let module_effect_allowlists = loaded
-            .ops
+            .workflows
             .values()
-            .filter_map(|op| {
-                let workflow = op.workflow.as_ref()?;
+            .map(|workflow| {
                 let mut effects = workflow
                     .effects_emitted
                     .iter()
                     .map(|kind| kind.as_str().to_string())
                     .collect::<Vec<_>>();
                 effects.sort();
-                Some(ModuleEffectAllowlist {
-                    module: op.name.clone(),
+                ModuleEffectAllowlist {
+                    module: workflow.name.clone(),
                     effects_emitted: effects,
-                })
+                }
             })
             .collect::<Vec<_>>();
         let mut kernel = Kernel::from_loaded_manifest_with_config(
@@ -87,7 +86,7 @@ impl ShadowExecutor {
             for opened in drain.opened_effects {
                 let intent = opened.intent;
                 predicted_effects.push(PredictedEffect {
-                    op: intent.effect_op.clone(),
+                    op: intent.effect.clone(),
                     intent_hash: hex::encode(intent.intent_hash),
                     params_json: params_to_json(&intent.params_cbor),
                 });
@@ -120,7 +119,7 @@ impl ShadowExecutor {
                         .as_ref()
                         .map(|key| base64::prelude::BASE64_STANDARD.encode(key)),
                     intent_hash: hex::encode(inflight.intent_id),
-                    effect_op: inflight.effect_op.clone(),
+                    effect: inflight.effect.clone(),
                     emitted_at_seq: inflight.emitted_at_seq,
                 });
             }
@@ -178,6 +177,8 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             ops: vec![],
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: vec![],
             routing: None,
         }

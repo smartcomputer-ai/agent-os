@@ -24,7 +24,7 @@ pub fn map_tool_receipt_to_llm_result(
     map_supported_receipt(mapper, tool_name, status, payload)
 }
 
-pub fn effect_op_for_mapper(mapper: ToolMapper) -> ToolEffectOp {
+pub fn effect_for_mapper(mapper: ToolMapper) -> ToolEffectOp {
     match mapper {
         ToolMapper::HostSessionOpen => ToolEffectOp::HostSessionOpen,
         ToolMapper::HostExec => ToolEffectOp::HostExec,
@@ -46,13 +46,13 @@ pub fn effect_op_for_mapper(mapper: ToolMapper) -> ToolEffectOp {
         ToolMapper::WorkspaceApply => ToolEffectOp::WorkspaceWriteBytes,
         ToolMapper::WorkspaceDiff => ToolEffectOp::WorkspaceDiff,
         ToolMapper::WorkspaceCommit => {
-            panic!("workspace commit does not map to an effect op")
+            panic!("workspace commit does not map to an effect")
         }
     }
 }
 
-pub fn mapper_for_effect_op(effect_op: &str) -> Option<ToolMapper> {
-    match effect_op {
+pub fn mapper_for_effect(effect: &str) -> Option<ToolMapper> {
+    match effect {
         "sys/host.session.open@1" | "host.session.open" => Some(ToolMapper::HostSessionOpen),
         "sys/host.exec@1" | "host.exec" => Some(ToolMapper::HostExec),
         "sys/host.session.signal@1" | "host.session.signal" => Some(ToolMapper::HostSessionSignal),

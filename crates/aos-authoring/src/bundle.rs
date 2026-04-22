@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    AirNode, DefModule, DefOp, DefSchema, DefSecret, HashRef, Manifest, NamedRef, builtins,
+    AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, HashRef, Manifest, NamedRef,
+    builtins,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::LoadedManifest;
@@ -28,7 +29,8 @@ pub struct WorldBundle {
     pub manifest: Manifest,
     pub schemas: Vec<DefSchema>,
     pub modules: Vec<DefModule>,
-    pub ops: Vec<DefOp>,
+    pub workflows: Vec<DefWorkflow>,
+    pub effects: Vec<DefEffect>,
     pub secrets: Vec<DefSecret>,
     pub wasm_blobs: Option<std::collections::BTreeMap<String, Vec<u8>>>,
 }
@@ -202,14 +204,25 @@ pub fn build_patch_document(
             },
         });
     }
-    for op in &bundle.ops {
-        if is_sys_name(op.name.as_str()) {
+    for workflow in &bundle.workflows {
+        if is_sys_name(workflow.name.as_str()) {
             continue;
         }
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
-                kind: "defop".to_string(),
-                node: AirNode::Defop(op.clone()),
+                kind: "defworkflow".to_string(),
+                node: AirNode::Defworkflow(workflow.clone()),
+            },
+        });
+    }
+    for effect in &bundle.effects {
+        if is_sys_name(effect.name.as_str()) {
+            continue;
+        }
+        patches.push(PatchOp::AddDef {
+            add_def: AddDef {
+                kind: "defeffect".to_string(),
+                node: AirNode::Defeffect(effect.clone()),
             },
         });
     }
@@ -237,8 +250,12 @@ pub fn build_patch_document(
         &filter_sys_refs(&bundle.manifest.modules),
     ));
     add_refs.extend(manifest_refs_from(
-        "defop",
-        &filter_sys_refs(&bundle.manifest.ops),
+        "defworkflow",
+        &filter_sys_refs(&bundle.manifest.workflows),
+    ));
+    add_refs.extend(manifest_refs_from(
+        "defeffect",
+        &filter_sys_refs(&bundle.manifest.effects),
     ));
     add_refs.extend(manifest_refs_from(
         "defsecret",
@@ -290,7 +307,8 @@ pub fn manifest_node_hash(manifest: &Manifest) -> Result<String> {
 struct StoredBundleHashes {
     schemas: std::collections::HashMap<String, HashRef>,
     modules: std::collections::HashMap<String, HashRef>,
-    ops: std::collections::HashMap<String, HashRef>,
+    workflows: std::collections::HashMap<String, HashRef>,
+    effects: std::collections::HashMap<String, HashRef>,
     secrets: std::collections::HashMap<String, HashRef>,
 }
 
@@ -314,13 +332,22 @@ fn store_bundle_defs<S: Store>(store: &S, bundle: &WorldBundle) -> Result<Stored
             HashRef::new(hash.to_hex()).context("hash defmodule")?,
         );
     }
-    for op in &bundle.ops {
+    for workflow in &bundle.workflows {
         let hash = store
-            .put_node(&AirNode::Defop(op.clone()))
-            .context("store defop")?;
-        stored.ops.insert(
-            op.name.to_string(),
-            HashRef::new(hash.to_hex()).context("hash defop")?,
+            .put_node(&AirNode::Defworkflow(workflow.clone()))
+            .context("store defworkflow")?;
+        stored.workflows.insert(
+            workflow.name.to_string(),
+            HashRef::new(hash.to_hex()).context("hash defworkflow")?,
+        );
+    }
+    for effect in &bundle.effects {
+        let hash = store
+            .put_node(&AirNode::Defeffect(effect.clone()))
+            .context("store defeffect")?;
+        stored.effects.insert(
+            effect.name.to_string(),
+            HashRef::new(hash.to_hex()).context("hash defeffect")?,
         );
     }
     for secret in &bundle.secrets {
@@ -342,7 +369,8 @@ fn patch_manifest_for_genesis(
     let mut manifest = manifest.clone();
     patch_named_refs_for_genesis("schema", &mut manifest.schemas, &stored.schemas)?;
     patch_named_refs_for_genesis("module", &mut manifest.modules, &stored.modules)?;
-    patch_named_refs_for_genesis("op", &mut manifest.ops, &stored.ops)?;
+    patch_named_refs_for_genesis("workflow", &mut manifest.workflows, &stored.workflows)?;
+    patch_named_refs_for_genesis("effect", &mut manifest.effects, &stored.effects)?;
     patch_named_refs_for_genesis("secret", &mut manifest.secrets, &stored.secrets)?;
     Ok(manifest)
 }
@@ -361,13 +389,15 @@ fn patch_named_refs_for_genesis(
                     builtins::find_builtin_module(reference.name.as_str())
                         .map(|builtin| builtin.hash_ref.clone())
                 }),
-                "op" => builtins::find_builtin_op(reference.name.as_str())
+                "workflow" => builtins::find_builtin_workflow(reference.name.as_str())
+                    .map(|builtin| builtin.hash_ref.clone()),
+                "effect" => builtins::find_builtin_effect(reference.name.as_str())
                     .map(|builtin| builtin.hash_ref.clone()),
                 _ => None,
             }
         } else {
             match kind {
-                "schema" | "module" | "op" | "secret" => {
+                "schema" | "module" | "workflow" | "effect" | "secret" => {
                     stored.get(reference.name.as_str()).cloned()
                 }
                 _ => bail!("unsupported manifest ref kind '{kind}'"),
@@ -414,7 +444,8 @@ pub fn write_air_layout_with_options(
 
     let (schemas, sys_schemas) = split_sys_defs(&bundle.schemas, options.include_sys);
     let (modules, sys_modules) = split_sys_defs(&bundle.modules, options.include_sys);
-    let (ops, sys_ops) = split_sys_defs(&bundle.ops, options.include_sys);
+    let (workflows, sys_workflows) = split_sys_defs(&bundle.workflows, options.include_sys);
+    let (effects, sys_effects) = split_sys_defs(&bundle.effects, options.include_sys);
     let (secrets, sys_secrets) = split_sys_defs(&bundle.secrets, options.include_sys);
 
     write_json(
@@ -422,7 +453,7 @@ pub fn write_air_layout_with_options(
         &AirNode::Manifest(bundle.manifest.clone()),
     )?;
     if options.defs_bundle {
-        let defs = collect_def_nodes(schemas, modules, ops, secrets);
+        let defs = collect_def_nodes(schemas, modules, workflows, effects, secrets);
         write_node_array_with_options(
             &air_dir.join("defs.air.json"),
             defs,
@@ -439,8 +470,16 @@ pub fn write_air_layout_with_options(
             options.strip_wasm_hashes,
         )?;
         write_node_array(
-            &air_dir.join("ops.air.json"),
-            ops.iter().cloned().map(AirNode::Defop).collect(),
+            &air_dir.join("workflows.air.json"),
+            workflows
+                .iter()
+                .cloned()
+                .map(AirNode::Defworkflow)
+                .collect(),
+        )?;
+        write_node_array(
+            &air_dir.join("effects.air.json"),
+            effects.iter().cloned().map(AirNode::Defeffect).collect(),
         )?;
         write_node_array(
             &air_dir.join("secrets.air.json"),
@@ -449,7 +488,13 @@ pub fn write_air_layout_with_options(
     }
 
     if options.include_sys {
-        let sys_nodes = collect_sys_nodes(sys_schemas, sys_modules, sys_ops, sys_secrets);
+        let sys_nodes = collect_sys_nodes(
+            sys_schemas,
+            sys_modules,
+            sys_workflows,
+            sys_effects,
+            sys_secrets,
+        );
         write_node_array(&air_dir.join("sys.air.json"), sys_nodes)?;
     }
 
@@ -466,7 +511,8 @@ impl WorldBundle {
             manifest: loaded.manifest,
             schemas: loaded.schemas.into_values().collect(),
             modules: loaded.modules.into_values().collect(),
-            ops: loaded.ops.into_values().collect(),
+            workflows: loaded.workflows.into_values().collect(),
+            effects: loaded.effects.into_values().collect(),
             secrets: Vec::new(),
             wasm_blobs: None,
         };
@@ -479,7 +525,8 @@ impl WorldBundle {
             manifest: loaded.manifest,
             schemas: loaded.schemas.into_values().collect(),
             modules: loaded.modules.into_values().collect(),
-            ops: loaded.ops.into_values().collect(),
+            workflows: loaded.workflows.into_values().collect(),
+            effects: loaded.effects.into_values().collect(),
             secrets,
             wasm_blobs: None,
         }
@@ -489,7 +536,8 @@ impl WorldBundle {
     fn sort_defs(&mut self) {
         self.schemas.sort_by(|a, b| a.name.cmp(&b.name));
         self.modules.sort_by(|a, b| a.name.cmp(&b.name));
-        self.ops.sort_by(|a, b| a.name.cmp(&b.name));
+        self.workflows.sort_by(|a, b| a.name.cmp(&b.name));
+        self.effects.sort_by(|a, b| a.name.cmp(&b.name));
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
@@ -597,13 +645,15 @@ fn split_sys_defs<T: HasName + Clone>(defs: &[T], include_sys: bool) -> (Vec<T>,
 fn collect_sys_nodes(
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
-    ops: Vec<DefOp>,
+    workflows: Vec<DefWorkflow>,
+    effects: Vec<DefEffect>,
     secrets: Vec<DefSecret>,
 ) -> Vec<AirNode> {
     let mut nodes = Vec::new();
     nodes.extend(schemas.into_iter().map(AirNode::Defschema));
     nodes.extend(modules.into_iter().map(AirNode::Defmodule));
-    nodes.extend(ops.into_iter().map(AirNode::Defop));
+    nodes.extend(workflows.into_iter().map(AirNode::Defworkflow));
+    nodes.extend(effects.into_iter().map(AirNode::Defeffect));
     nodes.extend(secrets.into_iter().map(AirNode::Defsecret));
     nodes
 }
@@ -611,13 +661,15 @@ fn collect_sys_nodes(
 fn collect_def_nodes(
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
-    ops: Vec<DefOp>,
+    workflows: Vec<DefWorkflow>,
+    effects: Vec<DefEffect>,
     secrets: Vec<DefSecret>,
 ) -> Vec<AirNode> {
     let mut nodes = Vec::new();
     nodes.extend(schemas.into_iter().map(AirNode::Defschema));
     nodes.extend(modules.into_iter().map(AirNode::Defmodule));
-    nodes.extend(ops.into_iter().map(AirNode::Defop));
+    nodes.extend(workflows.into_iter().map(AirNode::Defworkflow));
+    nodes.extend(effects.into_iter().map(AirNode::Defeffect));
     nodes.extend(secrets.into_iter().map(AirNode::Defsecret));
     nodes
 }
@@ -638,7 +690,13 @@ impl HasName for DefModule {
     }
 }
 
-impl HasName for DefOp {
+impl HasName for DefWorkflow {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+impl HasName for DefEffect {
     fn name(&self) -> &str {
         self.name.as_str()
     }
@@ -655,8 +713,11 @@ fn extend_with_builtins(bundle: &mut WorldBundle) {
     for schema in &bundle.schemas {
         existing.insert(schema.name.clone());
     }
-    for op in &bundle.ops {
-        existing.insert(op.name.clone());
+    for workflow in &bundle.workflows {
+        existing.insert(workflow.name.clone());
+    }
+    for effect in &bundle.effects {
+        existing.insert(effect.name.clone());
     }
     for module in &bundle.modules {
         existing.insert(module.name.clone());
@@ -667,9 +728,14 @@ fn extend_with_builtins(bundle: &mut WorldBundle) {
             bundle.schemas.push(builtin.schema.clone());
         }
     }
-    for builtin in builtins::builtin_ops() {
-        if existing.insert(builtin.op.name.clone()) {
-            bundle.ops.push(builtin.op.clone());
+    for builtin in builtins::builtin_workflows() {
+        if existing.insert(builtin.workflow.name.clone()) {
+            bundle.workflows.push(builtin.workflow.clone());
+        }
+    }
+    for builtin in builtins::builtin_effects() {
+        if existing.insert(builtin.effect.name.clone()) {
+            bundle.effects.push(builtin.effect.clone());
         }
     }
     for builtin in builtins::builtin_modules() {
@@ -682,7 +748,8 @@ fn extend_with_builtins(bundle: &mut WorldBundle) {
 fn bundle_from_catalog(catalog: aos_kernel::Catalog, include_sys: bool) -> WorldBundle {
     let mut schemas = Vec::new();
     let mut modules = Vec::new();
-    let mut ops = Vec::new();
+    let mut workflows = Vec::new();
+    let mut effects = Vec::new();
     let mut secrets = Vec::new();
 
     for (name, entry) in catalog.nodes {
@@ -692,7 +759,8 @@ fn bundle_from_catalog(catalog: aos_kernel::Catalog, include_sys: bool) -> World
         match entry.node {
             AirNode::Defschema(schema) => schemas.push(schema),
             AirNode::Defmodule(module) => modules.push(module),
-            AirNode::Defop(op) => ops.push(op),
+            AirNode::Defworkflow(workflow) => workflows.push(workflow),
+            AirNode::Defeffect(effect) => effects.push(effect),
             AirNode::Defsecret(secret) => secrets.push(secret),
             AirNode::Manifest(_) => {}
         }
@@ -702,7 +770,8 @@ fn bundle_from_catalog(catalog: aos_kernel::Catalog, include_sys: bool) -> World
         manifest: catalog.manifest,
         schemas,
         modules,
-        ops,
+        workflows,
+        effects,
         secrets,
         wasm_blobs: None,
     }
@@ -726,6 +795,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         }
@@ -778,6 +849,8 @@ mod tests {
             }],
             modules: Vec::new(),
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
@@ -823,6 +896,8 @@ mod tests {
                 hash: HashRef::new(old_hash.to_hex()).expect("module hash ref"),
             }],
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
@@ -835,7 +910,8 @@ mod tests {
             manifest,
             schemas: Vec::new(),
             modules: vec![new_module.clone()],
-            ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             wasm_blobs: None,
         };
@@ -871,6 +947,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
@@ -883,13 +961,13 @@ mod tests {
             .schemas
             .iter()
             .any(|s| s.name.as_str().starts_with("sys/"));
-        let has_sys_op = exported
+        let has_sys_effect = exported
             .bundle
-            .ops
+            .effects
             .iter()
             .any(|e| e.name.as_str().starts_with("sys/"));
         assert!(has_sys_schema, "expected built-in sys schema");
-        assert!(has_sys_op, "expected built-in sys op");
+        assert!(has_sys_effect, "expected built-in sys effect");
     }
 
     #[test]
@@ -912,6 +990,8 @@ mod tests {
             }],
             modules: Vec::new(),
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
@@ -919,7 +999,8 @@ mod tests {
             manifest: manifest.clone(),
             schemas: vec![schema.clone()],
             modules: Vec::new(),
-            ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             wasm_blobs: None,
         };
@@ -964,6 +1045,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };
@@ -987,7 +1070,8 @@ mod tests {
             manifest: bundle_manifest,
             schemas: Vec::new(),
             modules: Vec::new(),
-            ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: vec![secret],
             wasm_blobs: None,
         };

@@ -13,18 +13,6 @@
     },
     {
       "name": "demo/RetryEvent@1"
-    },
-    {
-      "name": "sys/TimerSetParams@1"
-    },
-    {
-      "name": "sys/TimerSetReceipt@1"
-    },
-    {
-      "name": "sys/HttpRequestParams@1"
-    },
-    {
-      "name": "sys/HttpRequestReceipt@1"
     }
   ],
   "modules": [
@@ -36,19 +24,14 @@
     "subscriptions": [
       {
         "event": "demo/RetryEvent@1",
-        "op": "demo/RetrySM@1"
+        "workflow": "demo/RetrySM@1"
       }
     ]
   },
-  "ops": [
-    {
-      "name": "sys/http.request@1"
-    },
-    {
-      "name": "sys/timer.set@1"
-    },
+  "workflows": [
     {
       "name": "demo/RetrySM@1"
     }
-  ]
+  ],
+  "effects": []
 }

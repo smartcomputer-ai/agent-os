@@ -1,6 +1,6 @@
 # P2: Forked Workflow/Effect Runtime Cut
 
-Status: planned.
+Status: implemented.
 
 ## Goal
 
@@ -63,34 +63,34 @@ Those helpers should not reintroduce a public or durable generic op vocabulary.
 
 ## Kernel World Runtime
 
-- [ ] Replace world runtime indexes:
+- [x] Replace world runtime indexes:
   - `workflow_defs: HashMap<Name, DefWorkflow>`
   - `effect_defs: HashMap<Name, DefEffect>`
   - module/runtime indexes for shared `Impl` resolution
-- [ ] Update bootstrap/open/replay code to load workflow/effect maps from `LoadedManifest`.
-- [ ] Update domain routing:
+- [x] Update bootstrap/open/replay code to load workflow/effect maps from `LoadedManifest`.
+- [x] Update domain routing:
   - route through `routing.subscriptions[].workflow`
   - validate delivery against `DefWorkflow.event`
   - keyed routing uses `DefWorkflow.key_schema`
   - variant-arm wrapping remains unchanged semantically
-- [ ] Update workflow invocation:
+- [x] Update workflow invocation:
   - resolve `DefWorkflow.impl.module`
   - call `DefWorkflow.impl.entrypoint`
   - workflow context carries workflow definition identity and hash
   - no special `"step"` or `"workflow"` entrypoint value
-- [ ] Update workflow state storage:
+- [x] Update workflow state storage:
   - instance identity is workflow name/hash
   - keyed cell indexes are keyed by workflow identity
   - trace/audit identity says workflow, not op
-- [ ] Keep strict quiescence semantics unchanged.
+- [x] Keep strict quiescence semantics unchanged.
 
 ## Effects And Continuations
 
-- [ ] Update workflow effect emission:
+- [x] Update workflow effect emission:
   - emitted request names an effect definition
   - admission checks `DefWorkflow.effects_emitted[]`
   - resolve params schema from `DefEffect.params`
-- [ ] Update effect intent identity preimage:
+- [x] Update effect intent identity preimage:
   - origin workflow name
   - origin workflow definition hash
   - origin instance key
@@ -99,15 +99,15 @@ Those helpers should not reintroduce a public or durable generic op vocabulary.
   - canonical params
   - emission position
   - workflow-requested idempotency key
-- [ ] Update open-work records:
+- [x] Update open-work records:
   - store origin workflow identity/hash
   - store effect identity/hash
   - store executor module/hash/entrypoint
-- [ ] Update receipt and stream admission:
+- [x] Update receipt and stream admission:
   - validate payloads through `DefEffect.receipt`
   - route continuations by recorded origin workflow and pending intent identity
   - keep continuation routing independent of domain routing subscriptions
-- [ ] Update async effect dispatch:
+- [x] Update async effect dispatch:
   - resolve `DefEffect.impl`
   - dispatch from module runtime plus entrypoint
   - keep publication after durable flush
@@ -115,51 +115,51 @@ Those helpers should not reintroduce a public or durable generic op vocabulary.
 
 ## Durable Records And Replay
 
-- [ ] Rename durable public fields where practical:
+- [x] Rename durable public fields where practical:
   - `workflow_op` -> `workflow`
   - `workflow_op_hash` -> `workflow_hash`
   - `effect_op` -> `effect`
   - `effect_op_hash` -> `effect_hash`
-- [ ] Update journal records for new journals.
-- [ ] Update snapshots and replay restore for new journals.
-- [ ] Update receipt and stream envelope built-in schemas.
-- [ ] Update audit/provenance records to use workflow/effect terminology.
-- [ ] Preserve replay-or-die for new forked AIR v2 journals.
-- [ ] Do not preserve replay compatibility for temporary `defop` journals unless a later decision
+- [x] Update journal records for new journals.
+- [x] Update snapshots and replay restore for new journals.
+- [x] Update receipt and stream envelope built-in schemas.
+- [x] Update audit/provenance records to use workflow/effect terminology.
+- [x] Preserve replay-or-die for new forked AIR v2 journals.
+- [x] Do not preserve replay compatibility for temporary `defop` journals unless a later decision
   explicitly requires it.
 
 ## Node, CLI, And Query Surfaces
 
-- [ ] Update node manifest summaries:
+- [x] Update node manifest summaries:
   - workflow count
   - effect count
   - route summaries target workflows
-- [ ] Update hot world/control read models that expose op-centered fields.
-- [ ] Update CLI rendering:
+- [x] Update hot world/control read models that expose op-centered fields.
+- [x] Update CLI rendering:
   - list/show `defworkflow`
   - list/show `defeffect`
   - remove generic op counts from user-facing output
   - route summaries say workflow
-- [ ] Update governance summaries:
+- [x] Update governance summaries:
   - report workflow definition changes
   - report effect definition changes
   - report routing changes by workflow target
-- [ ] Keep any temporary compatibility aliases clearly marked and remove them before P2 is done.
+- [x] Keep any temporary compatibility aliases clearly marked and remove them before P2 is done.
 
 ## Fixtures And Downstream Crates
 
-- [ ] Convert active fixtures and examples:
+- [x] Convert active fixtures and examples:
   - smoke fixtures
   - kernel tests
   - node tests
   - authoring integration fixtures
   - agent AIR fixtures
   - eval fixtures
-- [ ] remove `sys/` references in manifests of fixtures, since sys is always included, where they are not helpful for clarity
-- [ ] Update SDK/helper crates that construct effect requests or consume receipt envelopes.
-- [ ] Update effect adapters only where start context or audit fields changed.
-- [ ] Update agent/session code only after kernel/node surfaces settle.
-- [ ] Sweep active fixture paths for:
+- [x] remove `sys/` references in manifests of fixtures, since sys is always included, where they are not helpful for clarity
+- [x] Update SDK/helper crates that construct effect requests or consume receipt envelopes.
+- [x] Update effect adapters only where start context or audit fields changed.
+- [x] Update agent/session code only after kernel/node surfaces settle.
+- [x] Sweep active fixture paths for:
   - `defop`
   - `op_kind`
   - `manifest.ops`

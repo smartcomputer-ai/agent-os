@@ -109,7 +109,7 @@ fn host_tool(
         args_schema_json: args_schema_json.to_string(),
         mapper,
         executor: ToolExecutor::Effect {
-            effect_op: tool_id.to_string(),
+            effect: tool_id.to_string(),
         },
         availability_rules: if requires_host_session {
             vec![ToolAvailabilityRule::HostSessionReady]
@@ -144,7 +144,7 @@ fn effect_tool(
         args_schema_json: args_schema_json.to_string(),
         mapper,
         executor: ToolExecutor::Effect {
-            effect_op: tool_id.to_string(),
+            effect: tool_id.to_string(),
         },
         availability_rules: vec![ToolAvailabilityRule::Always],
         parallelism_hint: hint,
@@ -302,7 +302,7 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
         effect_tool(
             "introspect.manifest",
             "inspect_world",
-            "Inspect world summary, modules, ops, routing, and manifest metadata.",
+            "Inspect world summary, modules, workflows, effects, routing, and manifest metadata.",
             r#"{"type":"object","additionalProperties":false,"properties":{}}"#,
             ToolMapper::InspectWorld,
             ToolParallelismHint {

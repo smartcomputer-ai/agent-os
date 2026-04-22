@@ -170,7 +170,7 @@ fn handle_start(ctx: &mut WorkflowCtx<SummarizerState, ()>, url: String) {
         headers: BTreeMap::new(),
         body_ref: None,
     };
-    ctx.effects().emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+    ctx.effects().emit_raw(HTTP_REQUEST_EFFECT, &params);
 }
 
 fn handle_receipt(
@@ -180,7 +180,7 @@ fn handle_receipt(
     if ctx.state.pending_request.is_none() {
         return Ok(());
     }
-    match envelope.effect_op.as_str() {
+    match envelope.effect.as_str() {
         HTTP_REQUEST_EFFECT if matches!(ctx.state.pc, SummarizerPc::Fetching) => {
             let receipt: HttpRequestReceipt = envelope
                 .decode_receipt_payload()
@@ -209,7 +209,7 @@ fn handle_receipt(
                 api_key: None,
             };
             ctx.effects()
-                .emit_raw(LLM_GENERATE_EFFECT, &llm_params, Some("default"));
+                .emit_raw(LLM_GENERATE_EFFECT, &llm_params);
             ctx.state.pc = SummarizerPc::Summarizing;
         }
         LLM_GENERATE_EFFECT if matches!(ctx.state.pc, SummarizerPc::Summarizing) => {

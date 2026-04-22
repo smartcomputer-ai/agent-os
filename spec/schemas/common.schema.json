@@ -20,7 +20,8 @@
       "enum": [
         "defschema",
         "defmodule",
-        "defop",
+        "defworkflow",
+        "defeffect",
         "defsecret",
         "manifest"
       ]
@@ -31,9 +32,23 @@
       "enum": [
         "defschema",
         "defmodule",
-        "defop",
+        "defworkflow",
+        "defeffect",
         "defsecret"
       ]
+    },
+    "Impl": {
+      "title": "Executable implementation selector",
+      "type": "object",
+      "properties": {
+        "module": { "$ref": "#/$defs/Name" },
+        "entrypoint": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["module", "entrypoint"],
+      "additionalProperties": false
     },
     "VarName": {
       "type": "string",

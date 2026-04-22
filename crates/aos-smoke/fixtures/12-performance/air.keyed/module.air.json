@@ -11,16 +11,13 @@
     }
   },
   {
-    "$kind": "defop",
+    "$kind": "defworkflow",
     "name": "demo/PerfCounter@1",
-    "op_kind": "workflow",
-    "workflow": {
-      "state": "demo/PerfState@1",
-      "event": "demo/PerfEvent@1",
-      "context": "sys/WorkflowContext@1",
-      "effects_emitted": [],
-      "key_schema": "demo/PerfCellKey@1"
-    },
+    "state": "demo/PerfState@1",
+    "event": "demo/PerfEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "key_schema": "demo/PerfCellKey@1",
+    "effects_emitted": [],
     "impl": {
       "module": "demo/PerfCounter_wasm@1",
       "entrypoint": "step"

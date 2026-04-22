@@ -66,21 +66,21 @@ impl ToolEffectOp {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolMappedArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_op: Option<ToolEffectOp>,
+    pub effect: Option<ToolEffectOp>,
     pub params_json: Value,
 }
 
 impl ToolMappedArgs {
     pub fn params(params_json: Value) -> Self {
         Self {
-            effect_op: None,
+            effect: None,
             params_json,
         }
     }
 
-    pub fn with_effect_op(effect_op: ToolEffectOp, params_json: Value) -> Self {
+    pub fn with_effect(effect: ToolEffectOp, params_json: Value) -> Self {
         Self {
-            effect_op: Some(effect_op),
+            effect: Some(effect),
             params_json,
         }
     }
@@ -158,7 +158,7 @@ impl ToolMappingError {
     }
 }
 
-pub fn mapper_effect_op(mapper: ToolMapper) -> ToolEffectOp {
+pub fn mapper_effect(mapper: ToolMapper) -> ToolEffectOp {
     match mapper {
         ToolMapper::HostSessionOpen => ToolEffectOp::HostSessionOpen,
         ToolMapper::HostExec => ToolEffectOp::HostExec,
@@ -180,7 +180,7 @@ pub fn mapper_effect_op(mapper: ToolMapper) -> ToolEffectOp {
         ToolMapper::WorkspaceApply => ToolEffectOp::WorkspaceWriteBytes,
         ToolMapper::WorkspaceDiff => ToolEffectOp::WorkspaceDiff,
         ToolMapper::WorkspaceCommit => {
-            panic!("workspace commit does not map to an effect op")
+            panic!("workspace commit does not map to an effect")
         }
     }
 }

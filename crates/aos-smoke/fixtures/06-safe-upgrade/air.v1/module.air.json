@@ -11,17 +11,14 @@
     }
   },
   {
-    "$kind": "defop",
+    "$kind": "defworkflow",
     "name": "demo/SafeUpgrade@1",
-    "op_kind": "workflow",
-    "workflow": {
-      "state": "demo/SafeUpgradeState@1",
-      "event": "demo/SafeUpgradeEvent@1",
-      "context": "sys/WorkflowContext@1",
-      "effects_emitted": [
-        "sys/http.request@1"
-      ]
-    },
+    "state": "demo/SafeUpgradeState@1",
+    "event": "demo/SafeUpgradeEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [
+      "sys/http.request@1"
+    ],
     "impl": {
       "module": "demo/SafeUpgrade_wasm@1",
       "entrypoint": "step"

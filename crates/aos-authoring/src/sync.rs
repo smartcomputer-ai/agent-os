@@ -844,10 +844,15 @@ fn import_defs_hash(root: &Path) -> Result<String> {
                     let node = AirNode::Defsecret(secret);
                     add_def_entry(&mut entries, &mut seen, "defsecret", name.as_str(), &node)?;
                 }
-                AirNode::Defop(op) => {
-                    let name = op.name.clone();
-                    let node = AirNode::Defop(op);
-                    add_def_entry(&mut entries, &mut seen, "defop", name.as_str(), &node)?;
+                AirNode::Defworkflow(workflow) => {
+                    let name = workflow.name.clone();
+                    let node = AirNode::Defworkflow(workflow);
+                    add_def_entry(&mut entries, &mut seen, "defworkflow", name.as_str(), &node)?;
+                }
+                AirNode::Defeffect(effect) => {
+                    let name = effect.name.clone();
+                    let node = AirNode::Defeffect(effect);
+                    add_def_entry(&mut entries, &mut seen, "defeffect", name.as_str(), &node)?;
                 }
             }
         }
@@ -1034,7 +1039,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in ["schemas", "modules", "ops", "secrets"] {
+    for key in ["schemas", "modules", "workflows", "effects", "secrets"] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {
@@ -1295,7 +1300,7 @@ mod tests {
         .expect("write defs");
         std::fs::write(
             import_root.join("manifest.air.json"),
-            r#"{"$kind":"manifest","air_version":"2","schemas":[],"modules":[],"ops":[],"secrets":[]}"#,
+            r#"{"$kind":"manifest","air_version":"2","schemas":[],"modules":[],"workflows":[],"effects":[],"secrets":[]}"#,
         )
         .expect("write manifest");
 

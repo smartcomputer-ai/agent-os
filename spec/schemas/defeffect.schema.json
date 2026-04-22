@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v2/defeffect.schema.json",
+  "title": "AIR v2 defeffect",
+  "type": "object",
+  "properties": {
+    "$kind": { "const": "defeffect" },
+    "name": { "$ref": "common.schema.json#/$defs/Name" },
+    "params": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+    "receipt": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+    "impl": { "$ref": "common.schema.json#/$defs/Impl" }
+  },
+  "required": ["$kind", "name", "params", "receipt", "impl"],
+  "additionalProperties": false
+}

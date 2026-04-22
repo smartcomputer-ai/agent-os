@@ -27,13 +27,14 @@
     "subscriptions": [
       {
         "event": "demo/CounterEvent@1",
-        "op": "demo/CounterSM@1"
+        "workflow": "demo/CounterSM@1"
       }
     ]
   },
-  "ops": [
+  "workflows": [
     {
       "name": "demo/CounterSM@1"
     }
-  ]
+  ],
+  "effects": []
 }

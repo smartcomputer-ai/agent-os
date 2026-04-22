@@ -619,7 +619,7 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: workflow.into(),
-            workflow_op_hash: None,
+            workflow_hash: None,
             key: None,
             cell_mode: false,
         };
@@ -779,12 +779,12 @@ mod tests {
         let payload = serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap();
         let envelope = EffectReceiptEnvelope {
             origin_module_id: "com.acme/Workflow@1".into(),
-            origin_workflow_op_hash: None,
+            origin_workflow_hash: None,
             origin_instance_key: Some(b"key-1".to_vec()),
             intent_id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .into(),
-            effect_op: "sys/http.request@1".into(),
-            effect_op_hash: None,
+            effect: "sys/http.request@1".into(),
+            effect_hash: None,
             executor_module: Some("sys/Http@1".into()),
             executor_module_hash: None,
             executor_entrypoint: Some("http.request".into()),
@@ -838,7 +838,7 @@ mod tests {
                     },
                 );
                 ctx.state.pending = pending;
-                assert_eq!(handle.effect_op, "sys/llm.generate@1");
+                assert_eq!(handle.effect, "sys/llm.generate@1");
                 Ok(())
             }
         }

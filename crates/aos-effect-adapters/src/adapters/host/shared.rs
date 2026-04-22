@@ -26,7 +26,7 @@ pub(crate) fn build_receipt<T: serde::Serialize>(
         intent_hash: intent.intent_hash,
         status,
         payload_cbor: serde_cbor::to_vec(payload)
-            .with_context(|| format!("encode {} payload", intent.effect_op))?,
+            .with_context(|| format!("encode {} payload", intent.effect))?,
         cost_cents: Some(0),
         signature: vec![0; 64],
     })

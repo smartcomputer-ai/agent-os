@@ -96,8 +96,11 @@ impl NodeWorldHarness {
                 }
             }
         }
-        for op in loaded.ops.values() {
-            store.put_node(op)?;
+        for workflow in loaded.workflows.values() {
+            store.put_node(workflow)?;
+        }
+        for effect in loaded.effects.values() {
+            store.put_node(effect)?;
         }
         let manifest_hash = store.put_node(&loaded.manifest)?.to_hex();
         self.runtime.create_world(

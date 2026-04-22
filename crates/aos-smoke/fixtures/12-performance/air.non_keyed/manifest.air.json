@@ -18,13 +18,14 @@
     "subscriptions": [
       {
         "event": "demo/PerfEvent@1",
-        "op": "demo/PerfCounter@1"
+        "workflow": "demo/PerfCounter@1"
       }
     ]
   },
-  "ops": [
+  "workflows": [
     {
       "name": "demo/PerfCounter@1"
     }
-  ]
+  ],
+  "effects": []
 }

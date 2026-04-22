@@ -184,11 +184,17 @@ pub async fn upload_bundle(
                 )
             })?;
     }
-    for op in &bundle.ops {
-        client.log(format!("uploading op {}", op.name));
-        upload_node(client, &AirNode::Defop(op.clone()))
+    for workflow in &bundle.workflows {
+        client.log(format!("uploading workflow {}", workflow.name));
+        upload_node(client, &AirNode::Defworkflow(workflow.clone()))
             .await
-            .with_context(|| format!("upload op {} to CAS", op.name))?;
+            .with_context(|| format!("upload workflow {} to CAS", workflow.name))?;
+    }
+    for effect in &bundle.effects {
+        client.log(format!("uploading effect {}", effect.name));
+        upload_node(client, &AirNode::Defeffect(effect.clone()))
+            .await
+            .with_context(|| format!("upload effect {} to CAS", effect.name))?;
     }
     for secret in &bundle.secrets {
         client.log(format!("uploading secret {}", secret.name));

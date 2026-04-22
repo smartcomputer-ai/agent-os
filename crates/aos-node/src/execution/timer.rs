@@ -145,7 +145,7 @@ impl TimerScheduler {
 
     pub fn rehydrate_from_pending(&mut self, contexts: &[WorkflowReceiptSnapshot]) {
         for ctx in contexts {
-            if ctx.effect_op == "sys/timer.set@1"
+            if ctx.effect == "sys/timer.set@1"
                 || ctx.executor_entrypoint.as_deref() == Some(effect_ops::TIMER_SET)
             {
                 if let Ok(params) = serde_cbor::from_slice::<TimerSetParams>(&ctx.params_cbor) {
@@ -258,9 +258,9 @@ mod tests {
             WorkflowReceiptSnapshot {
                 intent_hash: [1; 32],
                 origin_module_id: "demo/Timer@1".into(),
-                origin_workflow_op_hash: None,
-                effect_op: "sys/timer.set@1".to_string(),
-                effect_op_hash: None,
+                origin_workflow_hash: None,
+                effect: "sys/timer.set@1".to_string(),
+                effect_hash: None,
                 executor_module: None,
                 executor_module_hash: None,
                 executor_entrypoint: Some(effect_ops::TIMER_SET.to_string()),
@@ -278,9 +278,9 @@ mod tests {
             WorkflowReceiptSnapshot {
                 intent_hash: [2; 32],
                 origin_module_id: "demo/Http@1".into(),
-                origin_workflow_op_hash: None,
-                effect_op: "sys/http.request@1".to_string(),
-                effect_op_hash: None,
+                origin_workflow_hash: None,
+                effect: "sys/http.request@1".to_string(),
+                effect_hash: None,
                 executor_module: None,
                 executor_module_hash: None,
                 executor_entrypoint: Some(effect_ops::HTTP_REQUEST.to_string()),

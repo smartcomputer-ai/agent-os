@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::builtins::BlobPutParams;
-use aos_effects::{EffectIntent, EffectSource, effect_ops, normalize_effect_op_params};
+use aos_effects::{EffectIntent, EffectSource, effect_ops, normalize_effect_params};
 use aos_wasm_abi::WorkflowEffect;
 
 use crate::error::KernelError;
@@ -11,9 +11,9 @@ use aos_air_types::catalog::EffectCatalog;
 use aos_air_types::schema_index::SchemaIndex;
 
 #[derive(Debug, Clone)]
-pub struct EffectOpRuntimeIdentity {
-    pub op_name: String,
-    pub op_hash: Option<String>,
+pub struct EffectRuntimeIdentity {
+    pub effect_name: String,
+    pub effect_hash: Option<String>,
     pub executor_module: Option<String>,
     pub executor_module_hash: Option<String>,
     pub executor_entrypoint: String,
@@ -60,7 +60,7 @@ pub trait EffectParamPreprocessor: Send + Sync {
     fn preprocess(
         &self,
         source: &EffectSource,
-        effect_op: &str,
+        effect: &str,
         params_cbor: Vec<u8>,
     ) -> Result<Vec<u8>, KernelError>;
 }
@@ -110,20 +110,20 @@ impl EffectManager {
         )
     }
 
-    pub fn enqueue_workflow_effect_op_authorized(
+    pub fn enqueue_workflow_effect_with_identity(
         &mut self,
         workflow_name: &str,
         effect: &WorkflowEffect,
-        identity: EffectOpRuntimeIdentity,
+        identity: EffectRuntimeIdentity,
     ) -> Result<EffectIntent, KernelError> {
         let source = EffectSource::Workflow {
             name: workflow_name.to_string(),
         };
         let idempotency_key = normalize_idempotency_key(effect.idempotency_key.as_deref())?;
-        let effect_op = identity.op_name.clone();
+        let effect_name = identity.effect_name.clone();
         self.enqueue_authorized_effect(
             source,
-            effect_op.as_str(),
+            effect_name.as_str(),
             Some(identity),
             effect.params_cbor.clone(),
             idempotency_key,
@@ -137,35 +137,35 @@ impl EffectManager {
     pub fn enqueue_plan_effect(
         &mut self,
         plan_name: &str,
-        effect_op: &str,
+        effect: &str,
         params_cbor: Vec<u8>,
         idempotency_key: [u8; 32],
     ) -> Result<EffectIntent, KernelError> {
         let source = EffectSource::Plan {
             name: plan_name.to_string(),
         };
-        self.enqueue_authorized_effect(source, effect_op, None, params_cbor, idempotency_key)
+        self.enqueue_authorized_effect(source, effect, None, params_cbor, idempotency_key)
     }
 
     fn enqueue_authorized_effect(
         &mut self,
         source: EffectSource,
-        effect_op: &str,
-        op_identity: Option<EffectOpRuntimeIdentity>,
+        effect: &str,
+        effect_identity: Option<EffectRuntimeIdentity>,
         params_cbor: Vec<u8>,
         idempotency_key: [u8; 32],
     ) -> Result<EffectIntent, KernelError> {
-        let canonical_params = if let Some(identity) = op_identity.as_ref() {
-            self.ensure_effect_op_known(&identity.op_name)?;
-            self.canonicalize_effect_op_params(&source, identity.op_name.as_str(), params_cbor)?
+        let canonical_params = if let Some(identity) = effect_identity.as_ref() {
+            self.ensure_effect_known(&identity.effect_name)?;
+            self.canonicalize_effect_params(&source, identity.effect_name.as_str(), params_cbor)?
         } else {
-            self.ensure_effect_op_known(effect_op)?;
-            self.canonicalize_effect_op_params(&source, effect_op, params_cbor)?
+            self.ensure_effect_known(effect)?;
+            self.canonicalize_effect_params(&source, effect, params_cbor)?
         };
-        let intent = if let Some(identity) = op_identity {
-            EffectIntent::from_raw_params_with_op(
-                identity.op_name,
-                identity.op_hash,
+        let intent = if let Some(identity) = effect_identity {
+            EffectIntent::from_raw_params_with_identity(
+                identity.effect_name,
+                identity.effect_hash,
                 identity.executor_module,
                 identity.executor_module_hash,
                 Some(identity.executor_entrypoint),
@@ -173,8 +173,8 @@ impl EffectManager {
                 idempotency_key,
             )
         } else {
-            EffectIntent::from_raw_params_with_op(
-                effect_op.to_string(),
+            EffectIntent::from_raw_params_with_identity(
+                effect.to_string(),
                 None,
                 None,
                 None,
@@ -187,35 +187,35 @@ impl EffectManager {
         Ok(intent)
     }
 
-    fn ensure_effect_op_known(&self, effect_op: &str) -> Result<(), KernelError> {
-        if self.effect_catalog.params_schema(effect_op).is_some() {
+    fn ensure_effect_known(&self, effect: &str) -> Result<(), KernelError> {
+        if self.effect_catalog.params_schema(effect).is_some() {
             Ok(())
         } else {
-            Err(KernelError::UnsupportedEffectOp(effect_op.into()))
+            Err(KernelError::UnsupportedEffect(effect.into()))
         }
     }
 
-    fn canonicalize_effect_op_params(
+    fn canonicalize_effect_params(
         &self,
         source: &EffectSource,
-        effect_op: &str,
+        effect: &str,
         params_cbor: Vec<u8>,
     ) -> Result<Vec<u8>, KernelError> {
         let params_cbor = if let Some(preprocessor) = &self.param_preprocessor {
-            preprocessor.preprocess(source, effect_op, params_cbor)?
+            preprocessor.preprocess(source, effect, params_cbor)?
         } else {
             params_cbor
         };
-        let params_cbor = if effect_op == effect_ops::BLOB_PUT {
+        let params_cbor = if effect == effect_ops::BLOB_PUT {
             normalize_blob_put_params(params_cbor)?
         } else {
             params_cbor
         };
 
-        let canonical_params = normalize_effect_op_params(
+        let canonical_params = normalize_effect_params(
             &self.effect_catalog,
             &self.schema_index,
-            effect_op,
+            effect,
             &params_cbor,
         )
         .map_err(|err| KernelError::EffectManager(err.to_string()))?;

@@ -105,7 +105,7 @@ fn workflow_effect_params_canonicalize_noop() {
     assert_eq!(intent.params_cbor, roundtrip, "canonical form is stable");
 
     let rehashed = aos_effects::EffectIntent::from_raw_params(
-        intent.effect_op.clone(),
+        intent.effect.clone(),
         intent.params_cbor.clone(),
         intent.idempotency_key,
     )
@@ -266,7 +266,8 @@ fn workflow_params_round_trip_journal_replay() {
 }
 
 fn builtin_effect_context() -> (Arc<EffectCatalog>, Arc<SchemaIndex>) {
-    let catalog = EffectCatalog::from_defs(builtins::builtin_ops().iter().map(|op| op.op.clone()));
+    let catalog =
+        EffectCatalog::from_effects(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
     let mut schemas = HashMap::new();
     for builtin in builtins::builtin_schemas() {
         schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());

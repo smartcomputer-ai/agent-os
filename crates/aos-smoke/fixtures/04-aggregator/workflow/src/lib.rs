@@ -152,7 +152,6 @@ fn queue_http_request(
     ctx.effects().emit_raw_with_issuer_ref(
         HTTP_REQUEST_EFFECT,
         &params,
-        Some("default"),
         Some(issuer_ref.as_str()),
     );
     Ok(())
@@ -165,7 +164,7 @@ fn handle_receipt(
     if ctx.state.pending_request.is_none() {
         return Ok(());
     }
-    if envelope.effect_op != HTTP_REQUEST_EFFECT {
+    if envelope.effect != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
     let Some(issuer_ref) = envelope.issuer_ref.as_ref() else {

@@ -13,10 +13,10 @@ pub type EffectUpdateSender = mpsc::Sender<EffectUpdate>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdapterStartContext {
     pub origin_module_id: String,
-    pub origin_workflow_op_hash: Option<String>,
+    pub origin_workflow_hash: Option<String>,
     pub origin_instance_key: Option<Vec<u8>>,
-    pub effect_op: String,
-    pub effect_op_hash: Option<String>,
+    pub effect: String,
+    pub effect_hash: Option<String>,
     pub executor_module: Option<String>,
     pub executor_module_hash: Option<String>,
     pub executor_entrypoint: Option<String>,

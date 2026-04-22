@@ -11,21 +11,18 @@
     }
   },
   {
-    "$kind": "defop",
+    "$kind": "defworkflow",
     "name": "demo/WorkspaceDemo@1",
-    "op_kind": "workflow",
-    "workflow": {
-      "state": "demo/WorkspaceState@1",
-      "event": "demo/WorkspaceEvent@1",
-      "context": "sys/WorkflowContext@1",
-      "effects_emitted": [
-        "sys/workspace.resolve@1",
-        "sys/workspace.empty_root@1",
-        "sys/workspace.write_bytes@1",
-        "sys/workspace.list@1",
-        "sys/workspace.diff@1"
-      ]
-    },
+    "state": "demo/WorkspaceState@1",
+    "event": "demo/WorkspaceEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [
+      "sys/workspace.resolve@1",
+      "sys/workspace.empty_root@1",
+      "sys/workspace.write_bytes@1",
+      "sys/workspace.list@1",
+      "sys/workspace.diff@1"
+    ],
     "impl": {
       "module": "demo/WorkspaceDemo_wasm@1",
       "entrypoint": "step"

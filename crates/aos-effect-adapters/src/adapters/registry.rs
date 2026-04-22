@@ -77,7 +77,7 @@ impl AdapterRegistry {
         intent: EffectIntent,
         updates: EffectUpdateSender,
     ) -> Result<(), AdapterStartError> {
-        let route_id = intent.effect_op.clone();
+        let route_id = intent.effect.clone();
         self.ensure_started_routed(intent, route_id, updates)
     }
 
@@ -167,9 +167,9 @@ mod tests {
         }
     }
 
-    fn test_intent(effect_op: &str) -> EffectIntent {
+    fn test_intent(effect: &str) -> EffectIntent {
         EffectIntent::from_raw_params(
-            effect_op,
+            effect,
             serde_cbor::to_vec(&serde_json::json!({ "ok": true })).expect("params"),
             [3; 32],
         )

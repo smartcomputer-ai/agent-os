@@ -201,9 +201,9 @@ pub(super) fn timer_entry_from_intent(intent: &EffectIntent) -> Result<TimerEntr
 pub(super) fn effect_intent_from_pending(
     pending: &aos_kernel::snapshot::WorkflowReceiptSnapshot,
 ) -> Result<EffectIntent, WorkerError> {
-    let mut intent = aos_effects::EffectIntent::from_raw_params_with_op(
-        pending.effect_op.clone(),
-        pending.effect_op_hash.clone(),
+    let mut intent = aos_effects::EffectIntent::from_raw_params_with_identity(
+        pending.effect.clone(),
+        pending.effect_hash.clone(),
         pending.executor_module.clone(),
         pending.executor_module_hash.clone(),
         pending.executor_entrypoint.clone(),
@@ -220,10 +220,10 @@ pub(super) fn adapter_start_context_from_pending(
 ) -> AdapterStartContext {
     AdapterStartContext {
         origin_module_id: pending.origin_module_id.clone(),
-        origin_workflow_op_hash: pending.origin_workflow_op_hash.clone(),
+        origin_workflow_hash: pending.origin_workflow_hash.clone(),
         origin_instance_key: pending.origin_instance_key.clone(),
-        effect_op: pending.effect_op.clone(),
-        effect_op_hash: pending.effect_op_hash.clone(),
+        effect: pending.effect.clone(),
+        effect_hash: pending.effect_hash.clone(),
         executor_module: pending.executor_module.clone(),
         executor_module_hash: pending.executor_module_hash.clone(),
         executor_entrypoint: pending.executor_entrypoint.clone(),
@@ -237,16 +237,16 @@ pub(super) fn adapter_start_context_from_opened(
     match &opened.record.origin {
         IntentOriginRecord::Workflow {
             name,
-            workflow_op_hash,
+            workflow_hash,
             instance_key,
             emitted_at_seq,
             ..
         } => Some(AdapterStartContext {
             origin_module_id: name.clone(),
-            origin_workflow_op_hash: workflow_op_hash.clone(),
+            origin_workflow_hash: workflow_hash.clone(),
             origin_instance_key: instance_key.clone(),
-            effect_op: opened.record.effect_op.clone(),
-            effect_op_hash: opened.record.effect_op_hash.clone(),
+            effect: opened.record.effect.clone(),
+            effect_hash: opened.record.effect_hash.clone(),
             executor_module: opened.record.executor_module.clone(),
             executor_module_hash: opened.record.executor_module_hash.clone(),
             executor_entrypoint: opened.record.executor_entrypoint.clone(),

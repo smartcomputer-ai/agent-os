@@ -139,9 +139,9 @@ pub struct DomainEventRecord {
 pub struct EffectIntentRecord {
     pub intent_hash: [u8; 32],
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub effect_op: String,
+    pub effect: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_op_hash: Option<String>,
+    pub effect_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_module: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -167,7 +167,7 @@ pub enum IntentOriginRecord {
     Workflow {
         name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        workflow_op_hash: Option<String>,
+        workflow_hash: Option<String>,
         #[serde(
             default,
             skip_serializing_if = "Option::is_none",
@@ -218,7 +218,7 @@ pub struct StreamFrameRecord {
     pub intent_hash: [u8; 32],
     pub origin_module_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_workflow_op_hash: Option<String>,
+    pub origin_workflow_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -226,9 +226,9 @@ pub struct StreamFrameRecord {
     )]
     pub origin_instance_key: Option<Vec<u8>>,
     #[serde(default)]
-    pub effect_op: String,
+    pub effect: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_op_hash: Option<String>,
+    pub effect_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_module: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

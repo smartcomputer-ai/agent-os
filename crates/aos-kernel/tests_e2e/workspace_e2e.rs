@@ -244,7 +244,7 @@ fn handle_internal<T: serde::de::DeserializeOwned>(
     receipt.payload().unwrap_or_else(|err| {
         panic!(
             "decode receipt for {} as {}: {:?}",
-            intent.effect_op.as_str(),
+            intent.effect.as_str(),
             type_name,
             err
         )
@@ -264,7 +264,7 @@ fn handle_internal_bytes(
         serde_cbor::from_slice(&receipt.payload_cbor).unwrap_or_else(|err| {
             panic!(
                 "decode receipt payload for {}: {err}",
-                intent.effect_op.as_str()
+                intent.effect.as_str()
             )
         });
     match payload {

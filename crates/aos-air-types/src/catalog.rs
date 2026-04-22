@@ -1,10 +1,10 @@
 use indexmap::IndexMap;
 
-use crate::{DefOp, Name, OpKind, SchemaRef};
+use crate::{DefEffect, Name, SchemaRef};
 
 #[derive(Debug, Clone)]
 pub struct EffectCatalogEntry {
-    pub op: Name,
+    pub effect: Name,
     pub params_schema: SchemaRef,
     pub receipt_schema: SchemaRef,
     pub impl_module: Name,
@@ -13,35 +13,32 @@ pub struct EffectCatalogEntry {
 
 #[derive(Debug, Clone, Default)]
 pub struct EffectCatalog {
-    by_op: IndexMap<Name, EffectCatalogEntry>,
+    by_effect: IndexMap<Name, EffectCatalogEntry>,
 }
 
 impl EffectCatalog {
     pub fn new() -> Self {
         Self {
-            by_op: IndexMap::new(),
+            by_effect: IndexMap::new(),
         }
     }
 
-    /// Builds a catalog from `defop` effect nodes. Duplicate op names keep the first definition.
-    pub fn from_defs<I>(defs: I) -> Self
+    /// Builds a catalog from `defeffect` nodes. Duplicate names keep the first definition.
+    pub fn from_effects<I>(defs: I) -> Self
     where
-        I: IntoIterator<Item = DefOp>,
+        I: IntoIterator<Item = DefEffect>,
     {
         let mut catalog = EffectCatalog::new();
         for def in defs {
-            if def.op_kind != OpKind::Effect || catalog.by_op.contains_key(&def.name) {
+            if catalog.by_effect.contains_key(&def.name) {
                 continue;
             }
-            let Some(effect) = def.effect.as_ref() else {
-                continue;
-            };
-            catalog.by_op.insert(
+            catalog.by_effect.insert(
                 def.name.clone(),
                 EffectCatalogEntry {
-                    op: def.name,
-                    params_schema: effect.params.clone(),
-                    receipt_schema: effect.receipt.clone(),
+                    effect: def.name,
+                    params_schema: def.params,
+                    receipt_schema: def.receipt,
                     impl_module: def.implementation.module,
                     impl_entrypoint: def.implementation.entrypoint,
                 },
@@ -50,8 +47,8 @@ impl EffectCatalog {
         catalog
     }
 
-    pub fn get(&self, op: &str) -> Option<&EffectCatalogEntry> {
-        self.by_op.get(op)
+    pub fn get(&self, effect: &str) -> Option<&EffectCatalogEntry> {
+        self.by_effect.get(effect)
     }
 
     pub fn params_schema(&self, op: &str) -> Option<&SchemaRef> {
@@ -63,6 +60,6 @@ impl EffectCatalog {
     }
 
     pub fn ops(&self) -> impl Iterator<Item = &str> {
-        self.by_op.keys().map(String::as_str)
+        self.by_effect.keys().map(String::as_str)
     }
 }

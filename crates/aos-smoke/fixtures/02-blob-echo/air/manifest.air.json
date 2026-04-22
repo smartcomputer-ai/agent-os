@@ -13,24 +13,6 @@
     },
     {
       "name": "demo/BlobEchoEvent@1"
-    },
-    {
-      "name": "sys/BlobPutParams@1"
-    },
-    {
-      "name": "sys/BlobPutReceipt@1"
-    },
-    {
-      "name": "sys/BlobGetParams@1"
-    },
-    {
-      "name": "sys/BlobGetReceipt@1"
-    },
-    {
-      "name": "sys/BlobPutResult@1"
-    },
-    {
-      "name": "sys/BlobGetResult@1"
     }
   ],
   "modules": [
@@ -42,19 +24,14 @@
     "subscriptions": [
       {
         "event": "demo/BlobEchoEvent@1",
-        "op": "demo/BlobEchoSM@1"
+        "workflow": "demo/BlobEchoSM@1"
       }
     ]
   },
-  "ops": [
-    {
-      "name": "sys/blob.put@1"
-    },
-    {
-      "name": "sys/blob.get@1"
-    },
+  "workflows": [
     {
       "name": "demo/BlobEchoSM@1"
     }
-  ]
+  ],
+  "effects": []
 }

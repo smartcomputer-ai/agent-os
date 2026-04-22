@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
-    DefModule, DefOp, DefSchema, EmptyObject, HashRef, Manifest, ModuleRuntime, Name, NamedRef,
-    OpImpl, OpKind, Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText,
-    TypeRecord, WasmArtifact, WorkflowDeterminism, WorkflowOp, catalog::EffectCatalog,
+    DefModule, DefSchema, DefWorkflow, EmptyObject, HashRef, Impl, Manifest, ModuleRuntime, Name,
+    NamedRef, Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText,
+    TypeRecord, WasmArtifact, WorkflowDeterminism, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
@@ -130,7 +130,10 @@ pub fn build_loaded_manifest(
     routing_events: Vec<RoutingEvent>,
 ) -> LoadedManifest {
     let modules: Vec<TestModule> = modules.into_iter().map(Into::into).collect();
-    let ops: Vec<DefOp> = modules.iter().filter_map(test_module_workflow_op).collect();
+    let workflows: Vec<DefWorkflow> = modules
+        .iter()
+        .filter_map(test_module_workflow_def)
+        .collect();
 
     let module_refs: Vec<NamedRef> = modules
         .iter()
@@ -153,31 +156,26 @@ pub fn build_loaded_manifest(
         })
     };
 
-    let mut op_refs: Vec<NamedRef> = ops
+    let workflow_refs: Vec<NamedRef> = workflows
         .iter()
-        .map(|op| {
-            let def_hash = aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defop(op.clone()))
-                .expect("hash defop");
+        .map(|workflow| {
+            let def_hash =
+                aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defworkflow(workflow.clone()))
+                    .expect("hash defworkflow");
             NamedRef {
-                name: op.name.clone(),
+                name: workflow.name.clone(),
                 hash: HashRef::new(def_hash.to_hex()).expect("hash ref"),
             }
         })
         .collect();
-    op_refs.extend(
-        aos_air_types::builtins::builtin_ops()
-            .iter()
-            .map(|op| NamedRef {
-                name: op.op.name.clone(),
-                hash: op.hash_ref.clone(),
-            }),
-    );
 
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: module_refs,
-        ops: op_refs,
+        ops: vec![],
+        workflows: workflow_refs,
+        effects: vec![],
         secrets: vec![],
         routing,
     };
@@ -187,22 +185,27 @@ pub fn build_loaded_manifest(
         .map(|module| (module.name.clone(), module.module.clone()))
         .collect();
 
-    let ops_map: HashMap<Name, DefOp> = ops
+    let workflows_map: HashMap<Name, DefWorkflow> = workflows
         .into_iter()
         .chain(
-            aos_air_types::builtins::builtin_ops()
+            aos_air_types::builtins::builtin_workflows()
                 .iter()
-                .map(|op| op.op.clone()),
+                .map(|workflow| workflow.workflow.clone()),
         )
-        .map(|op| (op.name.clone(), op))
+        .map(|workflow| (workflow.name.clone(), workflow))
         .collect();
-    let effect_catalog = EffectCatalog::from_defs(ops_map.values().cloned());
+    let effects_map = aos_air_types::builtins::builtin_effects()
+        .iter()
+        .map(|effect| (effect.effect.name.clone(), effect.effect.clone()))
+        .collect::<HashMap<_, _>>();
+    let effect_catalog = EffectCatalog::from_effects(effects_map.values().cloned());
 
     let mut loaded = LoadedManifest {
         manifest,
         secrets: Vec::new(),
         modules: modules_map,
-        ops: ops_map,
+        workflows: workflows_map,
+        effects: effects_map,
         schemas: HashMap::new(),
         effect_catalog,
     };
@@ -210,33 +213,29 @@ pub fn build_loaded_manifest(
     loaded
 }
 
-fn test_module_workflow_op(module: &TestModule) -> Option<DefOp> {
+fn test_module_workflow_def(module: &TestModule) -> Option<DefWorkflow> {
     let workflow = module.abi.workflow.as_ref()?;
-    Some(DefOp {
+    Some(DefWorkflow {
         name: module.name.clone(),
-        op_kind: OpKind::Workflow,
-        workflow: Some(WorkflowOp {
-            state: workflow.state.clone(),
-            event: workflow.event.clone(),
-            context: workflow.context.clone(),
-            annotations: workflow.annotations.clone(),
-            key_schema: module.key_schema.clone(),
-            effects_emitted: workflow
-                .effects_emitted
-                .iter()
-                .map(|effect| canonical_effect_op_name(effect))
-                .collect(),
-            determinism: WorkflowDeterminism::Strict,
-        }),
-        effect: None,
-        implementation: OpImpl {
+        state: workflow.state.clone(),
+        event: workflow.event.clone(),
+        context: workflow.context.clone(),
+        annotations: workflow.annotations.clone(),
+        key_schema: module.key_schema.clone(),
+        effects_emitted: workflow
+            .effects_emitted
+            .iter()
+            .map(|effect| canonical_effect_name(effect))
+            .collect(),
+        determinism: WorkflowDeterminism::Strict,
+        implementation: Impl {
             module: module.name.clone(),
             entrypoint: "step".into(),
         },
     })
 }
 
-fn canonical_effect_op_name(name: &str) -> String {
+fn canonical_effect_name(name: &str) -> String {
     if name.starts_with("sys/") {
         name.to_string()
     } else {
@@ -266,33 +265,31 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
             required.insert(event.event.as_str().to_string());
         }
     }
-    for op in loaded.ops.values() {
-        if let Some(workflow) = op.workflow.as_ref() {
-            required.insert(workflow.state.as_str().to_string());
-            required.insert(workflow.event.as_str().to_string());
-            if let Some(event_schema) = schema_type(workflow.event.as_str(), loaded) {
-                match event_schema {
-                    TypeExpr::Ref(reference) => {
-                        required.insert(reference.reference.as_str().to_string());
-                    }
-                    TypeExpr::Variant(variant) => {
-                        for member in variant.variant.values() {
-                            if let TypeExpr::Ref(reference) = member {
-                                required.insert(reference.reference.as_str().to_string());
-                            }
+    for workflow in loaded.workflows.values() {
+        required.insert(workflow.state.as_str().to_string());
+        required.insert(workflow.event.as_str().to_string());
+        if let Some(event_schema) = schema_type(workflow.event.as_str(), loaded) {
+            match event_schema {
+                TypeExpr::Ref(reference) => {
+                    required.insert(reference.reference.as_str().to_string());
+                }
+                TypeExpr::Variant(variant) => {
+                    for member in variant.variant.values() {
+                        if let TypeExpr::Ref(reference) = member {
+                            required.insert(reference.reference.as_str().to_string());
                         }
                     }
-                    _ => {}
                 }
+                _ => {}
             }
-            for effect in &workflow.effects_emitted {
-                if let Some(receipt_schema) = loaded.effect_catalog.receipt_schema(effect) {
-                    required.insert(receipt_schema.as_str().to_string());
-                }
+        }
+        for effect in &workflow.effects_emitted {
+            if let Some(receipt_schema) = loaded.effect_catalog.receipt_schema(effect) {
+                required.insert(receipt_schema.as_str().to_string());
             }
-            if let Some(key_schema) = &workflow.key_schema {
-                required.insert(key_schema.as_str().to_string());
-            }
+        }
+        if let Some(key_schema) = &workflow.key_schema {
+            required.insert(key_schema.as_str().to_string());
         }
     }
 
@@ -608,7 +605,7 @@ fn expr_value_to_cbor(value: &ExprValue) -> serde_cbor::Value {
 pub fn routing_event(schema_name: &str, workflow: &str) -> RoutingEvent {
     RoutingEvent {
         event: schema(schema_name),
-        op: workflow.to_string(),
+        workflow: workflow.to_string(),
         key_field: None,
     }
 }
@@ -619,10 +616,10 @@ pub fn routing_event(schema_name: &str, workflow: &str) -> RoutingEvent {
 pub fn recommended_receipt_routes<'a>(
     modules: impl IntoIterator<Item = &'a TestModule>,
 ) -> Vec<RoutingEvent> {
-    let catalog = EffectCatalog::from_defs(
-        aos_air_types::builtins::builtin_ops()
+    let catalog = EffectCatalog::from_effects(
+        aos_air_types::builtins::builtin_effects()
             .iter()
-            .map(|op| op.op.clone()),
+            .map(|effect| effect.effect.clone()),
     );
     let mut routes = Vec::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -632,7 +629,7 @@ pub fn recommended_receipt_routes<'a>(
             continue;
         };
         for effect in &workflow.effects_emitted {
-            let effect = canonical_effect_op_name(effect);
+            let effect = canonical_effect_name(effect);
             let Some(entry) = catalog.get(&effect) else {
                 continue;
             };

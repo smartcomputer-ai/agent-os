@@ -4,7 +4,7 @@ use aos_kernel::WorldInput;
 use aos_node::{
     CheckpointBackend, CreateWorldSource, EffectExecutionClass, HostControl, JournalBackend,
     JournalCommit, JournalDisposition, JournalFlush, JournalSourceAck, SubmissionPayload,
-    WorldCheckpointRef, WorldId, classify_effect_op_identity, partition_for_world,
+    WorldCheckpointRef, WorldId, classify_effect_identity, partition_for_world,
 };
 
 use super::commands::{
@@ -209,7 +209,7 @@ impl HostedWorkerCore {
                     .registered_worlds
                     .get(&world_id)
                     .map(|registered| registered.effect_runtime.classify_intent(&opened.intent))
-                    .unwrap_or_else(|| classify_effect_op_identity(&opened.intent));
+                    .unwrap_or_else(|| classify_effect_identity(&opened.intent));
                 match class {
                     EffectExecutionClass::InlineInternal => {
                         if let Some(receipt) =
@@ -707,6 +707,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };

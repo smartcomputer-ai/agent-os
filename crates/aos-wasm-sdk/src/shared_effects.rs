@@ -126,12 +126,12 @@ impl<W> SharedPendingEffects<W> {
 
     pub fn begin<T: Serialize>(
         &mut self,
-        effect_op: impl Into<String>,
+        effect: impl Into<String>,
         params: &T,
         emitted_at_ns: u64,
         waiter: W,
     ) -> Result<SharedPendingBegin, serde_cbor::Error> {
-        let pending = PendingEffect::from_params(effect_op, params, emitted_at_ns)?;
+        let pending = PendingEffect::from_params(effect, params, emitted_at_ns)?;
         Ok(self.attach(pending, waiter))
     }
 
@@ -222,7 +222,7 @@ impl<W> SharedPendingEffects<W> {
                 continuation.params_hash().and_then(|params_hash| {
                     self.by_params_hash
                         .get(params_hash)
-                        .filter(|shared| shared.pending.effect_op == continuation.effect_op())
+                        .filter(|shared| shared.pending.effect == continuation.effect())
                         .map(|_| params_hash.to_string())
                 })
             })
@@ -404,7 +404,7 @@ mod tests {
 
         let receipt = EffectReceiptEnvelope {
             intent_id: fake_hash('i'),
-            effect_op: "sys/blob.get@1".into(),
+            effect: "sys/blob.get@1".into(),
             params_hash: Some(begin1.pending.params_hash.clone()),
             receipt_payload: serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap(),
             status: "ok".into(),
@@ -426,7 +426,7 @@ mod tests {
 
         let receipt = EffectReceiptEnvelope {
             intent_id: fake_hash('i'),
-            effect_op: "sys/blob.get@1".into(),
+            effect: "sys/blob.get@1".into(),
             params_hash: Some(begin.pending.params_hash.clone()),
             receipt_payload: serde_cbor::to_vec(&crate::BlobGetReceipt {
                 blob_ref: params.blob_ref.clone(),

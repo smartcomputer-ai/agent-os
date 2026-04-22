@@ -443,7 +443,7 @@ fn handle_standalone_host_session_open_receipt(
     envelope: &EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
-    if envelope.effect_op != "sys/host.session.open@1" {
+    if envelope.effect != "sys/host.session.open@1" {
         return Ok(false);
     }
 
@@ -511,11 +511,11 @@ fn rejected_as_error_envelope(rejected: &EffectReceiptRejected) -> EffectReceipt
 
     EffectReceiptEnvelope {
         origin_module_id: rejected.origin_module_id.clone(),
-        origin_workflow_op_hash: rejected.origin_workflow_op_hash.clone(),
+        origin_workflow_hash: rejected.origin_workflow_hash.clone(),
         origin_instance_key: rejected.origin_instance_key.clone(),
         intent_id: rejected.intent_id.clone(),
-        effect_op: rejected.effect_op.clone(),
-        effect_op_hash: rejected.effect_op_hash.clone(),
+        effect: rejected.effect.clone(),
+        effect_hash: rejected.effect_hash.clone(),
         executor_module: rejected.executor_module.clone(),
         executor_module_hash: rejected.executor_module_hash.clone(),
         executor_entrypoint: rejected.executor_entrypoint.clone(),
@@ -542,7 +542,7 @@ fn on_receipt_envelope(
     }
 
     if let Some(matched) = state.pending_effects.settle(envelope.into()) {
-        match matched.pending.effect_op.as_str() {
+        match matched.pending.effect.as_str() {
             "sys/host.session.open@1" => {
                 let _ = handle_standalone_host_session_open_receipt(state, envelope, out)?;
             }
@@ -579,7 +579,7 @@ fn on_receipt_rejected(
     }
 
     if let Some(matched) = state.pending_effects.settle(rejected.into()) {
-        match matched.pending.effect_op.as_str() {
+        match matched.pending.effect.as_str() {
             "sys/host.session.open@1" => {
                 let _ = handle_standalone_host_session_open_receipt(state, &envelope, out)?;
             }
@@ -803,7 +803,7 @@ fn should_auto_open_host_session(state: &SessionState) -> bool {
     }
     !state
         .pending_effects
-        .contains_effect_op("sys/host.session.open@1")
+        .contains_effect("sys/host.session.open@1")
 }
 
 fn emit_auto_host_session_open(
@@ -1102,24 +1102,17 @@ mod tests {
 
     fn receipt_event<T: serde::Serialize>(
         emitted_at_seq: u64,
-        effect_op: &str,
+        effect: &str,
         params_hash: Option<String>,
         status: &str,
         payload: &T,
     ) -> SessionWorkflowEvent {
-        receipt_event_with_issuer_ref(
-            emitted_at_seq,
-            effect_op,
-            params_hash,
-            None,
-            status,
-            payload,
-        )
+        receipt_event_with_issuer_ref(emitted_at_seq, effect, params_hash, None, status, payload)
     }
 
     fn receipt_event_with_issuer_ref<T: serde::Serialize>(
         emitted_at_seq: u64,
-        effect_op: &str,
+        effect: &str,
         params_hash: Option<String>,
         issuer_ref: Option<String>,
         status: &str,
@@ -1127,11 +1120,11 @@ mod tests {
     ) -> SessionWorkflowEvent {
         SessionWorkflowEvent::Receipt(aos_wasm_sdk::EffectReceiptEnvelope {
             origin_module_id: "aos.agent/SessionWorkflow@1".into(),
-            origin_workflow_op_hash: None,
+            origin_workflow_hash: None,
             origin_instance_key: None,
             intent_id: fake_hash('i'),
-            effect_op: effect_op.into(),
-            effect_op_hash: None,
+            effect: effect.into(),
+            effect_hash: None,
             executor_module: None,
             executor_module_hash: None,
             executor_entrypoint: None,
@@ -1176,7 +1169,7 @@ mod tests {
         assert!(matches!(
             out.effects.first(),
             Some(SessionEffectCommand::ToolEffect { pending, .. })
-                if pending.effect_op == "sys/host.session.open@1"
+                if pending.effect == "sys/host.session.open@1"
         ));
         assert_eq!(state.pending_effects.len(), 1);
         assert!(state.pending_blob_puts.is_empty());

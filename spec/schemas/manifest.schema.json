@@ -18,7 +18,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
-    "ops": {
+    "workflows": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NamedRef" }
+    },
+    "effects": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
@@ -28,7 +32,7 @@
     },
     "routing": { "$ref": "#/$defs/Routing" }
   },
-  "required": ["$kind", "air_version", "schemas", "modules", "ops"],
+  "required": ["$kind", "air_version", "schemas", "modules", "workflows", "effects"],
   "additionalProperties": false,
   "$defs": {
     "NamedRef": {
@@ -54,13 +58,13 @@
       "type": "object",
       "properties": {
         "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-        "op": { "$ref": "common.schema.json#/$defs/Name" },
+        "workflow": { "$ref": "common.schema.json#/$defs/Name" },
         "key_field": {
           "type": "string",
-          "description": "Field path in event value that carries the cell key for keyed workflow ops."
+          "description": "Field path in event value that carries the cell key for keyed workflows."
         }
       },
-      "required": ["event", "op"],
+      "required": ["event", "workflow"],
       "additionalProperties": false
     }
   }

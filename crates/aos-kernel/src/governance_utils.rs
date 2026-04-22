@@ -85,7 +85,8 @@ pub fn canonicalize_patch<S: Store>(
 fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), KernelError> {
     let mut schema_hashes = HashMap::new();
     let mut module_hashes = HashMap::new();
-    let mut op_hashes = HashMap::new();
+    let mut workflow_hashes = HashMap::new();
+    let mut effect_hashes = HashMap::new();
 
     for node in &patch.nodes {
         match node {
@@ -101,11 +102,18 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
                 })?;
                 module_hashes.insert(module.name.clone(), hash);
             }
-            AirNode::Defop(op) => {
-                let hash = Hash::of_cbor(&AirNode::Defop(op.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash op '{}': {err}", op.name))
+            AirNode::Defworkflow(workflow) => {
+                let hash =
+                    Hash::of_cbor(&AirNode::Defworkflow(workflow.clone())).map_err(|err| {
+                        KernelError::Manifest(format!("hash workflow '{}': {err}", workflow.name))
+                    })?;
+                workflow_hashes.insert(workflow.name.clone(), hash);
+            }
+            AirNode::Defeffect(effect) => {
+                let hash = Hash::of_cbor(&AirNode::Defeffect(effect.clone())).map_err(|err| {
+                    KernelError::Manifest(format!("hash effect '{}': {err}", effect.name))
                 })?;
-                op_hashes.insert(op.name.clone(), hash);
+                effect_hashes.insert(effect.name.clone(), hash);
             }
             _ => {}
         }
@@ -131,12 +139,22 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
         }
     }
 
-    for reference in &mut patch.manifest.ops {
-        if let Some(builtin) = builtins::find_builtin_op(reference.name.as_str()) {
+    for reference in &mut patch.manifest.workflows {
+        if let Some(builtin) = builtins::find_builtin_workflow(reference.name.as_str()) {
             reference.hash = builtin.hash_ref.clone();
-        } else if let Some(hash) = op_hashes.get(&reference.name) {
+        } else if let Some(hash) = workflow_hashes.get(&reference.name) {
             reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("op hash '{}': {err}", reference.name))
+                KernelError::Manifest(format!("workflow hash '{}': {err}", reference.name))
+            })?;
+        }
+    }
+
+    for reference in &mut patch.manifest.effects {
+        if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
+            reference.hash = builtin.hash_ref.clone();
+        } else if let Some(hash) = effect_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("effect hash '{}': {err}", reference.name))
             })?;
         }
     }
@@ -193,6 +211,8 @@ mod tests {
                     hash: HashRef::new(original_hash.clone()).expect("valid hash"),
                 }],
                 ops: Vec::new(),
+                workflows: Vec::new(),
+                effects: Vec::new(),
                 secrets: Vec::new(),
                 routing: None,
             },

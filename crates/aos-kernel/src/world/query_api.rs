@@ -178,6 +178,8 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             ops: vec![],
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: vec![],
             routing: None,
         }
@@ -193,7 +195,8 @@ mod tests {
             manifest,
             secrets: vec![],
             modules: HashMap::new(),
-            ops: HashMap::new(),
+            workflows: HashMap::new(),
+            effects: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: aos_air_types::catalog::EffectCatalog::default(),
         };

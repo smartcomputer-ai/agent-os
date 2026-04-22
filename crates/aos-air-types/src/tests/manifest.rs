@@ -2,7 +2,7 @@ use serde_json::json;
 use std::panic::{self, AssertUnwindSafe};
 
 use super::assert_json_schema;
-use crate::{Manifest, NamedRef};
+use crate::{AirNode, NamedRef};
 
 #[test]
 fn manifest_json_round_trip() {
@@ -11,11 +11,16 @@ fn manifest_json_round_trip() {
         "air_version": "2",
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [],
-        "ops": [],
+        "workflows": [],
+        "effects": [],
         "secrets": []
     });
     assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
-    let manifest: Manifest = serde_json::from_value(manifest_json.clone()).expect("manifest json");
+    let AirNode::Manifest(manifest) =
+        serde_json::from_value(manifest_json.clone()).expect("manifest json")
+    else {
+        panic!("expected manifest node");
+    };
     let round = serde_json::to_value(manifest).expect("serialize");
     assert_eq!(round["schemas"], manifest_json["schemas"]);
 }
@@ -32,30 +37,35 @@ fn manifest_with_routing_and_subscriptions_validates() {
         "air_version": "2",
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [{"name": "com.acme/order_wasm@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
-        "ops": [{"name": "com.acme/order.step@1", "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],
+        "workflows": [{"name": "com.acme/order.step@1", "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],
+        "effects": [],
         "routing": {
             "subscriptions": [{
                 "event": "com.acme/Event@1",
-                "op": "com.acme/order.step@1",
+                "workflow": "com.acme/order.step@1",
                 "key_field": "id"
             }]
         }
     });
     assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
-    let manifest: Manifest = serde_json::from_value(manifest_json).expect("manifest");
+    let AirNode::Manifest(manifest) = serde_json::from_value(manifest_json).expect("manifest")
+    else {
+        panic!("expected manifest node");
+    };
     let routing = manifest.routing.expect("routing");
     assert_eq!(routing.subscriptions.len(), 1);
-    assert_eq!(routing.subscriptions[0].op, "com.acme/order.step@1");
+    assert_eq!(routing.subscriptions[0].workflow, "com.acme/order.step@1");
 }
 
 #[test]
-fn manifest_rejects_v1_effects_field() {
+fn manifest_rejects_v1_ops_field() {
     let manifest_json = json!({
         "$kind": "manifest",
         "air_version": "2",
         "schemas": [],
         "modules": [],
         "ops": [],
+        "workflows": [],
         "effects": []
     });
     assert!(
@@ -64,7 +74,11 @@ fn manifest_rejects_v1_effects_field() {
             &manifest_json
         )))
         .is_err(),
-        "schema should reject legacy manifest.effects"
+        "schema should reject temporary manifest.ops"
+    );
+    assert!(
+        serde_json::from_value::<AirNode>(manifest_json).is_err(),
+        "model should reject manifest.ops as unknown AIR v2 input"
     );
 }
 
@@ -75,7 +89,8 @@ fn manifest_rejects_v1_routing_module() {
         "air_version": "2",
         "schemas": [],
         "modules": [],
-        "ops": [],
+        "workflows": [],
+        "effects": [],
         "routing": {
             "subscriptions": [{
                 "event": "com.acme/Event@1",
@@ -100,7 +115,8 @@ fn manifest_rejects_authority_fields() {
         "air_version": "2",
         "schemas": [],
         "modules": [],
-        "ops": [],
+        "workflows": [],
+        "effects": [],
         "caps": [],
         "policies": [],
         "defaults": {
@@ -128,14 +144,19 @@ fn manifest_with_secrets_round_trip() {
         "air_version": "2",
         "schemas": [],
         "modules": [],
-        "ops": [],
+        "workflows": [],
+        "effects": [],
         "secrets": [{
             "name": "payments/stripe@1",
             "hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         }]
     });
     assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
-    let manifest: Manifest = serde_json::from_value(manifest_json.clone()).expect("manifest json");
+    let AirNode::Manifest(manifest) =
+        serde_json::from_value(manifest_json.clone()).expect("manifest json")
+    else {
+        panic!("expected manifest node");
+    };
     assert_eq!(manifest.secrets.len(), 1);
     let round = serde_json::to_value(manifest).expect("serialize");
     assert_eq!(round["secrets"], manifest_json["secrets"]);

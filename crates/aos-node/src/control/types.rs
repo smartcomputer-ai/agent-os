@@ -151,9 +151,8 @@ pub struct ManifestResponse {
 pub struct ManifestSummary {
     pub schema_count: usize,
     pub module_count: usize,
-    pub op_count: usize,
-    pub workflow_op_count: usize,
-    pub effect_op_count: usize,
+    pub workflow_count: usize,
+    pub effect_count: usize,
     pub secret_count: usize,
     pub routing_subscription_count: usize,
     pub routes: Vec<RouteSummary>,
@@ -162,7 +161,7 @@ pub struct ManifestSummary {
 #[derive(Debug, Clone, Serialize)]
 pub struct RouteSummary {
     pub event: String,
-    pub op: String,
+    pub workflow: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_field: Option<String>,
 }

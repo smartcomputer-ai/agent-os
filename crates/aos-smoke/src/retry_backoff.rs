@@ -125,7 +125,7 @@ fn drive_retry_flow<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
             break;
         }
         for intent in intents {
-            match intent.effect_op.as_str() {
+            match intent.effect.as_str() {
                 EffectsEffectOps::HTTP_REQUEST => {
                     let params: HttpRequestParams = serde_cbor::from_slice(&intent.params_cbor)?;
                     http_attempts += 1;
@@ -172,7 +172,7 @@ fn drive_retry_flow<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
                     })?;
                     kernel.tick_until_idle()?;
                 }
-                other => return Err(anyhow!("unexpected effect op {other}")),
+                other => return Err(anyhow!("unexpected effect {other}")),
             }
         }
         safety += 1;

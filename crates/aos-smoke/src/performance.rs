@@ -81,9 +81,9 @@ impl MemPerfHost {
             .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
 
         let module_name = loaded
-            .ops
+            .workflows
             .get(WORKFLOW_NAME)
-            .map(|op| op.implementation.module.as_str())
+            .map(|workflow| workflow.implementation.module.as_str())
             .unwrap_or(WORKFLOW_NAME)
             .to_string();
         let patched = patch_modules(&mut loaded, &wasm_hash_ref, |name, _| name == module_name);

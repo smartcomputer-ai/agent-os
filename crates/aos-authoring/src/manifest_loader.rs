@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    self as air_types, AirNode, DefModule, DefOp, DefSchema, DefSecret, HashRef, Manifest, Name,
-    NamedRef,
+    AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, HashRef, Manifest, Name,
+    NamedRef, builtins,
 };
 use aos_cbor::Hash;
 use aos_kernel::{LoadedManifest, ManifestLoader, Store};
@@ -55,7 +55,8 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
     let mut schemas: Vec<DefSchema> = Vec::new();
     let mut modules: Vec<DefModule> = Vec::new();
     let mut secrets: Vec<DefSecret> = Vec::new();
-    let mut ops: Vec<DefOp> = Vec::new();
+    let mut workflows: Vec<DefWorkflow> = Vec::new();
+    let mut effects: Vec<DefEffect> = Vec::new();
 
     let mut roots = Vec::with_capacity(import_roots.len() + 1);
     roots.push(AssetRoot {
@@ -91,7 +92,8 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
                         AirNode::Defschema(schema) => schemas.push(schema),
                         AirNode::Defmodule(module) => modules.push(module),
                         AirNode::Defsecret(secret) => secrets.push(secret),
-                        AirNode::Defop(op) => ops.push(op),
+                        AirNode::Defworkflow(workflow) => workflows.push(workflow),
+                        AirNode::Defeffect(effect) => effects.push(effect),
                     }
                 }
             }
@@ -110,7 +112,8 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
         schemas,
         modules,
         secrets.clone(),
-        ops,
+        workflows,
+        effects,
     )?;
     patch_manifest_refs(&mut manifest, &hashes)?;
     let loaded = ManifestLoader::load_from_manifest(store.as_ref(), &manifest)
@@ -124,7 +127,8 @@ fn write_nodes<S: Store + ?Sized>(
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
     secrets: Vec<DefSecret>,
-    ops: Vec<DefOp>,
+    workflows: Vec<DefWorkflow>,
+    effects: Vec<DefEffect>,
 ) -> Result<StoredHashes> {
     let mut hashes = StoredHashes::default();
     for schema in schemas {
@@ -157,15 +161,25 @@ fn write_nodes<S: Store + ?Sized>(
             .context("store defsecret node")?;
         insert_or_verify_hash("defsecret", &mut hashes.secrets, name, hash)?;
     }
-    for op in ops {
-        let name = op.name.clone();
+    for workflow in workflows {
+        let name = workflow.name.clone();
         if !allow_reserved_sys {
-            reject_sys_name("defop", name.as_str())?;
+            reject_sys_name("defworkflow", name.as_str())?;
         }
         let hash = store
-            .put_node(&AirNode::Defop(op))
-            .context("store defop node")?;
-        insert_or_verify_hash("defop", &mut hashes.ops, name, hash)?;
+            .put_node(&AirNode::Defworkflow(workflow))
+            .context("store defworkflow node")?;
+        insert_or_verify_hash("defworkflow", &mut hashes.workflows, name, hash)?;
+    }
+    for effect in effects {
+        let name = effect.name.clone();
+        if !allow_reserved_sys {
+            reject_sys_name("defeffect", name.as_str())?;
+        }
+        let hash = store
+            .put_node(&AirNode::Defeffect(effect))
+            .context("store defeffect node")?;
+        insert_or_verify_hash("defeffect", &mut hashes.effects, name, hash)?;
     }
     Ok(hashes)
 }
@@ -203,7 +217,8 @@ fn reject_sys_name(kind: &str, name: &str) -> Result<()> {
 struct StoredHashes {
     schemas: HashMap<Name, HashRef>,
     modules: HashMap<Name, HashRef>,
-    ops: HashMap<Name, HashRef>,
+    workflows: HashMap<Name, HashRef>,
+    effects: HashMap<Name, HashRef>,
     secrets: HashMap<Name, HashRef>,
 }
 
@@ -217,7 +232,8 @@ struct AssetRoot {
 fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result<()> {
     patch_named_refs("schema", &mut manifest.schemas, &hashes.schemas)?;
     patch_named_refs("module", &mut manifest.modules, &hashes.modules)?;
-    patch_named_refs("op", &mut manifest.ops, &hashes.ops)?;
+    patch_named_refs("workflow", &mut manifest.workflows, &hashes.workflows)?;
+    patch_named_refs("effect", &mut manifest.effects, &hashes.effects)?;
     patch_named_refs("secret", &mut manifest.secrets, &hashes.secrets)?;
     Ok(())
 }
@@ -230,19 +246,22 @@ fn patch_named_refs(
     for reference in refs {
         let actual = if let Some(found) = hashes.get(reference.name.as_str()) {
             found.clone()
-        } else if let Some(builtin) =
-            air_types::builtins::find_builtin_schema(reference.name.as_str())
-        {
+        } else if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
             builtin.hash_ref.clone()
-        } else if kind == "op" {
-            if let Some(builtin) = air_types::builtins::find_builtin_op(reference.name.as_str()) {
+        } else if kind == "workflow" {
+            if let Some(builtin) = builtins::find_builtin_workflow(reference.name.as_str()) {
+                builtin.hash_ref.clone()
+            } else {
+                bail!("manifest references unknown {kind} '{}'", reference.name);
+            }
+        } else if kind == "effect" {
+            if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
                 builtin.hash_ref.clone()
             } else {
                 bail!("manifest references unknown {kind} '{}'", reference.name);
             }
         } else if kind == "module" {
-            if let Some(builtin) = air_types::builtins::find_builtin_module(reference.name.as_str())
-            {
+            if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
                 builtin.hash_ref.clone()
             } else {
                 bail!("manifest references unknown {kind} '{}'", reference.name);
@@ -279,7 +298,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in ["schemas", "modules", "ops", "secrets"] {
+    for key in ["schemas", "modules", "workflows", "effects", "secrets"] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {

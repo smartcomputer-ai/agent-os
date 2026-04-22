@@ -1093,6 +1093,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };

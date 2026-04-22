@@ -13,21 +13,6 @@
     },
     {
       "name": "demo/FabricExecProgressEvent@1"
-    },
-    {
-      "name": "sys/EffectReceiptEnvelope@1"
-    },
-    {
-      "name": "sys/EffectStreamFrame@1"
-    },
-    {
-      "name": "sys/HostExecParams@1"
-    },
-    {
-      "name": "sys/HostExecReceipt@1"
-    },
-    {
-      "name": "sys/HostExecProgressFrame@1"
     }
   ],
   "modules": [
@@ -39,16 +24,14 @@
     "subscriptions": [
       {
         "event": "demo/FabricExecProgressEvent@1",
-        "op": "demo/FabricExecProgress@1"
+        "workflow": "demo/FabricExecProgress@1"
       }
     ]
   },
-  "ops": [
-    {
-      "name": "sys/host.exec@1"
-    },
+  "workflows": [
     {
       "name": "demo/FabricExecProgress@1"
     }
-  ]
+  ],
+  "effects": []
 }

@@ -135,7 +135,6 @@ fn handle_approval(
         ctx.effects().emit_raw_with_issuer_ref(
             HTTP_REQUEST_EFFECT,
             &params,
-            Some("default"),
             Some(issuer_ref.as_str()),
         );
     }
@@ -147,7 +146,7 @@ fn handle_receipt(
     ctx: &mut WorkflowCtx<FlowState, ()>,
     envelope: EffectReceiptEnvelope,
 ) -> Result<(), ReduceError> {
-    if envelope.effect_op != HTTP_REQUEST_EFFECT {
+    if envelope.effect != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
 

@@ -11,17 +11,14 @@
     }
   },
   {
-    "$kind": "defop",
+    "$kind": "defworkflow",
     "name": "demo/Aggregator@1",
-    "op_kind": "workflow",
-    "workflow": {
-      "state": "demo/AggregatorState@1",
-      "event": "demo/AggregatorEvent@1",
-      "context": "sys/WorkflowContext@1",
-      "effects_emitted": [
-        "sys/http.request@1"
-      ]
-    },
+    "state": "demo/AggregatorState@1",
+    "event": "demo/AggregatorEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [
+      "sys/http.request@1"
+    ],
     "impl": {
       "module": "demo/Aggregator_wasm@1",
       "entrypoint": "step"

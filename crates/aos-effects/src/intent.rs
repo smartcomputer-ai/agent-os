@@ -37,9 +37,9 @@ impl EffectSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectIntent {
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub effect_op: String,
+    pub effect: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_op_hash: Option<String>,
+    pub effect_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_module: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -58,12 +58,12 @@ impl EffectIntent {
     }
 
     pub fn from_raw_params(
-        effect_op: impl Into<String>,
+        effect: impl Into<String>,
         params_cbor: Vec<u8>,
         idempotency_key: IdempotencyKey,
     ) -> Result<Self, IntentEncodeError> {
-        Self::from_raw_params_with_op(
-            effect_op.into(),
+        Self::from_raw_params_with_identity(
+            effect.into(),
             None,
             None,
             None,
@@ -73,9 +73,9 @@ impl EffectIntent {
         )
     }
 
-    pub fn from_raw_params_with_op(
-        effect_op: String,
-        effect_op_hash: Option<String>,
+    pub fn from_raw_params_with_identity(
+        effect: String,
+        effect_hash: Option<String>,
         executor_module: Option<String>,
         executor_module_hash: Option<String>,
         executor_entrypoint: Option<String>,
@@ -83,8 +83,8 @@ impl EffectIntent {
         idempotency_key: IdempotencyKey,
     ) -> Result<Self, IntentEncodeError> {
         let hash = compute_intent_hash(
-            &effect_op,
-            effect_op_hash.as_deref(),
+            &effect,
+            effect_hash.as_deref(),
             executor_module.as_deref(),
             executor_module_hash.as_deref(),
             executor_entrypoint.as_deref(),
@@ -92,8 +92,8 @@ impl EffectIntent {
             &idempotency_key,
         )?;
         Ok(Self {
-            effect_op,
-            effect_op_hash,
+            effect,
+            effect_hash,
             executor_module,
             executor_module_hash,
             executor_entrypoint,
@@ -105,22 +105,22 @@ impl EffectIntent {
 }
 
 pub struct IntentBuilder<'a, P> {
-    effect_op: String,
+    effect: String,
     params: &'a P,
     idempotency_key: IdempotencyKey,
 }
 
 impl<'a, P> IntentBuilder<'a, P> {
-    pub fn new(effect_op: impl Into<String>, params: &'a P) -> Self {
+    pub fn new(effect: impl Into<String>, params: &'a P) -> Self {
         Self {
-            effect_op: effect_op.into(),
+            effect: effect.into(),
             params,
             idempotency_key: [0u8; 32],
         }
     }
 
-    pub fn builder(effect_op: impl Into<String>, params: &'a P) -> Self {
-        Self::new(effect_op, params)
+    pub fn builder(effect: impl Into<String>, params: &'a P) -> Self {
+        Self::new(effect, params)
     }
 
     pub fn idempotency_key(mut self, key: IdempotencyKey) -> Self {
@@ -134,7 +134,7 @@ impl<'a, P> IntentBuilder<'a, P> {
     {
         let params_cbor = to_canonical_cbor(self.params)?;
         let hash = compute_intent_hash(
-            self.effect_op.as_str(),
+            self.effect.as_str(),
             None,
             None,
             None,
@@ -143,8 +143,8 @@ impl<'a, P> IntentBuilder<'a, P> {
             &self.idempotency_key,
         )?;
         Ok(EffectIntent {
-            effect_op: self.effect_op,
-            effect_op_hash: None,
+            effect: self.effect,
+            effect_hash: None,
             executor_module: None,
             executor_module_hash: None,
             executor_entrypoint: None,
@@ -156,8 +156,8 @@ impl<'a, P> IntentBuilder<'a, P> {
 }
 
 fn compute_intent_hash(
-    effect_op: &str,
-    effect_op_hash: Option<&str>,
+    effect: &str,
+    effect_hash: Option<&str>,
     executor_module: Option<&str>,
     executor_module_hash: Option<&str>,
     executor_entrypoint: Option<&str>,
@@ -166,9 +166,9 @@ fn compute_intent_hash(
 ) -> Result<[u8; 32], serde_cbor::Error> {
     #[derive(Serialize)]
     struct Envelope<'a> {
-        effect_op: &'a str,
+        effect: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
-        effect_op_hash: Option<&'a str>,
+        effect_hash: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         executor_module: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -182,8 +182,8 @@ fn compute_intent_hash(
     }
 
     let bytes = to_canonical_cbor(&Envelope {
-        effect_op,
-        effect_op_hash,
+        effect,
+        effect_hash,
         executor_module,
         executor_module_hash,
         executor_entrypoint,

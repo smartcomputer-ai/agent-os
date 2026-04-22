@@ -1245,10 +1245,10 @@ fn fabric_exec_progress_frame(
     Ok(EffectStreamFrame {
         intent_hash: intent.intent_hash,
         origin_module_id: context.origin_module_id.clone(),
-        origin_workflow_op_hash: context.origin_workflow_op_hash.clone(),
+        origin_workflow_hash: context.origin_workflow_hash.clone(),
         origin_instance_key: context.origin_instance_key.clone(),
-        effect_op: context.effect_op.clone(),
-        effect_op_hash: context.effect_op_hash.clone(),
+        effect: context.effect.clone(),
+        effect_hash: context.effect_hash.clone(),
         executor_module: context.executor_module.clone(),
         executor_module_hash: context.executor_module_hash.clone(),
         executor_entrypoint: context.executor_entrypoint.clone(),

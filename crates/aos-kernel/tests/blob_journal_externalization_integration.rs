@@ -37,7 +37,7 @@ fn blob_put_intent_is_externalized_in_journal() {
         .filter_map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok())
         .find_map(|record| match record {
             JournalRecord::EffectIntent(record)
-                if record.effect_op == aos_effects::effect_ops::BLOB_PUT =>
+                if record.effect == aos_effects::effect_ops::BLOB_PUT =>
             {
                 Some(record)
             }
@@ -148,9 +148,9 @@ fn blob_get_receipt_is_externalized_and_replay_requires_cas_dependency() {
 
 fn blob_world_manifest(
     store: &Arc<fixtures::TestStore>,
-    effect_op: &str,
+    effect: &str,
 ) -> aos_kernel::manifest::LoadedManifest {
-    let effect = match effect_op {
+    let effect = match effect {
         "sys/blob.put@1" => WorkflowEffect::new(
             "sys/blob.put@1",
             serde_cbor::to_vec(&BlobPutParams {
@@ -167,7 +167,7 @@ fn blob_world_manifest(
             })
             .unwrap(),
         ),
-        other => panic!("unexpected effect op {other}"),
+        other => panic!("unexpected effect {other}"),
     };
     let mut workflow = fixtures::stub_workflow_module(
         store,
@@ -175,7 +175,7 @@ fn blob_world_manifest(
         &aos_wasm_abi::WorkflowOutput {
             state: Some(vec![0x01]),
             domain_events: vec![],
-            effects: vec![effect],
+            effects: vec![effect.clone()],
             ann: None,
         },
     );
@@ -184,7 +184,7 @@ fn blob_world_manifest(
         event: fixtures::schema("com.acme/BlobEvent@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![effect_op.into()],
+        effects_emitted: vec![effect.kind.clone()],
     });
 
     let mut loaded = fixtures::build_loaded_manifest(

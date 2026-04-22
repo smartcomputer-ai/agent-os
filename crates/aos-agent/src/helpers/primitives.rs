@@ -310,20 +310,20 @@ pub fn spawn_or_handoff_session(
 
 pub fn begin_pending_effect<T: serde::Serialize>(
     state: &mut SessionState,
-    effect_op: &'static str,
+    effect: &'static str,
     params: &T,
     issuer_ref: Option<String>,
 ) -> PendingEffect {
-    let issuer_ref = issuer_ref.or_else(|| Some(synthesize_pending_issuer_ref(state, effect_op)));
+    let issuer_ref = issuer_ref.or_else(|| Some(synthesize_pending_issuer_ref(state, effect)));
     match state.pending_effects.begin_with_issuer_ref(
-        effect_op,
+        effect,
         params,
         state.updated_at,
         issuer_ref.clone(),
     ) {
         Ok(pending) => pending,
         Err(_) => {
-            let pending = PendingEffect::new(effect_op, String::new(), state.updated_at)
+            let pending = PendingEffect::new(effect, String::new(), state.updated_at)
                 .with_issuer_ref_opt(issuer_ref);
             state.pending_effects.insert(pending.clone());
             pending
@@ -331,10 +331,10 @@ pub fn begin_pending_effect<T: serde::Serialize>(
     }
 }
 
-fn synthesize_pending_issuer_ref(state: &SessionState, effect_op: &str) -> String {
+fn synthesize_pending_issuer_ref(state: &SessionState, effect: &str) -> String {
     let mut ordinal = state.pending_effects.len();
     loop {
-        let candidate = format!("session:{effect_op}:{}:{ordinal}", state.updated_at);
+        let candidate = format!("session:{effect}:{}:{ordinal}", state.updated_at);
         if state
             .pending_effects
             .values()

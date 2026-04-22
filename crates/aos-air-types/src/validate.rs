@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::{
-    DefModule, DefOp, DefSchema, DefSecret, Manifest, ModuleRuntime, OpKind, RoutingEvent,
+    DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, Manifest, ModuleRuntime, RoutingEvent,
     TypeExpr, builtins,
 };
 
@@ -11,52 +11,50 @@ use crate::{
 pub enum ValidationError {
     #[error("manifest {kind} ref '{name}' does not resolve")]
     ManifestRefNotFound { kind: &'static str, name: String },
-    #[error("op '{op}' implementation references inactive module '{module}'")]
-    OpUnknownModule { op: String, module: String },
-    #[error("workflow op '{op}' must define workflow and not effect")]
-    WorkflowOpShape { op: String },
-    #[error("effect op '{op}' must define effect and not workflow")]
-    EffectOpShape { op: String },
+    #[error("definition '{name}' implementation references inactive module '{module}'")]
+    DefUnknownModule { name: String, module: String },
     #[error("schema '{schema}' not found")]
     SchemaNotFound { schema: String },
-    #[error("effect op '{op}' not found or not active")]
-    EffectOpNotFound { op: String },
-    #[error("workflow op '{op}' not found or not active")]
-    WorkflowOpNotFound { op: String },
-    #[error("route to keyed workflow op '{op}' must specify key_field")]
-    RoutingMissingKeyField { op: String },
-    #[error("route to non-keyed workflow op '{op}' must not specify key_field")]
-    RoutingUnexpectedKeyField { op: String },
+    #[error("effect '{effect}' not found or not active")]
+    EffectNotFound { effect: String },
+    #[error("workflow '{workflow}' not found or not active")]
+    WorkflowNotFound { workflow: String },
+    #[error("route to keyed workflow '{workflow}' must specify key_field")]
+    RoutingMissingKeyField { workflow: String },
+    #[error("route to non-keyed workflow '{workflow}' must not specify key_field")]
+    RoutingUnexpectedKeyField { workflow: String },
     #[error(
-        "route to workflow op '{op}' uses schema '{event}' but workflow event schema is '{expected}'"
+        "route to workflow '{workflow}' uses schema '{event}' but workflow event schema is '{expected}'"
     )]
     RoutingSchemaMismatch {
-        op: String,
+        workflow: String,
         event: String,
         expected: String,
     },
     #[error(
-        "route to workflow op '{op}' uses key_field '{key_field}' with schema '{event}', but key schema '{expected}' does not match '{found}'"
+        "route to workflow '{workflow}' uses key_field '{key_field}' with schema '{event}', but key schema '{expected}' does not match '{found}'"
     )]
     RoutingKeyFieldMismatch {
-        op: String,
+        workflow: String,
         event: String,
         key_field: String,
         expected: String,
         found: String,
     },
-    #[error("workflow op '{op}' event family schema '{event_schema}' is invalid: {reason}")]
+    #[error("workflow '{workflow}' event family schema '{event_schema}' is invalid: {reason}")]
     WorkflowEventFamilyInvalid {
-        op: String,
+        workflow: String,
         event_schema: String,
         reason: String,
     },
-    #[error("module '{module}' runtime '{runtime}' does not support {op_kind} op '{op}'")]
-    UnsupportedRuntimeForOp {
+    #[error(
+        "module '{module}' runtime '{runtime}' does not support {def_kind} definition '{name}'"
+    )]
+    UnsupportedRuntimeForDef {
         module: String,
         runtime: &'static str,
-        op_kind: &'static str,
-        op: String,
+        def_kind: &'static str,
+        name: String,
     },
 }
 
@@ -64,12 +62,15 @@ pub fn validate_manifest(
     manifest: &Manifest,
     modules: &HashMap<String, DefModule>,
     schemas: &HashMap<String, DefSchema>,
-    ops: &HashMap<String, DefOp>,
+    workflows: &HashMap<String, DefWorkflow>,
+    effects: &HashMap<String, DefEffect>,
     secrets: &HashMap<String, DefSecret>,
 ) -> Result<(), ValidationError> {
     let active_schemas: HashSet<String> = manifest.schemas.iter().map(|r| r.name.clone()).collect();
     let active_modules: HashSet<String> = manifest.modules.iter().map(|r| r.name.clone()).collect();
-    let active_ops: HashSet<String> = manifest.ops.iter().map(|r| r.name.clone()).collect();
+    let active_workflows: HashSet<String> =
+        manifest.workflows.iter().map(|r| r.name.clone()).collect();
+    let active_effects: HashSet<String> = manifest.effects.iter().map(|r| r.name.clone()).collect();
     let active_secrets: HashSet<String> = manifest.secrets.iter().map(|r| r.name.clone()).collect();
 
     for reference in &manifest.schemas {
@@ -92,12 +93,22 @@ pub fn validate_manifest(
             });
         }
     }
-    for reference in &manifest.ops {
-        if !ops.contains_key(&reference.name)
-            && builtins::find_builtin_op(reference.name.as_str()).is_none()
+    for reference in &manifest.workflows {
+        if !workflows.contains_key(&reference.name)
+            && builtins::find_builtin_workflow(reference.name.as_str()).is_none()
         {
             return Err(ValidationError::ManifestRefNotFound {
-                kind: "op",
+                kind: "workflow",
+                name: reference.name.clone(),
+            });
+        }
+    }
+    for reference in &manifest.effects {
+        if !effects.contains_key(&reference.name)
+            && builtins::find_builtin_effect(reference.name.as_str()).is_none()
+        {
+            return Err(ValidationError::ManifestRefNotFound {
+                kind: "effect",
                 name: reference.name.clone(),
             });
         }
@@ -121,10 +132,16 @@ pub fn validate_manifest(
                 builtins::find_builtin_schema(name).map(|builtin| builtin.schema.ty.clone())
             })
     };
-    let op_lookup = |name: &str| -> Option<DefOp> {
-        ops.get(name)
+    let workflow_lookup = |name: &str| -> Option<DefWorkflow> {
+        workflows.get(name).cloned().or_else(|| {
+            builtins::find_builtin_workflow(name).map(|builtin| builtin.workflow.clone())
+        })
+    };
+    let effect_lookup = |name: &str| -> Option<DefEffect> {
+        effects
+            .get(name)
             .cloned()
-            .or_else(|| builtins::find_builtin_op(name).map(|builtin| builtin.op.clone()))
+            .or_else(|| builtins::find_builtin_effect(name).map(|builtin| builtin.effect.clone()))
     };
     let module_lookup = |name: &str| -> Option<DefModule> {
         modules
@@ -133,81 +150,81 @@ pub fn validate_manifest(
             .or_else(|| builtins::find_builtin_module(name).map(|builtin| builtin.module.clone()))
     };
 
-    for op_name in &active_ops {
-        let op = op_lookup(op_name).ok_or_else(|| ValidationError::ManifestRefNotFound {
-            kind: "op",
-            name: op_name.clone(),
-        })?;
-        if !active_modules.contains(&op.implementation.module)
-            && builtins::find_builtin_module(op.implementation.module.as_str()).is_none()
+    for workflow_name in &active_workflows {
+        let workflow =
+            workflow_lookup(workflow_name).ok_or_else(|| ValidationError::ManifestRefNotFound {
+                kind: "workflow",
+                name: workflow_name.clone(),
+            })?;
+        if !active_modules.contains(&workflow.implementation.module)
+            && builtins::find_builtin_module(workflow.implementation.module.as_str()).is_none()
         {
-            return Err(ValidationError::OpUnknownModule {
-                op: op.name,
-                module: op.implementation.module,
+            return Err(ValidationError::DefUnknownModule {
+                name: workflow.name,
+                module: workflow.implementation.module,
             });
         }
 
-        let module = module_lookup(&op.implementation.module).expect("module checked above");
-        validate_runtime_support(&op, &module)?;
+        let module = module_lookup(&workflow.implementation.module).expect("module checked above");
+        validate_runtime_support("workflow", &workflow.name, &module)?;
 
-        match op.op_kind {
-            OpKind::Workflow => {
-                let Some(workflow) = op.workflow.as_ref() else {
-                    return Err(ValidationError::WorkflowOpShape { op: op.name });
-                };
-                if op.effect.is_some() {
-                    return Err(ValidationError::WorkflowOpShape { op: op.name });
-                }
-                for schema_ref in [
-                    Some(workflow.state.as_str()),
-                    Some(workflow.event.as_str()),
-                    workflow.context.as_ref().map(|s| s.as_str()),
-                    workflow.annotations.as_ref().map(|s| s.as_str()),
-                    workflow.key_schema.as_ref().map(|s| s.as_str()),
-                ]
-                .iter()
-                .flatten()
-                {
-                    if !schema_exists(schema_ref) {
-                        return Err(ValidationError::SchemaNotFound {
-                            schema: schema_ref.to_string(),
-                        });
-                    }
-                }
-                let event_schema_name = workflow.event.as_str();
-                let event_schema = schema_type(event_schema_name).ok_or_else(|| {
-                    ValidationError::SchemaNotFound {
-                        schema: event_schema_name.to_string(),
-                    }
-                })?;
-                validate_event_family(op.name.as_str(), event_schema_name, &event_schema)?;
-                for effect_op in &workflow.effects_emitted {
-                    let Some(effect_def) = op_lookup(effect_op) else {
-                        return Err(ValidationError::EffectOpNotFound {
-                            op: effect_op.clone(),
-                        });
-                    };
-                    if !active_ops.contains(effect_op) || effect_def.op_kind != OpKind::Effect {
-                        return Err(ValidationError::EffectOpNotFound {
-                            op: effect_op.clone(),
-                        });
-                    }
-                }
+        for schema_ref in [
+            Some(workflow.state.as_str()),
+            Some(workflow.event.as_str()),
+            workflow.context.as_ref().map(|s| s.as_str()),
+            workflow.annotations.as_ref().map(|s| s.as_str()),
+            workflow.key_schema.as_ref().map(|s| s.as_str()),
+        ]
+        .iter()
+        .flatten()
+        {
+            if !schema_exists(schema_ref) {
+                return Err(ValidationError::SchemaNotFound {
+                    schema: schema_ref.to_string(),
+                });
             }
-            OpKind::Effect => {
-                let Some(effect) = op.effect.as_ref() else {
-                    return Err(ValidationError::EffectOpShape { op: op.name });
-                };
-                if op.workflow.is_some() {
-                    return Err(ValidationError::EffectOpShape { op: op.name });
-                }
-                for schema_ref in [effect.params.as_str(), effect.receipt.as_str()] {
-                    if !schema_exists(schema_ref) {
-                        return Err(ValidationError::SchemaNotFound {
-                            schema: schema_ref.to_string(),
-                        });
-                    }
-                }
+        }
+        let event_schema_name = workflow.event.as_str();
+        let event_schema =
+            schema_type(event_schema_name).ok_or_else(|| ValidationError::SchemaNotFound {
+                schema: event_schema_name.to_string(),
+            })?;
+        validate_event_family(workflow.name.as_str(), event_schema_name, &event_schema)?;
+        for effect in &workflow.effects_emitted {
+            if effect_lookup(effect).is_none()
+                || (!active_effects.contains(effect)
+                    && builtins::find_builtin_effect(effect.as_str()).is_none())
+            {
+                return Err(ValidationError::EffectNotFound {
+                    effect: effect.clone(),
+                });
+            }
+        }
+    }
+
+    for effect_name in &active_effects {
+        let effect =
+            effect_lookup(effect_name).ok_or_else(|| ValidationError::ManifestRefNotFound {
+                kind: "effect",
+                name: effect_name.clone(),
+            })?;
+        if !active_modules.contains(&effect.implementation.module)
+            && builtins::find_builtin_module(effect.implementation.module.as_str()).is_none()
+        {
+            return Err(ValidationError::DefUnknownModule {
+                name: effect.name,
+                module: effect.implementation.module,
+            });
+        }
+
+        let module = module_lookup(&effect.implementation.module).expect("module checked above");
+        validate_runtime_support("effect", &effect.name, &module)?;
+
+        for schema_ref in [effect.params.as_str(), effect.receipt.as_str()] {
+            if !schema_exists(schema_ref) {
+                return Err(ValidationError::SchemaNotFound {
+                    schema: schema_ref.to_string(),
+                });
             }
         }
     }
@@ -215,7 +232,7 @@ pub fn validate_manifest(
     if let Some(routing) = manifest.routing.as_ref() {
         for RoutingEvent {
             event,
-            op,
+            workflow,
             key_field,
         } in &routing.subscriptions
         {
@@ -224,42 +241,48 @@ pub fn validate_manifest(
                     schema: event.as_str().to_string(),
                 });
             }
-            let Some(op_def) = op_lookup(op) else {
-                return Err(ValidationError::WorkflowOpNotFound { op: op.clone() });
+            let Some(workflow_def) = workflow_lookup(workflow) else {
+                return Err(ValidationError::WorkflowNotFound {
+                    workflow: workflow.clone(),
+                });
             };
-            if !active_ops.contains(op) || op_def.op_kind != OpKind::Workflow {
-                return Err(ValidationError::WorkflowOpNotFound { op: op.clone() });
+            if !active_workflows.contains(workflow)
+                && builtins::find_builtin_workflow(workflow.as_str()).is_none()
+            {
+                return Err(ValidationError::WorkflowNotFound {
+                    workflow: workflow.clone(),
+                });
             }
-            let workflow = op_def
-                .workflow
-                .as_ref()
-                .ok_or_else(|| ValidationError::WorkflowOpShape { op: op.clone() })?;
-            let expected = workflow.event.as_str();
+            let expected = workflow_def.event.as_str();
             let family_schema =
                 schema_type(expected).ok_or_else(|| ValidationError::SchemaNotFound {
                     schema: expected.to_string(),
                 })?;
             if !event_in_family(event.as_str(), expected, &family_schema) {
                 return Err(ValidationError::RoutingSchemaMismatch {
-                    op: op.clone(),
+                    workflow: workflow.clone(),
                     event: event.as_str().to_string(),
                     expected: expected.to_string(),
                 });
             }
 
-            let keyed = workflow.key_schema.is_some();
+            let keyed = workflow_def.key_schema.is_some();
             match (keyed, key_field.is_some()) {
                 (true, false) => {
-                    return Err(ValidationError::RoutingMissingKeyField { op: op.clone() });
+                    return Err(ValidationError::RoutingMissingKeyField {
+                        workflow: workflow.clone(),
+                    });
                 }
                 (false, true) => {
-                    return Err(ValidationError::RoutingUnexpectedKeyField { op: op.clone() });
+                    return Err(ValidationError::RoutingUnexpectedKeyField {
+                        workflow: workflow.clone(),
+                    });
                 }
                 _ => {}
             }
 
             if let (Some(key_schema_ref), Some(field)) =
-                (workflow.key_schema.as_ref(), key_field.as_ref())
+                (workflow_def.key_schema.as_ref(), key_field.as_ref())
             {
                 let key_schema_name = key_schema_ref.as_str();
                 let key_schema = schema_type(key_schema_name).ok_or_else(|| {
@@ -274,7 +297,7 @@ pub fn validate_manifest(
                 let field_ty =
                     key_field_type(&event_schema, field, &schema_type).ok_or_else(|| {
                         ValidationError::RoutingKeyFieldMismatch {
-                            op: op.clone(),
+                            workflow: workflow.clone(),
                             event: event.as_str().to_string(),
                             key_field: field.to_string(),
                             expected: key_schema_name.to_string(),
@@ -285,7 +308,7 @@ pub fn validate_manifest(
                     key_type_matches(&field_ty, &key_schema, &schema_type).unwrap_or(false);
                 if !matches {
                     return Err(ValidationError::RoutingKeyFieldMismatch {
-                        op: op.clone(),
+                        workflow: workflow.clone(),
                         event: event.as_str().to_string(),
                         key_field: field.to_string(),
                         expected: key_schema_name.to_string(),
@@ -308,22 +331,24 @@ pub fn validate_manifest(
     Ok(())
 }
 
-fn validate_runtime_support(op: &DefOp, module: &DefModule) -> Result<(), ValidationError> {
-    match (&module.runtime, op.op_kind) {
-        (ModuleRuntime::Builtin {}, OpKind::Workflow) => {
-            Err(ValidationError::UnsupportedRuntimeForOp {
-                module: module.name.clone(),
-                runtime: "builtin",
-                op_kind: "workflow",
-                op: op.name.clone(),
-            })
-        }
+fn validate_runtime_support(
+    def_kind: &'static str,
+    name: &str,
+    module: &DefModule,
+) -> Result<(), ValidationError> {
+    match (&module.runtime, def_kind) {
+        (ModuleRuntime::Builtin {}, "workflow") => Err(ValidationError::UnsupportedRuntimeForDef {
+            module: module.name.clone(),
+            runtime: "builtin",
+            def_kind,
+            name: name.to_string(),
+        }),
         _ => Ok(()),
     }
 }
 
 fn validate_event_family(
-    op_name: &str,
+    workflow_name: &str,
     event_schema_name: &str,
     event_schema: &TypeExpr,
 ) -> Result<(), ValidationError> {
@@ -334,7 +359,7 @@ fn validate_event_family(
             for ty in variant.variant.values() {
                 let TypeExpr::Ref(reference) = ty else {
                     return Err(ValidationError::WorkflowEventFamilyInvalid {
-                        op: op_name.to_string(),
+                        workflow: workflow_name.to_string(),
                         event_schema: event_schema_name.to_string(),
                         reason: "variant arm is not a ref".into(),
                     });
@@ -342,7 +367,7 @@ fn validate_event_family(
                 let name = reference.reference.as_str().to_string();
                 if !seen.insert(name) {
                     return Err(ValidationError::WorkflowEventFamilyInvalid {
-                        op: op_name.to_string(),
+                        workflow: workflow_name.to_string(),
                         event_schema: event_schema_name.to_string(),
                         reason: "duplicate event schema in variant".into(),
                     });
@@ -352,7 +377,7 @@ fn validate_event_family(
         }
         TypeExpr::Record(_) => Ok(()),
         _ => Err(ValidationError::WorkflowEventFamilyInvalid {
-            op: op_name.to_string(),
+            workflow: workflow_name.to_string(),
             event_schema: event_schema_name.to_string(),
             reason: "event family must be a ref, variant of refs, or record".into(),
         }),

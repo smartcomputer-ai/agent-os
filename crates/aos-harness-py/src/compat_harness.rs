@@ -322,15 +322,15 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
     fn restore_open_work(&mut self) -> Result<()> {
         for pending in self.kernel.pending_workflow_receipts_snapshot() {
             let intent = EffectIntent {
-                effect_op: if pending.effect_op.is_empty() {
+                effect: if pending.effect.is_empty() {
                     pending
                         .executor_entrypoint
                         .clone()
-                        .unwrap_or_else(|| pending.effect_op.clone())
+                        .unwrap_or_else(|| pending.effect.clone())
                 } else {
-                    pending.effect_op.clone()
+                    pending.effect.clone()
                 },
-                effect_op_hash: pending.effect_op_hash.clone(),
+                effect_hash: pending.effect_hash.clone(),
                 executor_module: pending.executor_module.clone(),
                 executor_module_hash: pending.executor_module_hash.clone(),
                 executor_entrypoint: pending.executor_entrypoint.clone(),
@@ -1149,10 +1149,10 @@ fn decode_state_json(bytes: &[u8]) -> Result<JsonValue> {
 }
 
 fn classify_effect_intent(intent: &EffectIntent) -> EffectExecutionClass {
-    if INTERNAL_EFFECT_KINDS.contains(&intent.effect_op.as_str()) {
+    if INTERNAL_EFFECT_KINDS.contains(&intent.effect.as_str()) {
         return EffectExecutionClass::InlineInternal;
     }
-    if intent.effect_op.as_str() == effect_ops::TIMER_SET {
+    if intent.effect.as_str() == effect_ops::TIMER_SET {
         return EffectExecutionClass::OwnerLocalTimer;
     }
     EffectExecutionClass::ExternalAsync

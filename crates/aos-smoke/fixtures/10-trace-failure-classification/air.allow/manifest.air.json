@@ -13,12 +13,6 @@
     },
     {
       "name": "demo/FetchNotifyEvent@1"
-    },
-    {
-      "name": "sys/HttpRequestParams@1"
-    },
-    {
-      "name": "sys/HttpRequestReceipt@1"
     }
   ],
   "modules": [
@@ -30,16 +24,14 @@
     "subscriptions": [
       {
         "event": "demo/FetchNotifyEvent@1",
-        "op": "demo/FetchNotify@1"
+        "workflow": "demo/FetchNotify@1"
       }
     ]
   },
-  "ops": [
-    {
-      "name": "sys/http.request@1"
-    },
+  "workflows": [
     {
       "name": "demo/FetchNotify@1"
     }
-  ]
+  ],
+  "effects": []
 }

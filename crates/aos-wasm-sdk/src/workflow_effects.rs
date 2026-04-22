@@ -57,7 +57,7 @@ mod serde_bytes_vec {
 pub struct EffectReceiptEnvelope {
     pub origin_module_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_workflow_op_hash: Option<String>,
+    pub origin_workflow_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -66,9 +66,9 @@ pub struct EffectReceiptEnvelope {
     pub origin_instance_key: Option<Vec<u8>>,
     pub intent_id: String,
     #[serde(default)]
-    pub effect_op: String,
+    pub effect: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_op_hash: Option<String>,
+    pub effect_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_module: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -102,7 +102,7 @@ impl EffectReceiptEnvelope {
 pub struct EffectReceiptRejected {
     pub origin_module_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_workflow_op_hash: Option<String>,
+    pub origin_workflow_hash: Option<String>,
     #[serde(
         default,
         with = "serde_bytes_opt",
@@ -111,9 +111,9 @@ pub struct EffectReceiptRejected {
     pub origin_instance_key: Option<Vec<u8>>,
     pub intent_id: String,
     #[serde(default)]
-    pub effect_op: String,
+    pub effect: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_op_hash: Option<String>,
+    pub effect_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_module: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -136,7 +136,7 @@ pub struct EffectReceiptRejected {
 pub struct EffectStreamFrameEnvelope {
     pub origin_module_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_workflow_op_hash: Option<String>,
+    pub origin_workflow_hash: Option<String>,
     #[serde(
         default,
         with = "serde_bytes_opt",
@@ -145,9 +145,9 @@ pub struct EffectStreamFrameEnvelope {
     pub origin_instance_key: Option<Vec<u8>>,
     pub intent_id: String,
     #[serde(default)]
-    pub effect_op: String,
+    pub effect: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_op_hash: Option<String>,
+    pub effect_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_module: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -191,11 +191,11 @@ impl<'a> EffectContinuationRef<'a> {
         }
     }
 
-    pub fn effect_op(self) -> &'a str {
+    pub fn effect(self) -> &'a str {
         match self {
-            Self::Receipt(value) => value.effect_op.as_str(),
-            Self::Rejected(value) => value.effect_op.as_str(),
-            Self::Stream(value) => value.effect_op.as_str(),
+            Self::Receipt(value) => value.effect.as_str(),
+            Self::Rejected(value) => value.effect.as_str(),
+            Self::Stream(value) => value.effect.as_str(),
         }
     }
 
@@ -285,7 +285,7 @@ impl From<EffectStreamFrameEnvelope> for EffectContinuation {
 /// Durable workflow-side handle for a pending effect intent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct PendingEffect {
-    pub effect_op: String,
+    pub effect: String,
     pub params_hash: String,
     pub intent_id: Option<String>,
     pub issuer_ref: Option<String>,
@@ -295,12 +295,12 @@ pub struct PendingEffect {
 
 impl PendingEffect {
     pub fn new(
-        effect_op: impl Into<String>,
+        effect: impl Into<String>,
         params_hash: impl Into<String>,
         emitted_at_ns: u64,
     ) -> Self {
         Self {
-            effect_op: effect_op.into(),
+            effect: effect.into(),
             params_hash: params_hash.into(),
             intent_id: None,
             issuer_ref: None,
@@ -320,30 +320,30 @@ impl PendingEffect {
     }
 
     pub fn from_params<T: Serialize>(
-        effect_op: impl Into<String>,
+        effect: impl Into<String>,
         params: &T,
         emitted_at_ns: u64,
     ) -> Result<Self, serde_cbor::Error> {
-        Self::from_params_with_issuer_ref(effect_op, params, emitted_at_ns, None)
+        Self::from_params_with_issuer_ref(effect, params, emitted_at_ns, None)
     }
 
     pub fn from_params_with_issuer_ref<T: Serialize>(
-        effect_op: impl Into<String>,
+        effect: impl Into<String>,
         params: &T,
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<Self, serde_cbor::Error> {
-        let effect_op = effect_op.into();
+        let effect = effect.into();
         Ok(Self::new(
-            effect_op.as_str(),
-            pending_effect_params_hash(effect_op.as_str(), params)?,
+            effect.as_str(),
+            pending_effect_params_hash(effect.as_str(), params)?,
             emitted_at_ns,
         )
         .with_issuer_ref_opt(issuer_ref))
     }
 
     pub fn matches(&self, continuation: EffectContinuationRef<'_>) -> bool {
-        if self.effect_op != continuation.effect_op() {
+        if self.effect != continuation.effect() {
             return false;
         }
 
@@ -420,8 +420,8 @@ impl PendingEffects {
         self.by_params_hash.clear();
     }
 
-    pub fn contains_effect_op(&self, effect_op: &str) -> bool {
-        self.values().any(|pending| pending.effect_op == effect_op)
+    pub fn contains_effect(&self, effect: &str) -> bool {
+        self.values().any(|pending| pending.effect == effect)
     }
 
     pub fn insert(&mut self, pending: PendingEffect) -> Option<PendingEffect> {
@@ -431,26 +431,22 @@ impl PendingEffects {
 
     pub fn begin<T: Serialize>(
         &mut self,
-        effect_op: impl Into<String>,
+        effect: impl Into<String>,
         params: &T,
         emitted_at_ns: u64,
     ) -> Result<PendingEffect, serde_cbor::Error> {
-        self.begin_with_issuer_ref(effect_op, params, emitted_at_ns, None)
+        self.begin_with_issuer_ref(effect, params, emitted_at_ns, None)
     }
 
     pub fn begin_with_issuer_ref<T: Serialize>(
         &mut self,
-        effect_op: impl Into<String>,
+        effect: impl Into<String>,
         params: &T,
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<PendingEffect, serde_cbor::Error> {
-        let pending = PendingEffect::from_params_with_issuer_ref(
-            effect_op,
-            params,
-            emitted_at_ns,
-            issuer_ref,
-        )?;
+        let pending =
+            PendingEffect::from_params_with_issuer_ref(effect, params, emitted_at_ns, issuer_ref)?;
         self.insert(pending.clone());
         Ok(pending)
     }
@@ -511,7 +507,7 @@ impl PendingEffects {
         continuation.params_hash().and_then(|params_hash| {
             self.by_params_hash
                 .get(params_hash)
-                .filter(|pending| pending.effect_op == continuation.effect_op())
+                .filter(|pending| pending.effect == continuation.effect())
                 .map(|_| params_hash.to_string())
         })
     }
@@ -524,7 +520,7 @@ pub enum PendingEffectLookupError {
         matches: usize,
     },
     AmbiguousParamsHash {
-        effect_op: String,
+        effect: String,
         params_hash: String,
         matches: usize,
     },
@@ -541,12 +537,12 @@ impl core::fmt::Display for PendingEffectLookupError {
                 "multiple pending effects match issuer_ref {issuer_ref}: {matches}"
             ),
             Self::AmbiguousParamsHash {
-                effect_op,
+                effect,
                 params_hash,
                 matches,
             } => write!(
                 f,
-                "multiple pending effects match {effect_op} with params_hash {params_hash}: {matches}"
+                "multiple pending effects match {effect} with params_hash {params_hash}: {matches}"
             ),
         }
     }
@@ -609,27 +605,23 @@ where
     pub fn begin<T: Serialize>(
         &mut self,
         key: K,
-        effect_op: impl Into<String>,
+        effect: impl Into<String>,
         params: &T,
         emitted_at_ns: u64,
     ) -> Result<PendingEffect, serde_cbor::Error> {
-        self.begin_with_issuer_ref(key, effect_op, params, emitted_at_ns, None)
+        self.begin_with_issuer_ref(key, effect, params, emitted_at_ns, None)
     }
 
     pub fn begin_with_issuer_ref<T: Serialize>(
         &mut self,
         key: K,
-        effect_op: impl Into<String>,
+        effect: impl Into<String>,
         params: &T,
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<PendingEffect, serde_cbor::Error> {
-        let pending = PendingEffect::from_params_with_issuer_ref(
-            effect_op,
-            params,
-            emitted_at_ns,
-            issuer_ref,
-        )?;
+        let pending =
+            PendingEffect::from_params_with_issuer_ref(effect, params, emitted_at_ns, issuer_ref)?;
         self.insert(key, pending.clone());
         Ok(pending)
     }
@@ -714,7 +706,7 @@ where
             .by_key
             .iter()
             .filter(|(_, pending)| {
-                pending.effect_op == continuation.effect_op() && pending.params_hash == params_hash
+                pending.effect == continuation.effect() && pending.params_hash == params_hash
             })
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
@@ -722,7 +714,7 @@ where
             0 => Ok(None),
             1 => Ok(matches.into_iter().next()),
             count => Err(PendingEffectLookupError::AmbiguousParamsHash {
-                effect_op: continuation.effect_op().to_string(),
+                effect: continuation.effect().to_string(),
                 params_hash: params_hash.to_string(),
                 matches: count,
             }),
@@ -936,10 +928,10 @@ pub fn effect_params_hash<T: Serialize>(params: &T) -> Result<String, serde_cbor
 /// kernel's continuation envelopes for effect payloads that need workflow-side
 /// reconstruction.
 pub fn pending_effect_params_hash<T: Serialize>(
-    effect_op: &str,
+    effect: &str,
     params: &T,
 ) -> Result<String, serde_cbor::Error> {
-    let cbor = if effect_op == "sys/blob.put@1" {
+    let cbor = if effect == "sys/blob.put@1" {
         let mut params: aos_effect_types::BlobPutParams =
             serde_cbor::from_slice(&serde_cbor::to_vec(params)?)?;
         if params.refs.is_none() {
@@ -1247,7 +1239,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use aos_air_types::{
-        builtins::{builtin_ops, builtin_schemas},
+        builtins::{builtin_effects, builtin_schemas},
         catalog::EffectCatalog,
         schema_index::SchemaIndex,
     };
@@ -1261,8 +1253,8 @@ mod tests {
         out
     }
 
-    fn kernel_normalized_params_hash<T: Serialize>(effect_op: &str, params: &T) -> String {
-        if effect_op == "sys/blob.put@1" {
+    fn kernel_normalized_params_hash<T: Serialize>(effect: &str, params: &T) -> String {
+        if effect == "sys/blob.put@1" {
             let mut params: BlobPutParams =
                 serde_cbor::from_slice(&serde_cbor::to_vec(params).expect("encode params"))
                     .expect("decode blob.put params");
@@ -1275,7 +1267,9 @@ mod tests {
             return hash_bytes(&normalized);
         }
 
-        let catalog = EffectCatalog::from_defs(builtin_ops().iter().map(|op| op.op.clone()));
+        let catalog = EffectCatalog::from_effects(
+            builtin_effects().iter().map(|effect| effect.effect.clone()),
+        );
         let mut schemas = HashMap::new();
         for builtin in builtin_schemas() {
             schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
@@ -1283,7 +1277,7 @@ mod tests {
         let schema_index = SchemaIndex::new(schemas);
         let raw = serde_cbor::to_vec(params).expect("encode params");
         let normalized =
-            aos_effects::normalize_effect_op_params(&catalog, &schema_index, effect_op, &raw)
+            aos_effects::normalize_effect_params(&catalog, &schema_index, effect, &raw)
                 .expect("kernel normalize params");
         hash_bytes(&normalized)
     }
@@ -1302,7 +1296,7 @@ mod tests {
     fn stream_frame_decodes_payload() {
         let frame = EffectStreamFrameEnvelope {
             intent_id: fake_hash('a'),
-            effect_op: "llm.session.start".into(),
+            effect: "llm.session.start".into(),
             issuer_ref: Some("stream-1".into()),
             seq: 2,
             kind: "tool_call.requested".into(),
@@ -1323,7 +1317,7 @@ mod tests {
 
         let stream = EffectStreamFrameEnvelope {
             intent_id: fake_hash('i'),
-            effect_op: "sys/llm.generate@1".into(),
+            effect: "sys/llm.generate@1".into(),
             params_hash: Some(handle.params_hash.clone()),
             issuer_ref: Some("run-1".into()),
             seq: 1,
@@ -1342,7 +1336,7 @@ mod tests {
 
         let receipt = EffectReceiptEnvelope {
             intent_id: stream.intent_id.clone(),
-            effect_op: "sys/llm.generate@1".into(),
+            effect: "sys/llm.generate@1".into(),
             params_hash: Some(handle.params_hash.clone()),
             issuer_ref: Some("run-1".into()),
             receipt_payload: serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap(),
@@ -1368,7 +1362,7 @@ mod tests {
 
         let rejected = EffectReceiptRejected {
             intent_id: fake_hash('i'),
-            effect_op: "sys/host.session.open@1".into(),
+            effect: "sys/host.session.open@1".into(),
             issuer_ref: Some("open-1".into()),
             status: "error".into(),
             error_code: "receipt.invalid_payload".into(),
@@ -1393,7 +1387,7 @@ mod tests {
 
         let receipt = EffectReceiptEnvelope {
             intent_id: fake_hash('i'),
-            effect_op: "sys/llm.generate@1".into(),
+            effect: "sys/llm.generate@1".into(),
             params_hash: Some(handle.params_hash.clone()),
             receipt_payload: serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap(),
             status: "ok".into(),
@@ -1420,7 +1414,7 @@ mod tests {
 
         let receipt = EffectReceiptEnvelope {
             intent_id: fake_hash('i'),
-            effect_op: "sys/blob.put@1".into(),
+            effect: "sys/blob.put@1".into(),
             params_hash: Some(
                 pending_effect_params_hash("sys/blob.put@1", &params)
                     .expect("normalized blob.put params hash"),

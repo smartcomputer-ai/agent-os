@@ -119,7 +119,7 @@ fn handle_start(
         body_ref: None,
     };
     ctx.effects()
-        .emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+        .emit_raw(HTTP_REQUEST_EFFECT, &params);
     Ok(())
 }
 
@@ -130,7 +130,7 @@ fn handle_receipt(
     if ctx.state.pending_request.is_none() {
         return Ok(());
     }
-    if envelope.effect_op != HTTP_REQUEST_EFFECT {
+    if envelope.effect != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
 
@@ -210,7 +210,7 @@ mod tests {
             origin_instance_key: None,
             intent_id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                 .into(),
-            effect_op: "sys/http.request@1".into(),
+            effect: "sys/http.request@1".into(),
             params_hash: None,
             issuer_ref: None,
             receipt_payload: serde_cbor::to_vec(&receipt_payload).expect("payload"),

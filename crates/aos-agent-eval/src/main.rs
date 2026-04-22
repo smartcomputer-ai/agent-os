@@ -705,7 +705,7 @@ fn drive_live_effects<S: Store + 'static>(
                 continue;
             }
 
-            if intent.effect_op.as_str() == effect_ops::LLM_GENERATE {
+            if intent.effect.as_str() == effect_ops::LLM_GENERATE {
                 stats.llm_turns = stats.llm_turns.saturating_add(1);
                 let receipt = execute_live_llm_intent(host, llm_adapter, intent, api_key)?;
                 receipts.push(receipt);
@@ -713,14 +713,14 @@ fn drive_live_effects<S: Store + 'static>(
             }
 
             if std::env::var("AOS_AGENT_EVAL_DEBUG_PATCH").is_ok()
-                && intent.effect_op.as_str() == effect_ops::HOST_FS_APPLY_PATCH
+                && intent.effect.as_str() == effect_ops::HOST_FS_APPLY_PATCH
             {
                 if let Ok(value) = serde_cbor::from_slice::<Value>(&intent.params_cbor) {
                     eprintln!("debug host.fs.apply_patch params: {}", value);
                 }
             }
 
-            external.push((intent.clone(), intent.effect_op.as_str().to_string()));
+            external.push((intent.clone(), intent.effect.as_str().to_string()));
         }
 
         if !external.is_empty() {

@@ -85,12 +85,12 @@ where
         &mut self,
         intent: &EffectIntent,
     ) -> Result<Option<EffectReceipt>, KernelError> {
-        let effect_op = intent.effect_op.as_str();
-        if !INTERNAL_EFFECT_ENTRYPOINTS.contains(&effect_op) {
+        let effect = intent.effect.as_str();
+        if !INTERNAL_EFFECT_ENTRYPOINTS.contains(&effect) {
             return Ok(None);
         }
 
-        let receipt_result = match effect_op {
+        let receipt_result = match effect {
             effect_ops::INTROSPECT_MANIFEST => self.handle_manifest(intent),
             effect_ops::INTROSPECT_WORKFLOW_STATE => self.handle_workflow_state(intent),
             effect_ops::INTROSPECT_JOURNAL_HEAD => self.handle_journal_head(intent),
@@ -157,11 +157,9 @@ mod tests {
             "air_version": "2",
             "schemas": [],
             "modules": [],
-            "plans": [],
-            "ops": [],
-            "caps": [],
-            "policies": [],
-            "triggers": []
+            "workflows": [],
+            "effects": [],
+            "secrets": []
         });
         let bytes = serde_cbor::to_vec(&manifest).expect("cbor encode");
         let mut file = File::create(path).expect("create manifest");
@@ -215,8 +213,8 @@ mod tests {
         let mut kernel = open_kernel();
         // bogus CBOR payload
         let intent = EffectIntent {
-            effect_op: effect_ops::INTROSPECT_MANIFEST.into(),
-            effect_op_hash: None,
+            effect: effect_ops::INTROSPECT_MANIFEST.into(),
+            effect_hash: None,
             executor_module: None,
             executor_module_hash: None,
             executor_entrypoint: Some(effect_ops::INTROSPECT_MANIFEST.into()),

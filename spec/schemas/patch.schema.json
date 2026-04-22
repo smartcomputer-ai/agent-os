@@ -30,7 +30,7 @@
 
   "$defs": {
     "node_json": {
-      "description": "Authoring form of any AIR definition node: defschema, defmodule, defop, or defsecret.",
+      "description": "Authoring form of any AIR definition node: defschema, defmodule, defworkflow, defeffect, or defsecret.",
       "type": "object",
       "minProperties": 1
     },

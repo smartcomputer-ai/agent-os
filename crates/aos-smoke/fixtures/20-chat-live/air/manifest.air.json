@@ -16,24 +16,6 @@
     },
     {
       "name": "demo/LiveState@1"
-    },
-    {
-      "name": "sys/LlmGenerateParams@1"
-    },
-    {
-      "name": "sys/LlmGenerateReceipt@1"
-    },
-    {
-      "name": "sys/LlmToolChoice@1"
-    },
-    {
-      "name": "sys/SecretRef@1"
-    },
-    {
-      "name": "sys/TextOrSecretRef@1"
-    },
-    {
-      "name": "sys/BytesOrSecretRef@1"
     }
   ],
   "modules": [
@@ -53,16 +35,14 @@
     "subscriptions": [
       {
         "event": "demo/LiveEvent@1",
-        "op": "demo/LiveChat@1"
+        "workflow": "demo/LiveChat@1"
       }
     ]
   },
-  "ops": [
-    {
-      "name": "sys/llm.generate@1"
-    },
+  "workflows": [
     {
       "name": "demo/LiveChat@1"
     }
-  ]
+  ],
+  "effects": []
 }

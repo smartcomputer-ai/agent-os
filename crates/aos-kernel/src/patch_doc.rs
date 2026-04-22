@@ -186,7 +186,8 @@ fn enforce_kind(expected: &str, node: &AirNode) -> Result<(), KernelError> {
     let actual = match node {
         AirNode::Defmodule(_) => "defmodule",
         AirNode::Defschema(_) => "defschema",
-        AirNode::Defop(_) => "defop",
+        AirNode::Defworkflow(_) => "defworkflow",
+        AirNode::Defeffect(_) => "defeffect",
         AirNode::Defsecret(_) => "defsecret",
         AirNode::Manifest(_) => "manifest",
     };
@@ -297,7 +298,8 @@ fn refs_for_kind_mut<'a>(
     match kind {
         "defschema" => Ok(&mut manifest.schemas),
         "defmodule" => Ok(&mut manifest.modules),
-        "defop" => Ok(&mut manifest.ops),
+        "defworkflow" => Ok(&mut manifest.workflows),
+        "defeffect" => Ok(&mut manifest.effects),
         "defsecret" => Ok(&mut manifest.secrets),
         _ => Err(KernelError::Manifest(format!(
             "unsupported manifest ref kind: {kind}"
@@ -318,7 +320,8 @@ fn rewrite_manifest_refs(manifest: &mut Manifest, hash_map: &HashMap<String, Has
 
     rewrite(&mut manifest.schemas);
     rewrite(&mut manifest.modules);
-    rewrite(&mut manifest.ops);
+    rewrite(&mut manifest.workflows);
+    rewrite(&mut manifest.effects);
     rewrite(&mut manifest.secrets);
 }
 
@@ -326,7 +329,8 @@ fn node_name(node: &AirNode) -> Option<&str> {
     match node {
         AirNode::Defschema(s) => Some(s.name.as_str()),
         AirNode::Defmodule(m) => Some(m.name.as_str()),
-        AirNode::Defop(o) => Some(o.name.as_str()),
+        AirNode::Defworkflow(w) => Some(w.name.as_str()),
+        AirNode::Defeffect(e) => Some(e.name.as_str()),
         AirNode::Defsecret(s) => Some(s.name.as_str()),
         AirNode::Manifest(_) => None,
     }

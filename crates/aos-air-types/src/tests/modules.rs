@@ -2,7 +2,9 @@ use serde_json::json;
 use std::panic::{self, AssertUnwindSafe};
 
 use super::assert_json_schema;
-use crate::{DefModule, DefOp, ModuleRuntime, OpKind, SchemaRef, WorkflowDeterminism, WorkflowOp};
+use crate::{
+    AirNode, DefEffect, DefModule, DefWorkflow, ModuleRuntime, SchemaRef, WorkflowDeterminism,
+};
 
 #[test]
 fn parses_wasm_module_runtime() {
@@ -59,33 +61,29 @@ fn rejects_wasm_module_with_python_artifact() {
 }
 
 #[test]
-fn parses_workflow_op_with_effect_allowlist() {
-    let op_json = json!({
-        "$kind": "defop",
+fn parses_workflow_with_effect_allowlist() {
+    let workflow_json = json!({
+        "$kind": "defworkflow",
         "name": "com.acme/order.step@1",
-        "op_kind": "workflow",
-        "workflow": {
-            "state": "com.acme/State@1",
-            "event": "com.acme/Event@1",
-            "key_schema": "com.acme/OrderId@1",
-            "effects_emitted": ["sys/timer.set@1"]
-        },
+        "state": "com.acme/State@1",
+        "event": "com.acme/Event@1",
+        "key_schema": "com.acme/OrderId@1",
+        "effects_emitted": ["sys/timer.set@1"],
         "impl": {
             "module": "com.acme/order_wasm@1",
             "entrypoint": "order_step"
         }
     });
-    assert_json_schema(crate::schemas::DEFOP, &op_json);
-    let op: DefOp = serde_json::from_value(op_json).expect("parse op");
-    assert_eq!(op.op_kind, OpKind::Workflow);
-    let workflow = op.workflow.expect("workflow op");
+    assert_json_schema(crate::schemas::DEFWORKFLOW, &workflow_json);
+    let workflow: DefWorkflow = serde_json::from_value(workflow_json).expect("parse workflow");
     assert_eq!(workflow.state.as_str(), "com.acme/State@1");
     assert_eq!(workflow.effects_emitted, vec!["sys/timer.set@1"]);
 }
 
 #[test]
-fn workflow_op_struct_round_trip() {
-    let workflow = WorkflowOp {
+fn workflow_struct_round_trip() {
+    let workflow = DefWorkflow {
+        name: "com.acme/order.step@1".into(),
         context: None,
         state: SchemaRef::new("com.acme/State@1").unwrap(),
         event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -93,22 +91,23 @@ fn workflow_op_struct_round_trip() {
         key_schema: None,
         effects_emitted: Vec::new(),
         determinism: WorkflowDeterminism::Strict,
+        implementation: crate::Impl {
+            module: "com.acme/order_wasm@1".into(),
+            entrypoint: "order_step".into(),
+        },
     };
     let json = serde_json::to_value(&workflow).expect("serialize");
-    let round_trip: WorkflowOp = serde_json::from_value(json).expect("deserialize");
+    let round_trip: DefWorkflow = serde_json::from_value(json).expect("deserialize");
     assert_eq!(round_trip.effects_emitted.len(), 0);
 }
 
 #[test]
-fn workflow_op_requires_effects_emitted() {
-    let op_json = json!({
-        "$kind": "defop",
+fn workflow_requires_effects_emitted() {
+    let workflow_json = json!({
+        "$kind": "defworkflow",
         "name": "com.acme/order.step@1",
-        "op_kind": "workflow",
-        "workflow": {
-            "state": "com.acme/State@1",
-            "event": "com.acme/Event@1"
-        },
+        "state": "com.acme/State@1",
+        "event": "com.acme/Event@1",
         "impl": {
             "module": "com.acme/order_wasm@1",
             "entrypoint": "order_step"
@@ -116,34 +115,49 @@ fn workflow_op_requires_effects_emitted() {
     });
     assert!(
         panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
-            crate::schemas::DEFOP,
-            &op_json
+            crate::schemas::DEFWORKFLOW,
+            &workflow_json
         )))
         .is_err(),
-        "canonical workflow ops must include effects_emitted"
+        "canonical workflows must include effects_emitted"
     );
 }
 
 #[test]
-fn parses_effect_op() {
+fn rejects_defop_root_form() {
     let op_json = json!({
         "$kind": "defop",
-        "name": "com.acme/slack.post@1",
-        "op_kind": "effect",
-        "effect": {
-            "params": "com.acme/SlackPostParams@1",
-            "receipt": "com.acme/SlackPostReceipt@1"
+        "name": "com.acme/order.step@1",
+        "op_kind": "workflow",
+        "workflow": {
+            "state": "com.acme/State@1",
+            "event": "com.acme/Event@1",
+            "effects_emitted": []
         },
+        "impl": {
+            "module": "com.acme/order_wasm@1",
+            "entrypoint": "order_step"
+        }
+    });
+    assert!(
+        serde_json::from_value::<AirNode>(op_json).is_err(),
+        "defop is not a public AIR v2 root form"
+    );
+}
+
+#[test]
+fn parses_effect() {
+    let effect_json = json!({
+        "$kind": "defeffect",
+        "name": "com.acme/slack.post@1",
+        "params": "com.acme/SlackPostParams@1",
+        "receipt": "com.acme/SlackPostReceipt@1",
         "impl": {
             "module": "com.acme/order_bundle@1",
             "entrypoint": "orders.effects:post_to_slack"
         }
     });
-    assert_json_schema(crate::schemas::DEFOP, &op_json);
-    let op: DefOp = serde_json::from_value(op_json).expect("parse op");
-    assert_eq!(op.op_kind, OpKind::Effect);
-    assert_eq!(
-        op.effect.unwrap().params.as_str(),
-        "com.acme/SlackPostParams@1"
-    );
+    assert_json_schema(crate::schemas::DEFEFFECT, &effect_json);
+    let effect: DefEffect = serde_json::from_value(effect_json).expect("parse effect");
+    assert_eq!(effect.params.as_str(), "com.acme/SlackPostParams@1");
 }

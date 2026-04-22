@@ -19,12 +19,6 @@
     },
     {
       "name": "demo/ChainEvent@1"
-    },
-    {
-      "name": "sys/HttpRequestParams@1"
-    },
-    {
-      "name": "sys/HttpRequestReceipt@1"
     }
   ],
   "modules": [
@@ -36,16 +30,14 @@
     "subscriptions": [
       {
         "event": "demo/ChainEvent@1",
-        "op": "demo/ChainComp@1"
+        "workflow": "demo/ChainComp@1"
       }
     ]
   },
-  "ops": [
-    {
-      "name": "sys/http.request@1"
-    },
+  "workflows": [
     {
       "name": "demo/ChainComp@1"
     }
-  ]
+  ],
+  "effects": []
 }

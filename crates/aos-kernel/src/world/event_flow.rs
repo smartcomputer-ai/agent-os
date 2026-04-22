@@ -228,16 +228,12 @@ impl<S: Store + 'static> Kernel<S> {
         }
         let workflow_name = event.workflow.clone();
         let (keyed, wants_context, module_name, entrypoint) = {
-            let op = self.workflow_op(&workflow_name)?;
-            let workflow = op
-                .workflow
-                .as_ref()
-                .expect("workflow_op requires workflow metadata");
+            let workflow = self.workflow_def(&workflow_name)?;
             (
                 workflow.key_schema.is_some(),
                 workflow.context.is_some(),
-                op.implementation.module.clone(),
-                op.implementation.entrypoint.clone(),
+                workflow.implementation.module.clone(),
+                workflow.implementation.entrypoint.clone(),
             )
         };
         let module_def = self
@@ -341,7 +337,7 @@ impl<S: Store + 'static> Kernel<S> {
                 event_hash,
                 manifest_hash: event.stamp.manifest_hash.clone(),
                 workflow: workflow_name.clone(),
-                workflow_op_hash: self.workflow_op_hash(&workflow_name).ok(),
+                workflow_hash: self.workflow_def_hash(&workflow_name).ok(),
                 key: key.clone(),
                 cell_mode: keyed,
             };
@@ -495,37 +491,36 @@ impl<S: Store + 'static> Kernel<S> {
             self.process_domain_event(event)?;
         }
         for (effect_index, effect) in output.effects.iter().enumerate() {
-            let effect_op =
-                self.resolve_declared_effect_op(&workflow_name, effect.kind.as_str())?;
-            let effect_op_name = effect_op.name.clone();
-            let effect_op_hash = self.op_hash(effect_op)?;
-            let executor_module = effect_op.implementation.module.clone();
+            let effect_def = self.resolve_declared_effect(&workflow_name, effect.kind.as_str())?;
+            let effect_name = effect_def.name.clone();
+            let effect_hash = self.effect_hash(effect_def)?;
+            let executor_module = effect_def.implementation.module.clone();
             let executor_module_hash = self
                 .module_defs
                 .get(&executor_module)
                 .map(|module| self.module_hash(module))
                 .transpose()?;
-            let executor_entrypoint = effect_op.implementation.entrypoint.clone();
-            let workflow_op_hash = self.workflow_op_hash(&workflow_name).ok();
+            let executor_entrypoint = effect_def.implementation.entrypoint.clone();
+            let workflow_hash = self.workflow_def_hash(&workflow_name).ok();
             let mut effect_for_enqueue = effect.clone();
             let derived_idempotency = derive_workflow_intent_idempotency_key(
                 workflow_name.as_str(),
-                workflow_op_hash.as_deref(),
+                workflow_hash.as_deref(),
                 key.as_deref(),
-                effect_op_name.as_str(),
-                effect_op_hash.as_str(),
+                effect_name.as_str(),
+                effect_hash.as_str(),
                 effect.idempotency_key.as_deref(),
                 effect_index,
                 emitted_at_seq,
             )
             .map_err(KernelError::WorkflowOutput)?;
             effect_for_enqueue.idempotency_key = Some(derived_idempotency.to_vec());
-            let intent = match self.effect_manager.enqueue_workflow_effect_op_authorized(
+            let intent = match self.effect_manager.enqueue_workflow_effect_with_identity(
                 &workflow_name,
                 &effect_for_enqueue,
-                crate::effects::EffectOpRuntimeIdentity {
-                    op_name: effect_op_name.clone(),
-                    op_hash: Some(effect_op_hash.clone()),
+                crate::effects::EffectRuntimeIdentity {
+                    effect_name: effect_name.clone(),
+                    effect_hash: Some(effect_hash.clone()),
                     executor_module: Some(executor_module.clone()),
                     executor_module_hash: executor_module_hash.clone(),
                     executor_entrypoint: executor_entrypoint.clone(),
@@ -542,7 +537,7 @@ impl<S: Store + 'static> Kernel<S> {
                 &intent,
                 IntentOriginRecord::Workflow {
                     name: workflow_name.clone(),
-                    workflow_op_hash: workflow_op_hash.clone(),
+                    workflow_hash: workflow_hash.clone(),
                     instance_key: key.clone(),
                     issuer_ref: effect.issuer_ref.clone(),
                     emitted_at_seq: Some(emitted_at_seq),
@@ -553,7 +548,7 @@ impl<S: Store + 'static> Kernel<S> {
                 WorkflowEffectContext::new(
                     workflow_name.clone(),
                     key.clone(),
-                    effect_op_name.clone(),
+                    effect_name.clone(),
                     intent.params_cbor.clone(),
                     intent.idempotency_key,
                     effect.issuer_ref.clone(),
@@ -561,10 +556,10 @@ impl<S: Store + 'static> Kernel<S> {
                     emitted_at_seq,
                     self.workflow_wasm_hash(&workflow_name).ok(),
                 )
-                .with_op_identity(
-                    workflow_op_hash,
-                    effect_op_name.clone(),
-                    Some(effect_op_hash),
+                .with_effect_identity(
+                    workflow_hash,
+                    effect_name.clone(),
+                    Some(effect_hash),
                     Some(executor_module),
                     executor_module_hash,
                     Some(executor_entrypoint),
@@ -574,7 +569,7 @@ impl<S: Store + 'static> Kernel<S> {
                 &workflow_name,
                 key.as_deref(),
                 intent.intent_hash,
-                effect_op_name.as_str(),
+                effect_name.as_str(),
                 &intent.params_cbor,
                 emitted_at_seq,
             );
@@ -607,23 +602,23 @@ fn workflow_output_size_bytes(output: &WorkflowOutput) -> usize {
 
 fn derive_workflow_intent_idempotency_key(
     workflow_name: &str,
-    workflow_op_hash: Option<&str>,
+    workflow_hash: Option<&str>,
     workflow_key: Option<&[u8]>,
-    effect_op_name: &str,
-    effect_op_hash: &str,
+    effect_name: &str,
+    effect_hash: &str,
     requested_idempotency_key: Option<&[u8]>,
     effect_index: usize,
     emitted_at_seq: u64,
 ) -> Result<[u8; 32], String> {
     #[derive(Serialize)]
     struct Preimage<'a> {
-        origin_workflow_op: &'a str,
+        origin_workflow: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
-        origin_workflow_op_hash: Option<&'a str>,
+        origin_workflow_hash: Option<&'a str>,
         #[serde(with = "serde_bytes")]
         origin_instance_key: &'a [u8],
-        effect_op: &'a str,
-        effect_op_hash: &'a str,
+        effect: &'a str,
+        effect_hash: &'a str,
         #[serde(with = "serde_bytes")]
         requested_idempotency_key: &'a [u8],
         effect_index: u64,
@@ -631,11 +626,11 @@ fn derive_workflow_intent_idempotency_key(
     }
 
     let preimage = Preimage {
-        origin_workflow_op: workflow_name,
-        origin_workflow_op_hash: workflow_op_hash,
+        origin_workflow: workflow_name,
+        origin_workflow_hash: workflow_hash,
         origin_instance_key: workflow_key.unwrap_or_default(),
-        effect_op: effect_op_name,
-        effect_op_hash,
+        effect: effect_name,
+        effect_hash,
         requested_idempotency_key: requested_idempotency_key.unwrap_or(&[]),
         effect_index: effect_index as u64,
         emitted_at_seq,
@@ -665,7 +660,7 @@ mod tests {
     use crate::world::test_support::{
         dummy_stamp, hash, minimal_kernel_keyed_missing_key_field, minimal_kernel_non_keyed,
         minimal_kernel_with_router, minimal_kernel_with_router_non_keyed, schema_event_record,
-        workflow_module, workflow_op,
+        workflow_def, workflow_module,
     };
     use aos_air_types::{
         CURRENT_AIR_VERSION, DefSchema, HashRef, NamedRef, Routing, RoutingEvent, SchemaRef,
@@ -803,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn workflow_output_rejects_undeclared_effect_op_before_cap_resolution() {
+    fn workflow_output_rejects_undeclared_effect_before_cap_resolution() {
         let mut kernel = minimal_kernel_non_keyed();
         let workflow = "com.acme/Workflow@1".to_string();
 
@@ -819,7 +814,7 @@ mod tests {
             )
             .unwrap_err();
         assert!(
-            matches!(err, KernelError::WorkflowOutput(ref message) if message.contains("undeclared effect op")),
+            matches!(err, KernelError::WorkflowOutput(ref message) if message.contains("undeclared effect")),
             "unexpected error: {err:?}"
         );
     }
@@ -1007,12 +1002,13 @@ mod tests {
     fn workflow_state_traversal_collects_only_typed_hash_refs() {
         let store = crate::MemStore::default();
         let module = workflow_module("com.acme/Workflow@1", 1);
-        let mut op = workflow_op("com.acme/Workflow@1", "com.acme/Workflow@1", None, vec![]);
-        op.workflow.as_mut().unwrap().state = SchemaRef::new("com.acme/StateRefs@1").unwrap();
+        let mut workflow_def =
+            workflow_def("com.acme/Workflow@1", "com.acme/Workflow@1", None, vec![]);
+        workflow_def.state = SchemaRef::new("com.acme/StateRefs@1").unwrap();
         let mut modules = HashMap::new();
         modules.insert(module.name.clone(), module);
-        let mut ops = HashMap::new();
-        ops.insert(op.name.clone(), op);
+        let mut workflows = HashMap::new();
+        workflows.insert(workflow_def.name.clone(), workflow_def);
         let mut schemas = HashMap::new();
         schemas.insert(
             "com.acme/StateRefs@1".into(),
@@ -1057,15 +1053,17 @@ mod tests {
                 name: "com.acme/Workflow@1".into(),
                 hash: HashRef::new(hash(1)).unwrap(),
             }],
-            ops: vec![NamedRef {
+            ops: vec![],
+            workflows: vec![NamedRef {
                 name: "com.acme/Workflow@1".into(),
                 hash: HashRef::new(hash(2)).unwrap(),
             }],
+            effects: Vec::new(),
             secrets: vec![],
             routing: Some(Routing {
                 subscriptions: vec![RoutingEvent {
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                    op: "com.acme/Workflow@1".to_string(),
+                    workflow: "com.acme/Workflow@1".to_string(),
                     key_field: None,
                 }],
             }),
@@ -1074,9 +1072,10 @@ mod tests {
             manifest,
             secrets: vec![],
             modules,
-            ops,
+            workflows,
+            effects: HashMap::new(),
             schemas,
-            effect_catalog: EffectCatalog::from_defs(Vec::new()),
+            effect_catalog: EffectCatalog::new(),
         };
         let mut kernel = Kernel::from_loaded_manifest(
             Arc::new(store),

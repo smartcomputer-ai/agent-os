@@ -143,9 +143,9 @@ pub fn receipts_to_vecdeque(
 pub struct EffectIntentSnapshot {
     pub intent_hash: [u8; 32],
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub effect_op: String,
+    pub effect: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_op_hash: Option<String>,
+    pub effect_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_module: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,8 +162,8 @@ impl EffectIntentSnapshot {
     pub fn from_intent(intent: &EffectIntent) -> Self {
         Self {
             intent_hash: intent.intent_hash,
-            effect_op: intent.effect_op.clone(),
-            effect_op_hash: intent.effect_op_hash.clone(),
+            effect: intent.effect.clone(),
+            effect_hash: intent.effect_hash.clone(),
             executor_module: intent.executor_module.clone(),
             executor_module_hash: intent.executor_module_hash.clone(),
             executor_entrypoint: intent.executor_entrypoint.clone(),
@@ -174,8 +174,8 @@ impl EffectIntentSnapshot {
 
     pub fn into_intent(self) -> EffectIntent {
         EffectIntent {
-            effect_op: self.effect_op,
-            effect_op_hash: self.effect_op_hash,
+            effect: self.effect,
+            effect_hash: self.effect_hash,
             executor_module: self.executor_module,
             executor_module_hash: self.executor_module_hash,
             executor_entrypoint: self.executor_entrypoint,
@@ -191,10 +191,10 @@ pub struct WorkflowReceiptSnapshot {
     pub intent_hash: [u8; 32],
     pub origin_module_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_workflow_op_hash: Option<String>,
-    pub effect_op: String,
+    pub origin_workflow_hash: Option<String>,
+    pub effect: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_op_hash: Option<String>,
+    pub effect_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_module: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -240,7 +240,7 @@ pub struct WorkflowInflightIntentSnapshot {
     )]
     pub origin_instance_key: Option<Vec<u8>>,
     #[serde(default)]
-    pub effect_op: String,
+    pub effect: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_hash: Option<String>,
     pub emitted_at_seq: u64,
@@ -266,9 +266,9 @@ impl WorkflowReceiptSnapshot {
         Self {
             intent_hash,
             origin_module_id: ctx.origin_module_id.clone(),
-            origin_workflow_op_hash: ctx.origin_workflow_op_hash.clone(),
-            effect_op: ctx.effect_op.clone(),
-            effect_op_hash: ctx.effect_op_hash.clone(),
+            origin_workflow_hash: ctx.origin_workflow_hash.clone(),
+            effect: ctx.effect.clone(),
+            effect_hash: ctx.effect_hash.clone(),
             executor_module: ctx.executor_module.clone(),
             executor_module_hash: ctx.executor_module_hash.clone(),
             executor_entrypoint: ctx.executor_entrypoint.clone(),
@@ -285,7 +285,7 @@ impl WorkflowReceiptSnapshot {
         WorkflowEffectContext::new(
             self.origin_module_id,
             self.origin_instance_key,
-            self.effect_op.clone(),
+            self.effect.clone(),
             self.params_cbor,
             self.idempotency_key,
             self.issuer_ref,
@@ -293,10 +293,10 @@ impl WorkflowReceiptSnapshot {
             self.emitted_at_seq,
             self.module_version,
         )
-        .with_op_identity(
-            self.origin_workflow_op_hash,
-            self.effect_op,
-            self.effect_op_hash,
+        .with_effect_identity(
+            self.origin_workflow_hash,
+            self.effect,
+            self.effect_hash,
             self.executor_module,
             self.executor_module_hash,
             self.executor_entrypoint,
@@ -361,7 +361,7 @@ mod tests {
                     intent_id: [9u8; 32],
                     origin_module_id: "com.acme/Workflow@1".into(),
                     origin_instance_key: None,
-                    effect_op: "sys/http.request@1".into(),
+                    effect: "sys/http.request@1".into(),
                     params_hash: None,
                     emitted_at_seq: 7,
                     last_stream_seq: 4,

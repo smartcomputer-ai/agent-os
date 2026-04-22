@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
-use aos_air_types::{AirNode, DefSecret, Manifest, OpKind};
+use aos_air_types::{DefSecret, Manifest};
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effect_types::{
     GovApplyReceipt, GovApproveParams, GovApproveReceipt, GovDecision, GovPatchInput,
@@ -158,7 +158,7 @@ struct WorldStateArgs {
 
 #[derive(Subcommand, Debug)]
 enum WorldStateCommand {
-    /// List workflow ops that expose state in the current world.
+    /// List workflows that expose state in the current world.
     Ls,
     /// Read one workflow state value by key.
     Get(WorldStateGetArgs),
@@ -877,24 +877,12 @@ async fn handle_state(
                     .await?,
             )
             .context("decode manifest response")?;
-            let mut workflows = Vec::new();
-            for op in manifest.manifest.ops {
-                let kind = encode_path_segment("op");
-                let name = encode_path_segment(op.name.as_str());
-                let def: DefEnvelope = serde_json::from_value(
-                    client
-                        .get_json(&format!("/v1/worlds/{world}/defs/{kind}/{name}"), &[])
-                        .await?,
-                )
-                .with_context(|| format!("decode op def {}", op.name.as_str()))?;
-                if matches!(
-                    def.def,
-                    AirNode::Defop(ref op_def)
-                        if matches!(op_def.op_kind, OpKind::Workflow)
-                ) {
-                    workflows.push(op.name.to_string());
-                }
-            }
+            let mut workflows = manifest
+                .manifest
+                .workflows
+                .into_iter()
+                .map(|workflow| workflow.name.to_string())
+                .collect::<Vec<_>>();
             workflows.sort();
             print_success(output, json!(workflows), None, vec![])
         }
@@ -1531,10 +1519,10 @@ fn route_summaries(set_routes: &Value) -> Vec<Value> {
         .flatten()
         .filter_map(|route| {
             let event = route.get("event").and_then(Value::as_str)?;
-            let op = route.get("op").and_then(Value::as_str)?;
+            let workflow = route.get("workflow").and_then(Value::as_str)?;
             let mut summary = serde_json::Map::new();
             summary.insert("event".into(), Value::String(event.to_string()));
-            summary.insert("op".into(), Value::String(op.to_string()));
+            summary.insert("workflow".into(), Value::String(workflow.to_string()));
             if let Some(key_field) = route.get("key_field").and_then(Value::as_str) {
                 summary.insert("key_field".into(), Value::String(key_field.to_string()));
             }
@@ -1859,11 +1847,6 @@ struct ManifestEnvelope {
     manifest: Manifest,
 }
 
-#[derive(Debug, Deserialize)]
-struct DefEnvelope {
-    def: AirNode,
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -2011,6 +1994,8 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: vec![
                 NamedRef {
                     name: "llm/openai_api@1".into(),
@@ -2092,26 +2077,23 @@ mod tests {
     }
 
     #[test]
-    fn patch_document_summary_reports_defop_changes_and_route_targets() {
+    fn patch_document_summary_reports_defworkflow_changes_and_route_targets() {
         let patch = json!({
             "version": "2",
             "base_manifest_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "patches": [
                 {
                     "add_def": {
-                        "kind": "defop",
+                        "kind": "defworkflow",
                         "node": {
-                            "$kind": "defop",
+                            "$kind": "defworkflow",
                             "name": "demo/workflow@1",
-                            "op_kind": "workflow",
-                            "workflow": {
-                                "state": "demo/State@1",
-                                "event": "demo/Event@1",
-                                "effects_emitted": []
-                            },
+                            "state": "demo/State@1",
+                            "event": "demo/Event@1",
+                            "effects_emitted": [],
                             "impl": {
                                 "module": "demo/workflow_wasm@1",
-                                "entrypoint": "workflow:handle"
+                                "entrypoint": "handle"
                             }
                         }
                     }
@@ -2122,7 +2104,7 @@ mod tests {
                         "subscriptions": [
                             {
                                 "event": "demo/Event@1",
-                                "op": "demo/workflow@1",
+                                "workflow": "demo/workflow@1",
                                 "key_field": "tenant_id"
                             }
                         ]
@@ -2143,14 +2125,14 @@ mod tests {
                 .and_then(|changes| changes.first())
                 .and_then(|change| change.get("kind"))
                 .and_then(Value::as_str),
-            Some("defop")
+            Some("defworkflow")
         );
         assert_eq!(
             summary
                 .get("routes")
                 .and_then(Value::as_array)
                 .and_then(|routes| routes.first())
-                .and_then(|route| route.get("op"))
+                .and_then(|route| route.get("workflow"))
                 .and_then(Value::as_str),
             Some("demo/workflow@1")
         );

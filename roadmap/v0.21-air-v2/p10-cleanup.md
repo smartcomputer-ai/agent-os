@@ -25,8 +25,9 @@ runtime identity, and repo fixtures to AIR v2.
 
 ## My notes:
 - [x] Remove `effect_kind` / public `EffectKind`, receipt `adapter_id`, and workflow `cap_slot`
-- Consider adding clear abstractions for 1) calling workflows, 2) calling effects (already exists, I think)
 - hash sentinell value should be optional 
 `"hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"`
 as it was for wasm_hash in old module 
 - sys schemas, modules, and ops should be optional in manifest
+
+- Consider adding clear abstractions for 1) calling workflows, 2) calling effects (already exists, I think)

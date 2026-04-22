@@ -13,15 +13,6 @@
     },
     {
       "name": "demo/TimerEvent@1"
-    },
-    {
-      "name": "sys/TimerSetParams@1"
-    },
-    {
-      "name": "sys/TimerSetReceipt@1"
-    },
-    {
-      "name": "sys/TimerFired@1"
     }
   ],
   "modules": [
@@ -33,16 +24,14 @@
     "subscriptions": [
       {
         "event": "demo/TimerEvent@1",
-        "op": "demo/TimerSM@1"
+        "workflow": "demo/TimerSM@1"
       }
     ]
   },
-  "ops": [
-    {
-      "name": "sys/timer.set@1"
-    },
+  "workflows": [
     {
       "name": "demo/TimerSM@1"
     }
-  ]
+  ],
+  "effects": []
 }

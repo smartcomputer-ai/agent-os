@@ -26,7 +26,8 @@ pub struct Catalog {
 enum NodeKind {
     Schema,
     Module,
-    Op,
+    Workflow,
+    Effect,
     Secret,
 }
 
@@ -35,7 +36,8 @@ impl NodeKind {
         match self {
             NodeKind::Schema => "defschema",
             NodeKind::Module => "defmodule",
-            NodeKind::Op => "defop",
+            NodeKind::Workflow => "defworkflow",
+            NodeKind::Effect => "defeffect",
             NodeKind::Secret => "defsecret",
         }
     }
@@ -45,7 +47,8 @@ impl NodeKind {
             (self, node),
             (NodeKind::Schema, AirNode::Defschema(_))
                 | (NodeKind::Module, AirNode::Defmodule(_))
-                | (NodeKind::Op, AirNode::Defop(_))
+                | (NodeKind::Workflow, AirNode::Defworkflow(_))
+                | (NodeKind::Effect, AirNode::Defeffect(_))
                 | (NodeKind::Secret, AirNode::Defsecret(_))
         )
     }
@@ -73,7 +76,8 @@ pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResul
     let mut nodes = HashMap::new();
     load_refs(store, &manifest.schemas, NodeKind::Schema, &mut nodes)?;
     load_refs(store, &manifest.modules, NodeKind::Module, &mut nodes)?;
-    load_refs(store, &manifest.ops, NodeKind::Op, &mut nodes)?;
+    load_refs(store, &manifest.workflows, NodeKind::Workflow, &mut nodes)?;
+    load_refs(store, &manifest.effects, NodeKind::Effect, &mut nodes)?;
     load_refs(store, &manifest.secrets, NodeKind::Secret, &mut nodes)?;
 
     let resolved_secrets = resolve_secrets(&manifest, &nodes)?;
@@ -115,7 +119,7 @@ fn load_refs<S: Store>(
     for reference in refs {
         if is_sys_name(reference.name.as_str()) {
             match kind {
-                NodeKind::Schema | NodeKind::Op | NodeKind::Module => {}
+                NodeKind::Schema | NodeKind::Workflow | NodeKind::Effect | NodeKind::Module => {}
                 _ => {
                     return Err(StoreError::ReservedSysName {
                         kind: kind.label(),
@@ -164,15 +168,29 @@ fn load_refs<S: Store>(
             continue;
         }
 
-        if kind == NodeKind::Op
-            && let Some(builtin) = builtins::find_builtin_op(reference.name.as_str())
+        if kind == NodeKind::Workflow
+            && let Some(builtin) = builtins::find_builtin_workflow(reference.name.as_str())
         {
-            ensure_builtin_op_hash(reference, builtin)?;
+            ensure_builtin_workflow_hash(reference, builtin)?;
             nodes.insert(
                 reference.name.clone(),
                 CatalogEntry {
                     hash: builtin.hash,
-                    node: AirNode::Defop(builtin.op.clone()),
+                    node: AirNode::Defworkflow(builtin.workflow.clone()),
+                },
+            );
+            continue;
+        }
+
+        if kind == NodeKind::Effect
+            && let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str())
+        {
+            ensure_builtin_effect_hash(reference, builtin)?;
+            nodes.insert(
+                reference.name.clone(),
+                CatalogEntry {
+                    hash: builtin.hash,
+                    node: AirNode::Defeffect(builtin.effect.clone()),
                 },
             );
             continue;
@@ -245,7 +263,25 @@ fn ensure_builtin_hash(reference: &NamedRef, builtin: &builtins::BuiltinSchema) 
     Ok(())
 }
 
-fn ensure_builtin_op_hash(reference: &NamedRef, builtin: &builtins::BuiltinOp) -> StoreResult<()> {
+fn ensure_builtin_workflow_hash(
+    reference: &NamedRef,
+    builtin: &builtins::BuiltinWorkflow,
+) -> StoreResult<()> {
+    let actual = parse_hash_str(reference.hash.as_str())?;
+    if actual != builtin.hash {
+        return Err(StoreError::HashMismatch {
+            kind: EntryKind::Node,
+            expected: builtin.hash,
+            actual,
+        });
+    }
+    Ok(())
+}
+
+fn ensure_builtin_effect_hash(
+    reference: &NamedRef,
+    builtin: &builtins::BuiltinEffect,
+) -> StoreResult<()> {
     let actual = parse_hash_str(reference.hash.as_str())?;
     if actual != builtin.hash {
         return Err(StoreError::HashMismatch {
@@ -379,26 +415,6 @@ mod tests {
         DefSchema, EmptyObject, HashRef, TypeExpr, TypePrimitive, TypePrimitiveText,
     };
 
-    fn builtin_schema_refs() -> Vec<NamedRef> {
-        builtins::builtin_schemas()
-            .iter()
-            .map(|b| NamedRef {
-                name: b.schema.name.clone(),
-                hash: b.hash_ref.clone(),
-            })
-            .collect()
-    }
-
-    fn builtin_op_refs() -> Vec<NamedRef> {
-        builtins::builtin_ops()
-            .iter()
-            .map(|b| NamedRef {
-                name: b.op.name.clone(),
-                hash: b.hash_ref.clone(),
-            })
-            .collect()
-    }
-
     #[test]
     fn load_manifest_success_without_plans() {
         let store = MemStore::default();
@@ -413,15 +429,15 @@ mod tests {
         let manifest = Manifest {
             air_version: CURRENT_AIR_VERSION.to_string(),
             schemas: {
-                let mut refs = builtin_schema_refs();
-                refs.push(NamedRef {
+                vec![NamedRef {
                     name: schema.name.clone(),
                     hash: HashRef::new(schema_hash.to_hex()).unwrap(),
-                });
-                refs
+                }]
             },
             modules: vec![],
-            ops: builtin_op_refs(),
+            ops: vec![],
+            workflows: vec![],
+            effects: vec![],
             secrets: vec![],
             routing: None,
         };

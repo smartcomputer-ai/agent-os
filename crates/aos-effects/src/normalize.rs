@@ -20,28 +20,13 @@ pub enum NormalizeError {
 pub fn normalize_effect_params(
     catalog: &EffectCatalog,
     schemas: &SchemaIndex,
-    effect_op: &str,
+    effect: &str,
     params_cbor: &[u8],
 ) -> Result<Vec<u8>, NormalizeError> {
     let schema_name = catalog
-        .params_schema(effect_op)
+        .params_schema(effect)
         .map(|schema| schema.as_str())
-        .ok_or_else(|| NormalizeError::UnknownEffect(effect_op.to_string()))?;
-    let normalized =
-        normalize_cbor_by_name(schemas, schema_name, params_cbor).map_err(map_error)?;
-    Ok(normalized.bytes)
-}
-
-pub fn normalize_effect_op_params(
-    catalog: &EffectCatalog,
-    schemas: &SchemaIndex,
-    effect_op: &str,
-    params_cbor: &[u8],
-) -> Result<Vec<u8>, NormalizeError> {
-    let schema_name = catalog
-        .params_schema(effect_op)
-        .map(|schema| schema.as_str())
-        .ok_or_else(|| NormalizeError::UnknownEffect(effect_op.to_string()))?;
+        .ok_or_else(|| NormalizeError::UnknownEffect(effect.to_string()))?;
     let normalized =
         normalize_cbor_by_name(schemas, schema_name, params_cbor).map_err(map_error)?;
     Ok(normalized.bytes)
@@ -59,7 +44,9 @@ fn map_error(err: ValueNormalizeError) -> NormalizeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_air_types::{builtins::builtin_ops, builtins::builtin_schemas, catalog::EffectCatalog};
+    use aos_air_types::{
+        builtins::builtin_effects, builtins::builtin_schemas, catalog::EffectCatalog,
+    };
     use serde_cbor::Value as CborValue;
     use std::collections::BTreeMap;
     use std::collections::HashMap;
@@ -83,7 +70,8 @@ mod tests {
     }
 
     fn catalog_and_schemas() -> (EffectCatalog, SchemaIndex) {
-        let catalog = EffectCatalog::from_defs(builtin_ops().iter().map(|e| e.op.clone()));
+        let catalog =
+            EffectCatalog::from_effects(builtin_effects().iter().map(|e| e.effect.clone()));
         let mut map = HashMap::new();
         for builtin in builtin_schemas() {
             map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
@@ -132,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_effect_op_returns_error() {
+    fn unknown_effect_returns_error() {
         let params = serde_cbor::to_vec(&CborValue::Map(BTreeMap::new())).unwrap();
         let (catalog, schemas) = catalog_and_schemas();
         let err =

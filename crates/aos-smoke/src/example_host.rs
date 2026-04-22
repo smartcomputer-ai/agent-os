@@ -452,7 +452,7 @@ impl ExampleHost {
                 continue;
             }
 
-            if intent.effect_op.as_str() == effect_ops::TIMER_SET {
+            if intent.effect.as_str() == effect_ops::TIMER_SET {
                 let params: TimerSetParams =
                     serde_cbor::from_slice(&intent.params_cbor).context("decode timer.set")?;
                 self.pending_timers.push(PendingTimer {
@@ -543,7 +543,7 @@ impl ExampleHost {
         self.effect_runtime
             .as_ref()
             .map(|runtime| runtime.classify_intent(intent))
-            .unwrap_or_else(|| aos_node::classify_effect_op_identity(intent))
+            .unwrap_or_else(|| aos_node::classify_effect_identity(intent))
     }
 
     fn dispatch_external_intent(&mut self, intent: aos_effects::EffectIntent) -> Result<usize> {
@@ -669,9 +669,9 @@ fn patch_module_hash(
     wasm_hash: &HashRef,
 ) -> Result<()> {
     let module_name = loaded
-        .ops
+        .workflows
         .get(workflow_name)
-        .map(|op| op.implementation.module.as_str())
+        .map(|workflow| workflow.implementation.module.as_str())
         .unwrap_or(workflow_name)
         .to_string();
     let patched = patch_modules(loaded, wasm_hash, |name, _| name == module_name);

@@ -42,7 +42,7 @@ fn workflow_orchestration_completes_after_receipt() {
     assert_eq!(effects.len(), 1);
     let effect = effects.remove(0);
     assert_eq!(
-        effect.effect_op.as_str(),
+        effect.effect.as_str(),
         aos_effects::effect_ops::HTTP_REQUEST
     );
 
@@ -152,7 +152,7 @@ fn workflow_effects_share_outbox_without_interference() {
 
     let effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 2);
-    let kinds: Vec<_> = effects.iter().map(|e| e.effect_op.as_str()).collect();
+    let kinds: Vec<_> = effects.iter().map(|e| e.effect.as_str()).collect();
     assert!(kinds.contains(&aos_effects::effect_ops::TIMER_SET));
     assert!(kinds.contains(&aos_effects::effect_ops::HTTP_REQUEST));
 
@@ -330,7 +330,7 @@ fn blob_put_receipt_routes_event_to_handler() {
     let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let intent = effects.remove(0);
-    assert_eq!(intent.effect_op.as_str(), aos_effects::effect_ops::BLOB_PUT);
+    assert_eq!(intent.effect.as_str(), aos_effects::effect_ops::BLOB_PUT);
 
     let receipt = EffectReceipt {
         intent_hash: intent.intent_hash,
@@ -448,7 +448,7 @@ fn blob_get_receipt_routes_event_to_handler() {
     let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let intent = effects.remove(0);
-    assert_eq!(intent.effect_op.as_str(), aos_effects::effect_ops::BLOB_GET);
+    assert_eq!(intent.effect.as_str(), aos_effects::effect_ops::BLOB_GET);
 
     let receipt = EffectReceipt {
         intent_hash: intent.intent_hash,

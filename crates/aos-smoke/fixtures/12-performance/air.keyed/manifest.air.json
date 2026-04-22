@@ -22,13 +22,14 @@
       {
         "event": "demo/PerfEvent@1",
         "key_field": "cell",
-        "op": "demo/PerfCounter@1"
+        "workflow": "demo/PerfCounter@1"
       }
     ]
   },
-  "ops": [
+  "workflows": [
     {
       "name": "demo/PerfCounter@1"
     }
-  ]
+  ],
+  "effects": []
 }

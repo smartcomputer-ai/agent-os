@@ -28,7 +28,7 @@ pub struct PendingWorkflowReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_instance_key_b64: Option<String>,
     pub intent_hash: String,
-    pub effect_op: String,
+    pub effect: String,
     pub emitted_at_seq: u64,
 }
 

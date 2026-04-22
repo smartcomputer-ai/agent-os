@@ -156,7 +156,7 @@ pub(crate) struct GovPendingWorkflowReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_instance_key_b64: Option<String>,
     pub intent_hash: HashRef,
-    pub effect_op: String,
+    pub effect: String,
     pub emitted_at_seq: u64,
 }
 
@@ -314,10 +314,10 @@ impl<S: Store> EffectParamPreprocessor for GovernanceParamPreprocessor<S> {
     fn preprocess(
         &self,
         _source: &aos_effects::EffectSource,
-        effect_op: &str,
+        effect: &str,
         params_cbor: Vec<u8>,
     ) -> Result<Vec<u8>, KernelError> {
-        if effect_op != "sys/governance.propose@1" {
+        if effect != "sys/governance.propose@1" {
             return Ok(params_cbor);
         }
         let raw: GovProposeParamsRaw = serde_cbor::from_slice(&params_cbor)
@@ -531,9 +531,15 @@ fn build_patch_summary(
         &mut def_changes,
     );
     refs_changed |= push_named_ref_changes(
-        "defop",
-        &base_manifest.ops,
-        &patch.manifest.ops,
+        "defworkflow",
+        &base_manifest.workflows,
+        &patch.manifest.workflows,
+        &mut def_changes,
+    );
+    refs_changed |= push_named_ref_changes(
+        "defeffect",
+        &base_manifest.effects,
+        &patch.manifest.effects,
         &mut def_changes,
     );
     refs_changed |= push_named_ref_changes(
@@ -671,21 +677,23 @@ mod tests {
             schemas: Vec::new(),
             modules: Vec::new(),
             ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         }
     }
 
     #[test]
-    fn patch_summary_reports_defop_changes_and_routing_subscription_section() {
+    fn patch_summary_reports_defworkflow_changes_and_routing_subscription_section() {
         let base = empty_manifest();
         let patch = ManifestPatch {
             manifest: Manifest {
-                ops: vec![named_ref("demo/workflow@1", '1')],
+                workflows: vec![named_ref("demo/workflow@1", '1')],
                 routing: Some(Routing {
                     subscriptions: vec![RoutingSubscription {
                         event: SchemaRef::new("demo/Event@1").expect("schema ref"),
-                        op: "demo/workflow@1".into(),
+                        workflow: "demo/workflow@1".into(),
                         key_field: Some("tenant_id".into()),
                     }],
                 }),
@@ -706,7 +714,7 @@ mod tests {
             ]
         );
         assert_eq!(summary.def_changes.len(), 1);
-        assert_eq!(summary.def_changes[0].kind, "defop");
+        assert_eq!(summary.def_changes[0].kind, "defworkflow");
         assert_eq!(summary.def_changes[0].name, "demo/workflow@1");
         assert_eq!(summary.def_changes[0].action, GovChangeAction::Added);
         assert_eq!(

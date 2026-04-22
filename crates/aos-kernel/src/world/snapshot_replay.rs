@@ -40,7 +40,7 @@ impl<S: Store + 'static> Kernel<S> {
                         intent_id: *intent_id,
                         origin_module_id: meta.origin_module_id.clone(),
                         origin_instance_key: meta.origin_instance_key.clone(),
-                        effect_op: meta.effect_op.clone(),
+                        effect: meta.effect.clone(),
                         params_hash: meta.params_hash.clone(),
                         emitted_at_seq: meta.emitted_at_seq,
                         last_stream_seq: meta.last_stream_seq,
@@ -420,10 +420,10 @@ impl<S: Store + 'static> Kernel<S> {
                 let frame = aos_effects::EffectStreamFrame {
                     intent_hash: record.intent_hash,
                     origin_module_id: record.origin_module_id,
-                    origin_workflow_op_hash: record.origin_workflow_op_hash,
+                    origin_workflow_hash: record.origin_workflow_hash,
                     origin_instance_key: record.origin_instance_key,
-                    effect_op: record.effect_op,
-                    effect_op_hash: record.effect_op_hash,
+                    effect: record.effect,
+                    effect_hash: record.effect_hash,
                     executor_module: record.executor_module,
                     executor_module_hash: record.executor_module_hash,
                     executor_entrypoint: record.executor_entrypoint,
@@ -781,7 +781,7 @@ impl<S: Store + 'static> Kernel<S> {
                             WorkflowInflightIntentMeta {
                                 origin_module_id: intent.origin_module_id,
                                 origin_instance_key: intent.origin_instance_key,
-                                effect_op: intent.effect_op,
+                                effect: intent.effect,
                                 params_hash: intent.params_hash,
                                 emitted_at_seq: intent.emitted_at_seq,
                                 last_stream_seq: intent.last_stream_seq,
@@ -953,7 +953,7 @@ mod tests {
     use crate::receipts::WorkflowEffectContext;
     use crate::world::test_support::{
         append_record, empty_manifest, event_record, kernel_with_store_and_journal,
-        loaded_manifest_with_schema, minimal_kernel_non_keyed, workflow_module, workflow_op,
+        loaded_manifest_with_schema, minimal_kernel_non_keyed, workflow_def, workflow_module,
         write_manifest,
     };
     use aos_air_types::{SchemaRef, catalog::EffectCatalog};
@@ -965,15 +965,12 @@ mod tests {
 
     fn install_stream_module(kernel: &mut Kernel<MemStore>, module_name: &str) {
         let module = workflow_module(module_name, 1);
-        let mut op = workflow_op(module_name, module_name, None, vec![]);
-        if let Some(workflow) = op.workflow.as_mut() {
-            workflow.state = SchemaRef::new("sys/PendingEffect@1").unwrap();
-            workflow.event =
-                SchemaRef::new(crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA).unwrap();
-            workflow.context = None;
-        }
+        let mut workflow = workflow_def(module_name, module_name, None, vec![]);
+        workflow.state = SchemaRef::new("sys/PendingEffect@1").unwrap();
+        workflow.event = SchemaRef::new(crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA).unwrap();
+        workflow.context = None;
         kernel.module_defs.insert(module_name.into(), module);
-        kernel.op_defs.insert(module_name.into(), op);
+        kernel.workflow_defs.insert(module_name.into(), workflow);
     }
 
     #[test]
@@ -1253,9 +1250,10 @@ mod tests {
             manifest: kernel.manifest.clone(),
             secrets: kernel.secrets.clone(),
             modules: kernel.module_defs.clone(),
-            ops: kernel.op_defs.clone(),
+            workflows: kernel.workflow_defs.clone(),
+            effects: HashMap::new(),
             schemas: kernel.schema_defs.clone(),
-            effect_catalog: EffectCatalog::from_defs(kernel.op_defs.values().cloned()),
+            effect_catalog: EffectCatalog::from_effects(kernel.effect_defs.values().cloned()),
         };
         let entries = kernel.dump_journal().expect("journal entries");
         let reopened = Kernel::from_loaded_manifest_with_config(
@@ -1338,7 +1336,7 @@ mod tests {
                     intent_id: [9u8; 32],
                     origin_module_id: "com.acme/Workflow@1".into(),
                     origin_instance_key: None,
-                    effect_op: "sys/http.request@1".into(),
+                    effect: "sys/http.request@1".into(),
                     params_hash: Some(
                         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                             .into(),
@@ -1390,7 +1388,7 @@ mod tests {
             5,
             None,
         )
-        .with_op_identity(
+        .with_effect_identity(
             None,
             "sys/http.request@1".into(),
             None,
@@ -1411,7 +1409,7 @@ mod tests {
                     intent_id: intent_hash,
                     origin_module_id: "com.acme/Workflow@1".into(),
                     origin_instance_key: None,
-                    effect_op: "sys/http.request@1".into(),
+                    effect: "sys/http.request@1".into(),
                     params_hash: Some(Hash::of_bytes(&context.params_cbor).to_hex()),
                     emitted_at_seq: 5,
                     last_stream_seq: 2,
@@ -1432,10 +1430,10 @@ mod tests {
         let duplicate = EffectStreamFrame {
             intent_hash,
             origin_module_id: "com.acme/Workflow@1".into(),
-            origin_workflow_op_hash: None,
+            origin_workflow_hash: None,
             origin_instance_key: None,
-            effect_op: "sys/http.request@1".into(),
-            effect_op_hash: None,
+            effect: "sys/http.request@1".into(),
+            effect_hash: None,
             executor_module: None,
             executor_module_hash: None,
             executor_entrypoint: None,
@@ -1454,10 +1452,10 @@ mod tests {
         let next = EffectStreamFrame {
             intent_hash,
             origin_module_id: "com.acme/Workflow@1".into(),
-            origin_workflow_op_hash: None,
+            origin_workflow_hash: None,
             origin_instance_key: None,
-            effect_op: "sys/http.request@1".into(),
-            effect_op_hash: None,
+            effect: "sys/http.request@1".into(),
+            effect_hash: None,
             executor_module: None,
             executor_module_hash: None,
             executor_entrypoint: None,
@@ -1504,7 +1502,7 @@ mod tests {
                     intent_id: intent_hash,
                     origin_module_id: "com.acme/Workflow@1".into(),
                     origin_instance_key: None,
-                    effect_op: "sys/http.request@1".into(),
+                    effect: "sys/http.request@1".into(),
                     params_hash: Some(Hash::of_bytes(&context.params_cbor).to_hex()),
                     emitted_at_seq: 5,
                     last_stream_seq: 0,
@@ -1669,8 +1667,8 @@ mod tests {
 
         let intent = EffectIntentRecord {
             intent_hash: [1u8; 32],
-            effect_op: "http.request".into(),
-            effect_op_hash: None,
+            effect: "http.request".into(),
+            effect_hash: None,
             executor_module: None,
             executor_module_hash: None,
             executor_entrypoint: Some("http.request".into()),
@@ -1681,7 +1679,7 @@ mod tests {
             idempotency_key: [2u8; 32],
             origin: IntentOriginRecord::Workflow {
                 name: "example/Workflow@1".into(),
-                workflow_op_hash: None,
+                workflow_hash: None,
                 instance_key: None,
                 issuer_ref: None,
                 emitted_at_seq: Some(0),

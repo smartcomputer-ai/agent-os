@@ -4,7 +4,7 @@ use crate::Store;
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
-    AirNode, DefModule, DefOp, DefSchema, DefSecret, Manifest, Name, builtins,
+    AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, Manifest, Name, builtins,
     catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
@@ -144,7 +144,8 @@ impl ManifestPatch {
     pub fn to_loaded_manifest<S: Store>(&self, store: &S) -> Result<LoadedManifest, KernelError> {
         let manifest = self.manifest.clone();
         let mut modules: HashMap<Name, DefModule> = HashMap::new();
-        let mut ops: HashMap<Name, DefOp> = HashMap::new();
+        let mut workflows: HashMap<Name, DefWorkflow> = HashMap::new();
+        let mut effects: HashMap<Name, DefEffect> = HashMap::new();
         let mut schemas: HashMap<Name, DefSchema> = HashMap::new();
         let mut secrets: Vec<DefSecret> = Vec::new();
 
@@ -153,8 +154,11 @@ impl ManifestPatch {
                 AirNode::Defmodule(m) => {
                     modules.insert(m.name.clone(), m.clone());
                 }
-                AirNode::Defop(o) => {
-                    ops.insert(o.name.clone(), o.clone());
+                AirNode::Defworkflow(workflow) => {
+                    workflows.insert(workflow.name.clone(), workflow.clone());
+                }
+                AirNode::Defeffect(effect) => {
+                    effects.insert(effect.name.clone(), effect.clone());
                 }
                 AirNode::Defschema(s) => {
                     schemas.insert(s.name.clone(), s.clone());
@@ -167,34 +171,26 @@ impl ManifestPatch {
             }
         }
 
-        // Ensure built-ins referenced by the manifest are present in catalogs.
+        // Built-in sys/* definitions are ambient in every manifest.
         for builtin in builtins::builtin_schemas() {
-            if manifest
-                .schemas
-                .iter()
-                .any(|nr| nr.name == builtin.schema.name)
-            {
-                schemas
-                    .entry(builtin.schema.name.clone())
-                    .or_insert(builtin.schema.clone());
-            }
+            schemas
+                .entry(builtin.schema.name.clone())
+                .or_insert_with(|| builtin.schema.clone());
         }
-        for builtin in builtins::builtin_ops() {
-            if manifest.ops.iter().any(|nr| nr.name == builtin.op.name) {
-                ops.entry(builtin.op.name.clone())
-                    .or_insert(builtin.op.clone());
-            }
+        for builtin in builtins::builtin_workflows() {
+            workflows
+                .entry(builtin.workflow.name.clone())
+                .or_insert_with(|| builtin.workflow.clone());
+        }
+        for builtin in builtins::builtin_effects() {
+            effects
+                .entry(builtin.effect.name.clone())
+                .or_insert_with(|| builtin.effect.clone());
         }
         for builtin in builtins::builtin_modules() {
-            if manifest
-                .modules
-                .iter()
-                .any(|nr| nr.name == builtin.module.name)
-            {
-                modules
-                    .entry(builtin.module.name.clone())
-                    .or_insert(builtin.module.clone());
-            }
+            modules
+                .entry(builtin.module.name.clone())
+                .or_insert_with(|| builtin.module.clone());
         }
 
         load_defs_from_manifest(
@@ -227,15 +223,36 @@ impl ManifestPatch {
                 }
             },
         )?;
-        load_defs_from_manifest(store, &manifest.ops, &mut ops, "defop", |node| {
-            if let AirNode::Defop(op) = node {
-                Ok(op)
-            } else {
-                Err(KernelError::Manifest(
-                    "manifest op ref did not point to defop".into(),
-                ))
-            }
-        })?;
+        load_defs_from_manifest(
+            store,
+            &manifest.workflows,
+            &mut workflows,
+            "defworkflow",
+            |node| {
+                if let AirNode::Defworkflow(workflow) = node {
+                    Ok(workflow)
+                } else {
+                    Err(KernelError::Manifest(
+                        "manifest workflow ref did not point to defworkflow".into(),
+                    ))
+                }
+            },
+        )?;
+        load_defs_from_manifest(
+            store,
+            &manifest.effects,
+            &mut effects,
+            "defeffect",
+            |node| {
+                if let AirNode::Defeffect(effect) = node {
+                    Ok(effect)
+                } else {
+                    Err(KernelError::Manifest(
+                        "manifest effect ref did not point to defeffect".into(),
+                    ))
+                }
+            },
+        )?;
         for reference in &manifest.secrets {
             if secrets.iter().any(|secret| secret.name == reference.name) {
                 continue;
@@ -257,17 +274,13 @@ impl ManifestPatch {
             }
         }
 
-        if ops.is_empty() {
-            for builtin in builtins::builtin_ops() {
-                ops.insert(builtin.op.name.clone(), builtin.op.clone());
-            }
-        }
-        let effect_catalog = EffectCatalog::from_defs(ops.values().cloned());
+        let effect_catalog = EffectCatalog::from_effects(effects.values().cloned());
         Ok(LoadedManifest {
             manifest,
             secrets,
             modules,
-            ops,
+            workflows,
+            effects,
             schemas,
             effect_catalog,
         })

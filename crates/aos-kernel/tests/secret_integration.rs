@@ -102,6 +102,8 @@ fn empty_manifest() -> Manifest {
         schemas: vec![],
         modules: vec![],
         ops: vec![],
+        workflows: vec![],
+        effects: vec![],
         secrets: vec![],
         routing: None,
     }
@@ -125,7 +127,8 @@ fn loaded_manifest_with_secret(binding_id: &str) -> LoadedManifest {
         manifest,
         secrets: vec![secret],
         modules: HashMap::new(),
-        ops: HashMap::new(),
+        workflows: HashMap::new(),
+        effects: HashMap::new(),
         schemas: HashMap::new(),
         effect_catalog: EffectCatalog::new(),
     }

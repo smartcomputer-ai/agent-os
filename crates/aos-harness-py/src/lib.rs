@@ -595,8 +595,8 @@ fn effect_intent_to_py_json(intent: &EffectIntent) -> PyResult<JsonValue> {
         .map_err(|err| py_runtime_error(format!("decode effect params: {err}")))?;
     let mut object = JsonMap::new();
     object.insert(
-        "effect_op".to_string(),
-        JsonValue::String(intent.effect_op.clone()),
+        "effect".to_string(),
+        JsonValue::String(intent.effect.clone()),
     );
     object.insert(
         "intent_hash".to_string(),

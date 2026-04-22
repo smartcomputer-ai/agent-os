@@ -25,12 +25,12 @@ pub fn map_args(arguments_json: &str) -> Result<ToolMappedArgs, ToolMappingError
             if let Some(key) = decode_cell_key(&args)? {
                 out.insert("key".into(), bytes_json(&key));
             }
-            Ok(ToolMappedArgs::with_effect_op(
+            Ok(ToolMappedArgs::with_effect(
                 ToolEffectOp::IntrospectWorkflowState,
                 Value::Object(out),
             ))
         }
-        "cells" => Ok(ToolMappedArgs::with_effect_op(
+        "cells" => Ok(ToolMappedArgs::with_effect(
             ToolEffectOp::IntrospectListCells,
             json!({
                 "workflow": workflow
@@ -276,9 +276,9 @@ mod tests {
     use aos_effect_types::HashRef;
 
     #[test]
-    fn cells_view_overrides_effect_op() {
+    fn cells_view_overrides_effect() {
         let mapped = map_args(r#"{"workflow":"demo/Flow@1","view":"cells"}"#).expect("map args");
-        assert_eq!(mapped.effect_op, Some(ToolEffectOp::IntrospectListCells));
+        assert_eq!(mapped.effect, Some(ToolEffectOp::IntrospectListCells));
         assert_eq!(mapped.params_json["workflow"], "demo/Flow@1");
     }
 

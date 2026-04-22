@@ -11,15 +11,12 @@
     }
   },
   {
-    "$kind": "defop",
+    "$kind": "defworkflow",
     "name": "demo/CounterSM@1",
-    "op_kind": "workflow",
-    "workflow": {
-      "state": "demo/CounterState@1",
-      "event": "demo/CounterEvent@1",
-      "context": "sys/WorkflowContext@1",
-      "effects_emitted": []
-    },
+    "state": "demo/CounterState@1",
+    "event": "demo/CounterEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [],
     "impl": {
       "module": "demo/CounterSM_wasm@1",
       "entrypoint": "step"

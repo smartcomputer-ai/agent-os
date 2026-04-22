@@ -121,9 +121,7 @@
           "text": {},
           "$comment": "Name-formatted string"
         },
-        "effect_op": {
-          "text": {}
-        },
+        "effect": {
           "text": {}
         },
         "status": {
@@ -626,9 +624,7 @@
           "text": {},
           "$comment": "Name-formatted string"
         },
-        "effect_op": {
-          "text": {}
-        },
+        "effect": {
           "text": {}
         },
         "status": {
@@ -663,9 +659,7 @@
           "text": {},
           "$comment": "Name-formatted string"
         },
-        "effect_op": {
-          "text": {}
-        },
+        "effect": {
           "text": {}
         },
         "status": {
@@ -749,8 +743,6 @@
               "nat": {}
             }
           }
-        },
-          "text": {}
         }
       }
     }
@@ -1385,7 +1377,7 @@
               "intent_hash": {
                 "hash": {}
               },
-              "effect_op": {
+              "effect": {
                 "text": {}
               },
               "emitted_at_seq": {

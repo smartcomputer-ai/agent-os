@@ -107,7 +107,7 @@ fn handle_start(ctx: &mut WorkflowCtx<FetchState, ()>, url: String, method: Stri
         body_ref: None,
     };
     ctx.effects()
-        .emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+        .emit_raw(HTTP_REQUEST_EFFECT, &params);
 }
 
 fn handle_receipt(
@@ -117,7 +117,7 @@ fn handle_receipt(
     if ctx.state.pending_request.is_none() {
         return Ok(());
     }
-    if envelope.effect_op != HTTP_REQUEST_EFFECT {
+    if envelope.effect != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
 

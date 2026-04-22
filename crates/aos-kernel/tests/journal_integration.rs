@@ -86,13 +86,13 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
 
     let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 2);
-    effects.sort_by(|a, b| a.effect_op.as_str().cmp(b.effect_op.as_str()));
+    effects.sort_by(|a, b| a.effect.as_str().cmp(b.effect.as_str()));
     assert_eq!(
-        effects[0].effect_op.as_str(),
+        effects[0].effect.as_str(),
         aos_effects::effect_ops::BLOB_PUT
     );
     assert_eq!(
-        effects[1].effect_op.as_str(),
+        effects[1].effect.as_str(),
         aos_effects::effect_ops::TIMER_SET
     );
 
@@ -105,7 +105,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     assert_eq!(workflow.status, WorkflowStatusSnapshot::Waiting);
 
     for intent in effects {
-        let receipt = match intent.effect_op.as_str() {
+        let receipt = match intent.effect.as_str() {
             aos_effects::effect_ops::BLOB_PUT => EffectReceipt {
                 intent_hash: intent.intent_hash,
                 status: ReceiptStatus::Ok,
@@ -188,7 +188,7 @@ fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
     assert_eq!(effects.len(), 2);
     let timer_intent = effects
         .iter()
-        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::TIMER_SET)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::TIMER_SET)
         .expect("timer.set intent");
 
     let receipt = EffectReceipt {
@@ -262,11 +262,11 @@ fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending(
     assert_eq!(effects.len(), 2);
     let blob_intent = effects
         .iter()
-        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::BLOB_PUT)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::BLOB_PUT)
         .expect("blob.put intent");
     let timer_intent = effects
         .iter()
-        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::TIMER_SET)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::TIMER_SET)
         .expect("timer.set intent");
 
     let malformed = EffectReceipt {
@@ -332,11 +332,11 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
     assert_eq!(effects.len(), 2);
     let blob_intent = effects
         .iter()
-        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::BLOB_PUT)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::BLOB_PUT)
         .expect("blob.put intent");
     let timer_intent = effects
         .iter()
-        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::TIMER_SET)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::TIMER_SET)
         .expect("timer.set intent");
 
     let malformed = EffectReceipt {

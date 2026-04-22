@@ -1,6 +1,6 @@
 # P1: Forked AIR Spec And Core Model Cut
 
-Status: planned.
+Status: implemented for the narrow P1 targets.
 
 ## Goal
 
@@ -53,7 +53,7 @@ This is an aggressive replacement phase. It is acceptable for downstream crates 
 while P1 lands, as long as the breakage is from known references to the old op-centered public
 surface.
 
-The first green targets should be narrow:
+The first green targets are narrow:
 
 ```text
 cargo test -p aos-air-types
@@ -101,62 +101,64 @@ describe the world's application surface, not repeat the whole system catalog.
 
 ## Spec Surface Work
 
-- [ ] Update `spec/schemas/common.schema.json`:
+- [x] Update `spec/schemas/common.schema.json`:
   - `RootKind`: `defschema`, `defmodule`, `defworkflow`, `defeffect`, `defsecret`, `manifest`
   - `DefKind`: `defschema`, `defmodule`, `defworkflow`, `defeffect`, `defsecret`
   - add `$defs.Impl` with `module` and `entrypoint`
   - keep `EffectKind` absent
-- [ ] Replace `spec/schemas/defop.schema.json` with:
+- [x] Replace `spec/schemas/defop.schema.json` with:
   - `spec/schemas/defworkflow.schema.json`
   - `spec/schemas/defeffect.schema.json`
-- [ ] Update `spec/schemas/manifest.schema.json`:
+- [x] Update `spec/schemas/manifest.schema.json`:
   - `ops[]` -> `workflows[]` and `effects[]`
   - `routing.subscriptions[].op` -> `routing.subscriptions[].workflow`
   - keep `secrets[]` as refs to `defsecret`
   - do not require manifests to list ambient `sys/*` definitions
-- [ ] Update `spec/schemas/patch.schema.json`:
+- [x] Update `spec/schemas/patch.schema.json`:
   - patch version remains `"2"`
   - `DefKind` accepts workflow/effect definitions
   - `set_manifest_refs` updates `schemas`, `modules`, `workflows`, `effects`, or `secrets`
   - `set_routing_subscriptions` uses the new workflow-targeted routing subscription shape
-- [ ] Delete or retire public `defop` schema references from the active schema set.
-- [ ] Validate all active schema JSON with `jq empty`.
+- [x] Delete or retire public `defop` schema references from the active schema set.
+- [x] Validate all active schema JSON with `jq empty`.
 
 ## Built-In Definition Shelf
 
-- [ ] Convert `spec/defs/` from built-in ops to built-in workflows/effects:
+- [x] Convert `spec/defs/` from built-in ops to built-in workflows/effects:
   - built-in workflows use `$kind = "defworkflow"`
   - built-in effects use `$kind = "defeffect"`
   - implementation refs use `impl.module` and `impl.entrypoint`
-- [ ] Decide whether to split `builtin-ops.air.json` into clearer files:
+- [x] Decide whether to split `builtin-ops.air.json` into clearer files:
   - `builtin-workflows.air.json`
   - `builtin-effects.air.json`
   - or keep one file temporarily if it reduces churn during P1
-- [ ] Ensure no active built-in definition uses `defop` or `op_kind`.
-- [ ] Ensure built-in manifests or examples omit redundant `sys/*` refs where practical.
-- [ ] Keep external `sys/*` definitions rejected.
-- [ ] Add or update built-in catalog tests for ambient `sys/*` resolution.
+  - P1 keeps the existing filename temporarily to reduce churn.
+- [x] Ensure no active built-in definition uses `defop` or `op_kind`.
+- [x] Ensure built-in manifests or examples omit redundant `sys/*` refs where practical.
+- [x] Keep external `sys/*` definitions rejected.
+- [x] Add or update built-in catalog tests for ambient `sys/*` resolution.
 
 ## `crates/aos-air-types`
 
-- [ ] Replace model types:
-  - remove canonical `DefOp`
+- [x] Replace public model types:
+  - remove canonical public `DefOp`
   - add `DefWorkflow`
   - add `DefEffect`
   - add shared `Impl`
   - keep workflow determinism on `DefWorkflow`
-- [ ] Replace `RootKind` and `DefKind` enums.
-- [ ] Replace manifest model:
+- [x] Removed the temporary internal `DefOp` compatibility shim during the P2 runtime cut.
+- [x] Replace `RootKind` and `DefKind` enums.
+- [x] Replace manifest model:
   - `ops` -> `workflows` and `effects`
   - routing target `op` -> `workflow`
-- [ ] Replace catalog indexes:
+- [x] Replace catalog indexes:
   - workflow definitions by name/hash
   - effect definitions by name/hash
   - modules by name/hash
   - schemas by name/hash
   - secrets by name/hash
-- [ ] Make built-in `sys/*` definitions ambient in validation and loaded catalog construction.
-- [ ] Preserve semantic validation:
+- [x] Make built-in `sys/*` definitions ambient in validation and loaded catalog construction.
+- [x] Preserve semantic validation:
   - workflow schema refs resolve
   - effect params and receipt schema refs resolve
   - `effects_emitted[]` references active or ambient built-in effects
@@ -164,24 +166,25 @@ describe the world's application surface, not repeat the whole system catalog.
   - keyed routing checks `DefWorkflow.key_schema`
   - `impl.module` resolves to active or ambient built-in modules
   - module runtime supports the definition kind
-- [ ] Update canonicalization/hash tests to cover `defworkflow`, `defeffect`, and ambient `sys/*`
+- [x] Update canonicalization/hash tests to cover `defworkflow`, `defeffect`, and ambient `sys/*`
   references.
-- [ ] Remove active `defop` round-trip tests or rewrite them as workflow/effect tests.
+- [x] Remove active `defop` round-trip tests or rewrite them as workflow/effect tests.
 
 ## `crates/aos-authoring`
 
-- [ ] Update manifest loading to collect `defworkflow` and `defeffect` nodes.
-- [ ] Update authored bundle/build outputs:
+- [x] Update manifest loading to collect `defworkflow` and `defeffect` nodes.
+- [x] Update authored bundle/build outputs:
   - workflow exports produce `defworkflow`
   - effect exports produce `defeffect`
   - module artifacts still produce `defmodule`
-- [ ] Update manifest synthesis:
+- [x] Update manifest synthesis:
   - application definitions go into `manifest.workflows[]` and `manifest.effects[]`
   - redundant `sys/*` refs are omitted by default
   - `routing.subscriptions[].workflow` is emitted
-- [ ] Update patch/build helpers to use workflow/effect `DefKind` values.
-- [ ] Keep import rejection for AIR v1 and old op-centered public forms.
-- [ ] Add focused authoring tests for:
+- [x] Update patch/build helpers to use workflow/effect `DefKind` values.
+- [x] Keep import rejection for AIR v1; old op-centered public forms are no longer in active schemas.
+- [x] Reject old `defop` nodes and manifest `ops[]` during AIR v2 model/authoring deserialization.
+- [x] Add focused authoring tests for:
   - workflow/effect fixture loading
   - generated manifest refs
   - ambient built-in effect references from `effects_emitted[]`
@@ -192,32 +195,32 @@ describe the world's application surface, not repeat the whole system catalog.
 Update the kernel pieces that own manifest loading, patching, governance definition storage, and the
 `LoadedManifest` type consumed by authoring. Do not chase world execution yet.
 
-- [ ] Update `LoadedManifest`:
+- [x] Update `LoadedManifest`:
   - `ops` -> `workflows` and `effects`
   - keep `schemas`, `modules`, and `secrets`
   - keep enough compatibility shims only if required to make P1 compile, and mark them temporary
-- [ ] Update manifest loading and storage:
+- [x] Update manifest loading and storage:
   - collect `DefWorkflow` and `DefEffect`
   - reject external `sys/*` definitions
   - include ambient built-in `sys/*` definitions in loaded catalogs
   - do not require redundant `sys/*` manifest refs
-- [ ] Update manifest patch helpers:
+- [x] Update manifest patch helpers:
   - `manifest_patch_from_loaded`
   - `store_loaded_manifest`
   - definition add/replace/remove dispatch
   - `set_manifest_refs` for workflows/effects
   - routing subscription patching with `workflow`
-- [ ] Update governance utility surfaces that summarize or normalize manifest patches:
+- [x] Update governance utility surfaces that summarize or normalize manifest patches:
   - definition kind strings
   - workflow/effect manifest ref sections
   - routing target labels
-- [ ] Update `manifest_catalog.rs` or equivalent catalog loaders:
+- [x] Update `manifest_catalog.rs` or equivalent catalog loaders:
   - load workflow refs from `manifest.workflows[]`
   - load effect refs from `manifest.effects[]`
   - resolve built-in ambient definitions without explicit refs
-- [ ] Keep world/runtime modules compiling only where that is cheap and local. Larger runtime
+- [x] Keep world/runtime modules compiling only where that is cheap and local. Larger runtime
   semantic updates belong in P2.
-- [ ] Add focused kernel control-plane tests for:
+- [x] Add focused kernel control-plane tests for:
   - loading forked manifests
   - patching workflow/effect refs
   - ambient `sys/*` resolution
@@ -252,11 +255,11 @@ while keeping small shared helpers for `Impl` resolution and module runtime comp
 
 ## Done When
 
-- Active JSON schemas define `defworkflow` and `defeffect` and no active `defop` schema remains.
-- Active built-in defs use `defworkflow` and `defeffect`.
-- `aos-air-types` parses, validates, canonicalizes, hashes, and serializes the forked AIR surface.
-- `aos-authoring` can load and synthesize forked AIR manifests.
-- Kernel manifest/governance loaders can store, load, and patch forked manifests.
-- Ambient `sys/*` definitions work without redundant manifest refs.
-- Focused tests for `aos-air-types`, kernel control-plane loading, and `aos-authoring` pass, or
+- [x] Active JSON schemas define `defworkflow` and `defeffect` and no active `defop` schema remains.
+- [x] Active built-in defs use `defworkflow` and `defeffect`.
+- [x] `aos-air-types` parses, validates, canonicalizes, hashes, and serializes the forked AIR surface.
+- [x] `aos-authoring` can load and synthesize forked AIR manifests.
+- [x] Kernel manifest/governance loaders can store, load, and patch forked manifests.
+- [x] Ambient `sys/*` definitions work without redundant manifest refs.
+- [x] Focused tests for `aos-air-types`, kernel control-plane loading, and `aos-authoring` pass, or
   remaining failures are documented as P2 runtime fallout.

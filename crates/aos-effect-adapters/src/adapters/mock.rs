@@ -90,7 +90,7 @@ impl MockHttpHarness {
                 break;
             }
             for intent in intents {
-                match intent.effect_op.as_str() {
+                match intent.effect.as_str() {
                     effect_ops::HTTP_REQUEST => {
                         let params: HttpRequestParams = serde_cbor::from_slice(&intent.params_cbor)
                             .context("decode http request params")?;
@@ -230,7 +230,7 @@ impl<S: Store + 'static> MockLlmHarness<S> {
                 break;
             }
             for intent in intents {
-                match intent.effect_op.as_str() {
+                match intent.effect.as_str() {
                     effect_ops::LLM_GENERATE => {
                         let raw: serde_cbor::Value = serde_cbor::from_slice(&intent.params_cbor)
                             .context("decode llm.generate params value")?;

@@ -447,10 +447,10 @@ async fn fabric_exec_async_start_emits_progress_frames_before_terminal_receipt()
     );
     let context = AdapterStartContext {
         origin_module_id: "com.acme/Workflow@1".to_string(),
-        origin_workflow_op_hash: None,
+        origin_workflow_hash: None,
         origin_instance_key: Some(vec![1, 2, 3]),
-        effect_op: "sys/host.exec@1".to_string(),
-        effect_op_hash: None,
+        effect: "sys/host.exec@1".to_string(),
+        effect_hash: None,
         executor_module: Some("sys/Host@1".to_string()),
         executor_module_hash: None,
         executor_entrypoint: Some(effect_ops::HOST_EXEC.to_string()),
@@ -484,7 +484,7 @@ async fn fabric_exec_async_start_emits_progress_frames_before_terminal_receipt()
     assert_eq!(first_frame.intent_hash, exec_intent.intent_hash);
     assert_eq!(first_frame.origin_module_id, context.origin_module_id);
     assert_eq!(first_frame.origin_instance_key, context.origin_instance_key);
-    assert_eq!(first_frame.effect_op, context.effect_op);
+    assert_eq!(first_frame.effect, context.effect);
     assert_eq!(first_frame.emitted_at_seq, context.emitted_at_seq);
     assert_eq!(first_frame.seq, 1);
     assert_eq!(first_frame.kind, "host.exec.progress");
@@ -529,10 +529,10 @@ async fn fabric_exec_async_start_fast_exec_emits_only_terminal_receipt() {
     );
     let context = AdapterStartContext {
         origin_module_id: "com.acme/Workflow@1".to_string(),
-        origin_workflow_op_hash: None,
+        origin_workflow_hash: None,
         origin_instance_key: None,
-        effect_op: "sys/host.exec@1".to_string(),
-        effect_op_hash: None,
+        effect: "sys/host.exec@1".to_string(),
+        effect_hash: None,
         executor_module: Some("sys/Host@1".to_string()),
         executor_module_hash: None,
         executor_entrypoint: Some(effect_ops::HOST_EXEC.to_string()),

@@ -173,7 +173,7 @@ pub struct WorkflowContext {
     pub manifest_hash: String,
     pub workflow: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow_op_hash: Option<String>,
+    pub workflow_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -261,7 +261,7 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: "com.acme/Workflow@1".into(),
-            workflow_op_hash: Some(
+            workflow_hash: Some(
                 "sha256:2222222222222222222222222222222222222222222222222222222222222222".into(),
             ),
             key: Some(vec![0x01, 0x02]),
@@ -291,7 +291,7 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: "com.acme/Workflow@1".into(),
-            workflow_op_hash: None,
+            workflow_hash: None,
             key: None,
             cell_mode: false,
         };

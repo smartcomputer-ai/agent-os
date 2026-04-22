@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use aos_air_types::{AirNode, Manifest, OpKind};
+use aos_air_types::{AirNode, Manifest};
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effect_types::HashRef;
 use aos_kernel::{Consistency, StateReader, Store, WorldInput};
@@ -1543,19 +1543,10 @@ impl HostedWorkerRuntime {
 
 fn manifest_summary(
     manifest: &Manifest,
-    mut get_def: impl FnMut(&str) -> Option<AirNode>,
+    _get_def: impl FnMut(&str) -> Option<AirNode>,
 ) -> ManifestSummary {
-    let mut workflow_op_count = 0;
-    let mut effect_op_count = 0;
-
-    for op_ref in &manifest.ops {
-        if let Some(AirNode::Defop(op)) = get_def(op_ref.name.as_str()) {
-            match op.op_kind {
-                OpKind::Workflow => workflow_op_count += 1,
-                OpKind::Effect => effect_op_count += 1,
-            }
-        }
-    }
+    let workflow_count = manifest.workflows.len();
+    let effect_count = manifest.effects.len();
 
     let routes = manifest
         .routing
@@ -1566,7 +1557,7 @@ fn manifest_summary(
                 .iter()
                 .map(|route| RouteSummary {
                     event: route.event.as_str().to_string(),
-                    op: route.op.as_str().to_string(),
+                    workflow: route.workflow.as_str().to_string(),
                     key_field: route.key_field.clone(),
                 })
                 .collect::<Vec<_>>()
@@ -1576,9 +1567,8 @@ fn manifest_summary(
     ManifestSummary {
         schema_count: manifest.schemas.len(),
         module_count: manifest.modules.len(),
-        op_count: manifest.ops.len(),
-        workflow_op_count,
-        effect_op_count,
+        workflow_count,
+        effect_count,
         secret_count: manifest.secrets.len(),
         routing_subscription_count: routes.len(),
         routes,
@@ -1588,10 +1578,7 @@ fn manifest_summary(
 #[cfg(test)]
 mod tests {
     use super::manifest_summary;
-    use aos_air_types::{
-        AirNode, HashRef, Manifest, NamedRef, Routing, RoutingSubscription, SchemaRef,
-    };
-    use serde_json::json;
+    use aos_air_types::{HashRef, Manifest, NamedRef, Routing, RoutingSubscription, SchemaRef};
 
     fn hash_ref(byte: char) -> HashRef {
         HashRef::new(format!("sha256:{}", byte.to_string().repeat(64))).expect("hash ref")
@@ -1604,76 +1591,35 @@ mod tests {
         }
     }
 
-    fn workflow_op(name: &str) -> AirNode {
-        serde_json::from_value(json!({
-            "$kind": "defop",
-            "name": name,
-            "op_kind": "workflow",
-            "workflow": {
-                "state": "demo/State@1",
-                "event": "demo/Event@1",
-                "effects_emitted": []
-            },
-            "impl": {
-                "module": "demo/workflow_wasm@1",
-                "entrypoint": "workflow:handle"
-            }
-        }))
-        .expect("workflow op")
-    }
-
-    fn effect_op(name: &str) -> AirNode {
-        serde_json::from_value(json!({
-            "$kind": "defop",
-            "name": name,
-            "op_kind": "effect",
-            "effect": {
-                "params": "demo/EffectParams@1",
-                "receipt": "demo/EffectReceipt@1"
-            },
-            "impl": {
-                "module": "demo/effect_adapter@1",
-                "entrypoint": "effect:run"
-            }
-        }))
-        .expect("effect op")
-    }
-
     #[test]
-    fn manifest_summary_counts_workflow_and_effect_ops_and_routes_by_op() {
+    fn manifest_summary_counts_workflows_and_effects_and_routes_by_workflow() {
         let manifest = Manifest {
             air_version: "2".into(),
             schemas: vec![named_ref("demo/Event@1", '1')],
             modules: vec![named_ref("demo/workflow_wasm@1", '2')],
-            ops: vec![
-                named_ref("demo/workflow@1", '3'),
-                named_ref("demo/http.request@1", '4'),
-            ],
+            ops: Vec::new(),
+            workflows: vec![named_ref("demo/workflow@1", '3')],
+            effects: vec![named_ref("demo/http.request@1", '4')],
             secrets: vec![named_ref("demo/secret@1", '5')],
             routing: Some(Routing {
                 subscriptions: vec![RoutingSubscription {
                     event: SchemaRef::new("demo/Event@1").expect("schema ref"),
-                    op: "demo/workflow@1".into(),
+                    workflow: "demo/workflow@1".into(),
                     key_field: Some("tenant_id".into()),
                 }],
             }),
         };
 
-        let summary = manifest_summary(&manifest, |name| match name {
-            "demo/workflow@1" => Some(workflow_op(name)),
-            "demo/http.request@1" => Some(effect_op(name)),
-            _ => None,
-        });
+        let summary = manifest_summary(&manifest, |_| None);
 
         assert_eq!(summary.schema_count, 1);
         assert_eq!(summary.module_count, 1);
-        assert_eq!(summary.op_count, 2);
-        assert_eq!(summary.workflow_op_count, 1);
-        assert_eq!(summary.effect_op_count, 1);
+        assert_eq!(summary.workflow_count, 1);
+        assert_eq!(summary.effect_count, 1);
         assert_eq!(summary.secret_count, 1);
         assert_eq!(summary.routing_subscription_count, 1);
         assert_eq!(summary.routes[0].event, "demo/Event@1");
-        assert_eq!(summary.routes[0].op, "demo/workflow@1");
+        assert_eq!(summary.routes[0].workflow, "demo/workflow@1");
         assert_eq!(summary.routes[0].key_field.as_deref(), Some("tenant_id"));
     }
 }

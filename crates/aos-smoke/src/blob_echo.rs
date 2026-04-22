@@ -84,7 +84,7 @@ fn synthesize_blob_effects<S: Store + 'static>(
             break;
         }
         for intent in intents {
-            match intent.effect_op.as_str() {
+            match intent.effect.as_str() {
                 effect_ops::BLOB_PUT => handle_blob_put(kernel, harness, intent)?,
                 effect_ops::BLOB_GET => handle_blob_get(kernel, harness, intent)?,
                 other => return Err(anyhow!("unexpected effect {other}")),

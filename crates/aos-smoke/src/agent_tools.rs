@@ -277,7 +277,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     ]);
     ensure!(
         script.seen_tool_effect_ops == expected_ops,
-        "unexpected seen tool ops: {:?}",
+        "unexpected seen tool effects: {:?}",
         script.seen_tool_effect_ops
     );
     ensure!(
@@ -299,7 +299,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     );
 
     println!(
-        "   tool flow validated: llm_turns={} ops={}",
+        "   tool flow validated: llm_turns={} effects={}",
         script.llm_turn,
         script.seen_tool_effect_ops.len()
     );
@@ -324,7 +324,7 @@ impl AgentToolsScript {
         store: &S,
         intent: EffectIntent,
     ) -> Result<EffectReceipt> {
-        match intent.effect_op.as_str() {
+        match intent.effect.as_str() {
             effect_ops::BLOB_PUT => self.handle_blob_put(store, intent),
             effect_ops::BLOB_GET => self.handle_blob_get(store, intent),
             effect_ops::LLM_GENERATE => self.handle_llm_generate(store, intent),
@@ -345,7 +345,7 @@ impl AgentToolsScript {
             TOOL_WORKSPACE_WRITE_BYTES => self.handle_workspace_write_bytes(intent),
             TOOL_WORKSPACE_WRITE_REF => self.handle_workspace_write_ref(intent),
             TOOL_WORKSPACE_DIFF => self.handle_workspace_diff(intent),
-            other => bail!("unexpected effect op in agent-tools smoke: {other}"),
+            other => bail!("unexpected effect in agent-tools smoke: {other}"),
         }
     }
 
@@ -1321,6 +1321,8 @@ fn smoke_manifest() -> Manifest {
         schemas: vec![],
         modules: vec![],
         ops: vec![],
+        workflows: vec![],
+        effects: vec![],
         secrets: vec![],
         routing: None,
     }

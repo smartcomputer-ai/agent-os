@@ -13,12 +13,6 @@
     },
     {
       "name": "demo/SafeUpgradeEvent@1"
-    },
-    {
-      "name": "sys/HttpRequestParams@1"
-    },
-    {
-      "name": "sys/HttpRequestReceipt@1"
     }
   ],
   "modules": [
@@ -30,16 +24,14 @@
     "subscriptions": [
       {
         "event": "demo/SafeUpgradeEvent@1",
-        "op": "demo/SafeUpgrade@1"
+        "workflow": "demo/SafeUpgrade@1"
       }
     ]
   },
-  "ops": [
-    {
-      "name": "sys/http.request@1"
-    },
+  "workflows": [
     {
       "name": "demo/SafeUpgrade@1"
     }
-  ]
+  ],
+  "effects": []
 }

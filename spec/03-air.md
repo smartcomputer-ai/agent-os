@@ -3,7 +3,7 @@
 AIR (Agent Intermediate Representation) is the typed, canonical control-plane IR that AgentOS
 loads, validates, diffs, patches, shadow-simulates, and executes deterministically. AIR is not a
 general-purpose programming language. Application logic runs in module runtimes; AIR describes the
-schemas, modules, ops, secrets, manifests, and routing that define a world.
+schemas, modules, workflows, effects, secrets, manifests, and routing that define a world.
 
 ## References
 
@@ -12,7 +12,8 @@ JSON Schemas:
 - `spec/schemas/common.schema.json`
 - `spec/schemas/defschema.schema.json`
 - `spec/schemas/defmodule.schema.json`
-- `spec/schemas/defop.schema.json`
+- `spec/schemas/defworkflow.schema.json`
+- `spec/schemas/defeffect.schema.json`
 - `spec/schemas/defsecret.schema.json`
 - `spec/schemas/manifest.schema.json`
 - `spec/schemas/patch.schema.json`
@@ -23,10 +24,11 @@ Built-in catalogs:
 - `spec/defs/builtin-schemas-sdk.air.json`
 - `spec/defs/builtin-schemas-host.air.json`
 - `spec/defs/builtin-modules.air.json`
-- `spec/defs/builtin-ops.air.json`
+- `spec/defs/builtin-ops.air.json` (built-in workflows and effects)
 
-The JSON Schemas validate structure. Semantic validation checks name/hash resolution, op/module
-compatibility, routing compatibility, workflow effect allowlists, effect payload schemas, and
+The JSON Schemas validate structure. Semantic validation checks name/hash resolution,
+workflow/effect implementation compatibility, routing compatibility, workflow effect allowlists,
+effect payload schemas, and
 system-name restrictions.
 
 ## Goals And Scope
@@ -40,9 +42,10 @@ rather than translated.
 
 ## 1) Vocabulary And Identity
 
-**Root kind**: one of `defschema`, `defmodule`, `defop`, `defsecret`, or `manifest`.
+**Root kind**: one of `defschema`, `defmodule`, `defworkflow`, `defeffect`, `defsecret`, or
+`manifest`.
 
-**Definition kind**: one of `defschema`, `defmodule`, `defop`, or `defsecret`.
+**Definition kind**: one of `defschema`, `defmodule`, `defworkflow`, `defeffect`, or `defsecret`.
 
 **Name**: a versioned identifier with format `namespace/name@version`, where version is a positive
 integer. Example: `com.acme/order.step@1`.
@@ -53,9 +56,11 @@ integer. Example: `com.acme/order.step@1`.
 **References**: manifests map Names to content hashes. Within one manifest, names are unique per
 definition kind and the referenced hashes must exist in the store.
 
-**Op**: the unit of callable behavior in AIR v2. Workflow behavior and effect behavior are both
-represented by `defop` nodes. A `defmodule` declares executable runtime/artifact identity; a
-`defop` declares the callable contract and points at an implementation entrypoint in a module.
+**Workflow**: a `defworkflow` deterministic state machine that consumes events, owns state, and may
+emit declared effects.
+
+**Effect**: a `defeffect` callable effect contract with parameter and receipt schemas plus an
+implementation entrypoint.
 
 ## 2) Types
 
@@ -115,13 +120,14 @@ The manifest is the root catalog for a world.
   "air_version": "2",
   "schemas": [{ "name": "com.acme/Event@1", "hash": "sha256:..." }],
   "modules": [{ "name": "com.acme/order_wasm@1", "hash": "sha256:..." }],
-  "ops": [{ "name": "com.acme/order.step@1", "hash": "sha256:..." }],
+  "workflows": [{ "name": "com.acme/order.step@1", "hash": "sha256:..." }],
+  "effects": [],
   "secrets": [{ "name": "llm/openai_api@1", "hash": "sha256:..." }],
   "routing": {
     "subscriptions": [
       {
         "event": "com.acme/OrderEvent@1",
-        "op": "com.acme/order.step@1",
+        "workflow": "com.acme/order.step@1",
         "key_field": "order_id"
       }
     ]
@@ -132,15 +138,17 @@ The manifest is the root catalog for a world.
 Rules:
 
 - `air_version` is required and must be `"2"`.
-- `schemas`, `modules`, and `ops` are required arrays. `secrets` defaults to empty.
-- `ops` is the authoritative catalog for both workflow ops and effect ops.
-- `routing.subscriptions[].op` must name a workflow op.
-- `key_field` is required when the target workflow op declares `workflow.key_schema` and rejected
-  when the target workflow op is unkeyed.
-- The routed event schema must either equal the workflow op's `workflow.event`, or be a named arm of
+- `schemas`, `modules`, `workflows`, and `effects` are required arrays. `secrets` defaults to empty.
+- `workflows` is the workflow catalog; `effects` is the effect catalog.
+- `routing.subscriptions[].workflow` must name a workflow.
+- `key_field` is required when the target workflow declares `workflow.key_schema` and rejected
+  when the target workflow is unkeyed.
+- The routed event schema must either equal the workflow's `workflow.event`, or be a named arm of
   that workflow event variant. Variant-arm delivery wraps the event before workflow invocation.
-- There is no `manifest.effects`, `effect_bindings`, `routing.inboxes`, caps, policies, defaults,
-  module bindings, or op bindings in AIR v2.
+- `sys/*` definitions are ambient: listing them in a manifest is optional, and external AIR may not
+  define or patch them.
+- There is no `manifest.ops`, `effect_bindings`, `routing.inboxes`, caps, policies, defaults,
+  module bindings, or workflow/effect bindings in AIR v2.
 
 ## 5) defschema
 
@@ -190,25 +198,23 @@ may not define or patch them.
 Removed v1 fields include `module_kind`, `wasm_hash`, `key_schema`, `abi`, `engine`, and
 runtime/target metadata outside the v2 schema.
 
-## 7) defop
+## 7) Workflows And Effects
 
-`defop` declares a callable operation and points at an implementation entrypoint.
+AIR v2 splits deterministic workflow definitions from effect definitions. Both point at an
+implementation entrypoint through `impl`, but they have different runtime contracts.
 
-### Workflow op
+### Workflow Definition
 
 ```json
 {
-  "$kind": "defop",
+  "$kind": "defworkflow",
   "name": "com.acme/order.step@1",
-  "op_kind": "workflow",
-  "workflow": {
-    "state": "com.acme/OrderState@1",
-    "event": "com.acme/OrderEvent@1",
-    "context": "sys/WorkflowContext@1",
-    "key_schema": "com.acme/OrderId@1",
-    "effects_emitted": ["sys/http.request@1"],
-    "determinism": "strict"
-  },
+  "state": "com.acme/OrderState@1",
+  "event": "com.acme/OrderEvent@1",
+  "context": "sys/WorkflowContext@1",
+  "key_schema": "com.acme/OrderId@1",
+  "effects_emitted": ["sys/http.request@1"],
+  "determinism": "strict",
   "impl": {
     "module": "com.acme/order_wasm@1",
     "entrypoint": "order_step"
@@ -216,26 +222,23 @@ runtime/target metadata outside the v2 schema.
 }
 ```
 
-Workflow op rules:
+Workflow rules:
 
-- `workflow.state`, `workflow.event`, and `workflow.effects_emitted` are required.
+- `state`, `event`, and `effects_emitted` are required.
 - Workflows that emit no effects must set `"effects_emitted": []` in canonical AIR.
-- `workflow.effects_emitted[]` names effect ops, not semantic effect strings.
-- `workflow.key_schema` makes the workflow keyed; route validation then requires `key_field`.
-- `workflow.context` and `workflow.annotations` are optional schema refs.
-- `workflow.determinism` defaults to `strict`.
+- `effects_emitted[]` names effect definitions, not semantic effect strings.
+- `key_schema` makes the workflow keyed; route validation then requires `key_field`.
+- `context` and `annotations` are optional schema refs.
+- `determinism` defaults to `strict`.
 
-### Effect op
+### Effect Definition
 
 ```json
 {
-  "$kind": "defop",
+  "$kind": "defeffect",
   "name": "sys/http.request@1",
-  "op_kind": "effect",
-  "effect": {
-    "params": "sys/HttpRequestParams@1",
-    "receipt": "sys/HttpRequestReceipt@1"
-  },
+  "params": "sys/HttpRequestParams@1",
+  "receipt": "sys/HttpRequestReceipt@1",
   "impl": {
     "module": "sys/builtin_effects@1",
     "entrypoint": "http.request"
@@ -243,16 +246,16 @@ Workflow op rules:
 }
 ```
 
-Effect op rules:
+Effect rules:
 
 - `effect.params` and `effect.receipt` are required schema refs.
 - Dispatch class is resolved from `impl.module`, `impl.entrypoint`, and runtime configuration, not
   from a public effect-kind field.
-- Workflow emission names the effect op. Intent records, stream frames, receipts, audit records, and
-  replay metadata carry the effect op identity and, where needed, the resolved op hash.
+- Workflow emission names the effect. Intent records, stream frames, receipts, audit records, and
+  replay metadata carry the effect identity and, where needed, the resolved effect hash.
 
-`impl.entrypoint` is op-local. For WASM it is an exported function name; for Python it is an import
-path plus callable; for built-ins it is the built-in dispatcher key.
+`impl.entrypoint` is local to the workflow or effect definition. For WASM it is an exported function
+name; for Python it is an import path plus callable; for built-ins it is the built-in dispatcher key.
 
 ## 8) defsecret
 
@@ -269,7 +272,7 @@ Secret values are never stored in AIR. `binding_id` is an opaque node-local reso
 optional `expected_digest` can be used by operators to detect resolver drift.
 
 AIR v2 has no per-secret public ACL. A workflow can reach a secret only through an admitted effect
-op whose parameter schema accepts `SecretRef`, and only if the secret is present in
+whose parameter schema accepts `SecretRef`, and only if the secret is present in
 `manifest.secrets`.
 
 ## 9) Built-In Catalogs
@@ -282,8 +285,8 @@ Built-in modules live in `spec/defs/builtin-modules.air.json`, including:
 - `sys/workspace_wasm@1`
 - `sys/http_publish_wasm@1`
 
-Built-in ops live in `spec/defs/builtin-ops.air.json`, including workflow ops such as
-`sys/Workspace@1` and effect ops such as:
+Built-in workflows and effects currently live together in `spec/defs/builtin-ops.air.json`,
+including workflows such as `sys/Workspace@1` and effects such as:
 
 - `sys/http.request@1`
 - `sys/blob.put@1`
@@ -319,7 +322,7 @@ Output:
 {
   state: bytes | null,
   domain_events?: [{ schema: Name, value: bytes, key?: bytes }],
-  effects?: [{ effect_op: Name, params: bytes, idempotency_key?: bytes, issuer_ref?: text }],
+  effects?: [{ effect: Name, params: bytes, idempotency_key?: bytes, issuer_ref?: text }],
   ann?: bytes
 }
 ```
@@ -328,17 +331,17 @@ The kernel normalizes output event payloads and effect params before hashing or 
 `state = null` from a keyed workflow deletes that cell.
 
 `sys/WorkflowContext@1` includes deterministic time, entropy, journal metadata, manifest hash,
-workflow op identity, optional workflow op hash, optional key, and `cell_mode`.
+workflow identity, optional workflow hash, optional key, and `cell_mode`.
 
 ## 11) Effect Intents And Receipts
 
-An effect intent records a request to execute one effect op:
+An effect intent records a request to execute one effect definition:
 
 ```text
 {
   intent_hash: hash,
-  effect_op: Name,
-  effect_op_hash?: hash,
+  effect: Name,
+  effect_hash?: hash,
   params_cbor: bytes,
   idempotency_key: bytes,
   origin: recorded workflow/system origin,
@@ -348,17 +351,17 @@ An effect intent records a request to execute one effect op:
 }
 ```
 
-Before enqueue, params are decoded against the effect op's `effect.params` schema, validated,
+Before enqueue, params are decoded against the effect's `params` schema, validated,
 canonicalized, and re-encoded as canonical CBOR. The intent hash for workflow-origin effects binds
-the origin workflow op, instance key, emission position, effect op identity, canonical params, and
+the origin workflow, instance key, emission position, effect identity, canonical params, and
 effective idempotency input.
 
 Terminal receipts bind to open work by `intent_hash`. Generic workflow receipt envelopes carry:
 
-- origin workflow op identity and optional op hash
+- origin workflow identity and optional workflow hash
 - origin instance key when keyed
 - intent identity
-- effect op identity and optional op hash
+- effect identity and optional effect hash
 - executor module, executor module hash, and entrypoint when resolved
 - params hash, issuer ref, receipt payload bytes, status, emitted sequence metadata, cost, and
   signature
@@ -367,10 +370,10 @@ Terminal receipts bind to open work by `intent_hash`. Generic workflow receipt e
 
 AIR v2 public admission is structural:
 
-- the emitted effect op must exist and be active in `manifest.ops`
-- workflow-origin effects must come from workflow ops
-- the effect op must be listed in the origin workflow op's `workflow.effects_emitted`
-- params must validate against the effect op params schema
+- the emitted effect must exist in active definitions or the ambient built-in catalog
+- workflow-origin effects must come from workflows
+- the effect must be listed in the origin workflow's `effects_emitted`
+- params must validate against the effect params schema
 - open work must be recorded before async execution starts
 
 This is not a hosted security boundary. Network, tenant, budget, and secret policy remain node-local
@@ -385,11 +388,11 @@ Patch documents are JSON documents with `version = "2"`:
   "version": "2",
   "base_manifest_hash": "sha256:...",
   "patches": [
-    { "add_def": { "kind": "defop", "node": { "$kind": "defop" } } },
+    { "add_def": { "kind": "defworkflow", "node": { "$kind": "defworkflow" } } },
     {
       "set_routing_subscriptions": {
         "pre_hash": "sha256:...",
-        "subscriptions": [{ "event": "com.acme/Event@1", "op": "com.acme/workflow@1" }]
+        "subscriptions": [{ "event": "com.acme/Event@1", "workflow": "com.acme/workflow@1" }]
       }
     }
   ]
@@ -402,7 +405,7 @@ Operations:
 - `replace_def`: `{ kind, name, new_node, pre_hash }`
 - `remove_def`: `{ kind, name, pre_hash }`
 - `set_manifest_refs`: `{ add:[{kind,name,hash}], remove:[{kind,name}] }`
-- `set_routing_subscriptions`: `{ pre_hash, subscriptions:[{event,op,key_field?}] }`
+- `set_routing_subscriptions`: `{ pre_hash, subscriptions:[{event,workflow,key_field?}] }`
 
 Patch compilation resolves `base_manifest_hash`, applies operations, canonicalizes new defs,
 computes hashes, rewrites manifest refs, stores nodes in CAS, and produces a compiled manifest
@@ -418,9 +421,9 @@ Important AIR-related journal records include:
 - `Approved { proposal_id, patch_hash, approver, decision }`
 - `Applied { proposal_id, patch_hash, manifest_hash_new }`
 - `DomainEvent { schema, value, key?, stamps..., manifest_hash }`
-- `EffectIntent { intent_hash, effect_op, effect_op_hash?, params_cbor, idempotency_key, origin, executor_module?, executor_module_hash?, executor_entrypoint? }`
-- `EffectReceipt { intent_hash, effect_op, effect_op_hash?, payload_cbor, status, cost_cents?, signature, stamps..., manifest_hash }`
-- `EffectStreamFrame { intent_hash, effect_op, effect_op_hash?, seq, payload, payload_ref?, stamps... }`
+- `EffectIntent { intent_hash, effect, effect_hash?, params_cbor, idempotency_key, origin, executor_module?, executor_module_hash?, executor_entrypoint? }`
+- `EffectReceipt { intent_hash, effect, effect_hash?, payload_cbor, status, cost_cents?, signature, stamps..., manifest_hash }`
+- `EffectStreamFrame { intent_hash, effect, effect_hash?, seq, payload, payload_ref?, stamps... }`
 - `Snapshot { snapshot_ref, height, logical_time_ns, receipt_horizon_height?, manifest_hash? }`
 
 Ingress-stamped fields are sampled once and replayed verbatim. Replay applies `Manifest` records in

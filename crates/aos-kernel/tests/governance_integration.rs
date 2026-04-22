@@ -252,7 +252,8 @@ fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> 
         .cloned()
         .map(AirNode::Defmodule)
         .collect();
-    nodes.extend(loaded.ops.values().cloned().map(AirNode::Defop));
+    nodes.extend(loaded.workflows.values().cloned().map(AirNode::Defworkflow));
+    nodes.extend(loaded.effects.values().cloned().map(AirNode::Defeffect));
     nodes.extend(loaded.schemas.values().cloned().map(AirNode::Defschema));
 
     ManifestPatch {

@@ -16,12 +16,6 @@
     },
     {
       "name": "demo/RuntimeHardeningEvent@1"
-    },
-    {
-      "name": "sys/HttpRequestParams@1"
-    },
-    {
-      "name": "sys/HttpRequestReceipt@1"
     }
   ],
   "modules": [
@@ -33,16 +27,14 @@
     "subscriptions": [
       {
         "event": "demo/RuntimeHardeningEvent@1",
-        "op": "demo/FlowTracker@1"
+        "workflow": "demo/FlowTracker@1"
       }
     ]
   },
-  "ops": [
-    {
-      "name": "sys/http.request@1"
-    },
+  "workflows": [
     {
       "name": "demo/FlowTracker@1"
     }
-  ]
+  ],
+  "effects": []
 }

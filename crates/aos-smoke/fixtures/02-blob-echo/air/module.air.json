@@ -11,18 +11,15 @@
     }
   },
   {
-    "$kind": "defop",
+    "$kind": "defworkflow",
     "name": "demo/BlobEchoSM@1",
-    "op_kind": "workflow",
-    "workflow": {
-      "state": "demo/BlobEchoState@1",
-      "event": "demo/BlobEchoEvent@1",
-      "context": "sys/WorkflowContext@1",
-      "effects_emitted": [
-        "sys/blob.put@1",
-        "sys/blob.get@1"
-      ]
-    },
+    "state": "demo/BlobEchoState@1",
+    "event": "demo/BlobEchoEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [
+      "sys/blob.put@1",
+      "sys/blob.get@1"
+    ],
     "impl": {
       "module": "demo/BlobEchoSM_wasm@1",
       "entrypoint": "step"

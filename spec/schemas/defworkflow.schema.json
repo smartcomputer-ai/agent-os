@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v2/defworkflow.schema.json",
+  "title": "AIR v2 defworkflow",
+  "type": "object",
+  "properties": {
+    "$kind": { "const": "defworkflow" },
+    "name": { "$ref": "common.schema.json#/$defs/Name" },
+    "state": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+    "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+    "context": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+    "annotations": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+    "key_schema": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+    "effects_emitted": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/Name" },
+      "uniqueItems": true
+    },
+    "determinism": {
+      "type": "string",
+      "enum": ["strict", "checked", "decision_log"],
+      "default": "strict"
+    },
+    "impl": { "$ref": "common.schema.json#/$defs/Impl" }
+  },
+  "required": ["$kind", "name", "state", "event", "effects_emitted", "impl"],
+  "additionalProperties": false
+}

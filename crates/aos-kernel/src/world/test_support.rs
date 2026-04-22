@@ -2,9 +2,9 @@ use super::*;
 use crate::MemStore;
 use crate::journal::{Journal, JournalEntry, JournalKind};
 use aos_air_types::{
-    CURRENT_AIR_VERSION, DefModule, DefOp, DefSchema, HashRef, ModuleRuntime, NamedRef, OpImpl,
-    OpKind, Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText,
-    TypeRecord, WasmArtifact, WorkflowDeterminism, WorkflowOp, catalog::EffectCatalog,
+    CURRENT_AIR_VERSION, DefModule, DefSchema, DefWorkflow, HashRef, Impl, ModuleRuntime, NamedRef,
+    Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord,
+    WasmArtifact, WorkflowDeterminism, catalog::EffectCatalog,
 };
 use indexmap::IndexMap;
 use serde_cbor::Value as CborValue;
@@ -31,6 +31,8 @@ pub(crate) fn minimal_manifest() -> Manifest {
         schemas: vec![],
         modules: vec![],
         ops: vec![],
+        workflows: Vec::new(),
+        effects: Vec::new(),
         secrets: vec![],
         routing: None,
     }
@@ -85,6 +87,8 @@ pub(crate) fn loaded_manifest_with_schema(
         }],
         modules: vec![],
         ops: vec![],
+        workflows: Vec::new(),
+        effects: Vec::new(),
         secrets: vec![],
         routing: None,
     };
@@ -92,9 +96,10 @@ pub(crate) fn loaded_manifest_with_schema(
         manifest,
         secrets: vec![],
         modules: HashMap::new(),
-        ops: HashMap::new(),
+        workflows: HashMap::new(),
+        effects: HashMap::new(),
         schemas: HashMap::from([(schema_name.into(), schema)]),
-        effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        effect_catalog: EffectCatalog::new(),
     };
     let mut loaded = loaded;
     manifest_runtime::persist_loaded_manifest(store, &mut loaded).expect("persist manifest");
@@ -139,26 +144,22 @@ pub(crate) fn workflow_module(name: &str, hash_num: u64) -> DefModule {
     }
 }
 
-pub(crate) fn workflow_op(
+pub(crate) fn workflow_def(
     name: &str,
     module_name: &str,
     key_schema: Option<&str>,
     effects_emitted: Vec<String>,
-) -> DefOp {
-    DefOp {
+) -> DefWorkflow {
+    DefWorkflow {
         name: name.into(),
-        op_kind: OpKind::Workflow,
-        workflow: Some(WorkflowOp {
-            state: SchemaRef::new("com.acme/State@1").unwrap(),
-            event: SchemaRef::new("com.acme/Event@1").unwrap(),
-            context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
-            annotations: None,
-            key_schema: key_schema.map(|schema| SchemaRef::new(schema).unwrap()),
-            effects_emitted,
-            determinism: WorkflowDeterminism::Strict,
-        }),
-        effect: None,
-        implementation: OpImpl {
+        state: SchemaRef::new("com.acme/State@1").unwrap(),
+        event: SchemaRef::new("com.acme/Event@1").unwrap(),
+        context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
+        annotations: None,
+        key_schema: key_schema.map(|schema| SchemaRef::new(schema).unwrap()),
+        effects_emitted,
+        determinism: WorkflowDeterminism::Strict,
+        implementation: Impl {
             module: module_name.into(),
             entrypoint: "step".into(),
         },
@@ -172,11 +173,11 @@ fn minimal_kernel_with_route(
     let store = MemStore::default();
     let workflow = "com.acme/Workflow@1";
     let module = workflow_module(workflow, 1);
-    let op = workflow_op(workflow, workflow, key_schema, vec![]);
+    let workflow_def = workflow_def(workflow, workflow, key_schema, vec![]);
     let mut modules = HashMap::new();
     modules.insert(module.name.clone(), module);
-    let mut ops = HashMap::new();
-    ops.insert(op.name.clone(), op);
+    let mut workflows = HashMap::new();
+    workflows.insert(workflow_def.name.clone(), workflow_def);
     let mut schemas = HashMap::new();
     schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
     schemas.insert(
@@ -191,15 +192,17 @@ fn minimal_kernel_with_route(
             name: workflow.into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
-        ops: vec![NamedRef {
+        ops: vec![],
+        workflows: vec![NamedRef {
             name: workflow.into(),
             hash: HashRef::new(hash(2)).unwrap(),
         }],
+        effects: Vec::new(),
         secrets: vec![],
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                op: workflow.to_string(),
+                workflow: workflow.to_string(),
                 key_field: key_field.map(str::to_string),
             }],
         }),
@@ -208,9 +211,10 @@ fn minimal_kernel_with_route(
         manifest,
         secrets: vec![],
         modules,
-        ops,
+        workflows,
+        effects: HashMap::new(),
         schemas,
-        effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        effect_catalog: EffectCatalog::new(),
     };
     Kernel::from_loaded_manifest(Arc::new(store), loaded, Journal::new()).unwrap()
 }
@@ -237,6 +241,8 @@ pub(crate) fn empty_manifest() -> Manifest {
         schemas: vec![],
         modules: vec![],
         ops: vec![],
+        workflows: Vec::new(),
+        effects: Vec::new(),
         secrets: vec![],
         routing: None,
     }
@@ -257,9 +263,10 @@ pub(crate) fn kernel_with_store_and_journal(
         manifest,
         secrets: vec![],
         modules: HashMap::new(),
-        ops: HashMap::new(),
+        workflows: HashMap::new(),
+        effects: HashMap::new(),
         schemas: HashMap::new(),
-        effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        effect_catalog: EffectCatalog::new(),
     };
     Kernel::from_loaded_manifest_with_config(store, loaded, journal, KernelConfig::default())
         .expect("build kernel")

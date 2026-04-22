@@ -135,8 +135,8 @@ fn handle_receipt(
     ctx: &mut WorkflowCtx<RetryState, ()>,
     envelope: EffectReceiptEnvelope,
 ) -> Result<(), ReduceError> {
-    if envelope.effect_op != HTTP_REQUEST_EFFECT {
-        if envelope.effect_op == TIMER_SET_EFFECT && matches!(ctx.state.pc, Pc::Backoff) {
+    if envelope.effect != HTTP_REQUEST_EFFECT {
+        if envelope.effect == TIMER_SET_EFFECT && matches!(ctx.state.pc, Pc::Backoff) {
             let receipt: TimerSetReceipt = envelope
                 .decode_receipt_payload()
                 .map_err(|_| ReduceError::new("invalid timer.set receipt payload"))?;
@@ -188,7 +188,7 @@ fn emit_http_request(ctx: &mut WorkflowCtx<RetryState, ()>) {
         headers,
         body_ref: None,
     };
-    ctx.effects().emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+    ctx.effects().emit_raw(HTTP_REQUEST_EFFECT, &params);
 }
 
 fn schedule_retry(ctx: &mut WorkflowCtx<RetryState, ()>) {
@@ -202,5 +202,5 @@ fn schedule_retry(ctx: &mut WorkflowCtx<RetryState, ()>) {
         key: Some(ctx.state.req_id.clone()),
     };
     ctx.state.timers_scheduled = ctx.state.timers_scheduled.saturating_add(1);
-    ctx.effects().sys().timer_set(&params, "default");
+    ctx.effects().sys().timer_set(&params);
 }

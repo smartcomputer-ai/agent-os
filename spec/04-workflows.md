@@ -1,7 +1,7 @@
 # Workflows
 
-Workflows are the orchestration unit in AgentOS. A workflow op is a deterministic state machine that
-consumes canonical events, updates state, emits domain events, and requests declared effect ops
+Workflows are the orchestration unit in AgentOS. A `defworkflow` is a deterministic state machine
+that consumes canonical events, updates state, emits domain events, and requests declared effects
 through the kernel.
 
 This document describes the active workflow runtime contract: what a workflow owns, how it is
@@ -12,8 +12,8 @@ and governance reliable.
 
 Workflow orchestration is code-defined and event-driven:
 
-- `defop` with `op_kind = "workflow"` is the orchestration/state-machine unit.
-- `defmodule` supplies the runtime/artifact used by the workflow op implementation.
+- `defworkflow` is the orchestration/state-machine unit.
+- `defmodule` supplies the runtime/artifact used by the workflow implementation.
 - Manifest startup and domain ingress wiring use `routing.subscriptions`.
 
 In practice, a workflow owns the end-to-end progression of a business process:
@@ -29,7 +29,7 @@ cells, described below.
 
 ## 2) Responsibility Split
 
-Workflow ops own:
+Workflows own:
 
 - domain state
 - business invariants
@@ -59,10 +59,10 @@ The owner/executor seam for open external work is defined in [spec/05-effects.md
 
 ### 3.1 Effect emission
 
-1. Only workflow ops may originate workflow-emitted effects.
-2. Workflow ops must declare `workflow.effects_emitted`.
-3. Emitted effects must name effect ops, not semantic effect strings.
-4. Kernel rejects undeclared effect ops before enqueue.
+1. Only workflows may originate workflow-emitted effects.
+2. Workflows must declare `workflow.effects_emitted`.
+3. Emitted effects must name effects, not semantic effect strings.
+4. Kernel rejects undeclared effects before enqueue.
 5. Multiple effects per step are allowed; deterministic kernel output limits apply.
 
 ### 3.2 Deterministic canonicalization
@@ -78,8 +78,8 @@ The owner/executor seam for open external work is defined in [spec/05-effects.md
 
 Receipt continuation routing is keyed by recorded origin identity:
 
-- origin workflow op
-- origin workflow op hash when available
+- origin workflow
+- origin workflow hash when available
 - origin instance key
 - intent hash identity
 
@@ -91,10 +91,10 @@ routing is manifest-independent. `routing.subscriptions` is for domain-event ing
 Settled effects produce a generic workflow receipt envelope (`sys/EffectReceiptEnvelope@1`) with at
 least:
 
-- origin workflow op identity
+- origin workflow identity
 - origin instance key when keyed
 - intent identity
-- effect op identity
+- effect identity
 - executor module/entrypoint identity when resolved
 - optional issuer reference echoed from the emitted effect
 - receipt payload bytes
@@ -118,7 +118,7 @@ Kernel persists workflow instance runtime state, conceptually including:
 - inflight intent set/map
 - lifecycle status: `running | waiting | completed | failed`
 - last processed sequence marker
-- workflow op/module version metadata for diagnostics
+- workflow/module version metadata for diagnostics
 
 Replay must restore this state deterministically.
 
@@ -139,7 +139,7 @@ Shadow/governance reporting is bounded to the observed execution horizon:
 - observed effects so far
 - pending workflow receipts/intents
 - workflow instance statuses
-- workflow op effect allowlists
+- workflow effect allowlists
 - relevant state deltas
 
 Shadow does not promise complete static future-effect prediction for unexecuted branches.
@@ -147,39 +147,39 @@ Shadow does not promise complete static future-effect prediction for unexecuted 
 ## 4) Runtime Flow
 
 1. Domain event is appended and canonicalized.
-2. Router evaluates `routing.subscriptions` and delivers to matching workflow ops.
+2. Router evaluates `routing.subscriptions` and delivers to matching workflows.
 3. Workflow entrypoint runs deterministically with current state + event.
 4. Workflow returns new state, domain events, and effect intents.
-5. Kernel enforces `workflow.effects_emitted`, validates effect op params, then records open work.
+5. Kernel enforces `workflow.effects_emitted`, validates effect params, then records open work.
 6. The unified node publishes opened async effects only after durable frame flush.
 7. Executors emit stream frames and terminal receipts.
 8. Kernel canonicalizes admitted continuations and routes them to the recorded origin instance.
 
 ## 5) Workflow Op Contract
 
-Workflow ops declare:
+Workflows declare:
 
 - `workflow.state`: state schema
 - `workflow.event`: event schema
 - `workflow.context`: optional context schema
 - `workflow.annotations`: optional annotation schema
 - `workflow.key_schema`: optional key schema for cells
-- `workflow.effects_emitted`: required list of effect op names
+- `workflow.effects_emitted`: required list of effect names
 - `impl.module` and `impl.entrypoint`: runtime implementation target
 
 `sys/WorkflowContext@1` includes deterministic time/entropy, journal metadata, manifest hash,
-workflow op identity, optional workflow op hash, optional key, and `cell_mode`.
+workflow identity, optional workflow hash, optional key, and `cell_mode`.
 
 ## 6) Routing Contract
 
-`routing.subscriptions` maps event schema to workflow op:
+`routing.subscriptions` maps event schema to workflow:
 
 - required fields are `event` and `op`
 - `key_field` is used for keyed workflow delivery
 - deterministic evaluation order is manifest order
 - matching subscriptions fan out in order
 
-A subscription is deliverable when its event schema exactly equals the target workflow op's
+A subscription is deliverable when its event schema exactly equals the target workflow's
 `workflow.event`, or when the workflow event schema is a variant whose arm references the
 subscription event schema. In the variant-arm case, runtime delivery wraps the incoming event as that
 variant arm before invoking the workflow.
@@ -188,7 +188,7 @@ Continuation delivery from receipts does not use this routing table.
 
 ## 7) Keyed Workflows (Cells)
 
-Cells are the keyed-instance model for workflows. They let one workflow op manage many independent
+Cells are the keyed-instance model for workflows. They let one workflow manage many independent
 instances of the same state machine, where each instance is identified by a key such as `order_id`,
 `ticket_id`, or `note_id`.
 
@@ -201,8 +201,8 @@ Use cells when:
 
 ### 7.1 Concepts
 
-- **Workflow op (keyed)**: one workflow op whose state is partitioned by key.
-- **Cell**: an instance of a keyed workflow op identified by key bytes.
+- **Workflow (keyed)**: one workflow whose state is partitioned by key.
+- **Cell**: an instance of a keyed workflow identified by key bytes.
 - **Workflow work unit**: scheduler unit for ready cells and queued workflow work.
 
 ### 7.2 ABI and context
@@ -218,20 +218,20 @@ mode deletes the cell.
 
 Effect authority is structural:
 
-- only workflow ops may emit effects
-- emitted effect ops must be declared in `workflow.effects_emitted`
-- the effect op must be present in the active manifest
+- only workflows may emit effects
+- emitted effects must be declared in `workflow.effects_emitted`
+- the effect must be present in the active manifest
 
 ### 7.3 Manifest hooks and routing
 
-`workflow.key_schema` documents the key type for a keyed workflow op.
+`workflow.key_schema` documents the key type for a keyed workflow.
 `manifest.routing.subscriptions[].key_field` marks routed events whose value field contains the key
 to target a cell:
 
 ```json
 {
   "event": "com.acme/OrderEvent@1",
-  "op": "com.acme/order.step@1",
+  "workflow": "com.acme/order.step@1",
   "key_field": "order_id"
 }
 ```
@@ -240,7 +240,7 @@ For variant event schemas, `key_field` typically points into the wrapped value, 
 `$value.note_id`.
 
 On domain ingress, the kernel extracts the key from the event value, validates it against
-`workflow.key_schema`, and targets `(workflow_op, key)`. If the cell is missing, the kernel invokes
+`workflow.key_schema`, and targets `(workflow, key)`. If the cell is missing, the kernel invokes
 the workflow with `state = null` so the workflow can create the instance.
 
 ### 7.4 Mailboxes, scheduling, and receipt continuation
@@ -251,19 +251,19 @@ other queued workflow work.
 
 Receipt continuation routing is manifest-independent and keyed by recorded origin identity:
 
-- origin workflow op
+- origin workflow
 - origin instance key
 - intent hash identity
 
 For keyed workflows, `origin_instance_key` maps directly to the target cell. This prevents receipt
-cross-delivery between concurrent instances of the same workflow op.
+cross-delivery between concurrent instances of the same workflow.
 
 ### 7.5 Storage, head view, and snapshots
 
 CAS stays immutable as logical `hash -> bytes`. Physical backends may pack many logical blobs into
 one immutable backing object, but that does not change the logical CAS contract.
 
-Per keyed workflow op, the kernel maintains a content-addressed `CellIndex`:
+Per keyed workflow, the kernel maintains a content-addressed `CellIndex`:
 
 ```text
 key_hash -> { key_bytes, state_hash, size, last_active_ns }
@@ -307,7 +307,7 @@ GC walks from snapshot-pinned roots. No side-channel CAS refs act as roots.
 
 ### 7.8 Journal and observability
 
-Journal entries for cell-scoped delivery include workflow op identity plus key correlation for
+Journal entries for cell-scoped delivery include workflow identity plus key correlation for
 domain and receipt records. CLI/inspect supports listing cells, showing cell state, tailing events,
 and tracing per-cell timelines. Trace/diagnose correlates receipt continuations via intent identity.
 
@@ -317,9 +317,9 @@ and tracing per-cell timelines. Trace/diagnose correlates receipt continuations 
 
 Best when business transitions, retries, and compensations are tightly coupled.
 
-### Pattern B: Multi-op choreography
+### Pattern B: Multi-workflow choreography
 
-Best when contexts or teams are split; workflow ops communicate through domain events.
+Best when contexts or teams are split; workflows communicate through domain events.
 
 ### Pattern C: Timer + receipt driven progression
 
@@ -353,7 +353,7 @@ match (state.pc, event) {
     "subscriptions": [
       {
         "event": "com.acme/OrderEvent@1",
-        "op": "com.acme/order.step@1",
+        "workflow": "com.acme/order.step@1",
         "key_field": "order_id"
       }
     ]
