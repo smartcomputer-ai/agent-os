@@ -89,20 +89,10 @@ Target replacement:
 `RootKind` is for top-level AIR document dispatch. `DefKind` is only for catalog definitions and
 must be used by patch operations that add, replace, remove, or reference manifest definition lists.
 
-`EffectKind` remains an open semantic string:
+AIR v2 has no public `EffectKind` definition. Effect op identity is the versioned `defop.name`
+plus its canonical node hash. Tooling that needs grouping should derive it from op names,
+implementation modules, or future non-identity metadata.
 
-```json
-{
-  "$defs": {
-    "EffectKind": {
-      "title": "Effect kind (namespaced string)",
-      "description": "Open-ended semantic effect kind identifier. Canonical effect identity is the effect op, not this string.",
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
-    }
-  }
-}
-```
 
 ## `defmodule.schema.json`
 
@@ -288,11 +278,10 @@ Target complete schema:
     "EffectOp": {
       "type": "object",
       "properties": {
-        "kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
         "params": { "$ref": "common.schema.json#/$defs/SchemaRef" },
         "receipt": { "$ref": "common.schema.json#/$defs/SchemaRef" }
       },
-      "required": ["kind", "params", "receipt"],
+      "required": ["params", "receipt"],
       "additionalProperties": false
     },
     "OpImpl": {
@@ -336,9 +325,15 @@ paths, not public effect emitters in AIR v2.
 `"effects_emitted": []`. Authoring sugar may allow omission only if the loader materializes the
 empty array before canonical hashing/CBOR.
 
-`effect.execution_class` is removed because dispatch class is runtime implementation metadata. The
-node resolves the execution path from the effect op implementation and the active runtime registry,
-not from a public schema field and not from semantic kind prefixes.
+`effect.execution_class` and `effect.kind` are removed because dispatch class and grouping are
+runtime/tooling concerns. The node resolves the execution path from the effect op implementation and
+the active runtime registry, not from a public effect-kind field and not from semantic kind prefixes.
+
+Workflow effect emission must name the effect op, not an effect kind string. Effect intent identity,
+open-work records, stream frames, receipt envelopes, and audit traces must carry the origin workflow
+op identity and effect op identity, including their resolved definition hashes where durable binding
+or replay validation needs them. Receipt and stream envelope v2 schemas should also record executor
+module, executor module hash, and entrypoint so the execution path is auditable.
 
 `workflow.key_schema` replaces v1 `defmodule.key_schema`. In v1, `defmodule` carried both the
 artifact and the workflow ABI. In AIR v2, `defmodule` is only the runtime/artifact declaration, so
@@ -468,7 +463,6 @@ These examples are illustrative only. The sections above define the actual schem
   "name": "acme/slack.post@1",
   "op_kind": "effect",
   "effect": {
-    "kind": "acme.slack.post",
     "params": "acme/SlackPostParams@1",
     "receipt": "acme/SlackPostReceipt@1"
   },
@@ -555,7 +549,6 @@ These examples are illustrative only. The sections above define the actual schem
   "name": "sys/timer.set@1",
   "op_kind": "effect",
   "effect": {
-    "kind": "timer.set",
     "params": "sys/TimerSetParams@1",
     "receipt": "sys/TimerSetReceipt@1"
   },
@@ -781,9 +774,9 @@ JSON Schema covers structure only. Semantic validation still needs:
 10. Routable workflow event variant arms must be named schema refs and must not contain duplicate refs.
 11. Every workflow `effects_emitted[]` entry references an active effect op.
 12. Workflow key-field validation uses the target op's `workflow.key_schema`, not the referenced module.
-13. Effect semantic kind duplicates are allowed only if the runtime has a deterministic dispatch rule by op identity. Recommendation: allow duplicates because op identity is canonical.
-14. The referenced module runtime kind must support the op kind.
-15. Effect execution path must resolve from the referenced module runtime and op implementation.
+13. The referenced module runtime kind must support the op kind.
+14. Effect execution path must resolve from the referenced module runtime and op implementation.
+15. Effect intent identity, continuation routing, receipt binding, and audit metadata must use effect op identity, not removed v1 effect-kind strings.
 16. Artifact kind compatibility is enforced by the `defmodule` schema: `wasm` accepts `wasm_module`; `python` accepts `python_bundle` or `workspace_root`; `builtin` has no artifact.
 17. `wasm_module.hash` must identify compiled WASM bytes.
 18. `python_bundle.root_hash` and `workspace_root.root_hash` must identify a workspace/tree root that the Python runner can hydrate.
