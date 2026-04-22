@@ -124,7 +124,6 @@
         "effect_op": {
           "text": {}
         },
-        "adapter_id": {
           "text": {}
         },
         "status": {
@@ -630,7 +629,6 @@
         "effect_op": {
           "text": {}
         },
-        "adapter_id": {
           "text": {}
         },
         "status": {
@@ -668,7 +666,6 @@
         "effect_op": {
           "text": {}
         },
-        "adapter_id": {
           "text": {}
         },
         "status": {
@@ -753,7 +750,6 @@
             }
           }
         },
-        "adapter_id": {
           "text": {}
         }
       }

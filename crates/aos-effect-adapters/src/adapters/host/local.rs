@@ -16,7 +16,7 @@ use aos_effects::builtins::{
     HostPatchOpsSummary, HostSessionOpenParams, HostSessionOpenReceipt, HostSessionSignalParams,
     HostSessionSignalReceipt,
 };
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::Store;
 use async_trait::async_trait;
 use globset::Glob;
@@ -191,7 +191,7 @@ pub fn make_host_adapters<S: Store + Send + Sync + 'static>(
 #[async_trait]
 impl AsyncEffectAdapter for HostSessionOpenAdapter {
     fn kind(&self) -> &str {
-        EffectKind::HOST_SESSION_OPEN
+        effect_ops::HOST_SESSION_OPEN
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -207,12 +207,7 @@ impl AsyncEffectAdapter for HostSessionOpenAdapter {
                     error_code: Some("invalid_params".into()),
                     error_message: Some(err.to_string()),
                 };
-                return Ok(build_receipt(
-                    intent,
-                    EffectKind::HOST_SESSION_OPEN,
-                    ReceiptStatus::Error,
-                    &payload,
-                )?);
+                return Ok(build_receipt(intent, ReceiptStatus::Error, &payload)?);
             }
         };
 
@@ -225,12 +220,7 @@ impl AsyncEffectAdapter for HostSessionOpenAdapter {
                 error_code: Some("unsupported_target".into()),
                 error_message: Some("local host adapter only supports local targets".into()),
             };
-            return Ok(build_receipt(
-                intent,
-                EffectKind::HOST_SESSION_OPEN,
-                ReceiptStatus::Error,
-                &payload,
-            )?);
+            return Ok(build_receipt(intent, ReceiptStatus::Error, &payload)?);
         };
 
         let requested_workdir = target_local
@@ -252,12 +242,7 @@ impl AsyncEffectAdapter for HostSessionOpenAdapter {
                         requested_workdir.to_string_lossy()
                     )),
                 };
-                return Ok(build_receipt(
-                    intent,
-                    EffectKind::HOST_SESSION_OPEN,
-                    ReceiptStatus::Error,
-                    &payload,
-                )?);
+                return Ok(build_receipt(intent, ReceiptStatus::Error, &payload)?);
             }
         };
 
@@ -294,19 +279,14 @@ impl AsyncEffectAdapter for HostSessionOpenAdapter {
             error_message: None,
         };
 
-        build_receipt(
-            intent,
-            EffectKind::HOST_SESSION_OPEN,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostExecAdapter<S> {
     fn kind(&self) -> &str {
-        EffectKind::HOST_EXEC
+        effect_ops::HOST_EXEC
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -583,14 +563,14 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostExecAdapter<S>
             error_message: None,
         };
 
-        build_receipt(intent, EffectKind::HOST_EXEC, receipt_status, &payload)
+        build_receipt(intent, receipt_status, &payload)
     }
 }
 
 #[async_trait]
 impl AsyncEffectAdapter for HostSessionSignalAdapter {
     fn kind(&self) -> &str {
-        EffectKind::HOST_SESSION_SIGNAL
+        effect_ops::HOST_SESSION_SIGNAL
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -604,12 +584,7 @@ impl AsyncEffectAdapter for HostSessionSignalAdapter {
                     error_code: Some("invalid_params".into()),
                     error_message: Some(err.to_string()),
                 };
-                return Ok(build_receipt(
-                    intent,
-                    EffectKind::HOST_SESSION_SIGNAL,
-                    ReceiptStatus::Error,
-                    &payload,
-                )?);
+                return Ok(build_receipt(intent, ReceiptStatus::Error, &payload)?);
             }
         };
 
@@ -622,12 +597,7 @@ impl AsyncEffectAdapter for HostSessionSignalAdapter {
                 error_code: None,
                 error_message: None,
             };
-            return build_receipt(
-                intent,
-                EffectKind::HOST_SESSION_SIGNAL,
-                ReceiptStatus::Ok,
-                &payload,
-            );
+            return build_receipt(intent, ReceiptStatus::Ok, &payload);
         };
 
         if session.closed {
@@ -638,12 +608,7 @@ impl AsyncEffectAdapter for HostSessionSignalAdapter {
                 error_code: None,
                 error_message: None,
             };
-            return build_receipt(
-                intent,
-                EffectKind::HOST_SESSION_SIGNAL,
-                ReceiptStatus::Ok,
-                &payload,
-            );
+            return build_receipt(intent, ReceiptStatus::Ok, &payload);
         }
 
         let ended_at_ns = now_wallclock_ns();
@@ -657,19 +622,14 @@ impl AsyncEffectAdapter for HostSessionSignalAdapter {
             error_code: None,
             error_message: None,
         };
-        build_receipt(
-            intent,
-            EffectKind::HOST_SESSION_SIGNAL,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdapter<S> {
     fn kind(&self) -> &str {
-        EffectKind::HOST_FS_READ_FILE
+        effect_ops::HOST_FS_READ_FILE
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -716,12 +676,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                 } else {
                     ReceiptStatus::Ok
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_READ_FILE,
-                    receipt_status,
-                    &payload,
-                );
+                return build_receipt(intent, receipt_status, &payload);
             }
         };
 
@@ -737,12 +692,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                     error_code: None,
                     error_message: None,
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_READ_FILE,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => return fs_read_error(intent, "read_failed", err.to_string()),
         };
@@ -757,12 +707,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                 error_code: None,
                 error_message: None,
             };
-            return build_receipt(
-                intent,
-                EffectKind::HOST_FS_READ_FILE,
-                ReceiptStatus::Ok,
-                &payload,
-            );
+            return build_receipt(intent, ReceiptStatus::Ok, &payload);
         }
 
         let bytes = match tokio::fs::read(&path).await {
@@ -792,12 +737,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                         error_code: Some("inline_required_too_large".into()),
                         error_message: None,
                     };
-                    return build_receipt(
-                        intent,
-                        EffectKind::HOST_FS_READ_FILE,
-                        ReceiptStatus::Error,
-                        &payload,
-                    );
+                    return build_receipt(intent, ReceiptStatus::Error, &payload);
                 }
                 Err(OutputMaterializeError::Store(err)) => {
                     return fs_read_error(intent, "output_store_failed", err);
@@ -816,12 +756,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                         error_code: Some("invalid_utf8".into()),
                         error_message: None,
                     };
-                    return build_receipt(
-                        intent,
-                        EffectKind::HOST_FS_READ_FILE,
-                        ReceiptStatus::Error,
-                        &payload,
-                    );
+                    return build_receipt(intent, ReceiptStatus::Error, &payload);
                 }
             };
             match materialize_text_output(self.store.as_ref(), mode, text, self.output_cfg) {
@@ -843,12 +778,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                         error_code: Some("inline_required_too_large".into()),
                         error_message: None,
                     };
-                    return build_receipt(
-                        intent,
-                        EffectKind::HOST_FS_READ_FILE,
-                        ReceiptStatus::Error,
-                        &payload,
-                    );
+                    return build_receipt(intent, ReceiptStatus::Error, &payload);
                 }
                 Err(OutputMaterializeError::Store(err)) => {
                     return fs_read_error(intent, "output_store_failed", err);
@@ -871,19 +801,14 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
             error_code: None,
             error_message: None,
         };
-        build_receipt(
-            intent,
-            EffectKind::HOST_FS_READ_FILE,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsWriteFileAdapter<S> {
     fn kind(&self) -> &str {
-        EffectKind::HOST_FS_WRITE_FILE
+        effect_ops::HOST_FS_WRITE_FILE
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -918,12 +843,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsWriteFileAda
                 } else {
                     ReceiptStatus::Ok
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_WRITE_FILE,
-                    receipt_status,
-                    &payload,
-                );
+                return build_receipt(intent, receipt_status, &payload);
             }
         };
 
@@ -946,12 +866,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsWriteFileAda
                 new_mtime_ns: None,
                 error_code: Some("file_exists".into()),
             };
-            return build_receipt(
-                intent,
-                EffectKind::HOST_FS_WRITE_FILE,
-                ReceiptStatus::Ok,
-                &payload,
-            );
+            return build_receipt(intent, ReceiptStatus::Ok, &payload);
         }
 
         let create_parents = params.create_parents.unwrap_or(false);
@@ -987,19 +902,14 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsWriteFileAda
             new_mtime_ns,
             error_code: None,
         };
-        build_receipt(
-            intent,
-            EffectKind::HOST_FS_WRITE_FILE,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
 impl AsyncEffectAdapter for HostFsEditFileAdapter {
     fn kind(&self) -> &str {
-        EffectKind::HOST_FS_EDIT_FILE
+        effect_ops::HOST_FS_EDIT_FILE
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -1041,12 +951,7 @@ impl AsyncEffectAdapter for HostFsEditFileAdapter {
                 } else {
                     ReceiptStatus::Ok
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_EDIT_FILE,
-                    receipt_status,
-                    &payload,
-                );
+                return build_receipt(intent, receipt_status, &payload);
             }
         };
 
@@ -1060,12 +965,7 @@ impl AsyncEffectAdapter for HostFsEditFileAdapter {
                     summary_text: None,
                     error_code: Some("path_not_found".into()),
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_EDIT_FILE,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => return fs_edit_error(intent, "read_failed", err.to_string()),
         };
@@ -1080,12 +980,7 @@ impl AsyncEffectAdapter for HostFsEditFileAdapter {
                     summary_text: None,
                     error_code: Some("invalid_utf8".into()),
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_EDIT_FILE,
-                    ReceiptStatus::Error,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Error, &payload);
             }
         };
 
@@ -1100,12 +995,7 @@ impl AsyncEffectAdapter for HostFsEditFileAdapter {
                     summary_text: None,
                     error_code: Some("edit_target_not_found".into()),
                 };
-                build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_EDIT_FILE,
-                    ReceiptStatus::Ok,
-                    &payload,
-                )
+                build_receipt(intent, ReceiptStatus::Ok, &payload)
             }
             Err(EditMatchError::Ambiguous(count)) => {
                 let payload = HostFsEditFileReceipt {
@@ -1115,12 +1005,7 @@ impl AsyncEffectAdapter for HostFsEditFileAdapter {
                     summary_text: None,
                     error_code: Some("ambiguous_matches".into()),
                 };
-                build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_EDIT_FILE,
-                    ReceiptStatus::Ok,
-                    &payload,
-                )
+                build_receipt(intent, ReceiptStatus::Ok, &payload)
             }
             Ok(result) => {
                 write_file_atomic(&path, result.updated.as_bytes()).await?;
@@ -1137,12 +1022,7 @@ impl AsyncEffectAdapter for HostFsEditFileAdapter {
                     summary_text: Some(summary),
                     error_code: None,
                 };
-                build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_EDIT_FILE,
-                    ReceiptStatus::Ok,
-                    &payload,
-                )
+                build_receipt(intent, ReceiptStatus::Ok, &payload)
             }
         }
     }
@@ -1151,7 +1031,7 @@ impl AsyncEffectAdapter for HostFsEditFileAdapter {
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsApplyPatchAdapter<S> {
     fn kind(&self) -> &str {
-        EffectKind::HOST_FS_APPLY_PATCH
+        effect_ops::HOST_FS_APPLY_PATCH
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -1172,12 +1052,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsApplyPatchAd
                 errors: None,
                 error_code: Some("unsupported_patch_format".into()),
             };
-            return build_receipt(
-                intent,
-                EffectKind::HOST_FS_APPLY_PATCH,
-                ReceiptStatus::Error,
-                &payload,
-            );
+            return build_receipt(intent, ReceiptStatus::Error, &payload);
         }
 
         let session = match active_session(&self.state, &params.session_id).await {
@@ -1209,12 +1084,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsApplyPatchAd
                     errors: Some(vec![err]),
                     error_code: Some("patch_parse_error".into()),
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_APPLY_PATCH,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
         };
 
@@ -1231,12 +1101,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsApplyPatchAd
                     errors: Some(vec![err.message]),
                     error_code: Some(err.error_code),
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_APPLY_PATCH,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
         };
 
@@ -1267,19 +1132,14 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsApplyPatchAd
             errors: None,
             error_code: None,
         };
-        build_receipt(
-            intent,
-            EffectKind::HOST_FS_APPLY_PATCH,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGrepAdapter<S> {
     fn kind(&self) -> &str {
-        EffectKind::HOST_FS_GREP
+        effect_ops::HOST_FS_GREP
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -1321,7 +1181,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGrepAdapter<
                 } else {
                     ReceiptStatus::Error
                 };
-                return build_receipt(intent, EffectKind::HOST_FS_GREP, receipt_status, &payload);
+                return build_receipt(intent, receipt_status, &payload);
             }
         };
 
@@ -1334,12 +1194,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGrepAdapter<
                 error_code: None,
                 summary_text: None,
             };
-            return build_receipt(
-                intent,
-                EffectKind::HOST_FS_GREP,
-                ReceiptStatus::Ok,
-                &payload,
-            );
+            return build_receipt(intent, ReceiptStatus::Ok, &payload);
         }
 
         let max_results = params
@@ -1365,12 +1220,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGrepAdapter<
                     error_code: Some("invalid_regex".into()),
                     summary_text: Some(message),
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_GREP,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(GrepCollectError::InvalidGlobFilter(message)) => {
                 return fs_grep_error(intent, "invalid_glob_filter", message);
@@ -1419,19 +1269,14 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGrepAdapter<
             error_code: None,
             summary_text: summary,
         };
-        build_receipt(
-            intent,
-            EffectKind::HOST_FS_GREP,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGlobAdapter<S> {
     fn kind(&self) -> &str {
-        EffectKind::HOST_FS_GLOB
+        effect_ops::HOST_FS_GLOB
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -1474,7 +1319,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGlobAdapter<
                 } else {
                     ReceiptStatus::Error
                 };
-                return build_receipt(intent, EffectKind::HOST_FS_GLOB, receipt_status, &payload);
+                return build_receipt(intent, receipt_status, &payload);
             }
         };
 
@@ -1487,12 +1332,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGlobAdapter<
                 error_code: None,
                 summary_text: None,
             };
-            return build_receipt(
-                intent,
-                EffectKind::HOST_FS_GLOB,
-                ReceiptStatus::Ok,
-                &payload,
-            );
+            return build_receipt(intent, ReceiptStatus::Ok, &payload);
         }
 
         let max_results = params
@@ -1511,12 +1351,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGlobAdapter<
                     error_code: Some("invalid_pattern".into()),
                     summary_text: Some(message),
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_GLOB,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(GlobCollectError::Io(message)) => {
                 return fs_glob_error(intent, "glob_failed", message);
@@ -1562,19 +1397,14 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsGlobAdapter<
             error_code: None,
             summary_text: summary,
         };
-        build_receipt(
-            intent,
-            EffectKind::HOST_FS_GLOB,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
 impl AsyncEffectAdapter for HostFsStatAdapter {
     fn kind(&self) -> &str {
-        EffectKind::HOST_FS_STAT
+        effect_ops::HOST_FS_STAT
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -1608,7 +1438,7 @@ impl AsyncEffectAdapter for HostFsStatAdapter {
                 } else {
                     ReceiptStatus::Error
                 };
-                return build_receipt(intent, EffectKind::HOST_FS_STAT, status, &payload);
+                return build_receipt(intent, status, &payload);
             }
         };
 
@@ -1623,12 +1453,7 @@ impl AsyncEffectAdapter for HostFsStatAdapter {
                     mtime_ns: None,
                     error_code: None,
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_STAT,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => return fs_stat_error(intent, "stat_failed", err.to_string()),
         };
@@ -1646,19 +1471,14 @@ impl AsyncEffectAdapter for HostFsStatAdapter {
             mtime_ns,
             error_code: None,
         };
-        build_receipt(
-            intent,
-            EffectKind::HOST_FS_STAT,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
 impl AsyncEffectAdapter for HostFsExistsAdapter {
     fn kind(&self) -> &str {
-        EffectKind::HOST_FS_EXISTS
+        effect_ops::HOST_FS_EXISTS
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -1689,7 +1509,7 @@ impl AsyncEffectAdapter for HostFsExistsAdapter {
                 } else {
                     ReceiptStatus::Error
                 };
-                return build_receipt(intent, EffectKind::HOST_FS_EXISTS, status, &payload);
+                return build_receipt(intent, status, &payload);
             }
         };
 
@@ -1699,19 +1519,14 @@ impl AsyncEffectAdapter for HostFsExistsAdapter {
             exists: Some(exists),
             error_code: None,
         };
-        build_receipt(
-            intent,
-            EffectKind::HOST_FS_EXISTS,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsListDirAdapter<S> {
     fn kind(&self) -> &str {
-        EffectKind::HOST_FS_LIST_DIR
+        effect_ops::HOST_FS_LIST_DIR
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -1753,7 +1568,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsListDirAdapt
                 } else {
                     ReceiptStatus::Error
                 };
-                return build_receipt(intent, EffectKind::HOST_FS_LIST_DIR, status, &payload);
+                return build_receipt(intent, status, &payload);
             }
         };
 
@@ -1768,12 +1583,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsListDirAdapt
                     error_code: None,
                     summary_text: None,
                 };
-                return build_receipt(
-                    intent,
-                    EffectKind::HOST_FS_LIST_DIR,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => return fs_list_dir_error(intent, "list_failed", err.to_string()),
         };
@@ -1839,12 +1649,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsListDirAdapt
                 if total == 1 { "y" } else { "ies" }
             )),
         };
-        build_receipt(
-            intent,
-            EffectKind::HOST_FS_LIST_DIR,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -1915,12 +1720,7 @@ fn exec_error_receipt(
         error_code: Some(code.into()),
         error_message: Some(message),
     };
-    build_receipt(
-        intent,
-        EffectKind::HOST_EXEC,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fs_read_error(
@@ -1937,12 +1737,7 @@ fn fs_read_error(
         error_code: Some(code.into()),
         error_message: None,
     };
-    let mut receipt = build_receipt(
-        intent,
-        EffectKind::HOST_FS_READ_FILE,
-        ReceiptStatus::Error,
-        &payload,
-    )?;
+    let mut receipt = build_receipt(intent, ReceiptStatus::Error, &payload)?;
     let _ = message;
     receipt.cost_cents = Some(0);
     Ok(receipt)
@@ -1960,12 +1755,7 @@ fn fs_write_error(
         new_mtime_ns: None,
         error_code: Some(code.into()),
     };
-    build_receipt(
-        intent,
-        EffectKind::HOST_FS_WRITE_FILE,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fs_edit_error(
@@ -1980,12 +1770,7 @@ fn fs_edit_error(
         summary_text: None,
         error_code: Some(code.into()),
     };
-    build_receipt(
-        intent,
-        EffectKind::HOST_FS_EDIT_FILE,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fs_apply_patch_error(
@@ -2002,12 +1787,7 @@ fn fs_apply_patch_error(
         errors: None,
         error_code: Some(code.into()),
     };
-    build_receipt(
-        intent,
-        EffectKind::HOST_FS_APPLY_PATCH,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fs_grep_error(
@@ -2023,12 +1803,7 @@ fn fs_grep_error(
         error_code: Some(code.into()),
         summary_text: None,
     };
-    build_receipt(
-        intent,
-        EffectKind::HOST_FS_GREP,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fs_glob_error(
@@ -2044,12 +1819,7 @@ fn fs_glob_error(
         error_code: Some(code.into()),
         summary_text: None,
     };
-    build_receipt(
-        intent,
-        EffectKind::HOST_FS_GLOB,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fs_stat_error(
@@ -2065,12 +1835,7 @@ fn fs_stat_error(
         mtime_ns: None,
         error_code: Some(code.into()),
     };
-    build_receipt(
-        intent,
-        EffectKind::HOST_FS_STAT,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fs_exists_error(
@@ -2083,12 +1848,7 @@ fn fs_exists_error(
         exists: None,
         error_code: Some(code.into()),
     };
-    build_receipt(
-        intent,
-        EffectKind::HOST_FS_EXISTS,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fs_list_dir_error(
@@ -2104,12 +1864,7 @@ fn fs_list_dir_error(
         error_code: Some(code.into()),
         summary_text: None,
     };
-    build_receipt(
-        intent,
-        EffectKind::HOST_FS_LIST_DIR,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 async fn write_file_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -2572,7 +2327,7 @@ mod tests {
 
     fn intent_for<T: serde::Serialize>(kind: &str, params: &T, seed: u8) -> EffectIntent {
         EffectIntent::from_raw_params(
-            EffectKind::new(kind),
+            kind,
             serde_cbor::to_vec(params).expect("encode params"),
             [seed; 32],
         )
@@ -2609,7 +2364,7 @@ mod tests {
 
         let open_receipt = open_adapter
             .run_terminal(&intent_for(
-                EffectKind::HOST_SESSION_OPEN,
+                effect_ops::HOST_SESSION_OPEN,
                 &open_params("."),
                 1,
             ))
@@ -2630,7 +2385,7 @@ mod tests {
             output_mode: Some("require_inline".into()),
         };
         let exec_receipt = exec_adapter
-            .run_terminal(&intent_for(EffectKind::HOST_EXEC, &exec_params, 2))
+            .run_terminal(&intent_for(effect_ops::HOST_EXEC, &exec_params, 2))
             .await
             .expect("exec receipt");
         assert_eq!(exec_receipt.status, ReceiptStatus::Ok);
@@ -2643,7 +2398,7 @@ mod tests {
         };
         let signal_receipt = signal_adapter
             .run_terminal(&intent_for(
-                EffectKind::HOST_SESSION_SIGNAL,
+                effect_ops::HOST_SESSION_SIGNAL,
                 &signal_params,
                 3,
             ))
@@ -2665,7 +2420,7 @@ mod tests {
         let open_receipt = set
             .session_open
             .run_terminal(&intent_for(
-                EffectKind::HOST_SESSION_OPEN,
+                effect_ops::HOST_SESSION_OPEN,
                 &open_params(tmp.path().to_string_lossy().as_ref()),
                 9,
             ))
@@ -2688,7 +2443,7 @@ mod tests {
         let write_receipt = set
             .fs_write_file
             .run_terminal(&intent_for(
-                EffectKind::HOST_FS_WRITE_FILE,
+                effect_ops::HOST_FS_WRITE_FILE,
                 &write_params,
                 10,
             ))
@@ -2707,7 +2462,7 @@ mod tests {
         };
         let read_receipt = set
             .fs_read_file
-            .run_terminal(&intent_for(EffectKind::HOST_FS_READ_FILE, &read_params, 11))
+            .run_terminal(&intent_for(effect_ops::HOST_FS_READ_FILE, &read_params, 11))
             .await
             .expect("read receipt");
         assert_eq!(read_receipt.status, ReceiptStatus::Ok);

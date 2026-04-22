@@ -3,8 +3,6 @@ use aos_air_types::schema_index::SchemaIndex;
 use aos_air_types::value_normalize::{ValueNormalizeError, normalize_cbor_by_name};
 use thiserror::Error;
 
-use crate::EffectKind;
-
 #[derive(Debug, Error)]
 pub enum NormalizeError {
     #[error("unknown effect params schema for {0}")]
@@ -22,11 +20,13 @@ pub enum NormalizeError {
 pub fn normalize_effect_params(
     catalog: &EffectCatalog,
     schemas: &SchemaIndex,
-    kind: &EffectKind,
+    effect_op: &str,
     params_cbor: &[u8],
 ) -> Result<Vec<u8>, NormalizeError> {
-    let schema_name = params_schema_name(catalog, kind)
-        .ok_or_else(|| NormalizeError::UnknownEffect(kind.as_str().to_string()))?;
+    let schema_name = catalog
+        .params_schema(effect_op)
+        .map(|schema| schema.as_str())
+        .ok_or_else(|| NormalizeError::UnknownEffect(effect_op.to_string()))?;
     let normalized =
         normalize_cbor_by_name(schemas, schema_name, params_cbor).map_err(map_error)?;
     Ok(normalized.bytes)
@@ -45,12 +45,6 @@ pub fn normalize_effect_op_params(
     let normalized =
         normalize_cbor_by_name(schemas, schema_name, params_cbor).map_err(map_error)?;
     Ok(normalized.bytes)
-}
-
-fn params_schema_name<'a>(catalog: &'a EffectCatalog, kind: &EffectKind) -> Option<&'a str> {
-    catalog
-        .params_schema_for_runtime(kind.as_str())
-        .map(|schema| schema.as_str())
 }
 
 fn map_error(err: ValueNormalizeError) -> NormalizeError {
@@ -106,14 +100,14 @@ mod tests {
         let norm_a = normalize_effect_params(
             &catalog,
             &schemas,
-            &EffectKind::new(crate::EffectKind::HTTP_REQUEST),
+            crate::effect_ops::HTTP_REQUEST,
             &params_a,
         )
         .unwrap();
         let norm_b = normalize_effect_params(
             &catalog,
             &schemas,
-            &EffectKind::new(crate::EffectKind::HTTP_REQUEST),
+            crate::effect_ops::HTTP_REQUEST,
             &params_b,
         )
         .unwrap();
@@ -131,27 +125,18 @@ mod tests {
         let value = CborValue::Map(map);
         let bytes = serde_cbor::to_vec(&value).unwrap();
         let (catalog, schemas) = catalog_and_schemas();
-        let err = normalize_effect_params(
-            &catalog,
-            &schemas,
-            &EffectKind::new(crate::EffectKind::HTTP_REQUEST),
-            &bytes,
-        )
-        .unwrap_err();
+        let err =
+            normalize_effect_params(&catalog, &schemas, crate::effect_ops::HTTP_REQUEST, &bytes)
+                .unwrap_err();
         assert!(format!("{err}").contains("missing field"));
     }
 
     #[test]
-    fn unknown_effect_kind_returns_error() {
+    fn unknown_effect_op_returns_error() {
         let params = serde_cbor::to_vec(&CborValue::Map(BTreeMap::new())).unwrap();
         let (catalog, schemas) = catalog_and_schemas();
-        let err = normalize_effect_params(
-            &catalog,
-            &schemas,
-            &EffectKind::new("custom.effect"),
-            &params,
-        )
-        .unwrap_err();
+        let err =
+            normalize_effect_params(&catalog, &schemas, "custom.effect", &params).unwrap_err();
         assert!(matches!(
             err,
             NormalizeError::UnknownEffect(kind) if kind == "custom.effect".to_string()

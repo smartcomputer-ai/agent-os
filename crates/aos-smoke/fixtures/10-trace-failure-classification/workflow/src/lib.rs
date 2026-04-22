@@ -87,7 +87,6 @@ struct HttpRequestReceipt {
     headers: BTreeMap<String, String>,
     body_ref: Option<String>,
     timings: RequestTimings,
-    adapter_id: String,
 }
 
 fn handle_start(ctx: &mut WorkflowCtx<FetchState, ()>, url: String, method: String) {

@@ -250,12 +250,7 @@ impl AsyncEffectAdapter for FabricHostSessionOpenAdapter {
             error_code: None,
             error_message: None,
         };
-        build_receipt(
-            intent,
-            HOST_SESSION_OPEN_FABRIC,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -441,7 +436,7 @@ impl<S: Store + Send + Sync + 'static> FabricHostExecAdapter<S> {
             error_code,
             error_message,
         };
-        build_receipt(intent, HOST_EXEC_FABRIC, receipt_status, &payload)
+        build_receipt(intent, receipt_status, &payload)
     }
 }
 
@@ -509,12 +504,7 @@ impl AsyncEffectAdapter for FabricHostSessionSignalAdapter {
             error_code: None,
             error_message: None,
         };
-        build_receipt(
-            intent,
-            HOST_SESSION_SIGNAL_FABRIC,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -606,12 +596,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsReadFi
             error_code: None,
             error_message: None,
         };
-        build_receipt(
-            intent,
-            HOST_FS_READ_FILE_FABRIC,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -656,12 +641,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsWriteF
                         new_mtime_ns: None,
                         error_code: None,
                     };
-                    return build_receipt(
-                        intent,
-                        HOST_FS_WRITE_FILE_FABRIC,
-                        ReceiptStatus::Ok,
-                        &payload,
-                    );
+                    return build_receipt(intent, ReceiptStatus::Ok, &payload);
                 }
                 Ok(_) => {}
                 Err(err) => {
@@ -717,12 +697,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsWriteF
             new_mtime_ns,
             error_code: None,
         };
-        build_receipt(
-            intent,
-            HOST_FS_WRITE_FILE_FABRIC,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -768,12 +743,7 @@ impl AsyncEffectAdapter for FabricHostFsEditFileAdapter {
                     summary_text: None,
                     error_code: Some("path_not_found".to_string()),
                 };
-                return build_receipt(
-                    intent,
-                    HOST_FS_EDIT_FILE_FABRIC,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => {
                 return fabric_fs_edit_error(intent, fabric_error_code(&err), err.to_string());
@@ -792,12 +762,7 @@ impl AsyncEffectAdapter for FabricHostFsEditFileAdapter {
             )),
             error_code: None,
         };
-        build_receipt(
-            intent,
-            HOST_FS_EDIT_FILE_FABRIC,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -825,12 +790,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsApplyP
                 errors: None,
                 error_code: Some("unsupported_patch_format".to_string()),
             };
-            return build_receipt(
-                intent,
-                HOST_FS_APPLY_PATCH_FABRIC,
-                ReceiptStatus::Error,
-                &payload,
-            );
+            return build_receipt(intent, ReceiptStatus::Error, &payload);
         }
 
         let patch_text = match resolve_patch_text(self.store.as_ref(), &params) {
@@ -870,12 +830,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsApplyP
                     errors: Some(vec![err.to_string()]),
                     error_code: Some("path_not_found".to_string()),
                 };
-                return build_receipt(
-                    intent,
-                    HOST_FS_APPLY_PATCH_FABRIC,
-                    ReceiptStatus::Ok,
-                    &payload,
-                );
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => {
                 return fabric_fs_apply_patch_error(
@@ -912,12 +867,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsApplyP
             errors: None,
             error_code: None,
         };
-        build_receipt(
-            intent,
-            HOST_FS_APPLY_PATCH_FABRIC,
-            ReceiptStatus::Ok,
-            &payload,
-        )
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -966,7 +916,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsGrepAd
                     error_code: None,
                     summary_text: None,
                 };
-                return build_receipt(intent, HOST_FS_GREP_FABRIC, ReceiptStatus::Ok, &payload);
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => {
                 return fabric_fs_grep_error(intent, fabric_error_code(&err), err.to_string());
@@ -1001,7 +951,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsGrepAd
             error_code: None,
             summary_text: summary,
         };
-        build_receipt(intent, HOST_FS_GREP_FABRIC, ReceiptStatus::Ok, &payload)
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -1048,7 +998,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsGlobAd
                     error_code: None,
                     summary_text: None,
                 };
-                return build_receipt(intent, HOST_FS_GLOB_FABRIC, ReceiptStatus::Ok, &payload);
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => {
                 return fabric_fs_glob_error(intent, fabric_error_code(&err), err.to_string());
@@ -1083,7 +1033,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsGlobAd
             error_code: None,
             summary_text: summary,
         };
-        build_receipt(intent, HOST_FS_GLOB_FABRIC, ReceiptStatus::Ok, &payload)
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -1121,7 +1071,7 @@ impl AsyncEffectAdapter for FabricHostFsStatAdapter {
                     mtime_ns: None,
                     error_code: None,
                 };
-                return build_receipt(intent, HOST_FS_STAT_FABRIC, ReceiptStatus::Ok, &payload);
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => {
                 return fabric_fs_stat_error(intent, fabric_error_code(&err), err.to_string());
@@ -1135,7 +1085,7 @@ impl AsyncEffectAdapter for FabricHostFsStatAdapter {
             mtime_ns: response.mtime_ns.map(u128_to_u64),
             error_code: None,
         };
-        build_receipt(intent, HOST_FS_STAT_FABRIC, ReceiptStatus::Ok, &payload)
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -1170,7 +1120,7 @@ impl AsyncEffectAdapter for FabricHostFsExistsAdapter {
                     exists: Some(false),
                     error_code: None,
                 };
-                return build_receipt(intent, HOST_FS_EXISTS_FABRIC, ReceiptStatus::Ok, &payload);
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => {
                 return fabric_fs_exists_error(intent, fabric_error_code(&err), err.to_string());
@@ -1181,7 +1131,7 @@ impl AsyncEffectAdapter for FabricHostFsExistsAdapter {
             exists: Some(response.exists),
             error_code: None,
         };
-        build_receipt(intent, HOST_FS_EXISTS_FABRIC, ReceiptStatus::Ok, &payload)
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -1229,7 +1179,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsListDi
                     error_code: None,
                     summary_text: None,
                 };
-                return build_receipt(intent, HOST_FS_LIST_DIR_FABRIC, ReceiptStatus::Ok, &payload);
+                return build_receipt(intent, ReceiptStatus::Ok, &payload);
             }
             Err(err) => {
                 return fabric_fs_list_dir_error(intent, fabric_error_code(&err), err.to_string());
@@ -1274,7 +1224,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsListDi
                 if total == 1 { "y" } else { "ies" }
             )),
         };
-        build_receipt(intent, HOST_FS_LIST_DIR_FABRIC, ReceiptStatus::Ok, &payload)
+        build_receipt(intent, ReceiptStatus::Ok, &payload)
     }
 }
 
@@ -1294,7 +1244,6 @@ fn fabric_exec_progress_frame(
     };
     Ok(EffectStreamFrame {
         intent_hash: intent.intent_hash,
-        adapter_id: HOST_EXEC_FABRIC.to_string(),
         origin_module_id: context.origin_module_id.clone(),
         origin_workflow_op_hash: context.origin_workflow_op_hash.clone(),
         origin_instance_key: context.origin_instance_key.clone(),
@@ -1469,12 +1418,7 @@ fn fabric_session_open_error(
         error_code: Some(code.to_string()),
         error_message: Some(message),
     };
-    build_receipt(
-        intent,
-        HOST_SESSION_OPEN_FABRIC,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_exec_error(
@@ -1495,7 +1439,7 @@ fn fabric_exec_error(
         error_code: Some(code.to_string()),
         error_message: Some(message),
     };
-    build_receipt(intent, HOST_EXEC_FABRIC, ReceiptStatus::Error, &payload)
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_signal_error(
@@ -1510,12 +1454,7 @@ fn fabric_signal_error(
         error_code: Some(code.to_string()),
         error_message: Some(message),
     };
-    build_receipt(
-        intent,
-        HOST_SESSION_SIGNAL_FABRIC,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_fs_read_error(
@@ -1550,7 +1489,7 @@ fn fabric_fs_read_error(
     } else {
         ReceiptStatus::Error
     };
-    build_receipt(intent, HOST_FS_READ_FILE_FABRIC, receipt_status, &payload)
+    build_receipt(intent, receipt_status, &payload)
 }
 
 fn fabric_fs_write_error(
@@ -1565,12 +1504,7 @@ fn fabric_fs_write_error(
         new_mtime_ns: None,
         error_code: Some(code.to_string()),
     };
-    build_receipt(
-        intent,
-        HOST_FS_WRITE_FILE_FABRIC,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_fs_edit_error(
@@ -1585,12 +1519,7 @@ fn fabric_fs_edit_error(
         summary_text: None,
         error_code: Some(code.to_string()),
     };
-    build_receipt(
-        intent,
-        HOST_FS_EDIT_FILE_FABRIC,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_fs_apply_patch_error(
@@ -1607,12 +1536,7 @@ fn fabric_fs_apply_patch_error(
         errors: None,
         error_code: Some(code.to_string()),
     };
-    build_receipt(
-        intent,
-        HOST_FS_APPLY_PATCH_FABRIC,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_fs_grep_error(
@@ -1628,7 +1552,7 @@ fn fabric_fs_grep_error(
         error_code: Some(code.to_string()),
         summary_text: None,
     };
-    build_receipt(intent, HOST_FS_GREP_FABRIC, ReceiptStatus::Error, &payload)
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_fs_glob_error(
@@ -1644,7 +1568,7 @@ fn fabric_fs_glob_error(
         error_code: Some(code.to_string()),
         summary_text: None,
     };
-    build_receipt(intent, HOST_FS_GLOB_FABRIC, ReceiptStatus::Error, &payload)
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_fs_stat_error(
@@ -1660,7 +1584,7 @@ fn fabric_fs_stat_error(
         mtime_ns: None,
         error_code: Some(code.to_string()),
     };
-    build_receipt(intent, HOST_FS_STAT_FABRIC, ReceiptStatus::Error, &payload)
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_fs_exists_error(
@@ -1673,12 +1597,7 @@ fn fabric_fs_exists_error(
         exists: None,
         error_code: Some(code.to_string()),
     };
-    build_receipt(
-        intent,
-        HOST_FS_EXISTS_FABRIC,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }
 
 fn fabric_fs_list_dir_error(
@@ -1694,10 +1613,5 @@ fn fabric_fs_list_dir_error(
         error_code: Some(code.to_string()),
         summary_text: None,
     };
-    build_receipt(
-        intent,
-        HOST_FS_LIST_DIR_FABRIC,
-        ReceiptStatus::Error,
-        &payload,
-    )
+    build_receipt(intent, ReceiptStatus::Error, &payload)
 }

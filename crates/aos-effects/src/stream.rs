@@ -1,13 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-/// Adapter-origin stream frame correlated to an open effect intent.
+/// Stream frame correlated to an open effect intent.
 ///
 /// A stream frame is continuation data for an already-emitted intent.
 /// Terminal settlement still happens through a single `EffectReceipt`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectStreamFrame {
     pub intent_hash: [u8; 32],
-    pub adapter_id: String,
     pub origin_module_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_workflow_op_hash: Option<String>,
@@ -17,7 +16,7 @@ pub struct EffectStreamFrame {
         with = "serde_bytes_opt"
     )]
     pub origin_instance_key: Option<Vec<u8>>,
-    #[serde(default, alias = "effect_kind")]
+    #[serde(default)]
     pub effect_op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_op_hash: Option<String>,

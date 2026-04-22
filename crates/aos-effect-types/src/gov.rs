@@ -79,7 +79,7 @@ pub struct GovPendingWorkflowReceipt {
     #[serde(default)]
     pub origin_instance_key_b64: Option<String>,
     pub intent_hash: HashRef,
-    pub effect_kind: String,
+    pub effect_op: String,
     pub emitted_at_seq: u64,
 }
 

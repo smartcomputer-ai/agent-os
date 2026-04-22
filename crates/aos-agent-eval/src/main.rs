@@ -22,7 +22,7 @@ use aos_effects::builtins::{
     HostLocalTarget, HostSessionOpenParams, HostSessionOpenReceipt, HostTarget, LlmGenerateParams,
     LlmGenerateReceipt,
 };
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::Store;
 use aos_node::WorldConfig;
 use casefile::{EvalCase, FileExpectation, load_cases};
@@ -648,14 +648,14 @@ fn bootstrap_host_session(host: &mut EvalHost, workdir: &Path) -> Result<String>
     };
 
     let intent = EffectIntent::from_raw_params(
-        EffectKind::host_session_open(),
+        effect_ops::HOST_SESSION_OPEN,
         serde_cbor::to_vec(&params).context("encode host.session.open params")?,
         [0x11; 32],
     )
     .context("build host.session.open intent")?;
 
     let receipts =
-        host.execute_batch_routed(vec![(intent, EffectKind::HOST_SESSION_OPEN.to_string())])?;
+        host.execute_batch_routed(vec![(intent, effect_ops::HOST_SESSION_OPEN.to_string())])?;
     let receipt = receipts
         .into_iter()
         .next()
@@ -705,7 +705,7 @@ fn drive_live_effects<S: Store + 'static>(
                 continue;
             }
 
-            if intent.kind.as_str() == EffectKind::LLM_GENERATE {
+            if intent.effect_op.as_str() == effect_ops::LLM_GENERATE {
                 stats.llm_turns = stats.llm_turns.saturating_add(1);
                 let receipt = execute_live_llm_intent(host, llm_adapter, intent, api_key)?;
                 receipts.push(receipt);
@@ -713,14 +713,14 @@ fn drive_live_effects<S: Store + 'static>(
             }
 
             if std::env::var("AOS_AGENT_EVAL_DEBUG_PATCH").is_ok()
-                && intent.kind.as_str() == EffectKind::HOST_FS_APPLY_PATCH
+                && intent.effect_op.as_str() == effect_ops::HOST_FS_APPLY_PATCH
             {
                 if let Ok(value) = serde_cbor::from_slice::<Value>(&intent.params_cbor) {
                     eprintln!("debug host.fs.apply_patch params: {}", value);
                 }
             }
 
-            external.push((intent.clone(), intent.kind.as_str().to_string()));
+            external.push((intent.clone(), intent.effect_op.as_str().to_string()));
         }
 
         if !external.is_empty() {
@@ -747,7 +747,7 @@ fn execute_live_llm_intent<S: Store + 'static>(
     params.api_key = Some(api_key.to_string().into());
 
     let patched_intent = EffectIntent::from_raw_params(
-        EffectKind::llm_generate(),
+        effect_ops::LLM_GENERATE,
         serde_cbor::to_vec(&params).context("encode patched llm.generate params")?,
         intent.idempotency_key,
     )

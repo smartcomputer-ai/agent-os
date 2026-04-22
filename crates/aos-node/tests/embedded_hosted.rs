@@ -250,7 +250,6 @@ async fn embedded_fabric_exec_progress_is_admitted_through_runtime_and_kernel() 
         let (stream_record, receipt_record) =
             wait_for_fabric_exec_progress_journal(&runtime, &mut supervisor, &world).await;
 
-        assert_eq!(stream_record.adapter_id, "host.exec.fabric");
         assert_eq!(stream_record.origin_module_id, "demo/FabricExecProgress@1");
         assert_eq!(stream_record.origin_instance_key, None);
         assert_eq!(stream_record.effect_op, "sys/host.exec@1");
@@ -262,7 +261,6 @@ async fn embedded_fabric_exec_progress_is_admitted_through_runtime_and_kernel() 
         assert_eq!(progress.stdout_delta, b"e2e-progress\n");
         assert_eq!(progress.stdout_bytes, "e2e-progress\n".len() as u64);
 
-        assert_eq!(receipt_record.adapter_id, "host.exec.fabric");
         assert_eq!(receipt_record.status, ReceiptStatus::Ok);
         let receipt: JournalHostExecReceipt =
             serde_cbor::from_slice(&receipt_record.payload_cbor).unwrap();
@@ -311,9 +309,7 @@ async fn wait_for_fabric_exec_progress_journal(
             _ => None,
         });
         let receipt = records.iter().find_map(|record| match record {
-            JournalRecord::EffectReceipt(receipt) if receipt.adapter_id == "host.exec.fabric" => {
-                Some(receipt.clone())
-            }
+            JournalRecord::EffectReceipt(receipt) => Some(receipt.clone()),
             _ => None,
         });
         if let (Some(stream), Some(receipt)) = (stream, receipt) {

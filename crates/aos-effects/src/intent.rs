@@ -2,8 +2,6 @@ use aos_cbor::{Hash, to_canonical_cbor};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-use crate::EffectKind;
-
 pub type IdempotencyKey = [u8; 32];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -38,8 +36,6 @@ impl EffectSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectIntent {
-    /// Canonical AIR v2 effect op identity. `kind` remains a compatibility carrier for the
-    /// executor entrypoint; durable kernel records should use this op name/hash pair.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub effect_op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,7 +46,6 @@ pub struct EffectIntent {
     pub executor_module_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_entrypoint: Option<String>,
-    pub kind: EffectKind,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
     pub idempotency_key: IdempotencyKey,
@@ -63,30 +58,27 @@ impl EffectIntent {
     }
 
     pub fn from_raw_params(
-        kind: EffectKind,
+        effect_op: impl Into<String>,
         params_cbor: Vec<u8>,
         idempotency_key: IdempotencyKey,
     ) -> Result<Self, IntentEncodeError> {
         Self::from_raw_params_with_op(
-            kind.as_str().to_string(),
+            effect_op.into(),
             None,
             None,
             None,
             None,
-            kind,
             params_cbor,
             idempotency_key,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn from_raw_params_with_op(
         effect_op: String,
         effect_op_hash: Option<String>,
         executor_module: Option<String>,
         executor_module_hash: Option<String>,
         executor_entrypoint: Option<String>,
-        kind: EffectKind,
         params_cbor: Vec<u8>,
         idempotency_key: IdempotencyKey,
     ) -> Result<Self, IntentEncodeError> {
@@ -95,7 +87,7 @@ impl EffectIntent {
             effect_op_hash.as_deref(),
             executor_module.as_deref(),
             executor_module_hash.as_deref(),
-            kind.as_str(),
+            executor_entrypoint.as_deref(),
             &params_cbor,
             &idempotency_key,
         )?;
@@ -105,7 +97,6 @@ impl EffectIntent {
             executor_module,
             executor_module_hash,
             executor_entrypoint,
-            kind,
             params_cbor,
             idempotency_key,
             intent_hash: hash,
@@ -114,22 +105,22 @@ impl EffectIntent {
 }
 
 pub struct IntentBuilder<'a, P> {
-    kind: EffectKind,
+    effect_op: String,
     params: &'a P,
     idempotency_key: IdempotencyKey,
 }
 
 impl<'a, P> IntentBuilder<'a, P> {
-    pub fn new(kind: EffectKind, params: &'a P) -> Self {
+    pub fn new(effect_op: impl Into<String>, params: &'a P) -> Self {
         Self {
-            kind,
+            effect_op: effect_op.into(),
             params,
             idempotency_key: [0u8; 32],
         }
     }
 
-    pub fn builder(kind: impl Into<EffectKind>, params: &'a P) -> Self {
-        Self::new(kind.into(), params)
+    pub fn builder(effect_op: impl Into<String>, params: &'a P) -> Self {
+        Self::new(effect_op, params)
     }
 
     pub fn idempotency_key(mut self, key: IdempotencyKey) -> Self {
@@ -143,21 +134,20 @@ impl<'a, P> IntentBuilder<'a, P> {
     {
         let params_cbor = to_canonical_cbor(self.params)?;
         let hash = compute_intent_hash(
-            self.kind.as_str(),
+            self.effect_op.as_str(),
             None,
             None,
             None,
-            self.kind.as_str(),
+            None,
             &params_cbor,
             &self.idempotency_key,
         )?;
         Ok(EffectIntent {
-            effect_op: self.kind.as_str().to_string(),
+            effect_op: self.effect_op,
             effect_op_hash: None,
             executor_module: None,
             executor_module_hash: None,
             executor_entrypoint: None,
-            kind: self.kind,
             params_cbor,
             idempotency_key: self.idempotency_key,
             intent_hash: hash,
@@ -170,7 +160,7 @@ fn compute_intent_hash(
     effect_op_hash: Option<&str>,
     executor_module: Option<&str>,
     executor_module_hash: Option<&str>,
-    executor_entrypoint: &str,
+    executor_entrypoint: Option<&str>,
     params_cbor: &[u8],
     idempotency_key: &IdempotencyKey,
 ) -> Result<[u8; 32], serde_cbor::Error> {
@@ -183,7 +173,8 @@ fn compute_intent_hash(
         executor_module: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         executor_module_hash: Option<&'a str>,
-        executor_entrypoint: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        executor_entrypoint: Option<&'a str>,
         #[serde(with = "serde_bytes")]
         params: &'a [u8],
         #[serde(with = "serde_bytes")]

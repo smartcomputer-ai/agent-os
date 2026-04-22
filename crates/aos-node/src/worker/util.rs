@@ -177,7 +177,6 @@ pub(super) fn reopen_kernel_from_frame_log(
 pub(super) fn build_timer_receipt(entry: &TimerEntry) -> Result<EffectReceipt, WorkerError> {
     Ok(EffectReceipt {
         intent_hash: entry.intent_hash,
-        adapter_id: "timer.local".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: entry.deliver_at_ns,
@@ -208,11 +207,6 @@ pub(super) fn effect_intent_from_pending(
         pending.executor_module.clone(),
         pending.executor_module_hash.clone(),
         pending.executor_entrypoint.clone(),
-        pending
-            .executor_entrypoint
-            .clone()
-            .unwrap_or_else(|| pending.effect_op.clone())
-            .into(),
         pending.params_cbor.clone(),
         pending.idempotency_key,
     )
@@ -251,11 +245,7 @@ pub(super) fn adapter_start_context_from_opened(
             origin_module_id: name.clone(),
             origin_workflow_op_hash: workflow_op_hash.clone(),
             origin_instance_key: instance_key.clone(),
-            effect_op: if opened.record.effect_op.is_empty() {
-                opened.record.kind.clone()
-            } else {
-                opened.record.effect_op.clone()
-            },
+            effect_op: opened.record.effect_op.clone(),
             effect_op_hash: opened.record.effect_op_hash.clone(),
             executor_module: opened.record.executor_module.clone(),
             executor_module_hash: opened.record.executor_module_hash.clone(),

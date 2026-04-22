@@ -232,7 +232,7 @@ where
         let host_provides = shared.host_route_mappings();
         let world_requires: BTreeMap<String, String> = effect_routes
             .iter()
-            .map(|(op, adapter_id)| (op.clone(), adapter_id.clone()))
+            .map(|(op, route_id)| (op.clone(), route_id.clone()))
             .collect();
         let effect_routes = effect_routes
             .into_iter()
@@ -265,13 +265,13 @@ where
 
     pub fn classify_intent(&self, intent: &EffectIntent) -> EffectExecutionClass {
         self.effect_routes
-            .get(effect_op_for_intent(intent))
+            .get(intent.effect_op.as_str())
             .map(|route| route.class)
             .unwrap_or_else(|| classify_effect_op_identity(intent))
     }
 
     pub fn resolve_effect_route_id(&self, intent: &EffectIntent) -> Result<String, RuntimeError> {
-        let effect_op = effect_op_for_intent(intent);
+        let effect_op = intent.effect_op.as_str();
         let route = self.effect_routes.get(effect_op).ok_or_else(|| {
             RuntimeError::Route(format!(
                 "missing execution route for external effect op '{effect_op}'"
@@ -298,13 +298,13 @@ where
             EffectExecutionClass::InlineInternal => {
                 return Err(RuntimeError::ExecutionClass(format!(
                     "internal effect op '{}' must run inline after append",
-                    effect_op_for_intent(&intent)
+                    intent.effect_op.as_str()
                 )));
             }
             EffectExecutionClass::OwnerLocalTimer => {
                 return Err(RuntimeError::ExecutionClass(format!(
                     "timer effect op '{}' is owner-local and must not use shared async effect runtime",
-                    effect_op_for_intent(&intent)
+                    intent.effect_op.as_str()
                 )));
             }
             EffectExecutionClass::ExternalAsync => {}
@@ -359,9 +359,9 @@ fn normalize_effect_update(
 }
 
 fn adapter_start_error_receipt(intent_hash: [u8; 32], route_id: &str) -> EffectReceipt {
+    let _ = route_id;
     EffectReceipt {
         intent_hash,
-        adapter_id: format!("runtime.{route_id}"),
         status: ReceiptStatus::Error,
         payload_cbor: Vec::new(),
         cost_cents: None,
@@ -370,8 +370,8 @@ fn adapter_start_error_receipt(intent_hash: [u8; 32], route_id: &str) -> EffectR
 }
 
 pub fn classify_effect_op_identity(intent: &EffectIntent) -> EffectExecutionClass {
-    match effect_op_for_intent(intent) {
-        "sys/timer.set@1" => EffectExecutionClass::OwnerLocalTimer,
+    match intent.effect_op.as_str() {
+        aos_effects::effect_ops::TIMER_SET => EffectExecutionClass::OwnerLocalTimer,
         _ => {
             if intent.executor_module.as_deref() == Some("sys/builtin_effects@1")
                 && intent.executor_entrypoint.is_some()
@@ -381,14 +381,6 @@ pub fn classify_effect_op_identity(intent: &EffectIntent) -> EffectExecutionClas
                 EffectExecutionClass::ExternalAsync
             }
         }
-    }
-}
-
-fn effect_op_for_intent(intent: &EffectIntent) -> &str {
-    if intent.effect_op.is_empty() {
-        intent.kind.as_str()
-    } else {
-        intent.effect_op.as_str()
     }
 }
 
@@ -486,15 +478,15 @@ fn preflight_external_effect_routes(
     let mut world_requires = BTreeMap::new();
     for op_name in required_ops {
         if let Some(route) = effect_routes.get(&op_name) {
-            let Some(adapter_id) = route.route_id.as_ref() else {
+            let Some(route_id) = route.route_id.as_ref() else {
                 continue;
             };
-            if !registry.has_route(adapter_id.as_str()) {
+            if !registry.has_route(route_id.as_str()) {
                 return Err(RuntimeError::Route(format!(
-                    "effect op '{op_name}' is bound to missing adapter route '{adapter_id}'"
+                    "effect op '{op_name}' is bound to missing route '{route_id}'"
                 )));
             }
-            world_requires.insert(op_name, adapter_id.clone());
+            world_requires.insert(op_name, route_id.clone());
             continue;
         }
 
@@ -527,7 +519,7 @@ fn preflight_external_effect_routes(
 mod tests {
     use super::*;
     use aos_effect_adapters::config::EffectAdapterConfig;
-    use aos_effects::EffectKind;
+    use aos_effects::effect_ops;
     use aos_kernel::MemStore;
     use std::collections::HashMap;
     use tokio::time::{Duration, timeout};
@@ -545,7 +537,7 @@ mod tests {
             tx,
         );
         let mut intent = EffectIntent::from_raw_params(
-            EffectKind::llm_generate(),
+            effect_ops::LLM_GENERATE,
             serde_cbor::to_vec(&serde_json::json!({
                 "provider": "stub",
                 "model": "stub",
@@ -582,12 +574,9 @@ mod tests {
 
     #[test]
     fn classify_execution_classes_matches_architecture_split() {
-        let mut workspace = EffectIntent::from_raw_params(
-            EffectKind::new("workspace.write_bytes"),
-            Vec::new(),
-            [0; 32],
-        )
-        .expect("intent");
+        let mut workspace =
+            EffectIntent::from_raw_params("workspace.write_bytes", Vec::new(), [0; 32])
+                .expect("intent");
         workspace.effect_op = "sys/workspace.write_bytes@1".into();
         workspace.executor_module = Some("sys/builtin_effects@1".into());
         workspace.executor_entrypoint = Some("workspace.write_bytes".into());
@@ -595,16 +584,15 @@ mod tests {
             classify_effect_op_identity(&workspace),
             EffectExecutionClass::InlineInternal
         );
-        let mut timer = EffectIntent::from_raw_params(EffectKind::timer_set(), Vec::new(), [0; 32])
+        let mut timer = EffectIntent::from_raw_params(effect_ops::TIMER_SET, Vec::new(), [0; 32])
             .expect("intent");
         timer.effect_op = "sys/timer.set@1".into();
         assert_eq!(
             classify_effect_op_identity(&timer),
             EffectExecutionClass::OwnerLocalTimer
         );
-        let mut http =
-            EffectIntent::from_raw_params(EffectKind::http_request(), Vec::new(), [0; 32])
-                .expect("intent");
+        let mut http = EffectIntent::from_raw_params(effect_ops::HTTP_REQUEST, Vec::new(), [0; 32])
+            .expect("intent");
         http.effect_op = "sys/http.request@1".into();
         http.executor_module = Some("sys/builtin_effects@1".into());
         http.executor_entrypoint = Some("http.request".into());
@@ -628,7 +616,7 @@ mod tests {
             EffectRuntime::from_effect_routes_with_shared(shared.clone(), routes.clone(), false);
         let runtime_b = EffectRuntime::from_effect_routes_with_shared(shared, routes, false);
         let mut intent = EffectIntent::from_raw_params(
-            EffectKind::llm_generate(),
+            effect_ops::LLM_GENERATE,
             serde_cbor::to_vec(&serde_json::json!({
                 "provider": "stub",
                 "model": "stub",
@@ -667,12 +655,11 @@ mod tests {
             effect_op_hash: Some("effect-hash".to_string()),
             executor_module: Some("sys/Host@1".to_string()),
             executor_module_hash: Some("module-hash".to_string()),
-            executor_entrypoint: Some(EffectKind::HOST_EXEC.to_string()),
+            executor_entrypoint: Some(effect_ops::HOST_EXEC.to_string()),
             emitted_at_seq: 42,
         };
         let update = EffectUpdate::StreamFrame(aos_effects::EffectStreamFrame {
             intent_hash: [1; 32],
-            adapter_id: "host.exec.fabric".to_string(),
             origin_module_id: "placeholder".to_string(),
             origin_workflow_op_hash: None,
             origin_instance_key: None,

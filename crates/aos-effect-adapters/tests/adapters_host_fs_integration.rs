@@ -15,12 +15,12 @@ use aos_effects::builtins::{
     HostInlineText, HostLocalTarget, HostOutput, HostPatchInput, HostSessionOpenParams,
     HostSessionOpenReceipt, HostTarget, HostTextOutput,
 };
-use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
+use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::{MemStore, Store};
 use tempfile::TempDir;
 
 fn build_intent(kind: &str, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
-    EffectIntent::from_raw_params(EffectKind::new(kind), params_cbor, [seed; 32]).unwrap()
+    EffectIntent::from_raw_params(kind, params_cbor, [seed; 32]).unwrap()
 }
 
 async fn open_session(set: &HostAdapterSet<MemStore>, workdir: &Path, seed: u8) -> String {
@@ -37,7 +37,7 @@ async fn open_session(set: &HostAdapterSet<MemStore>, workdir: &Path, seed: u8) 
     let receipt = set
         .session_open
         .execute(&build_intent(
-            EffectKind::HOST_SESSION_OPEN,
+            effect_ops::HOST_SESSION_OPEN,
             serde_cbor::to_vec(&params).unwrap(),
             seed,
         ))
@@ -85,7 +85,7 @@ async fn host_fs_read_file_modes_and_statuses_expected() {
     let auto_receipt = set
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&auto_params).unwrap(),
             2,
         ))
@@ -115,7 +115,7 @@ async fn host_fs_read_file_modes_and_statuses_expected() {
     let inline_receipt = set
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&inline_params).unwrap(),
             3,
         ))
@@ -141,7 +141,7 @@ async fn host_fs_read_file_modes_and_statuses_expected() {
     let bytes_receipt = set
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&bytes_params).unwrap(),
             4,
         ))
@@ -168,7 +168,7 @@ async fn host_fs_read_file_modes_and_statuses_expected() {
     let missing_receipt = set
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&missing_params).unwrap(),
             5,
         ))
@@ -189,7 +189,7 @@ async fn host_fs_read_file_modes_and_statuses_expected() {
     let dir_receipt = set
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&dir_params).unwrap(),
             6,
         ))
@@ -221,7 +221,7 @@ async fn host_fs_write_file_modes_and_content_sources_expected() {
     let write_receipt = set
         .fs_write_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_WRITE_FILE,
+            effect_ops::HOST_FS_WRITE_FILE,
             serde_cbor::to_vec(&write_text).unwrap(),
             11,
         ))
@@ -247,7 +247,7 @@ async fn host_fs_write_file_modes_and_content_sources_expected() {
     let conflict_receipt = set
         .fs_write_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_WRITE_FILE,
+            effect_ops::HOST_FS_WRITE_FILE,
             serde_cbor::to_vec(&create_new_conflict).unwrap(),
             12,
         ))
@@ -272,7 +272,7 @@ async fn host_fs_write_file_modes_and_content_sources_expected() {
     let blob_receipt = set
         .fs_write_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_WRITE_FILE,
+            effect_ops::HOST_FS_WRITE_FILE,
             serde_cbor::to_vec(&write_blob).unwrap(),
             13,
         ))
@@ -307,7 +307,7 @@ async fn host_fs_edit_file_exact_fuzzy_ambiguous_and_invalid_inputs_expected() {
     let ambiguous_receipt = set
         .fs_edit_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_EDIT_FILE,
+            effect_ops::HOST_FS_EDIT_FILE,
             serde_cbor::to_vec(&ambiguous_params).unwrap(),
             21,
         ))
@@ -331,7 +331,7 @@ async fn host_fs_edit_file_exact_fuzzy_ambiguous_and_invalid_inputs_expected() {
     let replace_all_receipt = set
         .fs_edit_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_EDIT_FILE,
+            effect_ops::HOST_FS_EDIT_FILE,
             serde_cbor::to_vec(&replace_all_params).unwrap(),
             22,
         ))
@@ -356,7 +356,7 @@ async fn host_fs_edit_file_exact_fuzzy_ambiguous_and_invalid_inputs_expected() {
     let fuzzy_receipt = set
         .fs_edit_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_EDIT_FILE,
+            effect_ops::HOST_FS_EDIT_FILE,
             serde_cbor::to_vec(&fuzzy_params).unwrap(),
             23,
         ))
@@ -381,7 +381,7 @@ async fn host_fs_edit_file_exact_fuzzy_ambiguous_and_invalid_inputs_expected() {
     let not_found_receipt = set
         .fs_edit_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_EDIT_FILE,
+            effect_ops::HOST_FS_EDIT_FILE,
             serde_cbor::to_vec(&not_found_params).unwrap(),
             24,
         ))
@@ -401,7 +401,7 @@ async fn host_fs_edit_file_exact_fuzzy_ambiguous_and_invalid_inputs_expected() {
     let invalid_receipt = set
         .fs_edit_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_EDIT_FILE,
+            effect_ops::HOST_FS_EDIT_FILE,
             serde_cbor::to_vec(&invalid_old_string_params).unwrap(),
             25,
         ))
@@ -445,7 +445,7 @@ async fn host_fs_apply_patch_success_dry_run_parse_error_and_atomic_failure_expe
     let dry_run_receipt = set
         .fs_apply_patch
         .execute(&build_intent(
-            EffectKind::HOST_FS_APPLY_PATCH,
+            effect_ops::HOST_FS_APPLY_PATCH,
             serde_cbor::to_vec(&dry_run_params).unwrap(),
             31,
         ))
@@ -473,7 +473,7 @@ async fn host_fs_apply_patch_success_dry_run_parse_error_and_atomic_failure_expe
     let apply_receipt = set
         .fs_apply_patch
         .execute(&build_intent(
-            EffectKind::HOST_FS_APPLY_PATCH,
+            effect_ops::HOST_FS_APPLY_PATCH,
             serde_cbor::to_vec(&apply_params).unwrap(),
             32,
         ))
@@ -501,7 +501,7 @@ async fn host_fs_apply_patch_success_dry_run_parse_error_and_atomic_failure_expe
     let parse_error_receipt = set
         .fs_apply_patch
         .execute(&build_intent(
-            EffectKind::HOST_FS_APPLY_PATCH,
+            effect_ops::HOST_FS_APPLY_PATCH,
             serde_cbor::to_vec(&parse_error_params).unwrap(),
             33,
         ))
@@ -537,7 +537,7 @@ async fn host_fs_apply_patch_success_dry_run_parse_error_and_atomic_failure_expe
     let partial_failure_receipt = set
         .fs_apply_patch
         .execute(&build_intent(
-            EffectKind::HOST_FS_APPLY_PATCH,
+            effect_ops::HOST_FS_APPLY_PATCH,
             serde_cbor::to_vec(&partial_failure_params).unwrap(),
             34,
         ))
@@ -578,7 +578,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let grep_receipt = set
         .fs_grep
         .execute(&build_intent(
-            EffectKind::HOST_FS_GREP,
+            effect_ops::HOST_FS_GREP,
             serde_cbor::to_vec(&grep_params).unwrap(),
             41,
         ))
@@ -602,7 +602,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let invalid_regex_receipt = set
         .fs_grep
         .execute(&build_intent(
-            EffectKind::HOST_FS_GREP,
+            effect_ops::HOST_FS_GREP,
             serde_cbor::to_vec(&invalid_regex_params).unwrap(),
             42,
         ))
@@ -624,7 +624,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let no_match_receipt = set
         .fs_grep
         .execute(&build_intent(
-            EffectKind::HOST_FS_GREP,
+            effect_ops::HOST_FS_GREP,
             serde_cbor::to_vec(&no_match_params).unwrap(),
             43,
         ))
@@ -645,7 +645,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let glob_receipt_first = set
         .fs_glob
         .execute(&build_intent(
-            EffectKind::HOST_FS_GLOB,
+            effect_ops::HOST_FS_GLOB,
             serde_cbor::to_vec(&glob_params).unwrap(),
             44,
         ))
@@ -659,7 +659,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let glob_receipt_second = set
         .fs_glob
         .execute(&build_intent(
-            EffectKind::HOST_FS_GLOB,
+            effect_ops::HOST_FS_GLOB,
             serde_cbor::to_vec(&glob_params).unwrap(),
             45,
         ))
@@ -681,7 +681,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let invalid_glob_receipt = set
         .fs_glob
         .execute(&build_intent(
-            EffectKind::HOST_FS_GLOB,
+            effect_ops::HOST_FS_GLOB,
             serde_cbor::to_vec(&invalid_glob_params).unwrap(),
             46,
         ))
@@ -698,7 +698,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let stat_ok_receipt = set
         .fs_stat
         .execute(&build_intent(
-            EffectKind::HOST_FS_STAT,
+            effect_ops::HOST_FS_STAT,
             serde_cbor::to_vec(&stat_ok_params).unwrap(),
             47,
         ))
@@ -716,7 +716,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let stat_missing_receipt = set
         .fs_stat
         .execute(&build_intent(
-            EffectKind::HOST_FS_STAT,
+            effect_ops::HOST_FS_STAT,
             serde_cbor::to_vec(&stat_missing_params).unwrap(),
             48,
         ))
@@ -733,7 +733,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let exists_receipt = set
         .fs_exists
         .execute(&build_intent(
-            EffectKind::HOST_FS_EXISTS,
+            effect_ops::HOST_FS_EXISTS,
             serde_cbor::to_vec(&exists_params).unwrap(),
             49,
         ))
@@ -753,7 +753,7 @@ async fn host_fs_grep_glob_stat_exists_and_list_dir_expected() {
     let list_dir_receipt = set
         .fs_list_dir
         .execute(&build_intent(
-            EffectKind::HOST_FS_LIST_DIR,
+            effect_ops::HOST_FS_LIST_DIR,
             serde_cbor::to_vec(&list_dir_params).unwrap(),
             50,
         ))

@@ -273,7 +273,7 @@ mod tests {
     use crate::MemStore;
     use crate::receipts::WorkflowEffectContext;
     use crate::world::test_support::empty_manifest;
-    use aos_effects::{EffectIntent, EffectKind};
+    use aos_effects::EffectIntent;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -334,12 +334,11 @@ mod tests {
             ),
         );
         kernel.effect_manager.restore_queue(vec![EffectIntent {
-            effect_op: "introspect.manifest".into(),
+            effect_op: "sys/introspect.manifest@1".into(),
             effect_op_hash: None,
             executor_module: None,
             executor_module_hash: None,
-            executor_entrypoint: Some("introspect.manifest".into()),
-            kind: EffectKind::new("introspect.manifest"),
+            executor_entrypoint: Some("sys/introspect.manifest@1".into()),
             params_cbor: vec![],
             idempotency_key: [0u8; 32],
             intent_hash: [3u8; 32],

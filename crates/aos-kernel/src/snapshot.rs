@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use aos_effects::{EffectIntent, EffectKind as RuntimeEffectKind};
+use aos_effects::EffectIntent;
 use serde::{Deserialize, Serialize};
 use serde_bytes;
 
@@ -152,7 +152,6 @@ pub struct EffectIntentSnapshot {
     pub executor_module_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_entrypoint: Option<String>,
-    pub kind: String,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
     #[serde(with = "serde_bytes")]
@@ -168,7 +167,6 @@ impl EffectIntentSnapshot {
             executor_module: intent.executor_module.clone(),
             executor_module_hash: intent.executor_module_hash.clone(),
             executor_entrypoint: intent.executor_entrypoint.clone(),
-            kind: intent.kind.as_str().to_string(),
             params_cbor: intent.params_cbor.clone(),
             idempotency_key: intent.idempotency_key,
         }
@@ -176,16 +174,11 @@ impl EffectIntentSnapshot {
 
     pub fn into_intent(self) -> EffectIntent {
         EffectIntent {
-            effect_op: if self.effect_op.is_empty() {
-                self.kind.clone()
-            } else {
-                self.effect_op
-            },
+            effect_op: self.effect_op,
             effect_op_hash: self.effect_op_hash,
             executor_module: self.executor_module,
             executor_module_hash: self.executor_module_hash,
             executor_entrypoint: self.executor_entrypoint,
-            kind: RuntimeEffectKind::new(self.kind),
             params_cbor: self.params_cbor,
             idempotency_key: self.idempotency_key,
             intent_hash: self.intent_hash,
@@ -246,7 +239,7 @@ pub struct WorkflowInflightIntentSnapshot {
         with = "serde_bytes_opt"
     )]
     pub origin_instance_key: Option<Vec<u8>>,
-    #[serde(default, alias = "effect_kind")]
+    #[serde(default)]
     pub effect_op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_hash: Option<String>,

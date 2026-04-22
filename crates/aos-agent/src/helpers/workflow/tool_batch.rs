@@ -331,11 +331,8 @@ pub(super) fn advance_tool_batch(
                 continue;
             }
 
-            let (executor_effect_op, cap_slot) = match &planned.executor {
-                ToolExecutor::Effect {
-                    effect_op,
-                    cap_slot,
-                } => (effect_op.clone(), cap_slot.clone()),
+            let executor_effect_op = match &planned.executor {
+                ToolExecutor::Effect { effect_op } => effect_op.clone(),
                 ToolExecutor::HostLoop { .. } => unreachable!(),
                 ToolExecutor::DomainEvent { schema } => {
                     fail_tool_call(
@@ -402,7 +399,6 @@ pub(super) fn advance_tool_batch(
                     call_id.clone(),
                     kind.as_str(),
                     &mapped_args.params_json,
-                    cap_slot.clone(),
                     state.updated_at,
                     Some(call_id.clone()),
                 )
@@ -411,7 +407,6 @@ pub(super) fn advance_tool_batch(
                         &mut batch,
                         &call_id,
                         kind,
-                        cap_slot.clone(),
                         state.updated_at,
                     )
                 });
@@ -446,10 +441,9 @@ fn insert_fallback_pending_tool_effect(
     batch: &mut ActiveToolBatch,
     call_id: &String,
     kind: ToolEffectOp,
-    cap_slot: Option<String>,
     emitted_at_ns: u64,
 ) -> PendingEffect {
-    let pending = PendingEffect::new(kind.as_str(), String::new(), cap_slot, emitted_at_ns)
+    let pending = PendingEffect::new(kind.as_str(), String::new(), emitted_at_ns)
         .with_issuer_ref(call_id.clone());
     batch
         .pending_effects
@@ -504,7 +498,6 @@ pub(super) fn settle_tool_batch_receipt(
             ) {
                 WorkspaceAction::Emit {
                     effect_op,
-                    cap_slot,
                     params_json,
                     state_json,
                 } => {
@@ -514,7 +507,6 @@ pub(super) fn settle_tool_batch_receipt(
                         &call_id,
                         &planned,
                         effect_op,
-                        cap_slot,
                         params_json,
                         state_json,
                         out,
@@ -614,7 +606,6 @@ fn advance_workspace_tool_call(
         }
         WorkspaceAction::Emit {
             effect_op,
-            cap_slot,
             params_json,
             state_json,
         } => emit_workspace_action_in_batch(
@@ -622,7 +613,6 @@ fn advance_workspace_tool_call(
             call_id,
             planned,
             effect_op,
-            cap_slot,
             params_json,
             state_json,
             emitted_at_ns,
@@ -671,7 +661,6 @@ fn emit_workspace_action(
     call_id: &String,
     planned: &PlannedToolCall,
     effect_op: ToolEffectOp,
-    cap_slot: &'static str,
     params_json: serde_json::Value,
     state_json: String,
     out: &mut SessionReduceOutput,
@@ -684,7 +673,6 @@ fn emit_workspace_action(
             call_id,
             planned,
             effect_op,
-            cap_slot,
             params_json,
             state_json,
             state.updated_at,
@@ -725,7 +713,6 @@ fn emit_workspace_action_in_batch(
     call_id: &String,
     planned: &PlannedToolCall,
     effect_op: ToolEffectOp,
-    cap_slot: &'static str,
     params_json: serde_json::Value,
     state_json: String,
     emitted_at_ns: u64,
@@ -748,7 +735,6 @@ fn emit_workspace_action_in_batch(
             call_id.clone(),
             effect_op.as_str(),
             &params_json,
-            Some(cap_slot.into()),
             emitted_at_ns,
             Some(issuer_ref.clone()),
         )
@@ -756,17 +742,11 @@ fn emit_workspace_action_in_batch(
             let fallback = PendingEffect::from_params_with_issuer_ref(
                 effect_op.as_str(),
                 &params_json,
-                Some(cap_slot.into()),
                 emitted_at_ns,
                 Some(issuer_ref),
             )
             .unwrap_or_else(|_| {
-                PendingEffect::new(
-                    effect_op.as_str(),
-                    String::new(),
-                    Some(cap_slot.into()),
-                    emitted_at_ns,
-                )
+                PendingEffect::new(effect_op.as_str(), String::new(), emitted_at_ns)
             });
             batch
                 .pending_effects
@@ -808,28 +788,12 @@ fn emit_workspace_blob_put_in_batch(
     };
     let pending = batch
         .pending_effects
-        .begin(
-            call_id.clone(),
-            "sys/blob.put@1",
-            &params,
-            Some("blob".into()),
-            emitted_at_ns,
-        )
+        .begin(call_id.clone(), "sys/blob.put@1", &params, emitted_at_ns)
         .unwrap_or_else(|_| {
-            let fallback = PendingEffect::from_params(
-                "sys/blob.put@1",
-                &params,
-                Some("blob".into()),
-                emitted_at_ns,
-            )
-            .unwrap_or_else(|_| {
-                PendingEffect::new(
-                    "sys/blob.put@1",
-                    String::new(),
-                    Some("blob".into()),
-                    emitted_at_ns,
-                )
-            });
+            let fallback = PendingEffect::from_params("sys/blob.put@1", &params, emitted_at_ns)
+                .unwrap_or_else(|_| {
+                    PendingEffect::new("sys/blob.put@1", String::new(), emitted_at_ns)
+                });
             batch
                 .pending_effects
                 .insert(call_id.clone(), fallback.clone());

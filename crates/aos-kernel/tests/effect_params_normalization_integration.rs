@@ -1,7 +1,7 @@
 #[path = "support/fixtures.rs"]
 mod fixtures;
 
-use aos_effects::EffectKind;
+use aos_effects::effect_ops;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::Journal;
 use aos_wasm_abi::WorkflowEffect;
@@ -31,7 +31,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let intent_a = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::llm_generate(),
+            &effect_ops::LLM_GENERATE,
             params_a.clone(),
             [0u8; 32],
         )
@@ -39,7 +39,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let intent_b = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::llm_generate(),
+            &effect_ops::LLM_GENERATE,
             params_b.clone(),
             [0u8; 32],
         )
@@ -73,7 +73,7 @@ fn workflow_effect_params_canonicalize_noop() {
     );
     let params_cbor = serde_cbor::to_vec(&CborValue::Map(params)).expect("encode");
 
-    let effect = WorkflowEffect::with_cap_slot("sys/timer.set@1", params_cbor.clone(), "timer");
+    let effect = WorkflowEffect::new("sys/timer.set@1", params_cbor.clone());
     let intent = mgr
         .enqueue_workflow_effect("com.acme/Timer", &effect)
         .expect("enqueue workflow effect");
@@ -84,7 +84,7 @@ fn workflow_effect_params_canonicalize_noop() {
     let canonical_again = aos_effects::normalize_effect_params(
         &effects,
         &schemas,
-        &aos_effects::EffectKind::new(aos_effects::EffectKind::TIMER_SET),
+        &aos_effects::effect_ops::TIMER_SET,
         &params_cbor,
     )
     .expect("normalize direct");
@@ -98,14 +98,14 @@ fn workflow_effect_params_canonicalize_noop() {
     let roundtrip = aos_effects::normalize_effect_params(
         &effects,
         &schemas,
-        &aos_effects::EffectKind::new(aos_effects::EffectKind::TIMER_SET),
+        &aos_effects::effect_ops::TIMER_SET,
         &intent.params_cbor,
     )
     .expect("normalize again");
     assert_eq!(intent.params_cbor, roundtrip, "canonical form is stable");
 
     let rehashed = aos_effects::EffectIntent::from_raw_params(
-        intent.kind.clone(),
+        intent.effect_op.clone(),
         intent.params_cbor.clone(),
         intent.idempotency_key,
     )
@@ -143,7 +143,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let intent_a = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::http_request(),
+            &effect_ops::HTTP_REQUEST,
             params_a.clone(),
             [0u8; 32],
         )
@@ -151,7 +151,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let intent_b = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::http_request(),
+            &effect_ops::HTTP_REQUEST,
             params_b.clone(),
             [0u8; 32],
         )
@@ -172,7 +172,7 @@ fn workflow_params_round_trip_journal_replay() {
     // Build workflow that emits a timer.set micro-effect.
     let workflow_event_schema = "com.acme/WorkflowEvent@1";
     let params = timer_params_cbor(42, Some("k".into()));
-    let effect = WorkflowEffect::with_cap_slot("sys/timer.set@1", params.clone(), "default");
+    let effect = WorkflowEffect::new("sys/timer.set@1", params.clone());
     let store = fixtures::new_mem_store();
     let mut workflow = fixtures::stub_workflow_module(
         &store,
@@ -189,7 +189,7 @@ fn workflow_params_round_trip_journal_replay() {
         event: fixtures::schema(workflow_event_schema),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        effects_emitted: vec![aos_effects::effect_ops::TIMER_SET.into()],
     });
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,

@@ -665,7 +665,6 @@ impl HostedWorkerRuntime {
                             ingress.intent_hash.len(),
                         ))
                     })?,
-                    adapter_id: ingress.adapter_id,
                     status: ingress.status,
                     payload_cbor: resolve_cbor_payload(store.as_ref(), &ingress.payload)?,
                     cost_cents: ingress.cost_cents,

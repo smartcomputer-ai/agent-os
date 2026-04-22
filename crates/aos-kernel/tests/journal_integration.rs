@@ -35,7 +35,6 @@ fn workflow_timer_receipt_replays_from_journal() {
         .expect("timer effect");
     let receipt = EffectReceipt {
         intent_hash: effect.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 10,
@@ -87,9 +86,15 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
 
     let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 2);
-    effects.sort_by(|a, b| a.kind.as_str().cmp(b.kind.as_str()));
-    assert_eq!(effects[0].kind.as_str(), aos_effects::EffectKind::BLOB_PUT);
-    assert_eq!(effects[1].kind.as_str(), aos_effects::EffectKind::TIMER_SET);
+    effects.sort_by(|a, b| a.effect_op.as_str().cmp(b.effect_op.as_str()));
+    assert_eq!(
+        effects[0].effect_op.as_str(),
+        aos_effects::effect_ops::BLOB_PUT
+    );
+    assert_eq!(
+        effects[1].effect_op.as_str(),
+        aos_effects::effect_ops::TIMER_SET
+    );
 
     let snapshot = world.kernel.workflow_instances_snapshot();
     let workflow = snapshot
@@ -100,10 +105,9 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     assert_eq!(workflow.status, WorkflowStatusSnapshot::Waiting);
 
     for intent in effects {
-        let receipt = match intent.kind.as_str() {
-            aos_effects::EffectKind::BLOB_PUT => EffectReceipt {
+        let receipt = match intent.effect_op.as_str() {
+            aos_effects::effect_ops::BLOB_PUT => EffectReceipt {
                 intent_hash: intent.intent_hash,
-                adapter_id: "adapter.blob".into(),
                 status: ReceiptStatus::Ok,
                 payload_cbor: serde_cbor::to_vec(&BlobPutReceipt {
                     blob_ref: fixtures::fake_hash(0x21),
@@ -114,9 +118,8 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
                 cost_cents: Some(1),
                 signature: vec![1, 2, 3],
             },
-            aos_effects::EffectKind::TIMER_SET => EffectReceipt {
+            aos_effects::effect_ops::TIMER_SET => EffectReceipt {
                 intent_hash: intent.intent_hash,
-                adapter_id: "adapter.timer".into(),
                 status: ReceiptStatus::Ok,
                 payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
                     delivered_at_ns: 42,
@@ -185,12 +188,11 @@ fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
     assert_eq!(effects.len(), 2);
     let timer_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
+        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::TIMER_SET)
         .expect("timer.set intent");
 
     let receipt = EffectReceipt {
         intent_hash: timer_intent.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 77,
@@ -260,16 +262,15 @@ fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending(
     assert_eq!(effects.len(), 2);
     let blob_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT)
+        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::BLOB_PUT)
         .expect("blob.put intent");
     let timer_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
+        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::TIMER_SET)
         .expect("timer.set intent");
 
     let malformed = EffectReceipt {
         intent_hash: blob_intent.intent_hash,
-        adapter_id: "adapter.blob".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: vec![0xa0],
         cost_cents: None,
@@ -296,7 +297,6 @@ fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending(
 
     let timer_receipt = EffectReceipt {
         intent_hash: timer_intent.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 42,
@@ -332,16 +332,15 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
     assert_eq!(effects.len(), 2);
     let blob_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT)
+        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::BLOB_PUT)
         .expect("blob.put intent");
     let timer_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
+        .find(|intent| intent.effect_op.as_str() == aos_effects::effect_ops::TIMER_SET)
         .expect("timer.set intent");
 
     let malformed = EffectReceipt {
         intent_hash: blob_intent.intent_hash,
-        adapter_id: "adapter.blob".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: vec![0xa0],
         cost_cents: None,
@@ -362,7 +361,6 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
 
     let timer_receipt = EffectReceipt {
         intent_hash: timer_intent.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 42,
@@ -444,7 +442,7 @@ fn no_plan_workflow_manifest_impl(
                 })
                 .unwrap(),
             ),
-            WorkflowEffect::with_cap_slot(
+            WorkflowEffect::new(
                 "sys/blob.put@1",
                 serde_cbor::to_vec(&BlobPutParams {
                     bytes: b"workflow".to_vec(),
@@ -452,7 +450,6 @@ fn no_plan_workflow_manifest_impl(
                     refs: None,
                 })
                 .unwrap(),
-                "blob",
             ),
         ],
         ann: None,
@@ -475,8 +472,8 @@ fn no_plan_workflow_manifest_impl(
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![
-            aos_effects::EffectKind::TIMER_SET.into(),
-            aos_effects::EffectKind::BLOB_PUT.into(),
+            aos_effects::effect_ops::TIMER_SET.into(),
+            aos_effects::effect_ops::BLOB_PUT.into(),
         ],
     });
 

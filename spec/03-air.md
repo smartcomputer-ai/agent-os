@@ -363,9 +363,6 @@ Terminal receipts bind to open work by `intent_hash`. Generic workflow receipt e
 - params hash, issuer ref, receipt payload bytes, status, emitted sequence metadata, cost, and
   signature
 
-Some current receipt payload schemas still include an `adapter_id` route label. That field is not
-AIR identity; durable audit identity is the op/module/entrypoint tuple above.
-
 ## 12) Authority And Admission
 
 AIR v2 public admission is structural:

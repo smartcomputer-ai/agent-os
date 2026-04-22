@@ -24,7 +24,7 @@ runtime identity, and repo fixtures to AIR v2.
   core schema/catalog/model cut and should not block the fixture/runtime migration phases.
 
 ## My notes:
-- Remove effect_kind
+- [x] Remove `effect_kind` / public `EffectKind`, receipt `adapter_id`, and workflow `cap_slot`
 - Consider adding clear abstractions for 1) calling workflows, 2) calling effects (already exists, I think)
 - hash sentinell value should be optional 
 `"hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"`

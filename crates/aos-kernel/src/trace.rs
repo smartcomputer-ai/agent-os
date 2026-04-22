@@ -140,8 +140,7 @@ pub fn trace_get<S: Store + 'static>(
                 effect
                     .executor_entrypoint
                     .clone()
-                    .unwrap_or_else(|| effect.effect_op.clone())
-                    .into(),
+                    .unwrap_or_else(|| effect.effect_op.clone()),
                 effect.params_cbor.clone(),
                 effect.idempotency_key,
             )
@@ -253,7 +252,7 @@ pub fn trace_get<S: Store + 'static>(
             "queued_effects": queued_effects.into_iter().map(|queued| {
                 json!({
                     "intent_hash": hash_bytes_hex(&queued.intent_hash),
-                    "kind": queued.kind,
+                    "effect_op": queued.effect_op,
                 })
             }).collect::<Vec<_>>(),
             "strict_quiescence": {
@@ -335,8 +334,7 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
                 effect
                     .executor_entrypoint
                     .clone()
-                    .unwrap_or_else(|| effect.effect_op.clone())
-                    .into(),
+                    .unwrap_or_else(|| effect.effect_op.clone()),
                 effect.params_cbor.clone(),
                 effect.idempotency_key,
             )

@@ -82,7 +82,6 @@ struct HttpRequestReceipt {
     headers: BTreeMap<String, String>,
     body_ref: Option<String>,
     timings: RequestTimings,
-    adapter_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -158,18 +158,18 @@ fn default_adapter_routes() -> HashMap<String, AdapterProviderSpec> {
 
 fn apply_adapter_routes_env(cfg: &mut EffectAdapterConfig, routes: &str) {
     for pair in routes.split(',').map(str::trim).filter(|p| !p.is_empty()) {
-        let Some((adapter_id, adapter_kind)) = pair.split_once('=') else {
+        let Some((route_id, adapter_kind)) = pair.split_once('=') else {
             log::warn!("ignoring malformed AOS_ADAPTER_ROUTES entry: '{pair}'");
             continue;
         };
-        let adapter_id = adapter_id.trim();
+        let route_id = route_id.trim();
         let adapter_kind = adapter_kind.trim();
-        if adapter_id.is_empty() || adapter_kind.is_empty() {
+        if route_id.is_empty() || adapter_kind.is_empty() {
             log::warn!("ignoring malformed AOS_ADAPTER_ROUTES entry: '{pair}'");
             continue;
         }
         cfg.adapter_routes.insert(
-            adapter_id.to_string(),
+            route_id.to_string(),
             AdapterProviderSpec {
                 adapter_kind: adapter_kind.to_string(),
             },

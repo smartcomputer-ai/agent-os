@@ -524,7 +524,6 @@ fn rejected_as_error_envelope(rejected: &EffectReceiptRejected) -> EffectReceipt
         receipt_payload: serde_cbor::to_vec(&payload).unwrap_or_default(),
         status: rejected.status.clone(),
         emitted_at_seq: rejected.emitted_at_seq,
-        adapter_id: rejected.adapter_id.clone(),
         cost_cents: None,
         signature: Vec::new(),
     }
@@ -785,7 +784,6 @@ fn dispatch_queued_llm_turn(
                 response_format_ref: None,
                 api_key: None,
             },
-            cap_slot: Some("llm".into()),
         },
     )?;
     Ok(())
@@ -825,7 +823,6 @@ fn emit_auto_host_session_open(
             state,
             "sys/host.session.open@1",
             &params.params_json,
-            Some("host".into()),
             None,
         ),
     });
@@ -1143,7 +1140,6 @@ mod tests {
             receipt_payload: serde_cbor::to_vec(payload).expect("encode payload"),
             status: status.into(),
             emitted_at_seq,
-            adapter_id: "adapter.mock".into(),
             cost_cents: None,
             signature: Vec::new(),
         })

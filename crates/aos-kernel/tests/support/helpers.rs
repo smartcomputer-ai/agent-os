@@ -55,7 +55,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         event: fixtures::schema(timer_event_schema),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        effects_emitted: vec![aos_effects::effect_ops::TIMER_SET.into()],
     });
     timer_handler.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),

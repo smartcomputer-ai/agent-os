@@ -28,7 +28,7 @@ use aos_effects::builtins::{
     LlmFinishReason, LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCall,
     LlmToolCallList, TokenUsage,
 };
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::Store;
 use aos_node::WorldConfig;
 use serde::Serialize;
@@ -324,10 +324,10 @@ impl AgentToolsScript {
         store: &S,
         intent: EffectIntent,
     ) -> Result<EffectReceipt> {
-        match intent.kind.as_str() {
-            EffectKind::BLOB_PUT => self.handle_blob_put(store, intent),
-            EffectKind::BLOB_GET => self.handle_blob_get(store, intent),
-            EffectKind::LLM_GENERATE => self.handle_llm_generate(store, intent),
+        match intent.effect_op.as_str() {
+            effect_ops::BLOB_PUT => self.handle_blob_put(store, intent),
+            effect_ops::BLOB_GET => self.handle_blob_get(store, intent),
+            effect_ops::LLM_GENERATE => self.handle_llm_generate(store, intent),
             TOOL_SESSION_OPEN => self.handle_host_session_open(intent),
             TOOL_FS_WRITE => self.handle_host_fs_write(intent),
             TOOL_FS_EXISTS => self.handle_host_fs_exists(intent),
@@ -375,7 +375,6 @@ impl AgentToolsScript {
                 edge_ref,
                 size: params.bytes.len() as u64,
             },
-            "adapter.blob.fake",
         )
     }
 
@@ -396,7 +395,6 @@ impl AgentToolsScript {
                 size: bytes.len() as u64,
                 bytes,
             },
-            "adapter.blob.fake",
         )
     }
 
@@ -445,7 +443,6 @@ impl AgentToolsScript {
                 cost_cents: Some(0),
                 provider_id: params.provider,
             },
-            "adapter.llm.fake",
         )
     }
 
@@ -466,7 +463,6 @@ impl AgentToolsScript {
                 error_code: None,
                 error_message: None,
             },
-            "adapter.host.fake",
         )
     }
 
@@ -496,7 +492,6 @@ impl AgentToolsScript {
                 new_mtime_ns: Some(11),
                 error_code: None,
             },
-            "adapter.host.fake",
         )
     }
 
@@ -520,7 +515,6 @@ impl AgentToolsScript {
                 exists: Some(true),
                 error_code: None,
             },
-            "adapter.host.fake",
         )
     }
 
@@ -549,7 +543,6 @@ impl AgentToolsScript {
                 "truncated": false,
                 "size_bytes": TEST_FILE_TEXT.len() as u64,
             }),
-            "adapter.host.fake",
         )
     }
 
@@ -580,7 +573,6 @@ impl AgentToolsScript {
                 error_code: None,
                 summary_text: None,
             },
-            "adapter.host.fake",
         )
     }
 
@@ -620,7 +612,6 @@ impl AgentToolsScript {
                 error_code: None,
                 error_message: None,
             },
-            "adapter.host.fake",
         )
     }
 
@@ -641,7 +632,6 @@ impl AgentToolsScript {
                 manifest: serde_cbor::to_vec(&smoke_manifest())?,
                 meta: smoke_read_meta()?,
             },
-            "adapter.introspect.fake",
         )
     }
 
@@ -676,7 +666,6 @@ impl AgentToolsScript {
                 }))?),
                 meta: smoke_read_meta()?,
             },
-            "adapter.introspect.fake",
         )
     }
 
@@ -699,7 +688,6 @@ impl AgentToolsScript {
                     }],
                     meta: smoke_read_meta()?,
                 },
-                "adapter.introspect.fake",
             );
         }
         ensure!(
@@ -730,7 +718,6 @@ impl AgentToolsScript {
                 ],
                 meta: smoke_read_meta()?,
             },
-            "adapter.introspect.fake",
         )
     }
 
@@ -760,7 +747,7 @@ impl AgentToolsScript {
             },
             other => bail!("unexpected workspace.resolve workspace {other}"),
         };
-        ok_receipt(intent, &receipt, "adapter.workspace.fake")
+        ok_receipt(intent, &receipt)
     }
 
     fn handle_workspace_empty_root(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
@@ -778,7 +765,6 @@ impl AgentToolsScript {
             &WorkspaceEmptyRootReceipt {
                 root_hash: EffectHashRef::new(DRAFT_EMPTY_ROOT_HASH)?,
             },
-            "adapter.workspace.fake",
         )
     }
 
@@ -811,7 +797,6 @@ impl AgentToolsScript {
                 }],
                 next_cursor: None,
             },
-            "adapter.workspace.fake",
         )
     }
 
@@ -842,7 +827,6 @@ impl AgentToolsScript {
                 size: WORKSPACE_TEXT.len() as u64,
                 mode: 0o644,
             }),
-            "adapter.workspace.fake",
         )
     }
 
@@ -866,7 +850,6 @@ impl AgentToolsScript {
         ok_receipt(
             intent,
             &serde_cbor::Value::Bytes(WORKSPACE_TEXT.as_bytes().to_vec()),
-            "adapter.workspace.fake",
         )
     }
 
@@ -894,7 +877,6 @@ impl AgentToolsScript {
                     "sha256:1414141414141414141414141414141414141414141414141414141414141414",
                 )?,
             },
-            "adapter.workspace.fake",
         )
     }
 
@@ -924,7 +906,6 @@ impl AgentToolsScript {
                         new_root_hash: EffectHashRef::new(DRAFT_TEXT_ROOT_HASH)?,
                         blob_hash: params.blob_hash,
                     },
-                    "adapter.workspace.fake",
                 )
             }
             2 => {
@@ -951,7 +932,6 @@ impl AgentToolsScript {
                         new_root_hash: EffectHashRef::new(DRAFT_FINAL_ROOT_HASH)?,
                         blob_hash: EffectHashRef::new(APPLY_BLOB_HASH)?,
                     },
-                    "adapter.workspace.fake",
                 )
             }
             other => bail!("unexpected workspace.write_ref call count {other}"),
@@ -988,7 +968,6 @@ impl AgentToolsScript {
                     )?),
                 }],
             },
-            "adapter.workspace.fake",
         )
     }
 
@@ -1316,14 +1295,9 @@ fn hash_from_ref(blob_ref: &str) -> Result<Hash> {
     Hash::from_hex_str(blob_ref).map_err(|err| anyhow!("invalid hash ref '{blob_ref}': {err}"))
 }
 
-fn ok_receipt<T: Serialize>(
-    intent: EffectIntent,
-    payload: &T,
-    adapter_id: &str,
-) -> Result<EffectReceipt> {
+fn ok_receipt<T: Serialize>(intent: EffectIntent, payload: &T) -> Result<EffectReceipt> {
     Ok(EffectReceipt {
         intent_hash: intent.intent_hash,
-        adapter_id: adapter_id.into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(payload).context("encode receipt payload")?,
         cost_cents: Some(0),

@@ -64,7 +64,6 @@ struct HttpRequestReceipt {
     headers: BTreeMap<String, String>,
     body_ref: Option<String>,
     timings: RequestTimings,
-    adapter_id: String,
 }
 
 aos_variant! {
@@ -205,7 +204,6 @@ mod tests {
                 start_ns: 10,
                 end_ns: 20,
             },
-            adapter_id: "http.mock".into(),
         };
         let receipt = FetchEvent::Receipt(EffectReceiptEnvelope {
             origin_module_id: "demo/FetchNotify@1".into(),
@@ -218,7 +216,6 @@ mod tests {
             receipt_payload: serde_cbor::to_vec(&receipt_payload).expect("payload"),
             status: "ok".into(),
             emitted_at_seq: 1,
-            adapter_id: "http.mock".into(),
             cost_cents: Some(0),
             signature: vec![0; 64],
         });

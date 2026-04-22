@@ -128,11 +128,10 @@ impl<W> SharedPendingEffects<W> {
         &mut self,
         effect_op: impl Into<String>,
         params: &T,
-        cap_slot: Option<String>,
         emitted_at_ns: u64,
         waiter: W,
     ) -> Result<SharedPendingBegin, serde_cbor::Error> {
-        let pending = PendingEffect::from_params(effect_op, params, cap_slot, emitted_at_ns)?;
+        let pending = PendingEffect::from_params(effect_op, params, emitted_at_ns)?;
         Ok(self.attach(pending, waiter))
     }
 
@@ -291,13 +290,8 @@ impl<W> SharedBlobGets<W> {
         emitted_at_ns: u64,
         waiter: W,
     ) -> Result<SharedPendingBegin, serde_cbor::Error> {
-        self.pending.begin(
-            "sys/blob.get@1",
-            params,
-            Some(String::from("blob")),
-            emitted_at_ns,
-            waiter,
-        )
+        self.pending
+            .begin("sys/blob.get@1", params, emitted_at_ns, waiter)
     }
 
     pub fn attach(&mut self, pending: PendingEffect, waiter: W) -> SharedPendingBegin {
@@ -358,13 +352,8 @@ impl<W> SharedBlobPuts<W> {
         emitted_at_ns: u64,
         waiter: W,
     ) -> Result<SharedPendingBegin, serde_cbor::Error> {
-        self.pending.begin(
-            "sys/blob.put@1",
-            params,
-            Some(String::from("blob")),
-            emitted_at_ns,
-            waiter,
-        )
+        self.pending
+            .begin("sys/blob.put@1", params, emitted_at_ns, waiter)
     }
 
     pub fn attach(&mut self, pending: PendingEffect, waiter: W) -> SharedPendingBegin {
@@ -403,22 +392,10 @@ mod tests {
     fn shared_pending_effects_fan_out_terminal_receipt() {
         let mut pending = SharedPendingEffects::new();
         let begin1 = pending
-            .begin(
-                "sys/blob.get@1",
-                &vec!["same"],
-                Some("blob".into()),
-                7,
-                "w1",
-            )
+            .begin("sys/blob.get@1", &vec!["same"], 7, "w1")
             .unwrap();
         let begin2 = pending
-            .begin(
-                "sys/blob.get@1",
-                &vec!["same"],
-                Some("blob".into()),
-                8,
-                "w2",
-            )
+            .begin("sys/blob.get@1", &vec!["same"], 8, "w2")
             .unwrap();
 
         assert!(begin1.should_emit);
@@ -469,7 +446,7 @@ mod tests {
     #[test]
     fn shared_pending_effect_attach_preserves_pending_handle() {
         let mut pending = SharedPendingEffects::new();
-        let tracked = PendingEffect::new("sys/blob.put@1", fake_hash('p'), Some("blob".into()), 9);
+        let tracked = PendingEffect::new("sys/blob.put@1", fake_hash('p'), 9);
         let begin = pending.attach(tracked.clone(), "waiter");
 
         assert!(begin.should_emit);

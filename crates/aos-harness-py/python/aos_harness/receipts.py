@@ -69,7 +69,6 @@ def http_request_ok(
     status: int,
     headers: Optional[JsonValue] = None,
     body_ref: Optional[str] = None,
-    adapter_id: str = "adapter.http.harness",
     start_ns: Optional[int] = None,
     end_ns: Optional[int] = None,
 ) -> ReceiptObject:
@@ -77,7 +76,6 @@ def http_request_ok(
     return harness.receipt_http_request_ok(
         _intent_hash(effect),
         status,
-        adapter_id=adapter_id,
         headers=headers,
         body_ref=body_ref,
         start_ns=start_ns,

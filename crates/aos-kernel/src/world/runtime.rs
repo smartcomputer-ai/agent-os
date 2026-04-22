@@ -151,16 +151,11 @@ impl<S: Store + 'static> Kernel<S> {
             "effect_intent.params",
         )?;
         let mut intent = aos_effects::EffectIntent::from_raw_params_with_op(
-            if record.effect_op.is_empty() {
-                record.kind.clone()
-            } else {
-                record.effect_op.clone()
-            },
+            record.effect_op.clone(),
             record.effect_op_hash.clone(),
             record.executor_module.clone(),
             record.executor_module_hash.clone(),
             record.executor_entrypoint.clone(),
-            aos_effects::EffectKind::new(record.kind.clone()),
             params_cbor,
             record.idempotency_key,
         )
@@ -405,7 +400,7 @@ impl<S: Store + 'static> Kernel<S> {
             .op_defs
             .get(&context.effect_op)
             .filter(|def| def.op_kind == OpKind::Effect)
-            .ok_or_else(|| KernelError::UnsupportedEffectKind(context.effect_op.clone()))?;
+            .ok_or_else(|| KernelError::UnsupportedEffectOp(context.effect_op.clone()))?;
         if let Some(expected_hash) = context.effect_op_hash.as_deref() {
             let actual_hash = self.op_hash(def)?;
             if actual_hash != expected_hash {
@@ -436,7 +431,7 @@ impl<S: Store + 'static> Kernel<S> {
             .effect
             .as_ref()
             .map(|effect| effect.receipt.as_str().to_string())
-            .ok_or_else(|| KernelError::UnsupportedEffectKind(context.effect_op.clone()))?;
+            .ok_or_else(|| KernelError::UnsupportedEffectOp(context.effect_op.clone()))?;
         let normalized =
             normalize_cbor_by_name(&self.schema_index, &receipt_schema, &receipt.payload_cbor)
                 .map_err(|err| {
@@ -709,7 +704,6 @@ impl<S: Store + 'static> Kernel<S> {
             origin_instance_key: context.origin_instance_key.clone(),
             intent_id: format_intent_hash(&receipt.intent_hash),
             effect_op: context.effect_op.clone(),
-            adapter_id: receipt.adapter_id.clone(),
             status: receipt.status.clone(),
             error_code: error_code.to_string(),
             error_message: error_message.to_string(),
@@ -735,7 +729,6 @@ impl<S: Store + 'static> Kernel<S> {
             origin_instance_key: frame.origin_instance_key.clone(),
             intent_id: format_intent_hash(&frame.intent_hash),
             effect_op: frame.effect_op.clone(),
-            adapter_id: frame.adapter_id.clone(),
             expected_seq,
             observed_seq: frame.seq,
         };
@@ -758,7 +751,6 @@ impl<S: Store + 'static> Kernel<S> {
             origin_instance_key: frame.origin_instance_key.clone(),
             intent_id: format_intent_hash(&frame.intent_hash),
             effect_op: frame.effect_op.clone(),
-            adapter_id: frame.adapter_id.clone(),
             emitted_at_seq: frame.emitted_at_seq,
             seq: frame.seq,
             kind: frame.kind.clone(),
@@ -838,7 +830,6 @@ struct WorkflowReceiptFaultRecord {
     origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
     effect_op: String,
-    adapter_id: String,
     status: aos_effects::ReceiptStatus,
     error_code: String,
     error_message: String,
@@ -858,7 +849,6 @@ struct WorkflowStreamGapRecord {
     origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
     effect_op: String,
-    adapter_id: String,
     expected_seq: u64,
     observed_seq: u64,
 }
@@ -874,7 +864,6 @@ struct WorkflowStreamDropRecord {
     origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
     effect_op: String,
-    adapter_id: String,
     emitted_at_seq: u64,
     seq: u64,
     kind: String,
@@ -1039,7 +1028,6 @@ mod tests {
                     effects: vec![WorkflowEffect {
                         kind: "sys/timer.set@1".into(),
                         params_cbor: serde_cbor::to_vec(&params).expect("encode timer params"),
-                        cap_slot: None,
                         issuer_ref: None,
                         idempotency_key: None,
                     }],
@@ -1055,7 +1043,6 @@ mod tests {
         let mut kernel = kernel_with_stream_context("com.acme/Workflow@1", intent_hash, 11);
         let frame = EffectStreamFrame {
             intent_hash,
-            adapter_id: "adapter.stream".into(),
             origin_module_id: "com.acme/Workflow@1".into(),
             origin_workflow_op_hash: None,
             origin_instance_key: None,
@@ -1104,7 +1091,6 @@ mod tests {
         let mut kernel = kernel_with_stream_context("com.acme/Workflow@1", intent_hash, 12);
         let frame = EffectStreamFrame {
             intent_hash,
-            adapter_id: "adapter.stream".into(),
             origin_module_id: "com.acme/Workflow@1".into(),
             origin_workflow_op_hash: None,
             origin_instance_key: None,
@@ -1151,7 +1137,6 @@ mod tests {
 
         let receipt = EffectReceipt {
             intent_hash,
-            adapter_id: "adapter.stream".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: vec![],
             cost_cents: None,
@@ -1196,7 +1181,7 @@ mod tests {
         );
 
         let opened = &drain.opened_effects[0];
-        assert_eq!(opened.record.kind, aos_effects::EffectKind::TIMER_SET);
+        assert_eq!(opened.record.effect_op, aos_effects::effect_ops::TIMER_SET);
         let params: TimerSetParams = serde_cbor::from_slice(&opened.intent.params_cbor)
             .expect("decode materialized timer params");
         assert_eq!(params.deliver_at_ns, 20);

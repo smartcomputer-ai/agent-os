@@ -92,7 +92,6 @@ class WorkflowHarness:
     def apply_receipt(
         self,
         intent_hash: bytes,
-        adapter_id: str,
         status: str,
         payload_cbor: bytes,
         cost_cents: Optional[int] = None,
@@ -101,19 +100,16 @@ class WorkflowHarness:
     def receipt_ok(
         self,
         intent_hash: bytes,
-        adapter_id: str,
         payload: JsonValue,
     ) -> ReceiptObject: ...
     def receipt_error(
         self,
         intent_hash: bytes,
-        adapter_id: str,
         payload: JsonValue,
     ) -> ReceiptObject: ...
     def receipt_timeout(
         self,
         intent_hash: bytes,
-        adapter_id: str,
         payload: JsonValue,
     ) -> ReceiptObject: ...
     def receipt_timer_set_ok(
@@ -140,7 +136,6 @@ class WorkflowHarness:
         self,
         intent_hash: bytes,
         status: int,
-        adapter_id: str = "adapter.http.harness",
         headers: Optional[JsonValue] = None,
         body_ref: Optional[str] = None,
         start_ns: Optional[int] = None,

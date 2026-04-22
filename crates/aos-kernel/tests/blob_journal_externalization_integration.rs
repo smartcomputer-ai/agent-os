@@ -37,7 +37,7 @@ fn blob_put_intent_is_externalized_in_journal() {
         .filter_map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok())
         .find_map(|record| match record {
             JournalRecord::EffectIntent(record)
-                if record.kind == aos_effects::EffectKind::BLOB_PUT =>
+                if record.effect_op == aos_effects::effect_ops::BLOB_PUT =>
             {
                 Some(record)
             }
@@ -84,7 +84,6 @@ fn blob_get_receipt_is_externalized_and_replay_requires_cas_dependency() {
         .kernel
         .handle_receipt(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "adapter.blob".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&BlobGetReceipt {
                 blob_ref: fixtures::fake_hash(0x44),
@@ -152,7 +151,7 @@ fn blob_world_manifest(
     effect_op: &str,
 ) -> aos_kernel::manifest::LoadedManifest {
     let effect = match effect_op {
-        "sys/blob.put@1" => WorkflowEffect::with_cap_slot(
+        "sys/blob.put@1" => WorkflowEffect::new(
             "sys/blob.put@1",
             serde_cbor::to_vec(&BlobPutParams {
                 bytes: b"journal-externalized".to_vec(),
@@ -160,15 +159,13 @@ fn blob_world_manifest(
                 refs: None,
             })
             .unwrap(),
-            "blob",
         ),
-        "sys/blob.get@1" => WorkflowEffect::with_cap_slot(
+        "sys/blob.get@1" => WorkflowEffect::new(
             "sys/blob.get@1",
             serde_cbor::to_vec(&aos_effects::builtins::BlobGetParams {
                 blob_ref: fixtures::fake_hash(0x10),
             })
             .unwrap(),
-            "blob",
         ),
         other => panic!("unexpected effect op {other}"),
     };

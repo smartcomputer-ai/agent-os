@@ -88,11 +88,11 @@ pub fn default_registry<S: Store + 'static>(
         registry.register(Box::new(StubLlmAdapter));
     }
 
-    for (adapter_id, provider) in &config.adapter_routes {
-        if !registry.register_route(adapter_id.as_str(), provider.adapter_kind.as_str()) {
+    for (route_id, provider) in &config.adapter_routes {
+        if !registry.register_route(route_id.as_str(), provider.adapter_kind.as_str()) {
             log::warn!(
                 "host profile route '{}' targets unknown adapter kind '{}'",
-                adapter_id,
+                route_id,
                 provider.adapter_kind
             );
         }

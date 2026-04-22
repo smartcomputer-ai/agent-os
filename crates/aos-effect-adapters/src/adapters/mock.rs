@@ -15,7 +15,7 @@ use aos_effects::builtins::{
     HeaderMap, HttpRequestParams, HttpRequestReceipt, LlmGenerateParams, LlmRuntimeArgs,
     RequestTimings, TextOrSecretRef,
 };
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::Kernel;
 use aos_kernel::Store;
 use sha2::{Digest, Sha256};
@@ -24,8 +24,6 @@ use tracing::debug;
 // ---------------------------------------------------------------------------
 // MockHttpHarness: HTTP effect interception
 // ---------------------------------------------------------------------------
-
-const MOCK_HTTP_ADAPTER_ID: &str = "http.mock";
 
 /// Context for an HTTP request intercepted by the mock harness.
 #[derive(Debug, Clone)]
@@ -92,8 +90,8 @@ impl MockHttpHarness {
                 break;
             }
             for intent in intents {
-                match intent.kind.as_str() {
-                    EffectKind::HTTP_REQUEST => {
+                match intent.effect_op.as_str() {
+                    effect_ops::HTTP_REQUEST => {
                         let params: HttpRequestParams = serde_cbor::from_slice(&intent.params_cbor)
                             .context("decode http request params")?;
                         out.push(HttpRequestContext { intent, params });
@@ -130,7 +128,6 @@ impl MockHttpHarness {
             build_http_receipt_payload(response.status, &response.headers, response.body, store)?;
         let receipt = EffectReceipt {
             intent_hash: ctx.intent.intent_hash,
-            adapter_id: MOCK_HTTP_ADAPTER_ID.into(),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&receipt_payload)?,
             cost_cents: Some(0),
@@ -170,7 +167,6 @@ fn build_http_receipt_payload(
             start_ns: 10,
             end_ns: 20,
         },
-        adapter_id: MOCK_HTTP_ADAPTER_ID.into(),
     })
 }
 
@@ -194,7 +190,7 @@ fn redact_headers(headers: &HeaderMap) -> HeaderMap {
 // MockLlmHarness: LLM effect interception
 // ---------------------------------------------------------------------------
 
-const MOCK_LLM_ADAPTER_ID: &str = "llm.mock";
+const MOCK_LLM_ROUTE_ID: &str = "llm.mock";
 
 /// Context for an LLM request intercepted by the mock harness.
 #[derive(Debug, Clone)]
@@ -234,8 +230,8 @@ impl<S: Store + 'static> MockLlmHarness<S> {
                 break;
             }
             for intent in intents {
-                match intent.kind.as_str() {
-                    EffectKind::LLM_GENERATE => {
+                match intent.effect_op.as_str() {
+                    effect_ops::LLM_GENERATE => {
                         let raw: serde_cbor::Value = serde_cbor::from_slice(&intent.params_cbor)
                             .context("decode llm.generate params value")?;
                         let params = llm_params_from_cbor(raw)?;
@@ -319,7 +315,6 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         let receipt_value = build_receipt_value(&output_ref, &summary_text);
         let receipt = EffectReceipt {
             intent_hash: ctx.intent.intent_hash,
-            adapter_id: MOCK_LLM_ADAPTER_ID.into(),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&receipt_value)?,
             cost_cents: Some(0),
@@ -575,7 +570,7 @@ fn build_receipt_value(output_ref: &HashRef, summary: &str) -> ExprValue {
     record.insert("cost_millis".into(), ExprValue::Nat(250));
     record.insert(
         "provider_id".into(),
-        ExprValue::Text(MOCK_LLM_ADAPTER_ID.into()),
+        ExprValue::Text(MOCK_LLM_ROUTE_ID.into()),
     );
     ExprValue::Record(record)
 }

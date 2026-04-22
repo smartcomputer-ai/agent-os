@@ -8,10 +8,10 @@ use aos_effects::builtins::{
     HostExecParams, HostExecReceipt, HostLocalTarget, HostOutput, HostSessionOpenParams,
     HostSessionOpenReceipt, HostSessionSignalParams, HostSessionSignalReceipt, HostTarget,
 };
-use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
+use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::{MemStore, Store};
 
-fn build_intent(kind: EffectKind, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
+fn build_intent(kind: impl Into<String>, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
     EffectIntent::from_raw_params(kind, params_cbor, [seed; 32]).unwrap()
 }
 
@@ -42,7 +42,7 @@ async fn process_open_exec_signal_roundtrip() {
 
     let open_receipt = open_adapter
         .execute(&build_intent(
-            EffectKind::new(EffectKind::HOST_SESSION_OPEN),
+            effect_ops::HOST_SESSION_OPEN,
             serde_cbor::to_vec(&open_params).unwrap(),
             1,
         ))
@@ -70,7 +70,7 @@ async fn process_open_exec_signal_roundtrip() {
 
     let exec_receipt = exec_adapter
         .execute(&build_intent(
-            EffectKind::new(EffectKind::HOST_EXEC),
+            effect_ops::HOST_EXEC,
             serde_cbor::to_vec(&exec_params).unwrap(),
             2,
         ))
@@ -95,7 +95,7 @@ async fn process_open_exec_signal_roundtrip() {
 
     let signal_receipt = signal_adapter
         .execute(&build_intent(
-            EffectKind::new(EffectKind::HOST_SESSION_SIGNAL),
+            effect_ops::HOST_SESSION_SIGNAL,
             serde_cbor::to_vec(&signal_params).unwrap(),
             3,
         ))
@@ -130,7 +130,7 @@ async fn process_exec_auto_large_output_uses_blob() {
 
     let open_receipt = open_adapter
         .execute(&build_intent(
-            EffectKind::new(EffectKind::HOST_SESSION_OPEN),
+            effect_ops::HOST_SESSION_OPEN,
             serde_cbor::to_vec(&open_params).unwrap(),
             10,
         ))
@@ -156,7 +156,7 @@ async fn process_exec_auto_large_output_uses_blob() {
 
     let exec_receipt = exec_adapter
         .execute(&build_intent(
-            EffectKind::new(EffectKind::HOST_EXEC),
+            effect_ops::HOST_EXEC,
             serde_cbor::to_vec(&exec_params).unwrap(),
             11,
         ))

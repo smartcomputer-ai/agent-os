@@ -49,11 +49,9 @@ impl<S: Store> HttpAdapter<S> {
             headers: HeaderMap::new(),
             body_ref,
             timings: timings.unwrap_or_else(default_timings),
-            adapter_id: "host.http".into(),
         };
         EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "host.http".into(),
             status: ReceiptStatus::Error,
             payload_cbor: serde_cbor::to_vec(&receipt)
                 .expect("encode host.http error receipt payload"),
@@ -79,11 +77,9 @@ impl<S: Store> HttpAdapter<S> {
             headers: HeaderMap::new(),
             body_ref: None,
             timings: timings.unwrap_or_else(default_timings),
-            adapter_id: "host.http".into(),
         };
         EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "host.http".into(),
             status: ReceiptStatus::Timeout,
             payload_cbor: serde_cbor::to_vec(&receipt_payload)
                 .expect("encode host.http timeout receipt payload"),
@@ -96,7 +92,7 @@ impl<S: Store> HttpAdapter<S> {
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
     fn kind(&self) -> &str {
-        aos_effects::EffectKind::HTTP_REQUEST
+        aos_effects::effect_ops::HTTP_REQUEST
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -242,12 +238,10 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
             headers,
             body_ref,
             timings: timings_from(start_ns, start.elapsed()),
-            adapter_id: "host.http".into(),
         };
 
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "host.http".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&receipt_payload)?,
             cost_cents: None,

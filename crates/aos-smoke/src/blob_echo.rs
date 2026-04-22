@@ -13,7 +13,7 @@ use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::builtins::{
     BlobEdge, BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt,
 };
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::Kernel;
 use aos_kernel::Store;
 use aos_wasm_sdk::{aos_event_union, aos_variant};
@@ -24,7 +24,6 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "demo/BlobEchoSM@1";
 const EVENT_SCHEMA: &str = "demo/BlobEchoEvent@1";
-const ADAPTER_ID: &str = "adapter.blob.fake";
 
 #[derive(Debug, Clone)]
 struct BlobEchoInput {
@@ -85,9 +84,9 @@ fn synthesize_blob_effects<S: Store + 'static>(
             break;
         }
         for intent in intents {
-            match intent.kind.as_str() {
-                EffectKind::BLOB_PUT => handle_blob_put(kernel, harness, intent)?,
-                EffectKind::BLOB_GET => handle_blob_get(kernel, harness, intent)?,
+            match intent.effect_op.as_str() {
+                effect_ops::BLOB_PUT => handle_blob_put(kernel, harness, intent)?,
+                effect_ops::BLOB_GET => handle_blob_get(kernel, harness, intent)?,
                 other => return Err(anyhow!("unexpected effect {other}")),
             }
         }
@@ -128,7 +127,6 @@ fn handle_blob_put<S: Store + 'static>(
     };
     let receipt = EffectReceipt {
         intent_hash: intent.intent_hash,
-        adapter_id: ADAPTER_ID.into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&receipt_payload)?,
         cost_cents: Some(0),
@@ -163,7 +161,6 @@ fn handle_blob_get<S: Store + 'static>(
     };
     let receipt = EffectReceipt {
         intent_hash: intent.intent_hash,
-        adapter_id: ADAPTER_ID.into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&receipt_payload)?,
         cost_cents: Some(0),

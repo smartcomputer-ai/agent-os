@@ -17,12 +17,12 @@ use aos_effects::builtins::{
     HostLocalTarget, HostOutput, HostPatchInput, HostSessionOpenParams, HostSessionOpenReceipt,
     HostTarget, HostTextOutput,
 };
-use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
+use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::{MemStore, Store};
 use tempfile::TempDir;
 
 fn build_intent(kind: &str, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
-    EffectIntent::from_raw_params(EffectKind::new(kind), params_cbor, [seed; 32]).unwrap()
+    EffectIntent::from_raw_params(kind, params_cbor, [seed; 32]).unwrap()
 }
 
 fn shell_available() -> bool {
@@ -43,7 +43,7 @@ async fn open_session(set: &HostAdapterSet<MemStore>, workdir: &Path, seed: u8) 
     let receipt = set
         .session_open
         .execute(&build_intent(
-            EffectKind::HOST_SESSION_OPEN,
+            effect_ops::HOST_SESSION_OPEN,
             serde_cbor::to_vec(&params).unwrap(),
             seed,
         ))
@@ -98,7 +98,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let write_receipt = set
         .fs_write_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_WRITE_FILE,
+            effect_ops::HOST_FS_WRITE_FILE,
             serde_cbor::to_vec(&write_params).unwrap(),
             2,
         ))
@@ -119,7 +119,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let read_receipt = set
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&read_params).unwrap(),
             3,
         ))
@@ -145,7 +145,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let edit_receipt = set
         .fs_edit_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_EDIT_FILE,
+            effect_ops::HOST_FS_EDIT_FILE,
             serde_cbor::to_vec(&edit_params).unwrap(),
             4,
         ))
@@ -173,7 +173,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let patch_receipt = set
         .fs_apply_patch
         .execute(&build_intent(
-            EffectKind::HOST_FS_APPLY_PATCH,
+            effect_ops::HOST_FS_APPLY_PATCH,
             serde_cbor::to_vec(&patch_params).unwrap(),
             5,
         ))
@@ -195,7 +195,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let grep_receipt = set
         .fs_grep
         .execute(&build_intent(
-            EffectKind::HOST_FS_GREP,
+            effect_ops::HOST_FS_GREP,
             serde_cbor::to_vec(&grep_params).unwrap(),
             6,
         ))
@@ -216,7 +216,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let glob_receipt = set
         .fs_glob
         .execute(&build_intent(
-            EffectKind::HOST_FS_GLOB,
+            effect_ops::HOST_FS_GLOB,
             serde_cbor::to_vec(&glob_params).unwrap(),
             7,
         ))
@@ -241,7 +241,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let exec_receipt = set
         .exec
         .execute(&build_intent(
-            EffectKind::HOST_EXEC,
+            effect_ops::HOST_EXEC,
             serde_cbor::to_vec(&exec_params).unwrap(),
             8,
         ))
@@ -266,7 +266,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let forbidden_receipt = set
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&forbidden_params).unwrap(),
             9,
         ))
@@ -291,7 +291,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let auto_large_receipt = set
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&auto_large_params).unwrap(),
             10,
         ))
@@ -320,7 +320,7 @@ async fn host_fs_session_flow_roundtrip_and_large_output_posture_expected() {
     let inline_large_receipt = set
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&inline_large_params).unwrap(),
             11,
         ))

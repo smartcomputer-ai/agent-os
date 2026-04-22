@@ -12,7 +12,7 @@ use aos_effect_adapters::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_effects::builtins::{
     LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolCallList,
 };
-use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
+use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::{MemStore, Store};
 use serde_json::Value;
 
@@ -195,7 +195,7 @@ pub(crate) fn require_live_matrix() -> Vec<ProviderRuntime> {
 
 pub(crate) fn build_intent(params: &LlmGenerateParams) -> EffectIntent {
     let params_cbor = serde_cbor::to_vec(params).expect("encode params");
-    EffectIntent::from_raw_params(EffectKind::llm_generate(), params_cbor, [0u8; 32])
+    EffectIntent::from_raw_params(effect_ops::LLM_GENERATE, params_cbor, [0u8; 32])
         .expect("build intent")
 }
 

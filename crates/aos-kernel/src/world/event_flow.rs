@@ -599,7 +599,7 @@ fn workflow_output_size_bytes(output: &WorkflowOutput) -> usize {
     for effect in &output.effects {
         total = total.saturating_add(effect.kind.len());
         total = total.saturating_add(effect.params_cbor.len());
-        total = total.saturating_add(effect.cap_slot.as_ref().map_or(0, String::len));
+        total = total.saturating_add(effect.issuer_ref.as_ref().map_or(0, String::len));
         total = total.saturating_add(effect.idempotency_key.as_ref().map_or(0, Vec::len));
     }
     total

@@ -23,7 +23,6 @@ const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 pub enum WorkspaceAction {
     Emit {
         effect_op: ToolEffectOp,
-        cap_slot: &'static str,
         params_json: Value,
         state_json: String,
     },
@@ -639,13 +638,11 @@ fn advance_state(
     match state {
         WorkspaceState::ListWorkspaces => emit(
             ToolEffectOp::IntrospectListCells,
-            "query",
             json!({ "workflow": WORKSPACE_WORKFLOW_NAME }),
             WorkspaceState::ListWorkspaces,
         ),
         WorkspaceState::InspectResolve { workspace, version } => emit(
             ToolEffectOp::WorkspaceResolve,
-            "workspace",
             resolve_params(workspace.as_str(), version),
             WorkspaceState::InspectResolve { workspace, version },
         ),
@@ -657,7 +654,6 @@ fn advance_state(
             limit,
         } => emit(
             ToolEffectOp::WorkspaceResolve,
-            "workspace",
             resolve_params(workspace.as_str(), version),
             WorkspaceState::ListResolve {
                 workspace,
@@ -674,7 +670,6 @@ fn advance_state(
             limit,
         } => emit(
             ToolEffectOp::WorkspaceList,
-            "workspace",
             json!({
                 "root_hash": resolved.root_hash,
                 "path": path,
@@ -696,7 +691,6 @@ fn advance_state(
             range,
         } => emit(
             ToolEffectOp::WorkspaceResolve,
-            "workspace",
             resolve_params(workspace.as_str(), version),
             WorkspaceState::ReadResolve {
                 workspace,
@@ -711,7 +705,6 @@ fn advance_state(
             range,
         } => emit(
             ToolEffectOp::WorkspaceReadRef,
-            "workspace",
             json!({
                 "root_hash": resolved.root_hash,
                 "path": path,
@@ -729,7 +722,6 @@ fn advance_state(
             entry,
         } => emit(
             ToolEffectOp::WorkspaceReadBytes,
-            "workspace",
             json!({
                 "root_hash": resolved.root_hash,
                 "path": path,
@@ -748,7 +740,6 @@ fn advance_state(
             operations,
         } => emit(
             ToolEffectOp::WorkspaceResolve,
-            "workspace",
             resolve_params(workspace.as_str(), version),
             WorkspaceState::ApplyResolve {
                 workspace,
@@ -761,7 +752,6 @@ fn advance_state(
             operations,
         } => emit(
             ToolEffectOp::WorkspaceEmptyRoot,
-            "workspace",
             json!({ "workspace": workspace }),
             WorkspaceState::ApplyEmptyRoot {
                 workspace,
@@ -797,7 +787,6 @@ fn advance_state(
                         params_json,
                     } => emit(
                         effect_op,
-                        "workspace",
                         params_json,
                         WorkspaceState::ApplyRun {
                             resolved,
@@ -841,7 +830,6 @@ fn advance_state(
             blob_hash,
         } => emit(
             ToolEffectOp::WorkspaceWriteRef,
-            "workspace",
             json!({
                 "root_hash": current_root_hash,
                 "path": path,
@@ -885,7 +873,6 @@ fn advance_state(
                 })?;
                 emit(
                     ToolEffectOp::WorkspaceResolve,
-                    "workspace",
                     resolve_params(workspace.as_str(), left.version),
                     WorkspaceState::DiffResolveLeft {
                         left,
@@ -923,7 +910,6 @@ fn advance_state(
                 })?;
                 emit(
                     ToolEffectOp::WorkspaceResolve,
-                    "workspace",
                     resolve_params(workspace.as_str(), right.version),
                     WorkspaceState::DiffResolveRight {
                         left,
@@ -939,7 +925,6 @@ fn advance_state(
             prefix,
         } => emit(
             ToolEffectOp::WorkspaceDiff,
-            "workspace",
             json!({
                 "root_a": left.root_hash,
                 "root_b": right.root_hash,
@@ -1677,7 +1662,6 @@ fn parse_args<T: for<'de> Deserialize<'de>>(
 
 fn emit(
     effect_op: ToolEffectOp,
-    cap_slot: &'static str,
     params_json: Value,
     state: WorkspaceState,
 ) -> Result<WorkspaceAction, crate::tools::types::ToolMappingError> {
@@ -1688,7 +1672,6 @@ fn emit(
     })?;
     Ok(WorkspaceAction::Emit {
         effect_op,
-        cap_slot,
         params_json,
         state_json,
     })

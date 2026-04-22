@@ -12,7 +12,7 @@ use aos_effect_adapters::{
     traits::{AdapterStartContext, AsyncEffectAdapter, EffectUpdate},
 };
 use aos_effects::{
-    EffectIntent, EffectKind, ReceiptStatus,
+    EffectIntent, ReceiptStatus,
     builtins::{
         HostExecParams, HostExecProgressFrame, HostExecReceipt, HostFileContentInput,
         HostFsApplyPatchParams, HostFsApplyPatchReceipt, HostFsEditFileParams,
@@ -24,6 +24,7 @@ use aos_effects::{
         HostSessionOpenReceipt, HostSessionSignalParams, HostSessionSignalReceipt, HostTarget,
         HostTextOutput,
     },
+    effect_ops,
 };
 use aos_kernel::{MemStore, Store};
 use serde::{Serialize, de::DeserializeOwned};
@@ -53,7 +54,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let open_payload: HostSessionOpenReceipt = execute_ok(
         &adapters.session_open,
-        EffectKind::HOST_SESSION_OPEN,
+        effect_ops::HOST_SESSION_OPEN,
         &HostSessionOpenParams {
             target: HostTarget::sandbox(HostSandboxTarget {
                 image,
@@ -83,7 +84,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let write_text: HostFsWriteFileReceipt = execute_ok(
         &adapters.fs_write_file,
-        EffectKind::HOST_FS_WRITE_FILE,
+        effect_ops::HOST_FS_WRITE_FILE,
         &HostFsWriteFileParams {
             session_id: session_id.clone(),
             path: text_path.clone(),
@@ -106,7 +107,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let read_text: HostFsReadFileReceipt = execute_ok(
         &adapters.fs_read_file,
-        EffectKind::HOST_FS_READ_FILE,
+        effect_ops::HOST_FS_READ_FILE,
         &HostFsReadFileParams {
             session_id: session_id.clone(),
             path: text_path.clone(),
@@ -127,7 +128,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
     let binary = vec![0, 159, 255, b'\n'];
     let write_binary: HostFsWriteFileReceipt = execute_ok(
         &adapters.fs_write_file,
-        EffectKind::HOST_FS_WRITE_FILE,
+        effect_ops::HOST_FS_WRITE_FILE,
         &HostFsWriteFileParams {
             session_id: session_id.clone(),
             path: binary_path.clone(),
@@ -146,7 +147,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let read_binary: HostFsReadFileReceipt = execute_ok(
         &adapters.fs_read_file,
-        EffectKind::HOST_FS_READ_FILE,
+        effect_ops::HOST_FS_READ_FILE,
         &HostFsReadFileParams {
             session_id: session_id.clone(),
             path: binary_path.clone(),
@@ -166,7 +167,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let exists: HostFsExistsReceipt = execute_ok(
         &adapters.fs_exists,
-        EffectKind::HOST_FS_EXISTS,
+        effect_ops::HOST_FS_EXISTS,
         &HostFsExistsParams {
             session_id: session_id.clone(),
             path: text_path.clone(),
@@ -178,7 +179,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let stat: HostFsStatReceipt = execute_ok(
         &adapters.fs_stat,
-        EffectKind::HOST_FS_STAT,
+        effect_ops::HOST_FS_STAT,
         &HostFsStatParams {
             session_id: session_id.clone(),
             path: text_path.clone(),
@@ -191,7 +192,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let grep: HostFsGrepReceipt = execute_ok(
         &adapters.fs_grep,
-        EffectKind::HOST_FS_GREP,
+        effect_ops::HOST_FS_GREP,
         &HostFsGrepParams {
             session_id: session_id.clone(),
             pattern: "needle".to_string(),
@@ -210,7 +211,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let glob: HostFsGlobReceipt = execute_ok(
         &adapters.fs_glob,
-        EffectKind::HOST_FS_GLOB,
+        effect_ops::HOST_FS_GLOB,
         &HostFsGlobParams {
             session_id: session_id.clone(),
             pattern: "*.txt".to_string(),
@@ -226,7 +227,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let list_dir: HostFsListDirReceipt = execute_ok(
         &adapters.fs_list_dir,
-        EffectKind::HOST_FS_LIST_DIR,
+        effect_ops::HOST_FS_LIST_DIR,
         &HostFsListDirParams {
             session_id: session_id.clone(),
             path: Some(prefix.clone()),
@@ -243,7 +244,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let edit: HostFsEditFileReceipt = execute_ok(
         &adapters.fs_edit_file,
-        EffectKind::HOST_FS_EDIT_FILE,
+        effect_ops::HOST_FS_EDIT_FILE,
         &HostFsEditFileParams {
             session_id: session_id.clone(),
             path: text_path.clone(),
@@ -260,7 +261,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
     let patch = format!("*** Begin Patch\n*** Add File: {patch_path}\n+patched ok\n*** End Patch");
     let patch_receipt: HostFsApplyPatchReceipt = execute_ok(
         &adapters.fs_apply_patch,
-        EffectKind::HOST_FS_APPLY_PATCH,
+        effect_ops::HOST_FS_APPLY_PATCH,
         &HostFsApplyPatchParams {
             session_id: session_id.clone(),
             patch: HostPatchInput::InlineText {
@@ -278,7 +279,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
     let stdin_hash = store.put_blob(&binary)?;
     let cat: HostExecReceipt = execute_ok(
         &adapters.exec,
-        EffectKind::HOST_EXEC,
+        effect_ops::HOST_EXEC,
         &HostExecParams {
             session_id: session_id.clone(),
             argv: vec!["cat".to_string()],
@@ -313,7 +314,7 @@ async fn fabric_controller_live_host_adapter_e2e() -> anyhow::Result<()> {
 
     let signal: HostSessionSignalReceipt = execute_ok(
         &adapters.session_signal,
-        EffectKind::HOST_SESSION_SIGNAL,
+        effect_ops::HOST_SESSION_SIGNAL,
         &HostSessionSignalParams {
             session_id,
             signal: "close".to_string(),
@@ -345,7 +346,7 @@ async fn run_long_exec_with_progress<A: AsyncEffectAdapter + ?Sized>(
         stdin_ref: None,
         output_mode: Some("require_inline".to_string()),
     };
-    let intent = intent_for(EffectKind::HOST_EXEC, &params, 64);
+    let intent = intent_for(effect_ops::HOST_EXEC, &params, 64);
     let context = AdapterStartContext {
         origin_module_id: "live/FabricHostE2E@1".to_string(),
         origin_workflow_op_hash: None,
@@ -354,7 +355,7 @@ async fn run_long_exec_with_progress<A: AsyncEffectAdapter + ?Sized>(
         effect_op_hash: None,
         executor_module: Some("sys/Host@1".to_string()),
         executor_module_hash: None,
-        executor_entrypoint: Some(EffectKind::HOST_EXEC.to_string()),
+        executor_entrypoint: Some(effect_ops::HOST_EXEC.to_string()),
         emitted_at_seq: 1,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel(16);
@@ -367,7 +368,6 @@ async fn run_long_exec_with_progress<A: AsyncEffectAdapter + ?Sized>(
     while let Some(update) = rx.recv().await {
         match update {
             EffectUpdate::StreamFrame(frame) => {
-                assert_eq!(frame.adapter_id, "host.exec.fabric");
                 assert_eq!(frame.kind, "host.exec.progress");
                 frames.push(serde_cbor::from_slice::<HostExecProgressFrame>(
                     &frame.payload_cbor,
@@ -417,7 +417,7 @@ where
 
 fn intent_for<P: Serialize>(kind: &str, params: &P, seed: u8) -> EffectIntent {
     EffectIntent::from_raw_params(
-        EffectKind::new(kind),
+        kind,
         serde_cbor::to_vec(params).expect("encode params"),
         [seed; 32],
     )

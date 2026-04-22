@@ -11,7 +11,7 @@ use aos_authoring::{
 use aos_cbor::Hash;
 use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_effects::builtins::{TimerSetParams, TimerSetReceipt};
-use aos_effects::{EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::journal::{Journal, OwnedJournalEntry};
 use aos_kernel::{Kernel, KernelConfig, KernelQuiescence, LoadedManifest, Store, WorldInput};
 use aos_node::{EffectExecutionClass, EffectRuntime, EffectRuntimeEvent, FsCas, WorldConfig};
@@ -452,7 +452,7 @@ impl ExampleHost {
                 continue;
             }
 
-            if intent.kind.as_str() == EffectKind::TIMER_SET {
+            if intent.effect_op.as_str() == effect_ops::TIMER_SET {
                 let params: TimerSetParams =
                     serde_cbor::from_slice(&intent.params_cbor).context("decode timer.set")?;
                 self.pending_timers.push(PendingTimer {
@@ -510,7 +510,6 @@ impl ExampleHost {
         for timer in &ready {
             let receipt = EffectReceipt {
                 intent_hash: timer.intent_hash,
-                adapter_id: "timer.default".into(),
                 status: ReceiptStatus::Ok,
                 payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
                     delivered_at_ns: timer.params.deliver_at_ns,

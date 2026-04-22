@@ -41,11 +41,13 @@ fn workflow_orchestration_completes_after_receipt() {
     let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let effect = effects.remove(0);
-    assert_eq!(effect.kind.as_str(), aos_effects::EffectKind::HTTP_REQUEST);
+    assert_eq!(
+        effect.effect_op.as_str(),
+        aos_effects::effect_ops::HTTP_REQUEST
+    );
 
     let receipt = EffectReceipt {
         intent_hash: effect.intent_hash,
-        adapter_id: "adapter.http".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&HttpRequestReceipt {
             status: 200,
@@ -55,7 +57,6 @@ fn workflow_orchestration_completes_after_receipt() {
                 start_ns: 1,
                 end_ns: 2,
             },
-            adapter_id: "adapter.http".into(),
         })
         .unwrap(),
         cost_cents: None,
@@ -96,7 +97,7 @@ fn workflow_effects_share_outbox_without_interference() {
         event: fixtures::schema(START_SCHEMA),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        effects_emitted: vec![aos_effects::effect_ops::TIMER_SET.into()],
     });
 
     let mut http_module = fixtures::stub_workflow_module(
@@ -105,7 +106,7 @@ fn workflow_effects_share_outbox_without_interference() {
         &WorkflowOutput {
             state: Some(vec![0xB2]),
             domain_events: vec![],
-            effects: vec![WorkflowEffect::with_cap_slot(
+            effects: vec![WorkflowEffect::new(
                 "sys/http.request@1",
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
@@ -114,7 +115,6 @@ fn workflow_effects_share_outbox_without_interference() {
                     body_ref: None,
                 })
                 .unwrap(),
-                "http",
             )],
             ann: None,
         },
@@ -124,7 +124,7 @@ fn workflow_effects_share_outbox_without_interference() {
         event: fixtures::schema(START_SCHEMA),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        effects_emitted: vec![aos_effects::effect_ops::HTTP_REQUEST.into()],
     });
 
     let mut loaded = build_loaded_manifest_with_http_enforcer(
@@ -152,9 +152,9 @@ fn workflow_effects_share_outbox_without_interference() {
 
     let effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 2);
-    let kinds: Vec<_> = effects.iter().map(|e| e.kind.as_str()).collect();
-    assert!(kinds.contains(&aos_effects::EffectKind::TIMER_SET));
-    assert!(kinds.contains(&aos_effects::EffectKind::HTTP_REQUEST));
+    let kinds: Vec<_> = effects.iter().map(|e| e.effect_op.as_str()).collect();
+    assert!(kinds.contains(&aos_effects::effect_ops::TIMER_SET));
+    assert!(kinds.contains(&aos_effects::effect_ops::HTTP_REQUEST));
 
     assert_eq!(
         world.kernel.workflow_state("com.acme/TimerEmitter@1"),
@@ -186,7 +186,6 @@ fn workflow_timer_receipt_routes_event_to_handler() {
 
     let receipt = EffectReceipt {
         intent_hash: effect.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 10,
@@ -206,7 +205,6 @@ fn workflow_timer_receipt_routes_event_to_handler() {
 
     let duplicate = EffectReceipt {
         intent_hash: effect.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 10,
@@ -222,7 +220,6 @@ fn workflow_timer_receipt_routes_event_to_handler() {
 
     let unknown = EffectReceipt {
         intent_hash: [9u8; 32],
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 42,
@@ -246,7 +243,7 @@ fn blob_put_receipt_routes_event_to_handler() {
         &WorkflowOutput {
             state: None,
             domain_events: vec![],
-            effects: vec![WorkflowEffect::with_cap_slot(
+            effects: vec![WorkflowEffect::new(
                 "sys/blob.put@1",
                 serde_cbor::to_vec(&BlobPutParams {
                     bytes: Vec::new(),
@@ -254,7 +251,6 @@ fn blob_put_receipt_routes_event_to_handler() {
                     refs: None,
                 })
                 .unwrap(),
-                "blob",
             )],
             ann: None,
         },
@@ -277,7 +273,7 @@ fn blob_put_receipt_routes_event_to_handler() {
         event: fixtures::schema(event_schema),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::BLOB_PUT.into()],
+        effects_emitted: vec![aos_effects::effect_ops::BLOB_PUT.into()],
     });
     handler.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
@@ -334,11 +330,10 @@ fn blob_put_receipt_routes_event_to_handler() {
     let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let intent = effects.remove(0);
-    assert_eq!(intent.kind.as_str(), aos_effects::EffectKind::BLOB_PUT);
+    assert_eq!(intent.effect_op.as_str(), aos_effects::effect_ops::BLOB_PUT);
 
     let receipt = EffectReceipt {
         intent_hash: intent.intent_hash,
-        adapter_id: "adapter.blob".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&BlobPutReceipt {
             blob_ref: fake_hash(0x21),
@@ -368,13 +363,12 @@ fn blob_get_receipt_routes_event_to_handler() {
         &WorkflowOutput {
             state: None,
             domain_events: vec![],
-            effects: vec![WorkflowEffect::with_cap_slot(
+            effects: vec![WorkflowEffect::new(
                 "sys/blob.get@1",
                 serde_cbor::to_vec(&BlobGetParams {
                     blob_ref: fake_hash(0x10),
                 })
                 .unwrap(),
-                "blob",
             )],
             ann: None,
         },
@@ -397,7 +391,7 @@ fn blob_get_receipt_routes_event_to_handler() {
         event: fixtures::schema(event_schema),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::BLOB_GET.into()],
+        effects_emitted: vec![aos_effects::effect_ops::BLOB_GET.into()],
     });
     handler.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
@@ -454,11 +448,10 @@ fn blob_get_receipt_routes_event_to_handler() {
     let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let intent = effects.remove(0);
-    assert_eq!(intent.kind.as_str(), aos_effects::EffectKind::BLOB_GET);
+    assert_eq!(intent.effect_op.as_str(), aos_effects::effect_ops::BLOB_GET);
 
     let receipt = EffectReceipt {
         intent_hash: intent.intent_hash,
-        adapter_id: "adapter.blob".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&BlobGetReceipt {
             blob_ref: fake_hash(0x22),
@@ -485,7 +478,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
     let start_output = WorkflowOutput {
         state: Some(vec![0x10]),
         domain_events: vec![],
-        effects: vec![WorkflowEffect::with_cap_slot(
+        effects: vec![WorkflowEffect::new(
             "sys/http.request@1",
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
@@ -494,14 +487,13 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
                 body_ref: None,
             })
             .unwrap(),
-            "http",
         )],
         ann: None,
     };
     let receipt_output = WorkflowOutput {
         state: Some(vec![0x11]),
         domain_events: vec![],
-        effects: vec![WorkflowEffect::with_cap_slot(
+        effects: vec![WorkflowEffect::new(
             "sys/http.request@1",
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
@@ -510,7 +502,6 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
                 body_ref: None,
             })
             .unwrap(),
-            "http",
         )],
         ann: None,
     };
@@ -525,7 +516,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
         event: fixtures::schema("com.acme/StagedWorkflowEvent@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        effects_emitted: vec![aos_effects::effect_ops::HTTP_REQUEST.into()],
     });
 
     let mut pulse = fixtures::stub_workflow_module(
@@ -534,7 +525,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
         &WorkflowOutput {
             state: Some(vec![0x12]),
             domain_events: vec![],
-            effects: vec![WorkflowEffect::with_cap_slot(
+            effects: vec![WorkflowEffect::new(
                 "sys/http.request@1",
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
@@ -543,7 +534,6 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
                     body_ref: None,
                 })
                 .unwrap(),
-                "http",
             )],
             ann: None,
         },
@@ -553,7 +543,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
         event: fixtures::schema("com.acme/PulseNext@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        effects_emitted: vec![aos_effects::effect_ops::HTTP_REQUEST.into()],
     });
 
     let mut loaded = build_loaded_manifest_with_http_enforcer(
@@ -630,7 +620,6 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
 
     let receipt = EffectReceipt {
         intent_hash: first.intent_hash,
-        adapter_id: "adapter.http".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&HttpRequestReceipt {
             status: 200,
@@ -640,7 +629,6 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
                 start_ns: 1,
                 end_ns: 2,
             },
-            adapter_id: "adapter.http".into(),
         })
         .unwrap(),
         cost_cents: None,
@@ -679,7 +667,7 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
         &WorkflowOutput {
             state: Some(vec![0x21]),
             domain_events: vec![],
-            effects: vec![WorkflowEffect::with_cap_slot(
+            effects: vec![WorkflowEffect::new(
                 "sys/http.request@1",
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
@@ -688,7 +676,6 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
                     body_ref: None,
                 })
                 .unwrap(),
-                "http",
             )],
             ann: None,
         },
@@ -698,7 +685,7 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
         event: fixtures::schema("com.acme/Ready@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        effects_emitted: vec![aos_effects::effect_ops::HTTP_REQUEST.into()],
     });
 
     let mut other = fixtures::stub_workflow_module(
@@ -707,7 +694,7 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
         &WorkflowOutput {
             state: Some(vec![0x22]),
             domain_events: vec![],
-            effects: vec![WorkflowEffect::with_cap_slot(
+            effects: vec![WorkflowEffect::new(
                 "sys/http.request@1",
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
@@ -716,7 +703,6 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
                     body_ref: None,
                 })
                 .unwrap(),
-                "http",
             )],
             ann: None,
         },
@@ -726,7 +712,7 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
         event: fixtures::schema("com.acme/Other@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        effects_emitted: vec![aos_effects::effect_ops::HTTP_REQUEST.into()],
     });
 
     let mut loaded = build_loaded_manifest_with_http_enforcer(
@@ -797,7 +783,7 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
     let start_output = WorkflowOutput {
         state: Some(vec![0x31]),
         domain_events: vec![],
-        effects: vec![WorkflowEffect::with_cap_slot(
+        effects: vec![WorkflowEffect::new(
             "sys/http.request@1",
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
@@ -806,7 +792,6 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
                 body_ref: None,
             })
             .unwrap(),
-            "http",
         )],
         ann: None,
     };
@@ -828,7 +813,7 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
         event: fixtures::schema("com.acme/KeyedWorkflowEvent@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        effects_emitted: vec![aos_effects::effect_ops::HTTP_REQUEST.into()],
     });
 
     let mut keyed_route =
@@ -908,7 +893,6 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
 
     let receipt = EffectReceipt {
         intent_hash: b_hash,
-        adapter_id: "adapter.http".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&HttpRequestReceipt {
             status: 200,
@@ -918,7 +902,6 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
                 start_ns: 10,
                 end_ns: 12,
             },
-            adapter_id: "adapter.http".into(),
         })
         .unwrap(),
         cost_cents: None,
@@ -977,7 +960,7 @@ fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
     let start_output = WorkflowOutput {
         state: Some(vec![0x01]),
         domain_events: vec![],
-        effects: vec![WorkflowEffect::with_cap_slot(
+        effects: vec![WorkflowEffect::new(
             "sys/http.request@1",
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
@@ -986,7 +969,6 @@ fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
                 body_ref: None,
             })
             .unwrap(),
-            "http",
         )],
         ann: None,
     };
@@ -1007,7 +989,7 @@ fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
         event: fixtures::schema("com.acme/WorkflowEvent@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        effects_emitted: vec![aos_effects::effect_ops::HTTP_REQUEST.into()],
     });
 
     let mut result_module = fixtures::stub_workflow_module(
@@ -1108,7 +1090,7 @@ fn timer_receipt_workflow_manifest(store: &Arc<TestStore>) -> aos_kernel::manife
         event: fixtures::schema("com.acme/TimerWorkflowEvent@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        effects_emitted: vec![aos_effects::effect_ops::TIMER_SET.into()],
     });
     let mut loaded = fixtures::build_loaded_manifest(
         vec![workflow],

@@ -54,36 +54,12 @@ impl EffectCatalog {
         self.by_op.get(op)
     }
 
-    pub fn get_by_impl_entrypoint(&self, entrypoint: &str) -> Option<&EffectCatalogEntry> {
-        self.by_op
-            .values()
-            .find(|entry| entry.impl_entrypoint == entrypoint)
-    }
-
     pub fn params_schema(&self, op: &str) -> Option<&SchemaRef> {
         self.get(op).map(|e| &e.params_schema)
     }
 
-    pub fn params_schema_for_runtime(&self, runtime_kind: &str) -> Option<&SchemaRef> {
-        self.params_schema(runtime_kind)
-            .or_else(|| self.params_schema(&format!("sys/{runtime_kind}@1")))
-            .or_else(|| {
-                self.get_by_impl_entrypoint(runtime_kind)
-                    .map(|entry| &entry.params_schema)
-            })
-    }
-
     pub fn receipt_schema(&self, op: &str) -> Option<&SchemaRef> {
         self.get(op).map(|e| &e.receipt_schema)
-    }
-
-    pub fn receipt_schema_for_runtime(&self, runtime_kind: &str) -> Option<&SchemaRef> {
-        self.receipt_schema(runtime_kind)
-            .or_else(|| self.receipt_schema(&format!("sys/{runtime_kind}@1")))
-            .or_else(|| {
-                self.get_by_impl_entrypoint(runtime_kind)
-                    .map(|entry| &entry.receipt_schema)
-            })
     }
 
     pub fn ops(&self) -> impl Iterator<Item = &str> {

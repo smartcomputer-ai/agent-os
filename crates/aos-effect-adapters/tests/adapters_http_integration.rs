@@ -6,13 +6,13 @@ use aos_effect_adapters::adapters::http::HttpAdapter;
 use aos_effect_adapters::config::HttpAdapterConfig;
 use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::builtins::HttpRequestParams;
-use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
+use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::MemStore;
 use serde_cbor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-fn build_intent(kind: EffectKind, params_cbor: Vec<u8>) -> EffectIntent {
+fn build_intent(kind: impl Into<String>, params_cbor: Vec<u8>) -> EffectIntent {
     EffectIntent::from_raw_params(kind, params_cbor, [0u8; 32]).unwrap()
 }
 
@@ -61,13 +61,12 @@ async fn http_invalid_header_errors() {
         body_ref: None,
     };
     let intent = build_intent(
-        EffectKind::http_request(),
+        effect_ops::HTTP_REQUEST,
         serde_cbor::to_vec(&params).unwrap(),
     );
 
     let receipt = adapter.execute(&intent).await.unwrap();
     assert_eq!(receipt.status, ReceiptStatus::Error);
-    assert_eq!(receipt.adapter_id, "host.http");
 }
 
 #[tokio::test]
@@ -90,7 +89,7 @@ async fn http_body_too_large_errors() {
         body_ref: None,
     };
     let intent = build_intent(
-        EffectKind::http_request(),
+        effect_ops::HTTP_REQUEST,
         serde_cbor::to_vec(&params).unwrap(),
     );
 
@@ -118,7 +117,7 @@ async fn http_timeout_returns_timeout_status() {
         body_ref: None,
     };
     let intent = build_intent(
-        EffectKind::http_request(),
+        effect_ops::HTTP_REQUEST,
         serde_cbor::to_vec(&params).unwrap(),
     );
 

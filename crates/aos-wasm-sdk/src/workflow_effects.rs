@@ -65,7 +65,7 @@ pub struct EffectReceiptEnvelope {
     )]
     pub origin_instance_key: Option<Vec<u8>>,
     pub intent_id: String,
-    #[serde(default, alias = "effect_kind")]
+    #[serde(default)]
     pub effect_op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_op_hash: Option<String>,
@@ -83,7 +83,6 @@ pub struct EffectReceiptEnvelope {
     pub receipt_payload: Vec<u8>,
     pub status: String,
     pub emitted_at_seq: u64,
-    pub adapter_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_cents: Option<u64>,
     #[serde(with = "serde_bytes_vec")]
@@ -111,7 +110,7 @@ pub struct EffectReceiptRejected {
     )]
     pub origin_instance_key: Option<Vec<u8>>,
     pub intent_id: String,
-    #[serde(default, alias = "effect_kind")]
+    #[serde(default)]
     pub effect_op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_op_hash: Option<String>,
@@ -124,7 +123,6 @@ pub struct EffectReceiptRejected {
     pub params_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issuer_ref: Option<String>,
-    pub adapter_id: String,
     pub status: String,
     pub error_code: String,
     pub error_message: String,
@@ -146,7 +144,7 @@ pub struct EffectStreamFrameEnvelope {
     )]
     pub origin_instance_key: Option<Vec<u8>>,
     pub intent_id: String,
-    #[serde(default, alias = "effect_kind")]
+    #[serde(default)]
     pub effect_op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_op_hash: Option<String>,
@@ -165,7 +163,6 @@ pub struct EffectStreamFrameEnvelope {
     #[serde(with = "serde_bytes_vec")]
     pub payload: Vec<u8>,
     pub payload_ref: Option<String>,
-    pub adapter_id: String,
     #[serde(with = "serde_bytes_vec")]
     pub signature: Vec<u8>,
 }
@@ -223,14 +220,6 @@ impl<'a> EffectContinuationRef<'a> {
             Self::Receipt(value) => value.emitted_at_seq,
             Self::Rejected(value) => value.emitted_at_seq,
             Self::Stream(value) => value.emitted_at_seq,
-        }
-    }
-
-    pub fn adapter_id(self) -> &'a str {
-        match self {
-            Self::Receipt(value) => value.adapter_id.as_str(),
-            Self::Rejected(value) => value.adapter_id.as_str(),
-            Self::Stream(value) => value.adapter_id.as_str(),
         }
     }
 
@@ -300,7 +289,6 @@ pub struct PendingEffect {
     pub params_hash: String,
     pub intent_id: Option<String>,
     pub issuer_ref: Option<String>,
-    pub cap_slot: Option<String>,
     pub emitted_at_ns: u64,
     pub last_stream_seq: u64,
 }
@@ -309,7 +297,6 @@ impl PendingEffect {
     pub fn new(
         effect_op: impl Into<String>,
         params_hash: impl Into<String>,
-        cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Self {
         Self {
@@ -317,7 +304,6 @@ impl PendingEffect {
             params_hash: params_hash.into(),
             intent_id: None,
             issuer_ref: None,
-            cap_slot,
             emitted_at_ns,
             last_stream_seq: 0,
         }
@@ -336,16 +322,14 @@ impl PendingEffect {
     pub fn from_params<T: Serialize>(
         effect_op: impl Into<String>,
         params: &T,
-        cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Result<Self, serde_cbor::Error> {
-        Self::from_params_with_issuer_ref(effect_op, params, cap_slot, emitted_at_ns, None)
+        Self::from_params_with_issuer_ref(effect_op, params, emitted_at_ns, None)
     }
 
     pub fn from_params_with_issuer_ref<T: Serialize>(
         effect_op: impl Into<String>,
         params: &T,
-        cap_slot: Option<String>,
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<Self, serde_cbor::Error> {
@@ -353,7 +337,6 @@ impl PendingEffect {
         Ok(Self::new(
             effect_op.as_str(),
             pending_effect_params_hash(effect_op.as_str(), params)?,
-            cap_slot,
             emitted_at_ns,
         )
         .with_issuer_ref_opt(issuer_ref))
@@ -450,24 +433,21 @@ impl PendingEffects {
         &mut self,
         effect_op: impl Into<String>,
         params: &T,
-        cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Result<PendingEffect, serde_cbor::Error> {
-        self.begin_with_issuer_ref(effect_op, params, cap_slot, emitted_at_ns, None)
+        self.begin_with_issuer_ref(effect_op, params, emitted_at_ns, None)
     }
 
     pub fn begin_with_issuer_ref<T: Serialize>(
         &mut self,
         effect_op: impl Into<String>,
         params: &T,
-        cap_slot: Option<String>,
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<PendingEffect, serde_cbor::Error> {
         let pending = PendingEffect::from_params_with_issuer_ref(
             effect_op,
             params,
-            cap_slot,
             emitted_at_ns,
             issuer_ref,
         )?;
@@ -631,10 +611,9 @@ where
         key: K,
         effect_op: impl Into<String>,
         params: &T,
-        cap_slot: Option<String>,
         emitted_at_ns: u64,
     ) -> Result<PendingEffect, serde_cbor::Error> {
-        self.begin_with_issuer_ref(key, effect_op, params, cap_slot, emitted_at_ns, None)
+        self.begin_with_issuer_ref(key, effect_op, params, emitted_at_ns, None)
     }
 
     pub fn begin_with_issuer_ref<T: Serialize>(
@@ -642,14 +621,12 @@ where
         key: K,
         effect_op: impl Into<String>,
         params: &T,
-        cap_slot: Option<String>,
         emitted_at_ns: u64,
         issuer_ref: Option<String>,
     ) -> Result<PendingEffect, serde_cbor::Error> {
         let pending = PendingEffect::from_params_with_issuer_ref(
             effect_op,
             params,
-            cap_slot,
             emitted_at_ns,
             issuer_ref,
         )?;
@@ -1022,23 +999,22 @@ macro_rules! define_sys_effect_helpers {
     ($(($emit:ident, $emit_tracked:ident, $kind:expr, $params:ty)),+ $(,)?) => {
         impl<'a, 'ctx, S, A> SysEffects<'a, 'ctx, S, A> {
             $(
-                pub fn $emit(&mut self, params: &$params, cap_slot: &str)
+                pub fn $emit(&mut self, params: &$params)
                 where
                     $params: Serialize,
                 {
-                    self.effects.emit_raw($kind, params, Some(cap_slot));
+                    self.effects.emit_raw($kind, params);
                 }
 
                 pub fn $emit_tracked(
                     &mut self,
                     pending: &mut PendingEffects,
                     params: &$params,
-                    cap_slot: &str,
                 ) -> PendingEffect
                 where
                     $params: Serialize,
                 {
-                    self.effects.emit_tracked(pending, $kind, params, Some(cap_slot))
+                    self.effects.emit_tracked(pending, $kind, params)
                 }
             )+
         }
@@ -1342,7 +1318,7 @@ mod tests {
     fn pending_effects_bind_stream_then_settle_receipt() {
         let mut pending = PendingEffects::new();
         let handle = pending
-            .begin("sys/llm.generate@1", &vec!["m1"], Some("llm".into()), 11)
+            .begin("sys/llm.generate@1", &vec!["m1"], 11)
             .unwrap();
 
         let stream = EffectStreamFrameEnvelope {
@@ -1386,12 +1362,7 @@ mod tests {
     #[test]
     fn settle_matches_by_intent_id_when_params_hash_missing() {
         let mut pending = PendingEffects::new();
-        let mut handle = PendingEffect::new(
-            "sys/host.session.open@1",
-            fake_hash('p'),
-            Some("host".into()),
-            9,
-        );
+        let mut handle = PendingEffect::new("sys/host.session.open@1", fake_hash('p'), 9);
         handle.intent_id = Some(fake_hash('i'));
         pending.insert(handle.clone());
 
@@ -1417,8 +1388,7 @@ mod tests {
     fn settle_falls_back_to_params_hash_when_continuation_has_no_issuer_ref() {
         let mut pending = PendingEffects::new();
         let handle =
-            PendingEffect::new("sys/llm.generate@1", fake_hash('p'), Some("llm".into()), 9)
-                .with_issuer_ref("run-1");
+            PendingEffect::new("sys/llm.generate@1", fake_hash('p'), 9).with_issuer_ref("run-1");
         pending.insert(handle.clone());
 
         let receipt = EffectReceiptEnvelope {
@@ -1445,7 +1415,7 @@ mod tests {
             refs: None,
         };
         let handle = pending
-            .begin("sys/blob.put@1", &params, Some("blob".into()), 7)
+            .begin("sys/blob.put@1", &params, 7)
             .expect("begin blob.put");
 
         let receipt = EffectReceiptEnvelope {
@@ -1473,9 +1443,8 @@ mod tests {
             headers: HeaderMap::new(),
             body_ref: None,
         };
-        let pending =
-            PendingEffect::from_params("sys/http.request@1", &params, Some("default".into()), 7)
-                .expect("build pending http.request");
+        let pending = PendingEffect::from_params("sys/http.request@1", &params, 7)
+            .expect("build pending http.request");
         assert_eq!(
             pending.params_hash,
             kernel_normalized_params_hash("sys/http.request@1", &params)
@@ -1489,7 +1458,7 @@ mod tests {
             blob_ref: None,
             refs: None,
         };
-        let pending = PendingEffect::from_params("sys/blob.put@1", &params, Some("blob".into()), 7)
+        let pending = PendingEffect::from_params("sys/blob.put@1", &params, 7)
             .expect("build pending blob.put");
         assert_eq!(
             pending.params_hash,
@@ -1505,13 +1474,8 @@ mod tests {
             bytes: b"hello".to_vec(),
             mode: None,
         };
-        let pending = PendingEffect::from_params(
-            "sys/workspace.write_bytes@1",
-            &params,
-            Some("default".into()),
-            7,
-        )
-        .expect("build pending workspace.write_bytes");
+        let pending = PendingEffect::from_params("sys/workspace.write_bytes@1", &params, 7)
+            .expect("build pending workspace.write_bytes");
         assert_eq!(
             pending.params_hash,
             kernel_normalized_params_hash("sys/workspace.write_bytes@1", &params)

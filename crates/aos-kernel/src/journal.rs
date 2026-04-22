@@ -148,7 +148,6 @@ pub struct EffectIntentRecord {
     pub executor_module_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_entrypoint: Option<String>,
-    pub kind: String,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -189,7 +188,6 @@ pub enum IntentOriginRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectReceiptRecord {
     pub intent_hash: [u8; 32],
-    pub adapter_id: String,
     pub status: ReceiptStatus,
     #[serde(with = "serde_bytes")]
     pub payload_cbor: Vec<u8>,
@@ -218,7 +216,6 @@ pub struct EffectReceiptRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StreamFrameRecord {
     pub intent_hash: [u8; 32],
-    pub adapter_id: String,
     pub origin_module_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_workflow_op_hash: Option<String>,
@@ -228,7 +225,7 @@ pub struct StreamFrameRecord {
         with = "serde_bytes_opt"
     )]
     pub origin_instance_key: Option<Vec<u8>>,
-    #[serde(default, alias = "effect_kind")]
+    #[serde(default)]
     pub effect_op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_op_hash: Option<String>,

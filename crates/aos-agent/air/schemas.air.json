@@ -74,7 +74,6 @@
         "Effect": {
           "record": {
             "effect_op": { "text": {} },
-            "cap_slot": { "option": { "text": {} } }
           }
         },
         "DomainEvent": {

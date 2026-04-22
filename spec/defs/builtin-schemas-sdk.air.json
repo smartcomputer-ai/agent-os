@@ -38,7 +38,6 @@
         "params_hash": { "hash": {} },
         "intent_id": { "option": { "hash": {} } },
         "issuer_ref": { "option": { "text": {} } },
-        "cap_slot": { "option": { "text": {} } },
         "emitted_at_ns": { "time": {} },
         "last_stream_seq": { "nat": {} }
       }
@@ -63,7 +62,6 @@
         "receipt_payload": { "bytes": {} },
         "status": { "text": {} },
         "emitted_at_seq": { "nat": {} },
-        "adapter_id": { "text": {} },
         "cost_cents": { "option": { "nat": {} } },
         "signature": { "bytes": {} }
       }
@@ -90,7 +88,6 @@
         "kind": { "text": {} },
         "payload": { "bytes": {} },
         "payload_ref": { "option": { "hash": {} } },
-        "adapter_id": { "text": {} },
         "signature": { "bytes": {} }
       }
     }
@@ -111,7 +108,6 @@
         "executor_entrypoint": { "option": { "text": {} } },
         "params_hash": { "option": { "hash": {} } },
         "issuer_ref": { "option": { "text": {} } },
-        "adapter_id": { "text": {} },
         "status": { "text": {} },
         "error_code": { "text": {} },
         "error_message": { "text": {} },

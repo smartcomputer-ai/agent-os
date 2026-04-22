@@ -12,7 +12,7 @@ use aos_air_types::{
     TypePrimitive, builtins, schema_index::SchemaIndex, value_normalize::normalize_cbor_by_name,
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, EffectStreamFrame};
+use aos_effects::{EffectIntent, EffectReceipt, EffectStreamFrame, effect_ops};
 use aos_wasm_abi::{
     ABI_VERSION, DomainEvent, PureInput, PureOutput, WorkflowInput, WorkflowOutput,
 };
@@ -1126,11 +1126,7 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn restore_effect_intent(&mut self, record: EffectIntentRecord) -> Result<(), KernelError> {
-        let effect_op = if record.effect_op.is_empty() {
-            record.kind.clone()
-        } else {
-            record.effect_op.clone()
-        };
+        let effect_op = record.effect_op.clone();
         let params_cbor = record.params_cbor.clone();
         match record.origin {
             IntentOriginRecord::Workflow {
@@ -1686,8 +1682,7 @@ impl<S: Store + 'static> Kernel<S> {
                     effect
                         .executor_entrypoint
                         .clone()
-                        .unwrap_or_else(|| effect.effect_op.clone())
-                        .into(),
+                        .unwrap_or_else(|| effect.effect_op.clone()),
                     effect.params_cbor,
                     effect.idempotency_key,
                 )
@@ -1885,9 +1880,7 @@ impl<S: Store + 'static> Kernel<S> {
         intent: &EffectIntent,
         origin: IntentOriginRecord,
     ) -> Result<(), KernelError> {
-        let stored_params = if intent.effect_op == "sys/blob.put@1"
-            || intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT
-        {
+        let stored_params = if intent.effect_op == effect_ops::BLOB_PUT {
             self.externalize_journal_cbor(&intent.params_cbor)?
         } else {
             JournalCborStorage::inline(intent.params_cbor.clone())
@@ -1899,7 +1892,6 @@ impl<S: Store + 'static> Kernel<S> {
             executor_module: intent.executor_module.clone(),
             executor_module_hash: intent.executor_module_hash.clone(),
             executor_entrypoint: intent.executor_entrypoint.clone(),
-            kind: intent.kind.as_str().to_string(),
             params_cbor: stored_params.inline,
             params_ref: stored_params.cbor_ref,
             params_size: stored_params.size,
@@ -1960,7 +1952,6 @@ impl<S: Store + 'static> Kernel<S> {
         };
         Ok(EffectReceiptRecord {
             intent_hash: receipt.intent_hash,
-            adapter_id: receipt.adapter_id.clone(),
             status: receipt.status.clone(),
             payload_cbor: stored_payload.inline,
             payload_ref: stored_payload.cbor_ref,
@@ -1986,7 +1977,6 @@ impl<S: Store + 'static> Kernel<S> {
         }
         let record = JournalRecord::StreamFrame(StreamFrameRecord {
             intent_hash: frame.intent_hash,
-            adapter_id: frame.adapter_id.clone(),
             origin_module_id: frame.origin_module_id.clone(),
             origin_workflow_op_hash: frame.origin_workflow_op_hash.clone(),
             origin_instance_key: frame.origin_instance_key.clone(),

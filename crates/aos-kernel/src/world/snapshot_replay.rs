@@ -392,7 +392,6 @@ impl<S: Store + 'static> Kernel<S> {
                 };
                 let receipt = EffectReceipt {
                     intent_hash: record.intent_hash,
-                    adapter_id: record.adapter_id,
                     status: record.status,
                     payload_cbor: record.payload_cbor,
                     cost_cents: record.cost_cents,
@@ -420,7 +419,6 @@ impl<S: Store + 'static> Kernel<S> {
                 };
                 let frame = aos_effects::EffectStreamFrame {
                     intent_hash: record.intent_hash,
-                    adapter_id: record.adapter_id,
                     origin_module_id: record.origin_module_id,
                     origin_workflow_op_hash: record.origin_workflow_op_hash,
                     origin_instance_key: record.origin_instance_key,
@@ -1433,7 +1431,6 @@ mod tests {
 
         let duplicate = EffectStreamFrame {
             intent_hash,
-            adapter_id: "adapter.stream".into(),
             origin_module_id: "com.acme/Workflow@1".into(),
             origin_workflow_op_hash: None,
             origin_instance_key: None,
@@ -1456,7 +1453,6 @@ mod tests {
 
         let next = EffectStreamFrame {
             intent_hash,
-            adapter_id: "adapter.stream".into(),
             origin_module_id: "com.acme/Workflow@1".into(),
             origin_workflow_op_hash: None,
             origin_instance_key: None,
@@ -1678,7 +1674,6 @@ mod tests {
             executor_module: None,
             executor_module_hash: None,
             executor_entrypoint: Some("http.request".into()),
-            kind: "http.request".into(),
             params_cbor: vec![1],
             params_ref: None,
             params_size: None,
@@ -1700,7 +1695,6 @@ mod tests {
 
         let receipt = EffectReceiptRecord {
             intent_hash: [1u8; 32],
-            adapter_id: "stub.http".into(),
             status: aos_effects::ReceiptStatus::Ok,
             payload_cbor: vec![],
             payload_ref: None,

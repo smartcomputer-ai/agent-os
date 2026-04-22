@@ -110,7 +110,6 @@ fn host_tool(
         mapper,
         executor: ToolExecutor::Effect {
             effect_op: tool_id.to_string(),
-            cap_slot: Some("host".into()),
         },
         availability_rules: if requires_host_session {
             vec![ToolAvailabilityRule::HostSessionReady]
@@ -129,7 +128,6 @@ fn effect_tool(
     description: &str,
     args_schema_json: &str,
     mapper: ToolMapper,
-    cap_slot: &str,
     hint: ToolParallelismHint,
 ) -> ToolSpec {
     assert!(
@@ -147,7 +145,6 @@ fn effect_tool(
         mapper,
         executor: ToolExecutor::Effect {
             effect_op: tool_id.to_string(),
-            cap_slot: Some(cap_slot.into()),
         },
         availability_rules: vec![ToolAvailabilityRule::Always],
         parallelism_hint: hint,
@@ -308,7 +305,6 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
             "Inspect world summary, modules, ops, routing, and manifest metadata.",
             r#"{"type":"object","additionalProperties":false,"properties":{}}"#,
             ToolMapper::InspectWorld,
-            "query",
             ToolParallelismHint {
                 parallel_safe: true,
                 resource_key: None,
@@ -320,7 +316,6 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
             "Inspect a workflow's current state or list its cells.",
             r#"{"type":"object","required":["workflow"],"properties":{"workflow":{"type":"string"},"view":{"type":"string","enum":["state","cells"]},"cell_key":{"type":"object","required":["encoding","value"],"properties":{"encoding":{"type":"string","enum":["utf8","hex"]},"value":{"type":"string"}},"additionalProperties":false}},"additionalProperties":false}"#,
             ToolMapper::InspectWorkflow,
-            "query",
             ToolParallelismHint {
                 parallel_safe: true,
                 resource_key: None,
@@ -332,7 +327,6 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
             "Resolve a workspace to its current or requested root, or inspect a specific root hash.",
             r#"{"type":"object","additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"}}}"#,
             ToolMapper::WorkspaceInspect,
-            "workspace",
             ToolParallelismHint {
                 parallel_safe: true,
                 resource_key: None,
@@ -344,7 +338,6 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
             "List workspaces or list entries in a workspace tree.",
             r#"{"type":"object","additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"},"path":{"type":"string"},"scope":{"type":"string","enum":["dir","subtree"]},"limit":{"type":"integer","minimum":0}}}"#,
             ToolMapper::WorkspaceList,
-            "workspace",
             ToolParallelismHint {
                 parallel_safe: true,
                 resource_key: None,
@@ -356,7 +349,6 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
             "Read workspace entry metadata and file content.",
             r#"{"type":"object","required":["path"],"additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"},"path":{"type":"string"},"range":{"type":"object","required":["start","end"],"properties":{"start":{"type":"integer","minimum":0},"end":{"type":"integer","minimum":0}},"additionalProperties":false}}}"#,
             ToolMapper::WorkspaceRead,
-            "workspace",
             ToolParallelismHint {
                 parallel_safe: true,
                 resource_key: None,
@@ -368,7 +360,6 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
             "Apply writes and removals to a workspace tree and return a new root hash.",
             r#"{"type":"object","required":["operations"],"additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"},"operations":{"type":"array","items":{"type":"object","required":["op","path"],"properties":{"op":{"type":"string","enum":["write","remove"]},"path":{"type":"string"},"text":{"type":"string"},"bytes_b64":{"type":"string"},"blob_hash":{"type":"string"},"mode":{"type":"integer","minimum":0}},"additionalProperties":false}}}}"#,
             ToolMapper::WorkspaceApply,
-            "workspace",
             ToolParallelismHint {
                 parallel_safe: false,
                 resource_key: Some("workspace.apply".into()),
@@ -380,7 +371,6 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
             "Diff two workspace roots or named workspace versions.",
             r#"{"type":"object","required":["left","right"],"additionalProperties":false,"properties":{"left":{"type":"object","additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"}}},"right":{"type":"object","additionalProperties":false,"properties":{"workspace":{"type":"string"},"version":{"type":"integer","minimum":0},"root_hash":{"type":"string"}}},"prefix":{"type":"string"}}}"#,
             ToolMapper::WorkspaceDiff,
-            "workspace",
             ToolParallelismHint {
                 parallel_safe: true,
                 resource_key: None,

@@ -295,9 +295,6 @@ Generic receipt and stream envelopes carry:
 - executor module, executor module hash, and executor entrypoint when resolved
 - params hash, issuer ref, payload bytes or payload ref, status/sequence data, cost, and signature
 
-Some concrete receipt payload schemas still include an `adapter_id` route label. It is operational
-metadata, not AIR identity.
-
 ## 8) Ordering And Concurrency
 
 Distinct open effects may progress and settle out of emission order. This is required for practical

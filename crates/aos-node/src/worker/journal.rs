@@ -404,7 +404,6 @@ impl HostedWorkerCore {
                 input: WorldInput::Receipt(build_timer_receipt(&entry).unwrap_or_else(|_| {
                     aos_effects::EffectReceipt {
                         intent_hash: intent.intent_hash,
-                        adapter_id: "timer.local".into(),
                         status: aos_effects::ReceiptStatus::Error,
                         payload_cbor: Vec::new(),
                         cost_cents: None,

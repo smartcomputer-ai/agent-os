@@ -314,10 +314,10 @@ impl<S: Store> EffectParamPreprocessor for GovernanceParamPreprocessor<S> {
     fn preprocess(
         &self,
         _source: &aos_effects::EffectSource,
-        kind: &aos_effects::EffectKind,
+        effect_op: &str,
         params_cbor: Vec<u8>,
     ) -> Result<Vec<u8>, KernelError> {
-        if kind.as_str() != "governance.propose" {
+        if effect_op != "sys/governance.propose@1" {
             return Ok(params_cbor);
         }
         let raw: GovProposeParamsRaw = serde_cbor::from_slice(&params_cbor)

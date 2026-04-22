@@ -48,7 +48,6 @@ fn workflow_timer_snapshot_resumes_on_receipt() {
 
     let receipt = EffectReceipt {
         intent_hash: effect.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 10,
@@ -96,7 +95,10 @@ fn workflow_snapshot_preserves_effect_queue() {
     .unwrap();
     let intents = replay_world.drain_effects().expect("drain effects");
     assert_eq!(intents.len(), 1);
-    assert_eq!(intents[0].kind.as_str(), aos_effects::EffectKind::TIMER_SET);
+    assert_eq!(
+        intents[0].effect_op.as_str(),
+        aos_effects::effect_ops::TIMER_SET
+    );
 }
 
 #[test]
@@ -119,8 +121,8 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
     assert_eq!(queued.len(), 1);
     let initial_intent = queued.remove(0);
     assert_eq!(
-        initial_intent.kind.as_str(),
-        aos_effects::EffectKind::TIMER_SET
+        initial_intent.effect_op.as_str(),
+        aos_effects::effect_ops::TIMER_SET
     );
 
     world.kernel.create_snapshot().unwrap();
@@ -136,13 +138,12 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
     let mut replay_queued = replay_world.drain_effects().expect("drain replay queue");
     assert_eq!(replay_queued.len(), 1);
     assert_eq!(
-        replay_queued.remove(0).kind.as_str(),
-        aos_effects::EffectKind::TIMER_SET
+        replay_queued.remove(0).effect_op.as_str(),
+        aos_effects::effect_ops::TIMER_SET
     );
 
     let receipt = EffectReceipt {
         intent_hash: initial_intent.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 15,
@@ -158,8 +159,8 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
     let mut resumed = replay_world.drain_effects().expect("drain resumed queue");
     assert_eq!(resumed.len(), 1);
     assert_eq!(
-        resumed.remove(0).kind.as_str(),
-        aos_effects::EffectKind::BLOB_PUT
+        resumed.remove(0).effect_op.as_str(),
+        aos_effects::effect_ops::BLOB_PUT
     );
 }
 
@@ -189,7 +190,10 @@ fn workflow_authorized_effect_snapshot_replay_has_no_cap_decisions() {
     .unwrap();
     let intents = replay_world.drain_effects().expect("drain effects");
     assert_eq!(intents.len(), 1);
-    assert_eq!(intents[0].kind.as_str(), aos_effects::EffectKind::TIMER_SET);
+    assert_eq!(
+        intents[0].effect_op.as_str(),
+        aos_effects::effect_ops::TIMER_SET
+    );
 }
 
 #[test]
@@ -280,11 +284,13 @@ fn workflow_manifest_records_restore_queued_intent_without_policy_reevaluation()
         "restored queued intent should bypass replay-time policy reevaluation"
     );
     let effect = intents.remove(0);
-    assert_eq!(effect.kind.as_str(), aos_effects::EffectKind::TIMER_SET);
+    assert_eq!(
+        effect.effect_op.as_str(),
+        aos_effects::effect_ops::TIMER_SET
+    );
 
     let receipt = EffectReceipt {
         intent_hash: effect.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 23,
@@ -300,8 +306,8 @@ fn workflow_manifest_records_restore_queued_intent_without_policy_reevaluation()
     let mut followups = replay_world.drain_effects().expect("drain followups");
     assert_eq!(followups.len(), 1);
     assert_eq!(
-        followups.remove(0).kind.as_str(),
-        aos_effects::EffectKind::BLOB_PUT
+        followups.remove(0).effect_op.as_str(),
+        aos_effects::effect_ops::BLOB_PUT
     );
 }
 
@@ -324,7 +330,7 @@ fn workflow_resume_manifest(
     let receipt_output = WorkflowOutput {
         state: Some(vec![0x52]),
         domain_events: vec![],
-        effects: vec![WorkflowEffect::with_cap_slot(
+        effects: vec![WorkflowEffect::new(
             "sys/blob.put@1",
             serde_cbor::to_vec(&BlobPutParams {
                 bytes: b"resumed".to_vec(),
@@ -332,7 +338,6 @@ fn workflow_resume_manifest(
                 refs: None,
             })
             .unwrap(),
-            "blob",
         )],
         ann: None,
     };
@@ -348,8 +353,8 @@ fn workflow_resume_manifest(
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![
-            aos_effects::EffectKind::TIMER_SET.into(),
-            aos_effects::EffectKind::BLOB_PUT.into(),
+            aos_effects::effect_ops::TIMER_SET.into(),
+            aos_effects::effect_ops::BLOB_PUT.into(),
         ],
     });
 

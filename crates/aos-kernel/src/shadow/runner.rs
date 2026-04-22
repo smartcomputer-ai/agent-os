@@ -87,11 +87,7 @@ impl ShadowExecutor {
             for opened in drain.opened_effects {
                 let intent = opened.intent;
                 predicted_effects.push(PredictedEffect {
-                    op: if intent.effect_op.is_empty() {
-                        intent.kind.as_str().to_string()
-                    } else {
-                        intent.effect_op.clone()
-                    },
+                    op: intent.effect_op.clone(),
                     intent_hash: hex::encode(intent.intent_hash),
                     params_json: params_to_json(&intent.params_cbor),
                 });
@@ -104,7 +100,6 @@ impl ShadowExecutor {
 
                 let receipt = EffectReceipt {
                     intent_hash: intent.intent_hash,
-                    adapter_id: "shadow.mock".into(),
                     status: ReceiptStatus::Ok,
                     payload_cbor: Vec::new(),
                     cost_cents: None,

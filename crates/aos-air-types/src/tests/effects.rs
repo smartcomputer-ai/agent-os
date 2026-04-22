@@ -86,7 +86,6 @@ fn http_request_receipt_literal_matches_builtin_schema() {
             "timings",
             record(vec![("start_ns", nat(1)), ("end_ns", nat(2))]),
         ),
-        ("adapter_id", text("http-adapter")),
     ]);
     validate_value_literal(&literal, &schema.schema.ty).expect("literal matches schema");
 }

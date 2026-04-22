@@ -118,7 +118,6 @@ struct WorkflowReceiptEnvelope {
     receipt_payload: Vec<u8>,
     status: ReceiptStatus,
     emitted_at_seq: u64,
-    adapter_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     cost_cents: Option<u64>,
     #[serde(with = "serde_bytes")]
@@ -157,7 +156,6 @@ struct WorkflowStreamFrameEnvelope {
     payload: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     payload_ref: Option<String>,
-    adapter_id: String,
     #[serde(with = "serde_bytes")]
     signature: Vec<u8>,
 }
@@ -187,7 +185,6 @@ struct WorkflowReceiptRejected {
     params_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     issuer_ref: Option<String>,
-    adapter_id: String,
     status: ReceiptStatus,
     error_code: String,
     error_message: String,
@@ -201,7 +198,6 @@ struct TimerReceiptEvent {
     intent_hash: String,
     workflow: String,
     effect_op: String,
-    adapter_id: String,
     status: ReceiptStatus,
     requested: TimerSetParams,
     receipt: TimerSetReceipt,
@@ -216,7 +212,6 @@ struct BlobReceiptEvent<TParams, TReceipt> {
     intent_hash: String,
     workflow: String,
     effect_op: String,
-    adapter_id: String,
     status: ReceiptStatus,
     requested: TParams,
     receipt: TReceipt,
@@ -245,7 +240,6 @@ pub fn build_workflow_receipt_event(
         receipt_payload: receipt.payload_cbor.clone(),
         status: receipt.status.clone(),
         emitted_at_seq: ctx.emitted_at_seq,
-        adapter_id: receipt.adapter_id.clone(),
         cost_cents: receipt.cost_cents,
         signature: receipt.signature.clone(),
     };
@@ -270,7 +264,6 @@ pub fn build_workflow_receipt_rejected_event(
         executor_entrypoint: ctx.executor_entrypoint.clone(),
         params_hash: Some(Hash::of_bytes(&ctx.params_cbor).to_hex()),
         issuer_ref: ctx.issuer_ref.clone(),
-        adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
         error_code: error_code.to_string(),
         error_message: error_message.to_string(),
@@ -302,24 +295,19 @@ pub fn build_workflow_stream_frame_event(
         kind: frame.kind.clone(),
         payload: frame.payload_cbor.clone(),
         payload_ref: frame.payload_ref.clone(),
-        adapter_id: frame.adapter_id.clone(),
         signature: frame.signature.clone(),
     };
     encode_event(SYS_EFFECT_STREAM_FRAME_SCHEMA, payload)
 }
 
-/// Optional compatibility path for typed timer/blob receipt envelopes.
 pub fn build_legacy_workflow_receipt_event(
     ctx: &WorkflowEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<Option<DomainEvent>, KernelError> {
     let event = match ctx.effect_op.as_str() {
-        "sys/timer.set@1" => Some(build_timer_event(ctx, receipt)?),
-        "sys/blob.put@1" => Some(build_blob_put_event(ctx, receipt)?),
-        "sys/blob.get@1" => Some(build_blob_get_event(ctx, receipt)?),
-        aos_effects::EffectKind::TIMER_SET => Some(build_timer_event(ctx, receipt)?),
-        aos_effects::EffectKind::BLOB_PUT => Some(build_blob_put_event(ctx, receipt)?),
-        aos_effects::EffectKind::BLOB_GET => Some(build_blob_get_event(ctx, receipt)?),
+        aos_effects::effect_ops::TIMER_SET => Some(build_timer_event(ctx, receipt)?),
+        aos_effects::effect_ops::BLOB_PUT => Some(build_blob_put_event(ctx, receipt)?),
+        aos_effects::effect_ops::BLOB_GET => Some(build_blob_get_event(ctx, receipt)?),
         _ => None,
     };
     Ok(event)
@@ -335,7 +323,6 @@ fn build_timer_event(
         intent_hash: hash_to_hex(&ctx.intent_id),
         workflow: ctx.origin_module_id.clone(),
         effect_op: ctx.effect_op.clone(),
-        adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
         requested,
         receipt: timer_receipt,
@@ -355,7 +342,6 @@ fn build_blob_put_event(
         intent_hash: hash_to_hex(&ctx.intent_id),
         workflow: ctx.origin_module_id.clone(),
         effect_op: ctx.effect_op.clone(),
-        adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
         requested,
         receipt: blob_receipt,
@@ -375,7 +361,6 @@ fn build_blob_get_event(
         intent_hash: hash_to_hex(&ctx.intent_id),
         workflow: ctx.origin_module_id.clone(),
         effect_op: ctx.effect_op.clone(),
-        adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
         requested,
         receipt: blob_receipt,
@@ -441,7 +426,6 @@ mod tests {
     fn base_receipt() -> EffectReceipt {
         EffectReceipt {
             intent_hash: [1u8; 32],
-            adapter_id: "adapter.test".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: vec![],
             cost_cents: Some(5),
@@ -449,11 +433,11 @@ mod tests {
         }
     }
 
-    fn base_context(effect_kind: &str) -> WorkflowEffectContext {
+    fn base_context(effect_op: &str) -> WorkflowEffectContext {
         WorkflowEffectContext::new(
             "com.acme/Workflow@1".into(),
             Some(b"order-123".to_vec()),
-            effect_kind.into(),
+            effect_op.into(),
             vec![],
             [3u8; 32],
             Some("op-1".into()),
@@ -484,7 +468,6 @@ mod tests {
             receipt_payload: Vec<u8>,
             status: ReceiptStatus,
             emitted_at_seq: u64,
-            adapter_id: String,
             cost_cents: Option<u64>,
             #[serde(with = "serde_bytes")]
             signature: Vec<u8>,
@@ -497,7 +480,6 @@ mod tests {
         assert_eq!(decoded.effect_op, "sys/http.request@1");
         assert_eq!(decoded.receipt_payload, vec![4, 5, 6]);
         assert_eq!(decoded.emitted_at_seq, 42);
-        assert_eq!(decoded.adapter_id, "adapter.test");
         assert_eq!(decoded.status, ReceiptStatus::Ok);
         assert_eq!(decoded.cost_cents, Some(5));
         assert_eq!(decoded.signature, vec![9, 9]);
@@ -535,7 +517,6 @@ mod tests {
             intent_id: String,
             effect_op: String,
             params_hash: Option<String>,
-            adapter_id: String,
             status: ReceiptStatus,
             error_code: String,
             error_message: String,
@@ -549,7 +530,6 @@ mod tests {
         assert_eq!(decoded.origin_instance_key, Some(b"order-123".to_vec()));
         assert_eq!(decoded.intent_id, hash_to_hex(&[7u8; 32]));
         assert_eq!(decoded.effect_op, "sys/http.request@1");
-        assert_eq!(decoded.adapter_id, "adapter.test");
         assert_eq!(decoded.status, ReceiptStatus::Ok);
         assert_eq!(decoded.error_code, "receipt.invalid_payload");
         assert_eq!(decoded.error_message, "schema mismatch");
@@ -565,7 +545,6 @@ mod tests {
         ctx.params_cbor = vec![1, 2, 3];
         let frame = EffectStreamFrame {
             intent_hash: [7u8; 32],
-            adapter_id: "adapter.test".into(),
             origin_module_id: "com.acme/Workflow@1".into(),
             origin_workflow_op_hash: None,
             origin_instance_key: Some(b"order-123".to_vec()),
@@ -598,7 +577,6 @@ mod tests {
             #[serde(with = "serde_bytes")]
             payload: Vec<u8>,
             payload_ref: Option<String>,
-            adapter_id: String,
             #[serde(with = "serde_bytes")]
             signature: Vec<u8>,
         }
@@ -613,7 +591,6 @@ mod tests {
         assert_eq!(decoded.kind, "progress.token");
         assert_eq!(decoded.payload, vec![8, 9]);
         assert_eq!(decoded.payload_ref, None);
-        assert_eq!(decoded.adapter_id, "adapter.test");
         assert_eq!(decoded.signature, vec![0xAA]);
         assert!(decoded.params_hash.is_some());
     }
@@ -624,7 +601,7 @@ mod tests {
             deliver_at_ns: 99,
             key: Some("order-123".into()),
         };
-        let mut ctx = base_context(aos_effects::EffectKind::TIMER_SET);
+        let mut ctx = base_context(aos_effects::effect_ops::TIMER_SET);
         ctx.params_cbor = serde_cbor::to_vec(&params).unwrap();
         let timer_receipt = TimerSetReceipt {
             delivered_at_ns: 123,
@@ -646,7 +623,7 @@ mod tests {
             blob_ref: Some(fake_hash(0x10)),
             refs: Some(vec![]),
         };
-        let mut ctx = base_context(aos_effects::EffectKind::BLOB_PUT);
+        let mut ctx = base_context(aos_effects::effect_ops::BLOB_PUT);
         ctx.params_cbor = serde_cbor::to_vec(&params).unwrap();
         let receipt_body = BlobPutReceipt {
             blob_ref: fake_hash(0x11),
@@ -666,7 +643,7 @@ mod tests {
         let params = BlobGetParams {
             blob_ref: fake_hash(0x10),
         };
-        let mut ctx = base_context(aos_effects::EffectKind::BLOB_GET);
+        let mut ctx = base_context(aos_effects::effect_ops::BLOB_GET);
         ctx.params_cbor = serde_cbor::to_vec(&params).unwrap();
         let receipt_body = BlobGetReceipt {
             blob_ref: fake_hash(0x12),

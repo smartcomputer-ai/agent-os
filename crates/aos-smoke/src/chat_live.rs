@@ -430,9 +430,6 @@ fn print_live_diagnostics(host: &mut ExampleHost) -> Result<()> {
         let JournalRecord::EffectReceipt(receipt) = record else {
             continue;
         };
-        if !receipt.adapter_id.starts_with("host.llm.") {
-            continue;
-        }
         if receipt.status == ReceiptStatus::Ok {
             continue;
         }
@@ -446,9 +443,8 @@ fn print_live_diagnostics(host: &mut ExampleHost) -> Result<()> {
             "<unable to decode llm receipt payload>".to_string()
         };
         println!(
-            "   diagnostics: llm receipt status={:?} adapter={} error={}",
+            "   diagnostics: llm receipt status={:?} error={}",
             receipt.status,
-            receipt.adapter_id,
             preview(&message)
         );
         break;
