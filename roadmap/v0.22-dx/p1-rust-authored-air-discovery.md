@@ -102,6 +102,7 @@ The first extraction contract is:
 ```text
 Rust source + proc macros
   -> generated Rust metadata constants/registrations
+  -> package-local `aos_air_exports!` collection
   -> host-side `aos air generate` or authoring helper
   -> materialized AIR JSON under air/generated/
   -> normal AIR loader path
@@ -169,6 +170,42 @@ pub struct TaskSubmitted {
 }
 ```
 
+Initial package-local export surface:
+
+```rust
+aos_wasm_sdk::aos_air_exports! {
+    pub const AOS_AIR_NODES_JSON = {
+        schemas: [
+            TaskSubmitted,
+            OtherSchema,
+        ],
+        workflows: [
+            CounterWorkflow,
+        ],
+    };
+}
+```
+
+Initial host-side materialization surface:
+
+```rust
+aos_authoring::write_generated_air_nodes(world_root, AOS_AIR_NODES_JSON)?;
+```
+
+Package-local export binaries can use the same constants without linking `aos-authoring`:
+
+```rust
+fn main() {
+    print!("{}", aos_wasm_sdk::air_exports_json(AOS_AIR_NODES_JSON));
+}
+```
+
+Host-side tooling can then pass the captured stdout to:
+
+```rust
+aos_authoring::write_generated_air_export_json(world_root, &stdout)?;
+```
+
 Supported first subset:
 
 1. structs with named fields -> `record`,
@@ -180,7 +217,7 @@ Supported first subset:
 7. `Vec<T>` -> `list<T>`,
 8. `Option<T>` -> `option<T>`,
 9. `BTreeMap<String, T>` -> `map<text, T>`,
-10. explicit `#[aos(ref = "...")]` for external or reused schemas.
+10. explicit `#[aos(schema_ref = "...")]` for external or reused schemas.
 
 Required checks:
 
@@ -201,10 +238,10 @@ Illustrative shape:
     name = "demo/Counter@1",
     module = "demo/Counter_wasm@1",
     entrypoint = "step",
-    state = CounterState,
-    event = CounterEvent,
+    state = "demo/CounterState@1",
+    event = "demo/CounterEvent@1",
     context = "sys/WorkflowContext@1",
-    key = "demo/CounterId@1",
+    key_schema = "demo/CounterId@1",
     effects = ["sys/timer.set@1"],
     routes = [
         { event = "demo/CounterEvent@1", key_field = "counter_id" }
@@ -223,6 +260,10 @@ Generated definitions:
 
 The existing `aos_workflow!(Ty)` macro can remain as a low-level ABI-only escape hatch. The new
 surface should be the Rust-authored AIR path.
+
+The first implementation slice can leave route/manifest generation out of the macro and emit only
+`defmodule` plus `defworkflow` JSON metadata. That proves the workflow export contract while keeping
+manifest patching and generated file materialization in `aos-authoring`.
 
 ## Phase 1C: Generated AIR Materialization And Loader Integration
 

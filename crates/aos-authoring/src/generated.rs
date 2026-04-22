@@ -68,6 +68,21 @@ pub fn write_generated_air_nodes(
     Ok(written)
 }
 
+/// Materialize generated AIR from the SDK export payload.
+///
+/// `aos_wasm_sdk::air_exports_json(AOS_AIR_NODES_JSON)` produces this JSON string array format.
+/// Keeping the protocol as plain JSON lets export binaries stay tiny and keeps all filesystem
+/// writes in host-side authoring code.
+pub fn write_generated_air_export_json(
+    world_root: &Path,
+    export_json: &str,
+) -> Result<Vec<PathBuf>> {
+    let fragments: Vec<String> =
+        serde_json::from_str(export_json).context("parse generated AIR export JSON")?;
+    let refs: Vec<&str> = fragments.iter().map(String::as_str).collect();
+    write_generated_air_nodes(world_root, &refs)
+}
+
 #[derive(Default)]
 struct GeneratedAirBuckets {
     schemas: Vec<AirNode>,
@@ -146,5 +161,38 @@ mod tests {
         let contents = fs::read_to_string(&written[0]).expect("read generated AIR");
         assert!(contents.contains(r#""$kind": "defschema""#));
         assert!(contents.contains(r#""name": "demo/Generated@1""#));
+    }
+
+    #[test]
+    fn write_generated_air_export_json_materializes_collected_fragments() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let fragments = vec![
+            r#"{"$kind":"defschema","name":"demo/State@1","type":{"record":{}}}"#,
+            r#"{"$kind":"defmodule","name":"demo/Workflow_wasm@1","runtime":{"kind":"wasm","artifact":{"kind":"wasm_module"}}}"#,
+            r#"{"$kind":"defworkflow","name":"demo/Workflow@1","state":"demo/State@1","event":"demo/Event@1","effects_emitted":[],"impl":{"module":"demo/Workflow_wasm@1","entrypoint":"step"}}"#,
+        ];
+        let export_json = serde_json::to_string(&fragments).expect("encode export payload");
+
+        let written = write_generated_air_export_json(temp.path(), &export_json)
+            .expect("write generated AIR");
+
+        assert_eq!(
+            written,
+            vec![
+                temp.path().join("air/generated/schemas.air.json"),
+                temp.path().join("air/generated/module.air.json"),
+                temp.path().join("air/generated/workflows.air.json"),
+            ]
+        );
+        assert!(
+            fs::read_to_string(temp.path().join("air/generated/module.air.json"))
+                .expect("read module")
+                .contains(r#""name": "demo/Workflow_wasm@1""#)
+        );
+        assert!(
+            fs::read_to_string(temp.path().join("air/generated/workflows.air.json"))
+                .expect("read workflow")
+                .contains(r#""effects_emitted": []"#)
+        );
     }
 }
