@@ -15,6 +15,9 @@ Python bindings for two test lanes:
 - runs one kernel in-process
 - exposes `pull_effects()` and `apply_receipt_object()` for scripted effect tests
 - supports logical timer control helpers such as `time_set()` / `time_jump_next_due()`
+- exposes effect intent identity by canonical `effect` name plus optional resolved definition and
+  executor identity fields (`effect_hash`, `executor_module`, `executor_module_hash`,
+  `executor_entrypoint`)
 
 `WorldHarness` is the realistic world lane:
 
@@ -33,6 +36,8 @@ That split is intentional:
 - `aos-harness-py` no longer depends directly on `aos-runtime`
 - `effect_mode="scripted"` is the only supported mode today
 - `WorldHarness` has one backend: the unified in-process node runtime with a SQLite journal
+- effect receipt helpers expect AIR v2 effect names such as `sys/timer.set@1`, not removed v1
+  effect-kind strings like `timer.set`
 
 ## Example
 

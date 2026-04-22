@@ -598,6 +598,30 @@ fn effect_intent_to_py_json(intent: &EffectIntent) -> PyResult<JsonValue> {
         "effect".to_string(),
         JsonValue::String(intent.effect.clone()),
     );
+    if let Some(effect_hash) = &intent.effect_hash {
+        object.insert(
+            "effect_hash".to_string(),
+            JsonValue::String(effect_hash.clone()),
+        );
+    }
+    if let Some(executor_module) = &intent.executor_module {
+        object.insert(
+            "executor_module".to_string(),
+            JsonValue::String(executor_module.clone()),
+        );
+    }
+    if let Some(executor_module_hash) = &intent.executor_module_hash {
+        object.insert(
+            "executor_module_hash".to_string(),
+            JsonValue::String(executor_module_hash.clone()),
+        );
+    }
+    if let Some(executor_entrypoint) = &intent.executor_entrypoint {
+        object.insert(
+            "executor_entrypoint".to_string(),
+            JsonValue::String(executor_entrypoint.clone()),
+        );
+    }
     object.insert(
         "intent_hash".to_string(),
         JsonValue::Array(
