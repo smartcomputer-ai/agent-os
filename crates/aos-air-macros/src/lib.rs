@@ -50,7 +50,7 @@ fn aos_workflow_impl(
 fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let schema_name = parse_schema_name(&input.attrs)?
         .ok_or_else(|| syn::Error::new(input.ident.span(), "missing #[aos(schema = \"...\")]"))?;
-    let schema_json = match &input.data {
+    let generated_schema = match &input.data {
         Data::Struct(data) => {
             let fields = match &data.fields {
                 Fields::Named(fields) => fields,
@@ -74,14 +74,14 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
                 field_entries.push((name, ty_json));
             }
 
-            defschema_record_json(&schema_name, &field_entries)
+            generated_defschema_record(&schema_name, &field_entries, input.ident.span())
         }
         Data::Enum(data) => {
             let mut variant_entries = Vec::new();
             for variant in &data.variants {
                 variant_entries.push(variant_json_entry(variant)?);
             }
-            defschema_variant_json(&schema_name, &variant_entries)
+            generated_defschema_variant(&schema_name, &variant_entries, input.ident.span())
         }
         _ => {
             return Err(syn::Error::new(
@@ -92,12 +92,20 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
     };
     let ident = input.ident;
     let schema_name_lit = LitStr::new(&schema_name, ident.span());
-    let schema_lit = LitStr::new(&schema_json, ident.span());
+    let schema_lit = LitStr::new(
+        generated_schema.static_json.as_deref().unwrap_or(""),
+        ident.span(),
+    );
+    let schema_expr = generated_schema.expr;
 
     Ok(quote! {
         impl ::aos_wasm_sdk::AirSchemaExport for #ident {
             const AIR_SCHEMA_NAME: &'static str = #schema_name_lit;
             const AIR_SCHEMA_JSON: &'static str = #schema_lit;
+
+            fn air_schema_json() -> ::aos_wasm_sdk::__aos_export::String {
+                #schema_expr
+            }
         }
     })
 }
@@ -214,11 +222,16 @@ fn parse_schema_name(attrs: &[Attribute]) -> syn::Result<Option<String>> {
     Ok(schema)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum FieldOverride {
     None,
     SchemaRef(String),
     Primitive(String),
+}
+
+struct GeneratedJson {
+    static_json: Option<String>,
+    expr: proc_macro2::TokenStream,
 }
 
 fn parse_type_override(attrs: &[Attribute]) -> syn::Result<FieldOverride> {
@@ -243,12 +256,12 @@ fn parse_type_override(attrs: &[Attribute]) -> syn::Result<FieldOverride> {
     Ok(override_value)
 }
 
-fn variant_json_entry(variant: &Variant) -> syn::Result<(String, String)> {
+fn variant_json_entry(variant: &Variant) -> syn::Result<(String, GeneratedJson)> {
     let override_value = parse_type_override(&variant.attrs)?;
     let name = variant.ident.to_string();
     let ty_json = match &variant.fields {
         Fields::Unit => type_override_json(override_value, variant.span())?
-            .unwrap_or_else(|| primitive_json("unit")),
+            .unwrap_or_else(|| generated_static_json(primitive_json("unit"), variant.span())),
         Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
             let field = fields.unnamed.first().expect("one unnamed field");
             type_json_with_override(&field.ty, override_value)?
@@ -274,7 +287,7 @@ fn ensure_no_override(
     }
 }
 
-fn type_json(ty: &Type) -> syn::Result<String> {
+fn type_json(ty: &Type) -> syn::Result<GeneratedJson> {
     let Type::Path(path) = ty else {
         return Err(syn::Error::new(ty.span(), "unsupported AIR field type"));
     };
@@ -283,17 +296,17 @@ fn type_json(ty: &Type) -> syn::Result<String> {
     };
     let ident = segment.ident.to_string();
     match ident.as_str() {
-        "String" => Ok(primitive_json("text")),
-        "bool" => Ok(primitive_json("bool")),
-        "u64" => Ok(primitive_json("nat")),
-        "i64" => Ok(primitive_json("int")),
+        "String" => Ok(generated_static_json(primitive_json("text"), ty.span())),
+        "bool" => Ok(generated_static_json(primitive_json("bool"), ty.span())),
+        "u64" => Ok(generated_static_json(primitive_json("nat"), ty.span())),
+        "i64" => Ok(generated_static_json(primitive_json("int"), ty.span())),
         "Vec" => {
             let inner = single_generic_type(&segment.arguments, ty.span(), "Vec")?;
-            Ok(format!(r#"{{"list":{}}}"#, type_json(inner)?))
+            Ok(wrap_generated_json("list", type_json(inner)?, ty.span()))
         }
         "Option" => {
             let inner = single_generic_type(&segment.arguments, ty.span(), "Option")?;
-            Ok(format!(r#"{{"option":{}}}"#, type_json(inner)?))
+            Ok(wrap_generated_json("option", type_json(inner)?, ty.span()))
         }
         "BTreeMap" => {
             let (key, value) = two_generic_types(&segment.arguments, ty.span(), "BTreeMap")?;
@@ -303,43 +316,39 @@ fn type_json(ty: &Type) -> syn::Result<String> {
                     "AIR only supports BTreeMap<String, T> in this phase",
                 ));
             }
-            Ok(format!(
-                r#"{{"map":{{"key":{{"text":{{}}}},"value":{}}}}}"#,
-                type_json(value)?
-            ))
+            Ok(map_generated_json(type_json(value)?, ty.span()))
         }
-        _ => Err(syn::Error::new(
-            ty.span(),
-            format!(
-                "unsupported AIR field type '{ident}'; add #[aos(schema_ref = \"...\")] or #[aos(air_type = \"...\")]"
-            ),
-        )),
+        _ => Ok(generated_schema_ref_for_type(ty)),
     }
 }
 
-fn type_json_with_override(ty: &Type, override_value: FieldOverride) -> syn::Result<String> {
+fn type_json_with_override(ty: &Type, override_value: FieldOverride) -> syn::Result<GeneratedJson> {
     let Some(base) = type_override_json(override_value, ty.span())? else {
         return type_json(ty);
     };
-    Ok(wrap_type_json_for_outer_type(ty, base))
+    Ok(wrap_generated_json_for_outer_type(ty, base))
 }
 
 fn type_override_json(
     override_value: FieldOverride,
     span: proc_macro2::Span,
-) -> syn::Result<Option<String>> {
+) -> syn::Result<Option<GeneratedJson>> {
     match override_value {
-        FieldOverride::SchemaRef(reference) => Ok(Some(schema_ref_json(&reference))),
-        FieldOverride::Primitive(kind) => {
-            Ok(Some(primitive_type_json(&kind).ok_or_else(|| {
+        FieldOverride::SchemaRef(reference) => Ok(Some(generated_static_json(
+            schema_ref_json(&reference),
+            span,
+        ))),
+        FieldOverride::Primitive(kind) => Ok(Some(generated_static_json(
+            primitive_type_json(&kind).ok_or_else(|| {
                 syn::Error::new(span, format!("unsupported AIR primitive override '{kind}'"))
-            })?))
-        }
+            })?,
+            span,
+        ))),
         FieldOverride::None => Ok(None),
     }
 }
 
-fn wrap_type_json_for_outer_type(ty: &Type, base: String) -> String {
+fn wrap_generated_json_for_outer_type(ty: &Type, base: GeneratedJson) -> GeneratedJson {
     let Type::Path(path) = ty else {
         return base;
     };
@@ -347,9 +356,165 @@ fn wrap_type_json_for_outer_type(ty: &Type, base: String) -> String {
         return base;
     };
     match segment.ident.to_string().as_str() {
-        "Option" => format!(r#"{{"option":{base}}}"#),
-        "Vec" => format!(r#"{{"list":{base}}}"#),
+        "Option" => wrap_generated_json("option", base, ty.span()),
+        "Vec" => wrap_generated_json("list", base, ty.span()),
         _ => base,
+    }
+}
+
+fn generated_static_json(json: String, span: proc_macro2::Span) -> GeneratedJson {
+    let lit = LitStr::new(&json, span);
+    GeneratedJson {
+        static_json: Some(json),
+        expr: quote! {
+            ::aos_wasm_sdk::__aos_export::String::from(#lit)
+        },
+    }
+}
+
+fn generated_schema_ref_for_type(ty: &Type) -> GeneratedJson {
+    let ty_tokens = quote! { #ty };
+    GeneratedJson {
+        static_json: None,
+        expr: quote! {{
+            let mut out = ::aos_wasm_sdk::__aos_export::String::from(r#"{"ref":"#);
+            ::aos_wasm_sdk::push_air_json_string(
+                &mut out,
+                <#ty_tokens as ::aos_wasm_sdk::AirSchemaExport>::AIR_SCHEMA_NAME,
+            );
+            out.push('}');
+            out
+        }},
+    }
+}
+
+fn wrap_generated_json(kind: &str, inner: GeneratedJson, span: proc_macro2::Span) -> GeneratedJson {
+    let static_json = inner
+        .static_json
+        .as_ref()
+        .map(|inner_json| format!(r#"{{"{kind}":{inner_json}}}"#));
+    let prefix = LitStr::new(&format!(r#"{{"{kind}":"#), span);
+    let inner_expr = inner.expr;
+    GeneratedJson {
+        static_json,
+        expr: quote! {{
+            let inner = #inner_expr;
+            let mut out = ::aos_wasm_sdk::__aos_export::String::from(#prefix);
+            out.push_str(&inner);
+            out.push('}');
+            out
+        }},
+    }
+}
+
+fn map_generated_json(value: GeneratedJson, span: proc_macro2::Span) -> GeneratedJson {
+    let static_json = value
+        .static_json
+        .as_ref()
+        .map(|value_json| format!(r#"{{"map":{{"key":{{"text":{{}}}},"value":{value_json}}}}}"#));
+    let value_expr = value.expr;
+    let prefix = LitStr::new(r#"{"map":{"key":{"text":{}},"value":"#, span);
+    GeneratedJson {
+        static_json,
+        expr: quote! {{
+            let value = #value_expr;
+            let mut out = ::aos_wasm_sdk::__aos_export::String::from(#prefix);
+            out.push_str(&value);
+            out.push_str("}}");
+            out
+        }},
+    }
+}
+
+fn generated_defschema_record(
+    schema_name: &str,
+    fields: &[(String, GeneratedJson)],
+    span: proc_macro2::Span,
+) -> GeneratedJson {
+    let static_fields: Option<Vec<(String, String)>> = fields
+        .iter()
+        .map(|(field, ty)| {
+            ty.static_json
+                .as_ref()
+                .map(|json| (field.clone(), json.clone()))
+        })
+        .collect();
+    let static_json = static_fields
+        .as_ref()
+        .map(|fields| defschema_record_json(schema_name, fields));
+
+    let schema_name_lit = LitStr::new(schema_name, span);
+    let field_chunks = fields.iter().enumerate().map(|(idx, (field, ty))| {
+        let comma = idx > 0;
+        let field_lit = LitStr::new(field, span);
+        let ty_expr = ty.expr.clone();
+        quote! {
+            if #comma {
+                out.push(',');
+            }
+            ::aos_wasm_sdk::push_air_json_string(&mut out, #field_lit);
+            out.push(':');
+            let field_ty = #ty_expr;
+            out.push_str(&field_ty);
+        }
+    });
+
+    GeneratedJson {
+        static_json,
+        expr: quote! {{
+            let mut out = ::aos_wasm_sdk::__aos_export::String::from(r#"{"$kind":"defschema","name":"#);
+            ::aos_wasm_sdk::push_air_json_string(&mut out, #schema_name_lit);
+            out.push_str(r#","type":{"record":{"#);
+            #(#field_chunks)*
+            out.push_str("}}}");
+            out
+        }},
+    }
+}
+
+fn generated_defschema_variant(
+    schema_name: &str,
+    variants: &[(String, GeneratedJson)],
+    span: proc_macro2::Span,
+) -> GeneratedJson {
+    let static_variants: Option<Vec<(String, String)>> = variants
+        .iter()
+        .map(|(variant, ty)| {
+            ty.static_json
+                .as_ref()
+                .map(|json| (variant.clone(), json.clone()))
+        })
+        .collect();
+    let static_json = static_variants
+        .as_ref()
+        .map(|variants| defschema_variant_json(schema_name, variants));
+
+    let schema_name_lit = LitStr::new(schema_name, span);
+    let variant_chunks = variants.iter().enumerate().map(|(idx, (variant, ty))| {
+        let comma = idx > 0;
+        let variant_lit = LitStr::new(variant, span);
+        let ty_expr = ty.expr.clone();
+        quote! {
+            if #comma {
+                out.push(',');
+            }
+            ::aos_wasm_sdk::push_air_json_string(&mut out, #variant_lit);
+            out.push(':');
+            let variant_ty = #ty_expr;
+            out.push_str(&variant_ty);
+        }
+    });
+
+    GeneratedJson {
+        static_json,
+        expr: quote! {{
+            let mut out = ::aos_wasm_sdk::__aos_export::String::from(r#"{"$kind":"defschema","name":"#);
+            ::aos_wasm_sdk::push_air_json_string(&mut out, #schema_name_lit);
+            out.push_str(r#","type":{"variant":{"#);
+            #(#variant_chunks)*
+            out.push_str("}}}");
+            out
+        }},
     }
 }
 

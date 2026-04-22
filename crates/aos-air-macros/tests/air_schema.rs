@@ -2,12 +2,12 @@ use aos_air_types::{AirNode, ModuleRuntime, TypeExpr, TypePrimitive};
 use aos_wasm_sdk::{AirSchema, AirSchemaExport, AirWorkflowExport};
 
 aos_wasm_sdk::aos_air_exports! {
-    const TEST_SCHEMA_AIR_NODES_JSON = [TaskSubmitted, Composite, DemoEvent];
+    const TEST_SCHEMA_AIR_NODES_JSON = [TaskSubmitted];
 }
 
 aos_wasm_sdk::aos_air_exports! {
     const TEST_ALL_AIR_NODES_JSON = {
-        schemas: [TaskSubmitted, Composite, DemoEvent],
+        schemas: [TaskSubmitted],
         workflows: [CounterWorkflow],
     };
 }
@@ -25,7 +25,6 @@ struct TaskSubmitted {
 struct Composite {
     #[aos(schema_ref = "demo/TaskSubmitted@1")]
     parent: String,
-    #[aos(schema_ref = "demo/TaskSubmitted@1")]
     optional_parent: Option<TaskSubmitted>,
     #[aos(air_type = "time")]
     observed_at_ns: u64,
@@ -40,7 +39,6 @@ struct Composite {
 #[allow(dead_code)]
 enum DemoEvent {
     Created,
-    #[aos(schema_ref = "demo/TaskSubmitted@1")]
     Submitted(TaskSubmitted),
     #[aos(schema_ref = "demo/TaskSubmitted@1")]
     ExternalNoop,
@@ -61,7 +59,7 @@ struct CounterWorkflow;
 #[test]
 fn derive_air_schema_emits_parseable_defschema() {
     let node: AirNode =
-        serde_json::from_str(TaskSubmitted::AIR_SCHEMA_JSON).expect("parse generated AIR");
+        serde_json::from_str(&TaskSubmitted::air_schema_json()).expect("parse generated AIR");
     let AirNode::Defschema(schema) = node else {
         panic!("expected defschema");
     };
@@ -78,7 +76,7 @@ fn derive_air_schema_emits_parseable_defschema() {
 #[test]
 fn derive_air_schema_supports_first_record_subset() {
     let node: AirNode =
-        serde_json::from_str(Composite::AIR_SCHEMA_JSON).expect("parse generated AIR");
+        serde_json::from_str(&Composite::air_schema_json()).expect("parse generated AIR");
     let AirNode::Defschema(schema) = node else {
         panic!("expected defschema");
     };
@@ -114,7 +112,7 @@ fn derive_air_schema_supports_first_record_subset() {
 #[test]
 fn derive_air_schema_supports_unit_and_ref_variants() {
     let node: AirNode =
-        serde_json::from_str(DemoEvent::AIR_SCHEMA_JSON).expect("parse generated AIR");
+        serde_json::from_str(&DemoEvent::air_schema_json()).expect("parse generated AIR");
     let AirNode::Defschema(schema) = node else {
         panic!("expected defschema");
     };
@@ -137,10 +135,8 @@ fn derive_air_schema_supports_unit_and_ref_variants() {
 
 #[test]
 fn aos_air_exports_collects_generated_json_constants() {
-    assert_eq!(TEST_SCHEMA_AIR_NODES_JSON.len(), 3);
+    assert_eq!(TEST_SCHEMA_AIR_NODES_JSON.len(), 1);
     assert!(TEST_SCHEMA_AIR_NODES_JSON[0].contains(r#""name":"demo/TaskSubmitted@1""#));
-    assert!(TEST_SCHEMA_AIR_NODES_JSON[1].contains(r#""name":"demo/Composite@1""#));
-    assert!(TEST_SCHEMA_AIR_NODES_JSON[2].contains(r#""name":"demo/Event@1""#));
 }
 
 #[test]
@@ -179,10 +175,8 @@ fn aos_workflow_emits_parseable_defworkflow() {
 
 #[test]
 fn aos_air_exports_collects_schema_and_workflow_json_constants() {
-    assert_eq!(TEST_ALL_AIR_NODES_JSON.len(), 5);
+    assert_eq!(TEST_ALL_AIR_NODES_JSON.len(), 3);
     assert!(TEST_ALL_AIR_NODES_JSON[0].contains(r#""name":"demo/TaskSubmitted@1""#));
-    assert!(TEST_ALL_AIR_NODES_JSON[1].contains(r#""name":"demo/Composite@1""#));
-    assert!(TEST_ALL_AIR_NODES_JSON[2].contains(r#""name":"demo/Event@1""#));
-    assert!(TEST_ALL_AIR_NODES_JSON[3].contains(r#""name":"demo/Counter_wasm@1""#));
-    assert!(TEST_ALL_AIR_NODES_JSON[4].contains(r#""name":"demo/Counter@1""#));
+    assert!(TEST_ALL_AIR_NODES_JSON[1].contains(r#""name":"demo/Counter_wasm@1""#));
+    assert!(TEST_ALL_AIR_NODES_JSON[2].contains(r#""name":"demo/Counter@1""#));
 }

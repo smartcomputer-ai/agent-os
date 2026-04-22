@@ -60,7 +60,6 @@ pub struct TaskSubmitted {
     pub observed_at_ns: u64,
     pub workdir: String,
     pub task: String,
-    #[aos(schema_ref = "demiurge/TaskConfig@1")]
     pub config: Option<TaskConfig>,
 }
 
@@ -100,9 +99,7 @@ pub struct TaskFinished {
     pub task_id: SessionId,
     #[aos(air_type = "time")]
     pub observed_at_ns: u64,
-    #[aos(schema_ref = "demiurge/TaskStatus@1")]
     pub status: TaskStatus,
-    #[aos(schema_ref = "demiurge/TaskFailure@1")]
     pub failure: Option<TaskFailure>,
     #[aos(schema_ref = "aos.agent/RunId@1")]
     pub run_id: Option<RunId>,
@@ -115,22 +112,18 @@ pub struct TaskFinished {
 pub struct DemiurgeState {
     #[aos(schema_ref = "aos.agent/SessionId@1")]
     pub task_id: SessionId,
-    #[aos(schema_ref = "demiurge/TaskStatus@1")]
     pub status: TaskStatus,
     pub workdir: Option<String>,
     pub task: Option<String>,
-    #[aos(schema_ref = "demiurge/TaskConfig@1")]
     pub config: Option<TaskConfig>,
     #[aos(air_type = "hash")]
     pub input_ref: Option<String>,
     #[aos(air_type = "hash")]
     pub output_ref: Option<String>,
     pub host_session_id: Option<String>,
-    #[aos(schema_ref = "demiurge/PendingStage@1")]
     pub pending_stage: Option<PendingStage>,
     pub next_observed_at_ns: u64,
     pub finished: bool,
-    #[aos(schema_ref = "demiurge/TaskFailure@1")]
     pub failure: Option<TaskFailure>,
     #[aos(air_type = "time")]
     pub last_updated_at_ns: u64,
@@ -140,7 +133,6 @@ pub struct DemiurgeState {
 #[aos(schema = "demiurge/WorkflowEvent@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum DemiurgeWorkflowEvent {
-    #[aos(schema_ref = "demiurge/TaskSubmitted@1")]
     TaskSubmitted(TaskSubmitted),
     #[aos(schema_ref = "aos.agent/SessionLifecycleChanged@1")]
     SessionLifecycleChanged(SessionLifecycleChanged),

@@ -21,6 +21,10 @@ pub use serde_cbor::Value;
 pub trait AirSchemaExport {
     const AIR_SCHEMA_NAME: &'static str;
     const AIR_SCHEMA_JSON: &'static str;
+
+    fn air_schema_json() -> String {
+        String::from(Self::AIR_SCHEMA_JSON)
+    }
 }
 
 /// Metadata emitted by Rust-authored AIR workflow attributes.
@@ -109,6 +113,11 @@ fn push_named_ref_array(out: &mut String, key: &str, names: &[&str]) {
 }
 
 #[doc(hidden)]
+pub fn push_air_json_string(out: &mut String, value: &str) {
+    push_json_string(out, value);
+}
+
+#[doc(hidden)]
 pub mod __aos_export {
     pub use alloc::string::String;
     pub use alloc::vec::Vec;
@@ -194,9 +203,7 @@ macro_rules! aos_air_world {
         $vis fn $name() -> $crate::__aos_export::Vec<$crate::__aos_export::String> {
             let mut nodes = $crate::__aos_export::Vec::new();
             $(
-                nodes.push($crate::__aos_export::String::from(
-                    <$schema as $crate::AirSchemaExport>::AIR_SCHEMA_JSON,
-                ));
+                nodes.push(<$schema as $crate::AirSchemaExport>::air_schema_json());
             )*
             $(
                 nodes.push($crate::__aos_export::String::from(
