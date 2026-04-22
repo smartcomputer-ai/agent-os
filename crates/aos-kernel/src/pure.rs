@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::Store;
+use crate::module_runtime::wasm_hash_ref;
 use aos_air_types::{DefModule, Name};
 use aos_cbor::Hash;
 use aos_wasm::PureRuntime;
@@ -32,12 +33,13 @@ impl<S: Store> PureRegistry<S> {
     }
 
     pub fn ensure_loaded(&mut self, name: &str, module_def: &DefModule) -> Result<(), KernelError> {
+        let wasm_hash_ref = wasm_hash_ref(name, module_def)?;
         if let Some(existing) = self.modules.get(name) {
-            if existing.wasm_hash == module_def.wasm_hash.as_str() {
+            if existing.wasm_hash == wasm_hash_ref.as_str() {
                 return Ok(());
             }
         }
-        let wasm_hash = Hash::from_hex_str(module_def.wasm_hash.as_str())
+        let wasm_hash = Hash::from_hex_str(wasm_hash_ref.as_str())
             .map_err(|err| KernelError::Manifest(err.to_string()))?;
         let bytes: Vec<u8> = self.store.get_blob(wasm_hash)?;
         let compiled = self
@@ -51,7 +53,7 @@ impl<S: Store> PureRegistry<S> {
         self.modules.insert(
             name.to_string(),
             PureModule {
-                wasm_hash: module_def.wasm_hash.to_string(),
+                wasm_hash: wasm_hash_ref.to_string(),
                 instance_pre,
             },
         );

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
-use aos_air_types::{AirNode, Manifest};
+use aos_air_types::{AirNode, Manifest, ModuleRuntime, WasmArtifact};
 use aos_authoring::bundle::import_genesis;
 use aos_authoring::{
     SyncConfig, WorldBundle, build_bundle_from_local_world_ephemeral, build_patch_document,
@@ -153,7 +153,13 @@ pub async fn upload_bundle(
         upload_node(client, &AirNode::Defmodule(module.clone()))
             .await
             .with_context(|| format!("upload module definition {} to CAS", module.name))?;
-        let wasm_hash = Hash::from_hex_str(module.wasm_hash.as_str())
+        let ModuleRuntime::Wasm {
+            artifact: WasmArtifact::WasmModule { hash },
+        } = &module.runtime
+        else {
+            continue;
+        };
+        let wasm_hash = Hash::from_hex_str(hash.as_str())
             .with_context(|| format!("parse module wasm hash for {}", module.name))?;
         let bytes = store
             .get_blob(wasm_hash)
@@ -177,6 +183,12 @@ pub async fn upload_bundle(
                     wasm_hash.to_hex()
                 )
             })?;
+    }
+    for workflow in &bundle.workflows {
+        client.log(format!("uploading workflow {}", workflow.name));
+        upload_node(client, &AirNode::Defworkflow(workflow.clone()))
+            .await
+            .with_context(|| format!("upload workflow {} to CAS", workflow.name))?;
     }
     for effect in &bundle.effects {
         client.log(format!("uploading effect {}", effect.name));

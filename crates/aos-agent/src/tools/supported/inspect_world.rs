@@ -63,20 +63,20 @@ pub fn map_receipt(tool_name: &str, status: &str, payload: &[u8]) -> ToolMappedR
             "snapshot_hash": receipt.meta.snapshot_hash.map(|hash| hash.to_string()),
             "schema_count": manifest.schemas.len(),
             "module_count": manifest.modules.len(),
+            "workflow_count": manifest.workflows.len(),
             "effect_count": manifest.effects.len(),
             "has_routing": manifest.routing.is_some(),
         },
         "modules": section(&manifest_json, "modules", json!([])),
+        "workflows": section(&manifest_json, "workflows", json!([])),
         "effects": section(&manifest_json, "effects", json!([])),
         "routing": section(
             &manifest_json,
             "routing",
             json!({
                 "subscriptions": [],
-                "inboxes": [],
             }),
         ),
-        "effect_bindings": section(&manifest_json, "effect_bindings", json!([])),
     });
 
     build_receipt(
@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn map_args_uses_head_consistency() {
         let mapped = map_args("{}").expect("map args");
-        assert_eq!(mapped.effect_kind, None);
+        assert_eq!(mapped.effect, None);
         assert_eq!(mapped.params_json["consistency"], "head");
     }
 
@@ -128,11 +128,12 @@ mod tests {
     fn map_receipt_shapes_manifest_summary() {
         let receipt = IntrospectManifestReceipt {
             manifest: serde_cbor::to_vec(&Manifest {
-                air_version: "1".into(),
+                air_version: "2".into(),
                 schemas: vec![],
                 modules: vec![],
+                ops: vec![],
+                workflows: vec![],
                 effects: vec![],
-                effect_bindings: vec![],
                 secrets: vec![],
                 routing: None,
             })

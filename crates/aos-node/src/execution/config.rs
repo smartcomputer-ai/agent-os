@@ -5,7 +5,7 @@ pub struct WorldConfig {
     pub module_cache_dir: Option<std::path::PathBuf>,
     pub eager_module_load: bool,
     pub allow_placeholder_secrets: bool,
-    pub strict_effect_bindings: bool,
+    pub strict_effect_routes: bool,
     pub cell_cache_size: usize,
     pub forced_replay_seed_height: Option<u64>,
 }
@@ -16,7 +16,7 @@ impl Default for WorldConfig {
             module_cache_dir: None,
             eager_module_load: false,
             allow_placeholder_secrets: false,
-            strict_effect_bindings: false,
+            strict_effect_routes: false,
             cell_cache_size: DEFAULT_CELL_CACHE_SIZE,
             forced_replay_seed_height: None,
         }
@@ -30,7 +30,9 @@ impl WorldConfig {
         Self::from_env_values(
             fallback_module_cache_dir,
             std::env::var("AOS_MODULE_CACHE_DIR").ok(),
-            std::env::var("AOS_STRICT_EFFECT_BINDINGS").ok(),
+            std::env::var("AOS_STRICT_EFFECT_ROUTES")
+                .ok()
+                .or_else(|| std::env::var("AOS_STRICT_OP_ROUTES").ok()),
             std::env::var("AOS_CELL_CACHE_SIZE").ok(),
             std::env::var("AOS_NODE_REPLAY_SEED_HEIGHT").ok(),
         )
@@ -39,7 +41,7 @@ impl WorldConfig {
     fn from_env_values(
         fallback_module_cache_dir: Option<std::path::PathBuf>,
         module_cache_dir: Option<String>,
-        strict_effect_bindings: Option<String>,
+        strict_effect_routes: Option<String>,
         cell_cache_size: Option<String>,
         forced_replay_seed_height: Option<String>,
     ) -> Self {
@@ -53,12 +55,12 @@ impl WorldConfig {
             cfg.module_cache_dir = fallback_module_cache_dir;
         }
         if matches!(
-            strict_effect_bindings
+            strict_effect_routes
                 .map(|v| v.trim().to_ascii_lowercase())
                 .as_deref(),
             Some("1" | "true" | "yes" | "on")
         ) {
-            cfg.strict_effect_bindings = true;
+            cfg.strict_effect_routes = true;
         }
         if let Some(raw) = cell_cache_size
             && let Ok(parsed) = raw.trim().parse::<usize>()
@@ -96,9 +98,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn world_config_from_env_enables_strict_effect_bindings() {
+    fn world_config_from_env_enables_strict_effect_routes() {
         let cfg = WorldConfig::from_env_values(None, None, Some("true".into()), None, None);
-        assert!(cfg.strict_effect_bindings);
+        assert!(cfg.strict_effect_routes);
     }
 
     #[test]
@@ -137,7 +139,7 @@ mod tests {
             module_cache_dir: Some(std::path::PathBuf::from("/tmp/aos-wasmtime-cache")),
             eager_module_load: true,
             allow_placeholder_secrets: true,
-            strict_effect_bindings: false,
+            strict_effect_routes: false,
             cell_cache_size: 512,
             forced_replay_seed_height: None,
         };
@@ -158,7 +160,7 @@ mod tests {
             module_cache_dir: Some(std::path::PathBuf::from("/tmp/aos-wasmtime-cache")),
             eager_module_load: true,
             allow_placeholder_secrets: true,
-            strict_effect_bindings: false,
+            strict_effect_routes: false,
             cell_cache_size: 512,
             forced_replay_seed_height: None,
         };

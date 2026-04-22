@@ -48,7 +48,10 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
 
     let propose_intent = effect_manager.enqueue_workflow_effect_authorized(
         "com.acme/Simple@1",
-        &WorkflowEffect::new("governance.propose", propose_params_cbor(&patch_doc_bytes)?),
+        &WorkflowEffect::new(
+            "sys/governance.propose@1",
+            propose_params_cbor(&patch_doc_bytes)?,
+        ),
     )?;
     let propose_receipt = world
         .kernel
@@ -67,7 +70,7 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
     let shadow_intent = effect_manager.enqueue_workflow_effect_authorized(
         "com.acme/Simple@1",
         &WorkflowEffect::new(
-            "governance.shadow",
+            "sys/governance.shadow@1",
             shadow_params_cbor(propose.proposal_id)?,
         ),
     )?;
@@ -87,7 +90,7 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
     let approve_intent = effect_manager.enqueue_workflow_effect_authorized(
         "com.acme/Simple@1",
         &WorkflowEffect::new(
-            "governance.approve",
+            "sys/governance.approve@1",
             approve_params_cbor(propose.proposal_id)?,
         ),
     )?;
@@ -106,7 +109,10 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
 
     let apply_intent = effect_manager.enqueue_workflow_effect_authorized(
         "com.acme/Simple@1",
-        &WorkflowEffect::new("governance.apply", apply_params_cbor(propose.proposal_id)?),
+        &WorkflowEffect::new(
+            "sys/governance.apply@1",
+            apply_params_cbor(propose.proposal_id)?,
+        ),
     )?;
     let apply_receipt = world
         .kernel
@@ -140,17 +146,13 @@ fn build_effect_manager(
         schemas.insert(schema.name.clone(), schema.ty.clone());
     }
     let schema_index = Arc::new(SchemaIndex::new(schemas));
-    let effect_catalog = Arc::new(EffectCatalog::from_defs(loaded.effects.values().cloned()));
+    let effect_catalog = Arc::new(EffectCatalog::from_effects(
+        loaded.effects.values().cloned(),
+    ));
     let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
         GovernanceParamPreprocessor::new(store.clone(), loaded.manifest.clone()),
     ));
-    let manager = EffectManager::new(
-        effect_catalog,
-        schema_index,
-        param_preprocessor,
-        None,
-        None,
-    );
+    let manager = EffectManager::new(effect_catalog, schema_index, param_preprocessor, None, None);
     Ok(manager)
 }
 
@@ -192,7 +194,7 @@ fn patch_doc_add_schema(base_manifest_hash: String, name: &str) -> serde_json::V
     };
     let node = serde_json::to_value(AirNode::Defschema(schema)).expect("serialize defschema node");
     serde_json::json!({
-        "version": "1",
+        "version": "2",
         "base_manifest_hash": base_manifest_hash,
         "patches": [
             {

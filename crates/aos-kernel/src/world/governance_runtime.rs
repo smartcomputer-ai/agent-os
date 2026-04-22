@@ -225,6 +225,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.manifest_hash = Hash::of_bytes(&manifest_bytes);
         self.secrets = loaded.secrets;
         self.module_defs = loaded.modules;
+        self.workflow_defs = loaded.workflows;
         self.effect_defs = loaded.effects;
         self.schema_defs = loaded.schemas;
         self.router = runtime.router;
@@ -273,7 +274,7 @@ mod tests {
     use crate::MemStore;
     use crate::receipts::WorkflowEffectContext;
     use crate::world::test_support::empty_manifest;
-    use aos_effects::{EffectIntent, EffectKind};
+    use aos_effects::EffectIntent;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -282,6 +283,7 @@ mod tests {
             manifest: empty_manifest(),
             secrets: vec![],
             modules: HashMap::new(),
+            workflows: HashMap::new(),
             effects: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: aos_air_types::catalog::EffectCatalog::new(),
@@ -303,7 +305,7 @@ mod tests {
             WorkflowInflightIntentMeta {
                 origin_module_id: "com.acme/Workflow@1".into(),
                 origin_instance_key: None,
-                effect_kind: "sys/http.request@1".into(),
+                effect: "sys/http.request@1".into(),
                 params_hash: None,
                 emitted_at_seq: 0,
                 last_stream_seq: 0,
@@ -324,7 +326,7 @@ mod tests {
             WorkflowEffectContext::new(
                 "com.acme/Workflow@1".into(),
                 None,
-                "timer.set".into(),
+                "sys/timer.set@1".into(),
                 vec![],
                 [2u8; 32],
                 None,
@@ -334,7 +336,11 @@ mod tests {
             ),
         );
         kernel.effect_manager.restore_queue(vec![EffectIntent {
-            kind: EffectKind::new("introspect.manifest"),
+            effect: "sys/introspect.manifest@1".into(),
+            effect_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: Some("sys/introspect.manifest@1".into()),
             params_cbor: vec![],
             idempotency_key: [0u8; 32],
             intent_hash: [3u8; 32],

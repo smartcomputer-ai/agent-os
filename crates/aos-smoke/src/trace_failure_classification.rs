@@ -51,7 +51,6 @@ fn run_adapter_timeout(example_root: &Path) -> Result<()> {
     let intent = intents.into_iter().next().expect("one intent");
     host.apply_receipt(EffectReceipt {
         intent_hash: intent.intent_hash,
-        adapter_id: "http.mock".into(),
         status: ReceiptStatus::Timeout,
         payload_cbor: serde_cbor::to_vec(&http_receipt_payload(504)?)?,
         cost_cents: Some(0),
@@ -82,7 +81,6 @@ fn run_adapter_error(example_root: &Path) -> Result<()> {
     let intent = intents.into_iter().next().expect("one intent");
     host.apply_receipt(EffectReceipt {
         intent_hash: intent.intent_hash,
-        adapter_id: "http.mock".into(),
         status: ReceiptStatus::Error,
         payload_cbor: serde_cbor::to_vec(&http_receipt_payload(500)?)?,
         cost_cents: Some(0),
@@ -154,6 +152,5 @@ fn http_receipt_payload(status: i32) -> Result<HttpRequestReceipt> {
             start_ns: 10,
             end_ns: 20,
         },
-        adapter_id: "http.mock".into(),
     })
 }

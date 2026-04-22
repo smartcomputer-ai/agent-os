@@ -11,7 +11,7 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const HTTP_REQUEST_EFFECT: &str = "http.request";
+const HTTP_REQUEST_EFFECT: &str = "sys/http.request@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct FetchState {
@@ -64,7 +64,6 @@ struct HttpRequestReceipt {
     headers: BTreeMap<String, String>,
     body_ref: Option<String>,
     timings: RequestTimings,
-    adapter_id: String,
 }
 
 aos_variant! {
@@ -120,7 +119,7 @@ fn handle_start(
         body_ref: None,
     };
     ctx.effects()
-        .emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+        .emit_raw(HTTP_REQUEST_EFFECT, &params);
     Ok(())
 }
 
@@ -131,7 +130,7 @@ fn handle_receipt(
     if ctx.state.pending_request.is_none() {
         return Ok(());
     }
-    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
+    if envelope.effect != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
 
@@ -164,6 +163,7 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: "demo/FetchNotify@1".into(),
+            workflow_hash: None,
             key: None,
             cell_mode: false,
         };
@@ -205,20 +205,18 @@ mod tests {
                 start_ns: 10,
                 end_ns: 20,
             },
-            adapter_id: "http.mock".into(),
         };
         let receipt = FetchEvent::Receipt(EffectReceiptEnvelope {
             origin_module_id: "demo/FetchNotify@1".into(),
             origin_instance_key: None,
             intent_id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                 .into(),
-            effect_kind: "http.request".into(),
+            effect: "sys/http.request@1".into(),
             params_hash: None,
             issuer_ref: None,
             receipt_payload: serde_cbor::to_vec(&receipt_payload).expect("payload"),
             status: "ok".into(),
             emitted_at_seq: 1,
-            adapter_id: "http.mock".into(),
             cost_cents: Some(0),
             signature: vec![0; 64],
         });

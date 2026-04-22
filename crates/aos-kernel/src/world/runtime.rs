@@ -150,8 +150,12 @@ impl<S: Store + 'static> Kernel<S> {
             record.params_sha256.as_ref(),
             "effect_intent.params",
         )?;
-        let mut intent = aos_effects::EffectIntent::from_raw_params(
-            aos_effects::EffectKind::new(record.kind.clone()),
+        let mut intent = aos_effects::EffectIntent::from_raw_params_with_identity(
+            record.effect.clone(),
+            record.effect_hash.clone(),
+            record.executor_module.clone(),
+            record.executor_module_hash.clone(),
+            record.executor_entrypoint.clone(),
             params_cbor,
             record.idempotency_key,
         )
@@ -304,8 +308,11 @@ impl<S: Store + 'static> Kernel<S> {
         };
 
         if frame.origin_module_id != context.origin_module_id
+            || frame.origin_workflow_hash != context.origin_workflow_hash
             || frame.origin_instance_key != context.origin_instance_key
-            || frame.effect_kind != context.effect_kind
+            || frame.effect != context.effect
+            || frame.effect_hash != context.effect_hash
+            || frame.executor_module_hash != context.executor_module_hash
             || frame.emitted_at_seq != context.emitted_at_seq
         {
             self.record_workflow_stream_drop(
@@ -345,7 +352,7 @@ impl<S: Store + 'static> Kernel<S> {
                     &context.origin_module_id,
                     context.origin_instance_key.as_deref(),
                     frame.intent_hash,
-                    &context.effect_kind,
+                    &context.effect,
                     &context.params_cbor,
                     context.emitted_at_seq,
                 );
@@ -389,18 +396,43 @@ impl<S: Store + 'static> Kernel<S> {
         mut receipt: aos_effects::EffectReceipt,
         context: &WorkflowEffectContext,
     ) -> Result<aos_effects::EffectReceipt, KernelError> {
-        let receipt_schema = self
+        let def = self
             .effect_defs
-            .values()
-            .find(|def| def.kind.as_str() == context.effect_kind)
-            .map(|def| def.receipt_schema.as_str().to_string())
-            .ok_or_else(|| KernelError::UnsupportedEffectKind(context.effect_kind.clone()))?;
+            .get(&context.effect)
+            .ok_or_else(|| KernelError::UnsupportedEffect(context.effect.clone()))?;
+        if let Some(expected_hash) = context.effect_hash.as_deref() {
+            let actual_hash = self.effect_hash(def)?;
+            if actual_hash != expected_hash {
+                return Err(KernelError::ReceiptDecode(format!(
+                    "receipt effect hash mismatch for '{}': expected {}, got {}",
+                    context.effect, expected_hash, actual_hash
+                )));
+            }
+        }
+        if let Some(expected_module_hash) = context.executor_module_hash.as_deref()
+            && let Some(module_name) = context.executor_module.as_deref()
+        {
+            let module = self.module_defs.get(module_name).ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "receipt executor module '{}' is not active",
+                    module_name
+                ))
+            })?;
+            let actual_module_hash = self.module_hash(module)?;
+            if actual_module_hash != expected_module_hash {
+                return Err(KernelError::ReceiptDecode(format!(
+                    "receipt executor module hash mismatch for '{}': expected {}, got {}",
+                    module_name, expected_module_hash, actual_module_hash
+                )));
+            }
+        }
+        let receipt_schema = def.receipt.as_str().to_string();
         let normalized =
             normalize_cbor_by_name(&self.schema_index, &receipt_schema, &receipt.payload_cbor)
                 .map_err(|err| {
                     KernelError::ReceiptDecode(format!(
                         "receipt payload for '{}' failed schema '{}': {err}",
-                        context.effect_kind, receipt_schema
+                        context.effect, receipt_schema
                     ))
                 })?;
         receipt.payload_cbor = normalized.bytes;
@@ -504,16 +536,8 @@ impl<S: Store + 'static> Kernel<S> {
         &'a self,
         workflow_name: &str,
     ) -> Result<(String, &'a TypeExpr), KernelError> {
-        let module_def = self
-            .module_defs
-            .get(workflow_name)
-            .ok_or_else(|| KernelError::WorkflowNotFound(workflow_name.to_string()))?;
-        let workflow_abi = module_def.abi.workflow.as_ref().ok_or_else(|| {
-            KernelError::Manifest(format!(
-                "module '{workflow_name}' is not a workflow/workflow"
-            ))
-        })?;
-        let workflow_event_schema_name = workflow_abi.event.as_str().to_string();
+        let workflow = self.workflow_def(workflow_name)?;
+        let workflow_event_schema_name = workflow.event.as_str().to_string();
         let workflow_event_schema = self
             .schema_index
             .get(workflow_event_schema_name.as_str())
@@ -670,8 +694,7 @@ impl<S: Store + 'static> Kernel<S> {
             origin_module_id: context.origin_module_id.clone(),
             origin_instance_key: context.origin_instance_key.clone(),
             intent_id: format_intent_hash(&receipt.intent_hash),
-            effect_kind: context.effect_kind.clone(),
-            adapter_id: receipt.adapter_id.clone(),
+            effect: context.effect.clone(),
             status: receipt.status.clone(),
             error_code: error_code.to_string(),
             error_message: error_message.to_string(),
@@ -696,8 +719,7 @@ impl<S: Store + 'static> Kernel<S> {
             origin_module_id: frame.origin_module_id.clone(),
             origin_instance_key: frame.origin_instance_key.clone(),
             intent_id: format_intent_hash(&frame.intent_hash),
-            effect_kind: frame.effect_kind.clone(),
-            adapter_id: frame.adapter_id.clone(),
+            effect: frame.effect.clone(),
             expected_seq,
             observed_seq: frame.seq,
         };
@@ -719,8 +741,7 @@ impl<S: Store + 'static> Kernel<S> {
             origin_module_id: frame.origin_module_id.clone(),
             origin_instance_key: frame.origin_instance_key.clone(),
             intent_id: format_intent_hash(&frame.intent_hash),
-            effect_kind: frame.effect_kind.clone(),
-            adapter_id: frame.adapter_id.clone(),
+            effect: frame.effect.clone(),
             emitted_at_seq: frame.emitted_at_seq,
             seq: frame.seq,
             kind: frame.kind.clone(),
@@ -799,8 +820,7 @@ struct WorkflowReceiptFaultRecord {
     )]
     origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
-    effect_kind: String,
-    adapter_id: String,
+    effect: String,
     status: aos_effects::ReceiptStatus,
     error_code: String,
     error_message: String,
@@ -819,8 +839,7 @@ struct WorkflowStreamGapRecord {
     )]
     origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
-    effect_kind: String,
-    adapter_id: String,
+    effect: String,
     expected_seq: u64,
     observed_seq: u64,
 }
@@ -835,8 +854,7 @@ struct WorkflowStreamDropRecord {
     )]
     origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
-    effect_kind: String,
-    adapter_id: String,
+    effect: String,
     emitted_at_seq: u64,
     seq: u64,
     kind: String,
@@ -873,34 +891,23 @@ mod tests {
     use crate::governance::ManifestPatch;
     use crate::journal::Journal;
     use crate::journal::JournalKind;
-    use crate::world::test_support::{hash, minimal_manifest, schema_event_record, schema_text};
-    use aos_air_types::{
-        DefModule, HashRef, ModuleAbi, ModuleKind, NamedRef, SchemaRef, WorkflowAbi, builtins,
-        catalog::EffectCatalog,
+    use crate::world::test_support::{
+        hash, minimal_manifest, schema_event_record, schema_text, workflow_def, workflow_module,
     };
+    use aos_air_types::{HashRef, NamedRef, SchemaRef, builtins, catalog::EffectCatalog};
     use aos_effects::{EffectStreamFrame, ReceiptStatus, builtins::TimerSetParams};
     use aos_wasm_abi::WorkflowEffect;
     use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
 
     fn install_stream_module(kernel: &mut Kernel<MemStore>, module_name: &str) {
-        let module = aos_air_types::DefModule {
-            name: module_name.into(),
-            module_kind: ModuleKind::Workflow,
-            wasm_hash: HashRef::new(format!("sha256:{}", "1".repeat(64))).unwrap(),
-            key_schema: None,
-            abi: ModuleAbi {
-                workflow: Some(WorkflowAbi {
-                    state: SchemaRef::new("sys/PendingEffect@1").unwrap(),
-                    event: SchemaRef::new(crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA).unwrap(),
-                    context: None,
-                    annotations: None,
-                    effects_emitted: vec![],
-                }),
-                pure: None,
-            },
-        };
+        let module = workflow_module(module_name, 1);
+        let mut workflow = workflow_def(module_name, module_name, None, vec![]);
+        workflow.state = SchemaRef::new("sys/PendingEffect@1").unwrap();
+        workflow.event = SchemaRef::new(crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA).unwrap();
+        workflow.context = None;
         kernel.module_defs.insert(module_name.into(), module);
+        kernel.workflow_defs.insert(module_name.into(), workflow);
     }
 
     fn kernel_with_stream_context(
@@ -922,6 +929,14 @@ mod tests {
             intent_hash,
             emitted_at_seq,
             None,
+        )
+        .with_effect_identity(
+            None,
+            "sys/http.request@1".into(),
+            None,
+            Some("sys/builtin_effects@1".into()),
+            None,
+            Some("http.request".into()),
         );
         kernel
             .pending_workflow_receipts
@@ -930,7 +945,7 @@ mod tests {
             module_name,
             None,
             intent_hash,
-            &context.effect_kind,
+            &context.effect,
             &context.params_cbor,
             emitted_at_seq,
         );
@@ -940,41 +955,32 @@ mod tests {
     fn kernel_for_timer_effects() -> Kernel<MemStore> {
         let store = Arc::new(MemStore::default());
         let workflow = "com.acme/Workflow@1";
-        let module = DefModule {
-            name: workflow.into(),
-            module_kind: ModuleKind::Workflow,
-            wasm_hash: HashRef::new(format!("sha256:{}", "1".repeat(64))).unwrap(),
-            key_schema: None,
-            abi: ModuleAbi {
-                workflow: Some(WorkflowAbi {
-                    state: SchemaRef::new("com.acme/State@1").unwrap(),
-                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                    context: None,
-                    annotations: None,
-                    effects_emitted: vec![aos_air_types::EffectKind::timer_set()],
-                }),
-                pure: None,
-            },
-        };
+        let module = workflow_module(workflow, 1);
         let timer_effect = builtins::find_builtin_effect("sys/timer.set@1")
             .expect("builtin timer effect")
             .effect
             .clone();
+        let workflow_def = workflow_def(workflow, workflow, None, vec![timer_effect.name.clone()]);
 
         let mut manifest = minimal_manifest();
         manifest.modules = vec![NamedRef {
             name: workflow.into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }];
+        manifest.workflows = vec![NamedRef {
+            name: workflow.into(),
+            hash: HashRef::new(hash(2)).unwrap(),
+        }];
         manifest.effects = vec![NamedRef {
             name: timer_effect.name.clone(),
-            hash: HashRef::new(hash(2)).unwrap(),
+            hash: HashRef::new(hash(3)).unwrap(),
         }];
 
         let loaded = LoadedManifest {
             manifest,
             secrets: vec![],
             modules: HashMap::from([(module.name.clone(), module)]),
+            workflows: HashMap::from([(workflow_def.name.clone(), workflow_def)]),
             effects: HashMap::from([(timer_effect.name.clone(), timer_effect.clone())]),
             schemas: HashMap::from([
                 ("com.acme/State@1".into(), schema_text("com.acme/State@1")),
@@ -983,7 +989,7 @@ mod tests {
                     schema_event_record("com.acme/Event@1"),
                 ),
             ]),
-            effect_catalog: EffectCatalog::from_defs(vec![timer_effect]),
+            effect_catalog: EffectCatalog::from_effects(vec![timer_effect]),
         };
 
         Kernel::from_loaded_manifest(store, loaded, Journal::new()).expect("timer kernel")
@@ -1001,9 +1007,8 @@ mod tests {
                 false,
                 WorkflowOutput {
                     effects: vec![WorkflowEffect {
-                        kind: aos_effects::EffectKind::TIMER_SET.into(),
+                        kind: "sys/timer.set@1".into(),
                         params_cbor: serde_cbor::to_vec(&params).expect("encode timer params"),
-                        cap_slot: None,
                         issuer_ref: None,
                         idempotency_key: None,
                     }],
@@ -1019,10 +1024,14 @@ mod tests {
         let mut kernel = kernel_with_stream_context("com.acme/Workflow@1", intent_hash, 11);
         let frame = EffectStreamFrame {
             intent_hash,
-            adapter_id: "adapter.stream".into(),
             origin_module_id: "com.acme/Workflow@1".into(),
+            origin_workflow_hash: None,
             origin_instance_key: None,
-            effect_kind: "http.request".into(),
+            effect: "sys/http.request@1".into(),
+            effect_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: None,
             emitted_at_seq: 11,
             seq: 1,
             kind: "progress".into(),
@@ -1063,10 +1072,14 @@ mod tests {
         let mut kernel = kernel_with_stream_context("com.acme/Workflow@1", intent_hash, 12);
         let frame = EffectStreamFrame {
             intent_hash,
-            adapter_id: "adapter.stream".into(),
             origin_module_id: "com.acme/Workflow@1".into(),
+            origin_workflow_hash: None,
             origin_instance_key: None,
-            effect_kind: "http.request".into(),
+            effect: "sys/http.request@1".into(),
+            effect_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: None,
             emitted_at_seq: 12,
             seq: 3,
             kind: "progress".into(),
@@ -1105,7 +1118,6 @@ mod tests {
 
         let receipt = EffectReceipt {
             intent_hash,
-            adapter_id: "adapter.stream".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: vec![],
             cost_cents: None,
@@ -1150,7 +1162,7 @@ mod tests {
         );
 
         let opened = &drain.opened_effects[0];
-        assert_eq!(opened.record.kind, aos_effects::EffectKind::TIMER_SET);
+        assert_eq!(opened.record.effect, aos_effects::effect_ops::TIMER_SET);
         let params: TimerSetParams = serde_cbor::from_slice(&opened.intent.params_cbor)
             .expect("decode materialized timer params");
         assert_eq!(params.deliver_at_ns, 20);
@@ -1191,6 +1203,7 @@ mod tests {
             manifest: minimal_manifest(),
             secrets: vec![],
             modules: HashMap::new(),
+            workflows: HashMap::new(),
             effects: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: EffectCatalog::new(),
@@ -1222,6 +1235,7 @@ mod tests {
             manifest: minimal_manifest(),
             secrets: vec![],
             modules: HashMap::new(),
+            workflows: HashMap::new(),
             effects: HashMap::new(),
             schemas: HashMap::new(),
             effect_catalog: EffectCatalog::new(),

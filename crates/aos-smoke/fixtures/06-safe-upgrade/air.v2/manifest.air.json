@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/SafeUpgradePc@1"
@@ -13,30 +13,25 @@
     },
     {
       "name": "demo/SafeUpgradeEvent@1"
-    },
-    {
-      "name": "sys/HttpRequestParams@1"
-    },
-    {
-      "name": "sys/HttpRequestReceipt@1"
     }
   ],
   "modules": [
     {
-      "name": "demo/SafeUpgrade@2"
+      "name": "demo/SafeUpgrade@2_wasm"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/SafeUpgradeEvent@1",
-        "module": "demo/SafeUpgrade@2"
+        "workflow": "demo/SafeUpgrade@2"
       }
     ]
   },
-  "effects": [
+  "workflows": [
     {
-      "name": "sys/http.request@1"
+      "name": "demo/SafeUpgrade@2"
     }
-  ]
+  ],
+  "effects": []
 }

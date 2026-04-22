@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/FetchNotifyPc@1"
@@ -13,30 +13,25 @@
     },
     {
       "name": "demo/FetchNotifyEvent@1"
-    },
-    {
-      "name": "sys/HttpRequestParams@1"
-    },
-    {
-      "name": "sys/HttpRequestReceipt@1"
     }
   ],
   "modules": [
     {
-      "name": "demo/FetchNotify@1"
-    }
-  ],
-  "effects": [
-    {
-      "name": "sys/http.request@1"
+      "name": "demo/FetchNotify_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/FetchNotifyEvent@1",
-        "module": "demo/FetchNotify@1"
+        "workflow": "demo/FetchNotify@1"
       }
     ]
-  }
+  },
+  "workflows": [
+    {
+      "name": "demo/FetchNotify@1"
+    }
+  ],
+  "effects": []
 }

@@ -17,6 +17,7 @@ use serde_json::json;
 use crate::util;
 
 const MODULE_NAME: &str = "demo/FlowTracker@1";
+const MODULE_WASM_NAME: &str = "demo/FlowTracker_wasm@1";
 const EVENT_SCHEMA: &str = "demo/RuntimeHardeningEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/11-workflow-runtime-hardening/workflow";
 
@@ -273,9 +274,15 @@ fn load_manifest_for_runtime<S: Store + 'static>(
         .context("load fixture manifest")?
         .ok_or_else(|| anyhow!("manifest missing at {}", assets_root.display()))?;
 
-    let patched = patch_modules(&mut loaded, wasm_hash, |name, _| name == MODULE_NAME);
+    let module_name = loaded
+        .workflows
+        .get(MODULE_NAME)
+        .map(|workflow| workflow.implementation.module.as_str())
+        .unwrap_or(MODULE_WASM_NAME)
+        .to_string();
+    let patched = patch_modules(&mut loaded, wasm_hash, |name, _| name == module_name);
     if patched == 0 {
-        anyhow::bail!("module '{}' missing from manifest", MODULE_NAME);
+        anyhow::bail!("module '{module_name}' for workflow '{MODULE_NAME}' missing from manifest");
     }
 
     Ok(loaded)

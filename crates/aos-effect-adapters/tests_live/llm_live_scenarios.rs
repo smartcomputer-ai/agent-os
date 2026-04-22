@@ -32,7 +32,6 @@ pub(crate) async fn run_plain_completion(case: &ProviderRuntime) {
         .execute(&build_intent(&params))
         .await
         .expect("execute");
-    assert_eq!(receipt.adapter_id, format!("host.llm.{}", case.provider_id));
 
     let payload = assert_ok_receipt(&store, case, "plain completion", &receipt);
     assert_eq!(payload.provider_id, case.provider_id);

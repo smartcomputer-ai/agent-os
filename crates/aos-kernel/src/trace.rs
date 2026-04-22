@@ -18,11 +18,11 @@ pub struct TraceQuery {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TraceRouteDiagnostics {
-    pub strict_effect_bindings: bool,
+    pub strict_effect_routes: bool,
     pub compatibility_fallback_enabled: bool,
     pub world_requires: std::collections::BTreeMap<String, String>,
     pub host_provides: std::collections::BTreeMap<String, String>,
-    pub compatibility_fallback_kinds: Vec<String>,
+    pub compatibility_fallback_effects: Vec<String>,
 }
 
 pub fn trace_get<S: Store + 'static>(
@@ -137,7 +137,10 @@ pub fn trace_get<S: Store + 'static>(
         .iter()
         .filter_map(|effect| {
             aos_effects::EffectIntent::from_raw_params(
-                effect.effect_kind.clone().into(),
+                effect
+                    .executor_entrypoint
+                    .clone()
+                    .unwrap_or_else(|| effect.effect.clone()),
                 effect.params_cbor.clone(),
                 effect.idempotency_key,
             )
@@ -227,7 +230,7 @@ pub fn trace_get<S: Store + 'static>(
                     "inflight_intents": instance.inflight_intents.into_iter().map(|intent| {
                         json!({
                             "intent_hash": hash_bytes_hex(&intent.intent_id),
-                            "effect_kind": intent.effect_kind,
+                            "effect": intent.effect,
                             "origin_module_id": intent.origin_module_id,
                             "origin_instance_key_b64": intent.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
                             "emitted_at_seq": intent.emitted_at_seq,
@@ -241,7 +244,7 @@ pub fn trace_get<S: Store + 'static>(
                 json!({
                     "intent_hash": hash_bytes_hex(&pending.intent_hash),
                     "origin_module_id": pending.origin_module_id,
-                    "effect_kind": pending.effect_kind,
+                    "effect": pending.effect,
                     "origin_instance_key_b64": pending.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
                     "emitted_at_seq": pending.emitted_at_seq,
                 })
@@ -249,7 +252,7 @@ pub fn trace_get<S: Store + 'static>(
             "queued_effects": queued_effects.into_iter().map(|queued| {
                 json!({
                     "intent_hash": hash_bytes_hex(&queued.intent_hash),
-                    "kind": queued.kind,
+                    "effect": queued.effect,
                 })
             }).collect::<Vec<_>>(),
             "strict_quiescence": {
@@ -263,7 +266,7 @@ pub fn trace_get<S: Store + 'static>(
                         json!({
                             "instance_id": instance_id,
                             "intent_hash": hash_bytes_hex(&intent.intent_id),
-                            "effect_kind": intent.effect_kind,
+                            "effect": intent.effect,
                             "emitted_at_seq": intent.emitted_at_seq,
                             "last_stream_seq": intent.last_stream_seq,
                             "age_events": journal_head.saturating_sub(intent.emitted_at_seq),
@@ -328,7 +331,10 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
         .iter()
         .filter_map(|effect| {
             aos_effects::EffectIntent::from_raw_params(
-                effect.effect_kind.clone().into(),
+                effect
+                    .executor_entrypoint
+                    .clone()
+                    .unwrap_or_else(|| effect.effect.clone()),
                 effect.params_cbor.clone(),
                 effect.idempotency_key,
             )
@@ -359,7 +365,7 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
                 "intent_hash": hash_bytes_hex(&intent.intent_id),
                 "origin_module_id": intent.origin_module_id,
                 "origin_instance_key_b64": intent.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
-                "effect_kind": intent.effect_kind,
+                "effect": intent.effect,
                 "emitted_at_seq": intent.emitted_at_seq,
                 "last_stream_seq": intent.last_stream_seq,
             }));
@@ -368,11 +374,11 @@ pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
 
     let adapter_routes = route_diagnostics.map(|diag| {
         json!({
-            "strict_effect_bindings": diag.strict_effect_bindings,
+            "strict_effect_routes": diag.strict_effect_routes,
             "compatibility_fallback_enabled": diag.compatibility_fallback_enabled,
             "world_requires": diag.world_requires,
             "host_provides": diag.host_provides,
-            "compatibility_fallback_kinds": diag.compatibility_fallback_kinds,
+            "compatibility_fallback_effects": diag.compatibility_fallback_effects,
         })
     });
 

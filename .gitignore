@@ -13,6 +13,7 @@ notes-world/
 profile.json.gz
 modules/
 roadmap/v0.17-kafka/kafka-examples/
+.codex
 
 # Local third-party runtime bundles downloaded for Fabric development.
 third_party/.cache/

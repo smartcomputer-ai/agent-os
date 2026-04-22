@@ -5,15 +5,15 @@
 #![allow(dead_code)]
 
 use aos_air_types::{
-    DefSchema, EmptyObject, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveInt,
-    TypePrimitiveText, TypeRecord, TypeRef, TypeVariant, WorkflowAbi,
+    DefSchema, EmptyObject, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText,
+    TypeRecord, TypeRef, TypeVariant,
 };
 use aos_effects::builtins::TimerSetParams;
 #[path = "fixtures.rs"]
 pub mod fixtures;
 
 use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
-use fixtures::{START_SCHEMA, TestStore, zero_hash};
+use fixtures::{START_SCHEMA, TestStore, WorkflowAbi, zero_hash};
 use indexmap::IndexMap;
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         state: Some(vec![0x01]),
         domain_events: vec![],
         effects: vec![WorkflowEffect::new(
-            aos_effects::EffectKind::TIMER_SET,
+            "sys/timer.set@1",
             serde_cbor::to_vec(&TimerSetParams {
                 deliver_at_ns: 5,
                 key: Some("retry".into()),
@@ -55,7 +55,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         event: fixtures::schema(timer_event_schema),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        effects_emitted: vec![aos_effects::effect_ops::TIMER_SET.into()],
     });
     timer_handler.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),

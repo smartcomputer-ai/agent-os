@@ -10,8 +10,8 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const HTTP_REQUEST_EFFECT: &str = "http.request";
-const TIMER_SET_EFFECT: &str = "timer.set";
+const HTTP_REQUEST_EFFECT: &str = "sys/http.request@1";
+const TIMER_SET_EFFECT: &str = "sys/timer.set@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RetryState {
@@ -82,7 +82,6 @@ struct HttpRequestReceipt {
     headers: BTreeMap<String, String>,
     body_ref: Option<String>,
     timings: RequestTimings,
-    adapter_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,8 +135,8 @@ fn handle_receipt(
     ctx: &mut WorkflowCtx<RetryState, ()>,
     envelope: EffectReceiptEnvelope,
 ) -> Result<(), ReduceError> {
-    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
-        if envelope.effect_kind == TIMER_SET_EFFECT && matches!(ctx.state.pc, Pc::Backoff) {
+    if envelope.effect != HTTP_REQUEST_EFFECT {
+        if envelope.effect == TIMER_SET_EFFECT && matches!(ctx.state.pc, Pc::Backoff) {
             let receipt: TimerSetReceipt = envelope
                 .decode_receipt_payload()
                 .map_err(|_| ReduceError::new("invalid timer.set receipt payload"))?;
@@ -189,7 +188,7 @@ fn emit_http_request(ctx: &mut WorkflowCtx<RetryState, ()>) {
         headers,
         body_ref: None,
     };
-    ctx.effects().emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+    ctx.effects().emit_raw(HTTP_REQUEST_EFFECT, &params);
 }
 
 fn schedule_retry(ctx: &mut WorkflowCtx<RetryState, ()>) {
@@ -203,5 +202,5 @@ fn schedule_retry(ctx: &mut WorkflowCtx<RetryState, ()>) {
         key: Some(ctx.state.req_id.clone()),
     };
     ctx.state.timers_scheduled = ctx.state.timers_scheduled.saturating_add(1);
-    ctx.effects().sys().timer_set(&params, "default");
+    ctx.effects().sys().timer_set(&params);
 }

@@ -170,14 +170,14 @@ fn handle_start(ctx: &mut WorkflowCtx<FabricExecProgressState, ()>, event: Start
         stdin_ref: None::<HashRef>,
         output_mode: Some("require_inline".into()),
     };
-    ctx.effects().sys().host_exec(&params, "default");
+    ctx.effects().sys().host_exec(&params);
 }
 
 fn handle_stream(
     ctx: &mut WorkflowCtx<FabricExecProgressState, ()>,
     frame: EffectStreamFrameEnvelope,
 ) -> Result<(), ReduceError> {
-    if frame.effect_kind != "host.exec" || frame.kind != "host.exec.progress" {
+    if frame.effect != "sys/host.exec@1" || frame.kind != "host.exec.progress" {
         return Ok(());
     }
     ctx.state.progress_frames = ctx.state.progress_frames.saturating_add(1);
@@ -194,7 +194,7 @@ fn handle_receipt(
     ctx: &mut WorkflowCtx<FabricExecProgressState, ()>,
     envelope: EffectReceiptEnvelope,
 ) -> Result<(), ReduceError> {
-    if envelope.effect_kind != "host.exec" {
+    if envelope.effect != "sys/host.exec@1" {
         return Ok(());
     }
     ctx.state.pc = FabricExecProgressPc::Done;
@@ -225,6 +225,7 @@ mod tests {
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111"
                     .into(),
             workflow: "demo/FabricExecProgress@1".into(),
+            workflow_hash: None,
             key: None,
             cell_mode: false,
         };
@@ -259,7 +260,7 @@ mod tests {
         let state = start_out.state;
 
         let stream = FabricExecProgressEvent::StreamFrame(EffectStreamFrameEnvelope {
-            effect_kind: "host.exec".into(),
+            effect: "sys/host.exec@1".into(),
             seq: 1,
             kind: "host.exec.progress".into(),
             payload: serde_cbor::to_vec(&HostExecProgressFrame {
@@ -277,7 +278,7 @@ mod tests {
         let state = stream_out.state;
 
         let receipt = FabricExecProgressEvent::Receipt(EffectReceiptEnvelope {
-            effect_kind: "host.exec".into(),
+            effect: "sys/host.exec@1".into(),
             receipt_payload: serde_cbor::to_vec(&HostExecReceipt {
                 exit_code: 0,
                 status: "ok".into(),

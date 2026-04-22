@@ -73,8 +73,7 @@
       "variant": {
         "Effect": {
           "record": {
-            "effect_kind": { "text": {} },
-            "cap_slot": { "option": { "text": {} } }
+            "effect": { "text": {} }
           }
         },
         "DomainEvent": {

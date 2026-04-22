@@ -334,8 +334,7 @@ pub struct DomainEventIngress {
 pub struct ReceiptIngress {
     #[serde(with = "serde_bytes")]
     pub intent_hash: Vec<u8>,
-    pub effect_kind: String,
-    pub adapter_id: String,
+    pub effect: String,
     pub status: ReceiptStatus,
     pub payload: CborPayload,
     #[serde(default, skip_serializing_if = "Option::is_none")]

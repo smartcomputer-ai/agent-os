@@ -2,170 +2,188 @@ use serde_json::json;
 use std::panic::{self, AssertUnwindSafe};
 
 use super::assert_json_schema;
-use crate::{DefModule, ModuleAbi, ModuleKind, SchemaRef, WorkflowAbi};
+use crate::{
+    AirNode, DefEffect, DefModule, DefWorkflow, ModuleRuntime, SchemaRef, WorkflowDeterminism,
+};
 
 #[test]
-fn parses_workflow_module_with_effect_allowlist() {
+fn parses_wasm_module_runtime() {
     let module_json = json!({
         "$kind": "defmodule",
-        "name": "com.acme/Workflow@1",
-        "module_kind": "workflow",
-        "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        "abi": {
-            "workflow": {
-                "state": "com.acme/State@1",
-                "event": "com.acme/Event@1",
-                "effects_emitted": ["http.request"]
+        "name": "com.acme/order_wasm@1",
+        "runtime": {
+            "kind": "wasm",
+            "artifact": {
+                "kind": "wasm_module",
+                "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
             }
         }
     });
     assert_json_schema(crate::schemas::DEFMODULE, &module_json);
     let module: DefModule = serde_json::from_value(module_json).expect("parse module");
-    assert_eq!(module.name, "com.acme/Workflow@1");
-    assert!(matches!(module.module_kind, ModuleKind::Workflow));
-    let workflow = module.abi.workflow.expect("workflow abi");
-    assert_eq!(workflow.state.as_str(), "com.acme/State@1");
+    assert_eq!(module.name, "com.acme/order_wasm@1");
+    assert!(matches!(module.runtime, ModuleRuntime::Wasm { .. }));
 }
 
 #[test]
-fn rejects_module_with_unknown_kind() {
+fn parses_wasm_module_runtime_without_hash_as_placeholder() {
+    let module_json = json!({
+        "$kind": "defmodule",
+        "name": "com.acme/order_wasm@1",
+        "runtime": {
+            "kind": "wasm",
+            "artifact": {
+                "kind": "wasm_module"
+            }
+        }
+    });
+    assert_json_schema(crate::schemas::DEFMODULE, &module_json);
+    let module: DefModule = serde_json::from_value(module_json).expect("parse module");
+    let ModuleRuntime::Wasm {
+        artifact: crate::WasmArtifact::WasmModule { hash },
+    } = module.runtime
+    else {
+        panic!("expected wasm module");
+    };
+    assert_eq!(
+        hash.as_str(),
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    );
+}
+
+#[test]
+fn parses_builtin_module_runtime() {
+    let module_json = json!({
+        "$kind": "defmodule",
+        "name": "sys/builtin_effects@1",
+        "runtime": { "kind": "builtin" }
+    });
+    assert_json_schema(crate::schemas::DEFMODULE, &module_json);
+    let module: DefModule = serde_json::from_value(module_json).expect("parse module");
+    assert!(matches!(module.runtime, ModuleRuntime::Builtin { .. }));
+}
+
+#[test]
+fn rejects_wasm_module_with_python_artifact() {
     let bad_module_json = json!({
         "$kind": "defmodule",
         "name": "com.acme/Workflow@1",
-        "module_kind": "plan",
-        "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        "abi": {}
+        "runtime": {
+            "kind": "wasm",
+            "artifact": {
+                "kind": "python_bundle",
+                "root_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }
+        }
     });
-    assert!(serde_json::from_value::<DefModule>(bad_module_json).is_err());
+    assert!(
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::DEFMODULE,
+            &bad_module_json
+        )))
+        .is_err(),
+        "schema should reject artifact kind that runtime cannot load"
+    );
 }
 
 #[test]
-fn workflow_abi_struct_round_trip() {
-    let abi = ModuleAbi {
-        workflow: Some(WorkflowAbi {
-            context: None,
-            state: SchemaRef::new("com.acme/State@1").unwrap(),
-            event: SchemaRef::new("com.acme/Event@1").unwrap(),
-            annotations: None,
-            effects_emitted: vec![crate::EffectKind::http_request()],
-        }),
-        pure: None,
+fn parses_workflow_with_effect_allowlist() {
+    let workflow_json = json!({
+        "$kind": "defworkflow",
+        "name": "com.acme/order.step@1",
+        "state": "com.acme/State@1",
+        "event": "com.acme/Event@1",
+        "key_schema": "com.acme/OrderId@1",
+        "effects_emitted": ["sys/timer.set@1"],
+        "impl": {
+            "module": "com.acme/order_wasm@1",
+            "entrypoint": "order_step"
+        }
+    });
+    assert_json_schema(crate::schemas::DEFWORKFLOW, &workflow_json);
+    let workflow: DefWorkflow = serde_json::from_value(workflow_json).expect("parse workflow");
+    assert_eq!(workflow.state.as_str(), "com.acme/State@1");
+    assert_eq!(workflow.effects_emitted, vec!["sys/timer.set@1"]);
+}
+
+#[test]
+fn workflow_struct_round_trip() {
+    let workflow = DefWorkflow {
+        name: "com.acme/order.step@1".into(),
+        context: None,
+        state: SchemaRef::new("com.acme/State@1").unwrap(),
+        event: SchemaRef::new("com.acme/Event@1").unwrap(),
+        annotations: None,
+        key_schema: None,
+        effects_emitted: Vec::new(),
+        determinism: WorkflowDeterminism::Strict,
+        implementation: crate::Impl {
+            module: "com.acme/order_wasm@1".into(),
+            entrypoint: "order_step".into(),
+        },
     };
-    let json = serde_json::to_value(&abi).expect("serialize");
-    let round_trip: ModuleAbi = serde_json::from_value(json).expect("deserialize");
-    assert!(round_trip.workflow.is_some());
+    let json = serde_json::to_value(&workflow).expect("serialize");
+    let round_trip: DefWorkflow = serde_json::from_value(json).expect("deserialize");
+    assert_eq!(round_trip.effects_emitted.len(), 0);
 }
 
 #[test]
-fn workflow_module_with_annotations_and_key_schema_validates() {
-    let module_json = json!({
-        "$kind": "defmodule",
-        "name": "com.acme/Workflow@2",
-        "module_kind": "workflow",
-        "wasm_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-        "key_schema": "com.acme/Key@1",
-        "abi": {
-            "workflow": {
-                "state": "com.acme/State@1",
-                "event": "com.acme/Event@1",
-                "annotations": "com.acme/Annotations@1",
-                "effects_emitted": ["http.request", "timer.set"]
-            }
-        }
-    });
-    assert_json_schema(crate::schemas::DEFMODULE, &module_json);
-    let module: DefModule = serde_json::from_value(module_json).expect("module json");
-    assert_eq!(
-        module.key_schema.as_ref().unwrap().as_str(),
-        "com.acme/Key@1"
-    );
-    let workflow = module.abi.workflow.expect("workflow abi");
-    assert_eq!(workflow.effects_emitted.len(), 2);
-}
-
-#[test]
-fn workflow_module_without_abi_is_rejected_by_schema() {
-    let module_json = json!({
-        "$kind": "defmodule",
-        "name": "com.acme/Workflow@1",
-        "module_kind": "workflow",
-        "wasm_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-        "abi": {}
-    });
-    assert!(
-        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
-            crate::schemas::DEFMODULE,
-            &module_json
-        )))
-        .is_err(),
-        "schema should reject workflow modules missing workflow ABI"
-    );
-}
-
-#[test]
-fn parses_pure_module() {
-    let module_json = json!({
-        "$kind": "defmodule",
-        "name": "com.acme/Pure@1",
-        "module_kind": "pure",
-        "wasm_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-        "abi": {
-            "pure": {
-                "input": "com.acme/Input@1",
-                "output": "com.acme/Output@1",
-                "context": "sys/PureContext@1"
-            }
-        }
-    });
-    assert_json_schema(crate::schemas::DEFMODULE, &module_json);
-    let module: DefModule = serde_json::from_value(module_json).expect("parse module");
-    assert!(matches!(module.module_kind, ModuleKind::Pure));
-    let pure = module.abi.pure.expect("pure abi");
-    assert_eq!(pure.input.as_str(), "com.acme/Input@1");
-}
-
-#[test]
-fn pure_module_without_abi_is_rejected_by_schema() {
-    let module_json = json!({
-        "$kind": "defmodule",
-        "name": "com.acme/Pure@1",
-        "module_kind": "pure",
-        "wasm_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
-        "abi": {}
-    });
-    assert!(
-        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
-            crate::schemas::DEFMODULE,
-            &module_json
-        )))
-        .is_err(),
-        "schema should reject pure modules missing pure ABI"
-    );
-}
-
-#[test]
-fn workflow_cap_slots_are_rejected_by_schema() {
-    let module_json = json!({
-        "$kind": "defmodule",
-        "name": "com.acme/Workflow@1",
-        "module_kind": "workflow",
-        "wasm_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-        "abi": {
-            "workflow": {
-                "state": "com.acme/State@1",
-                "event": "com.acme/Event@1",
-                "cap_slots": {
-                    "1invalid": "http.out"
-                }
-            }
+fn workflow_requires_effects_emitted() {
+    let workflow_json = json!({
+        "$kind": "defworkflow",
+        "name": "com.acme/order.step@1",
+        "state": "com.acme/State@1",
+        "event": "com.acme/Event@1",
+        "impl": {
+            "module": "com.acme/order_wasm@1",
+            "entrypoint": "order_step"
         }
     });
     assert!(
         panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
-            crate::schemas::DEFMODULE,
-            &module_json
+            crate::schemas::DEFWORKFLOW,
+            &workflow_json
         )))
         .is_err(),
-        "schema should reject legacy cap_slots"
+        "canonical workflows must include effects_emitted"
     );
+}
+
+#[test]
+fn rejects_defop_root_form() {
+    let op_json = json!({
+        "$kind": "defop",
+        "name": "com.acme/order.step@1",
+        "op_kind": "workflow",
+        "workflow": {
+            "state": "com.acme/State@1",
+            "event": "com.acme/Event@1",
+            "effects_emitted": []
+        },
+        "impl": {
+            "module": "com.acme/order_wasm@1",
+            "entrypoint": "order_step"
+        }
+    });
+    assert!(
+        serde_json::from_value::<AirNode>(op_json).is_err(),
+        "defop is not a public AIR v2 root form"
+    );
+}
+
+#[test]
+fn parses_effect() {
+    let effect_json = json!({
+        "$kind": "defeffect",
+        "name": "com.acme/slack.post@1",
+        "params": "com.acme/SlackPostParams@1",
+        "receipt": "com.acme/SlackPostReceipt@1",
+        "impl": {
+            "module": "com.acme/order_bundle@1",
+            "entrypoint": "orders.effects:post_to_slack"
+        }
+    });
+    assert_json_schema(crate::schemas::DEFEFFECT, &effect_json);
+    let effect: DefEffect = serde_json::from_value(effect_json).expect("parse effect");
+    assert_eq!(effect.params.as_str(), "com.acme/SlackPostParams@1");
 }

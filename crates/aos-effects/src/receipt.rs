@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-/// Signed adapter receipt referencing an effect intent hash.
+/// Signed receipt referencing an effect intent hash.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectReceipt {
     pub intent_hash: [u8; 32],
-    pub adapter_id: String,
     pub status: ReceiptStatus,
     #[serde(with = "serde_bytes")]
     pub payload_cbor: Vec<u8>,
@@ -52,7 +51,6 @@ mod tests {
         let payload = serde_cbor::to_vec(&DummyReceipt { ok: true }).unwrap();
         let receipt = EffectReceipt {
             intent_hash: [1u8; 32],
-            adapter_id: "adapter.http".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: payload,
             cost_cents: Some(42),
@@ -67,7 +65,6 @@ mod tests {
         let payload = aos_cbor::to_canonical_cbor(&Option::<DummyReceipt>::None).unwrap();
         let receipt = EffectReceipt {
             intent_hash: [2u8; 32],
-            adapter_id: "adapter.workspace".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: payload,
             cost_cents: Some(0),
@@ -82,7 +79,6 @@ mod tests {
         let payload = aos_cbor::to_canonical_cbor(&Option::<DummyReceipt>::None).unwrap();
         let receipt = EffectReceipt {
             intent_hash: [3u8; 32],
-            adapter_id: "adapter.workspace".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: payload,
             cost_cents: Some(0),

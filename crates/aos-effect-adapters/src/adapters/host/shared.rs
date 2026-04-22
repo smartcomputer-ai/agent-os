@@ -19,16 +19,14 @@ pub(crate) fn now_wallclock_ns() -> u64 {
 
 pub(crate) fn build_receipt<T: serde::Serialize>(
     intent: &EffectIntent,
-    adapter_id: &str,
     status: ReceiptStatus,
     payload: &T,
 ) -> anyhow::Result<EffectReceipt> {
     Ok(EffectReceipt {
         intent_hash: intent.intent_hash,
-        adapter_id: adapter_id.into(),
         status,
         payload_cbor: serde_cbor::to_vec(payload)
-            .with_context(|| format!("encode {} payload", intent.kind.as_str()))?,
+            .with_context(|| format!("encode {} payload", intent.effect))?,
         cost_cents: Some(0),
         signature: vec![0; 64],
     })

@@ -1,52 +1,94 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aos.dev/air/v1/defmodule.schema.json",
-  "title": "AIR v1 defmodule",
+  "$id": "https://aos.dev/air/v2/defmodule.schema.json",
+  "title": "AIR v2 defmodule",
   "type": "object",
   "properties": {
     "$kind": { "const": "defmodule" },
     "name": { "$ref": "common.schema.json#/$defs/Name" },
-    "module_kind": { "type": "string", "enum": ["workflow", "pure"] },
-    "wasm_hash": { "$ref": "common.schema.json#/$defs/Hash" },
-    "key_schema": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-    "abi": {
+    "runtime": { "$ref": "#/$defs/Runtime" }
+  },
+  "required": ["$kind", "name", "runtime"],
+  "additionalProperties": false,
+  "$defs": {
+    "Runtime": {
+      "type": "object",
+      "oneOf": [
+        { "$ref": "#/$defs/WasmRuntime" },
+        { "$ref": "#/$defs/PythonRuntime" },
+        { "$ref": "#/$defs/BuiltinRuntime" }
+      ]
+    },
+    "WasmRuntime": {
       "type": "object",
       "properties": {
-        "workflow": {
-          "type": "object",
-          "properties": {
-            "state": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-            "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-            "context": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-            "annotations": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-            "effects_emitted": {
-              "type": "array",
-              "items": { "$ref": "common.schema.json#/$defs/EffectKind" }
-            }
-          },
-          "required": ["state","event"],
-          "additionalProperties": false
+        "kind": { "const": "wasm" },
+        "artifact": { "$ref": "#/$defs/WasmModuleArtifact" }
+      },
+      "required": ["kind", "artifact"],
+      "additionalProperties": false
+    },
+    "PythonRuntime": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "python" },
+        "python": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$"
         },
-        "pure": {
-          "type": "object",
-          "properties": {
-            "input": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-            "output": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-            "context": { "$ref": "common.schema.json#/$defs/SchemaRef" }
-          },
-          "required": ["input","output"],
-          "additionalProperties": false
+        "artifact": { "$ref": "#/$defs/PythonArtifact" }
+      },
+      "required": ["kind", "python", "artifact"],
+      "additionalProperties": false
+    },
+    "BuiltinRuntime": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "builtin" }
+      },
+      "required": ["kind"],
+      "additionalProperties": false
+    },
+    "PythonArtifact": {
+      "type": "object",
+      "oneOf": [
+        { "$ref": "#/$defs/PythonBundleArtifact" },
+        { "$ref": "#/$defs/WorkspaceRootArtifact" }
+      ]
+    },
+    "WasmModuleArtifact": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "wasm_module" },
+        "hash": {
+          "$ref": "common.schema.json#/$defs/Hash",
+          "description": "Optional in authored AIR. When omitted, loaders use the placeholder wasm hash until the compiled module hash is supplied."
         }
       },
+      "required": ["kind"],
+      "additionalProperties": false
+    },
+    "PythonBundleArtifact": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "python_bundle" },
+        "root_hash": { "$ref": "common.schema.json#/$defs/Hash" }
+      },
+      "required": ["kind", "root_hash"],
+      "additionalProperties": false
+    },
+    "WorkspaceRootArtifact": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "workspace_root" },
+        "root_hash": { "$ref": "common.schema.json#/$defs/Hash" },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["kind", "root_hash"],
       "additionalProperties": false
     }
-  },
-  "required": ["$kind","name","module_kind","wasm_hash","abi"],
-  "allOf": [
-    { "if": { "properties": { "module_kind": { "const": "workflow" } } },
-      "then": { "required": ["abi"], "properties": { "abi": { "required": ["workflow"] } } } },
-    { "if": { "properties": { "module_kind": { "const": "pure" } } },
-      "then": { "required": ["abi"], "properties": { "abi": { "required": ["pure"] } } } }
-  ],
-  "additionalProperties": false
+  }
 }

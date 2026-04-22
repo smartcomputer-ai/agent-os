@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    self as air_types, AirNode, DefEffect, DefModule, DefSchema, DefSecret, HashRef, Manifest,
-    Name, NamedRef, SecretEntry,
+    AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, HashRef, Manifest, Name,
+    NamedRef, builtins,
 };
 use aos_cbor::Hash;
 use aos_kernel::{LoadedManifest, ManifestLoader, Store};
@@ -55,6 +55,7 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
     let mut schemas: Vec<DefSchema> = Vec::new();
     let mut modules: Vec<DefModule> = Vec::new();
     let mut secrets: Vec<DefSecret> = Vec::new();
+    let mut workflows: Vec<DefWorkflow> = Vec::new();
     let mut effects: Vec<DefEffect> = Vec::new();
 
     let mut roots = Vec::with_capacity(import_roots.len() + 1);
@@ -91,6 +92,7 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
                         AirNode::Defschema(schema) => schemas.push(schema),
                         AirNode::Defmodule(module) => modules.push(module),
                         AirNode::Defsecret(secret) => secrets.push(secret),
+                        AirNode::Defworkflow(workflow) => workflows.push(workflow),
                         AirNode::Defeffect(effect) => effects.push(effect),
                     }
                 }
@@ -110,6 +112,7 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
         schemas,
         modules,
         secrets.clone(),
+        workflows,
         effects,
     )?;
     patch_manifest_refs(&mut manifest, &hashes)?;
@@ -124,6 +127,7 @@ fn write_nodes<S: Store + ?Sized>(
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
     secrets: Vec<DefSecret>,
+    workflows: Vec<DefWorkflow>,
     effects: Vec<DefEffect>,
 ) -> Result<StoredHashes> {
     let mut hashes = StoredHashes::default();
@@ -156,6 +160,16 @@ fn write_nodes<S: Store + ?Sized>(
             .put_node(&AirNode::Defsecret(secret))
             .context("store defsecret node")?;
         insert_or_verify_hash("defsecret", &mut hashes.secrets, name, hash)?;
+    }
+    for workflow in workflows {
+        let name = workflow.name.clone();
+        if !allow_reserved_sys {
+            reject_sys_name("defworkflow", name.as_str())?;
+        }
+        let hash = store
+            .put_node(&AirNode::Defworkflow(workflow))
+            .context("store defworkflow node")?;
+        insert_or_verify_hash("defworkflow", &mut hashes.workflows, name, hash)?;
     }
     for effect in effects {
         let name = effect.name.clone();
@@ -203,6 +217,7 @@ fn reject_sys_name(kind: &str, name: &str) -> Result<()> {
 struct StoredHashes {
     schemas: HashMap<Name, HashRef>,
     modules: HashMap<Name, HashRef>,
+    workflows: HashMap<Name, HashRef>,
     effects: HashMap<Name, HashRef>,
     secrets: HashMap<Name, HashRef>,
 }
@@ -217,24 +232,10 @@ struct AssetRoot {
 fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result<()> {
     patch_named_refs("schema", &mut manifest.schemas, &hashes.schemas)?;
     patch_named_refs("module", &mut manifest.modules, &hashes.modules)?;
+    patch_named_refs("workflow", &mut manifest.workflows, &hashes.workflows)?;
     patch_named_refs("effect", &mut manifest.effects, &hashes.effects)?;
-    let mut secret_refs = secrets_as_named_refs(&manifest.secrets)?;
-    patch_named_refs("secret", &mut secret_refs, &hashes.secrets)?;
-    manifest.secrets = secret_refs.into_iter().map(SecretEntry::Ref).collect();
+    patch_named_refs("secret", &mut manifest.secrets, &hashes.secrets)?;
     Ok(())
-}
-
-fn secrets_as_named_refs(entries: &[SecretEntry]) -> Result<Vec<NamedRef>> {
-    let mut refs = Vec::new();
-    for entry in entries {
-        match entry {
-            SecretEntry::Ref(r) => refs.push(r.clone()),
-            SecretEntry::Decl(_) => {
-                bail!("inline secret declarations are unsupported; provide defsecret nodes instead")
-            }
-        }
-    }
-    Ok(refs)
 }
 
 fn patch_named_refs(
@@ -245,20 +246,22 @@ fn patch_named_refs(
     for reference in refs {
         let actual = if let Some(found) = hashes.get(reference.name.as_str()) {
             found.clone()
-        } else if let Some(builtin) =
-            air_types::builtins::find_builtin_schema(reference.name.as_str())
-        {
+        } else if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
             builtin.hash_ref.clone()
+        } else if kind == "workflow" {
+            if let Some(builtin) = builtins::find_builtin_workflow(reference.name.as_str()) {
+                builtin.hash_ref.clone()
+            } else {
+                bail!("manifest references unknown {kind} '{}'", reference.name);
+            }
         } else if kind == "effect" {
-            if let Some(builtin) = air_types::builtins::find_builtin_effect(reference.name.as_str())
-            {
+            if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
                 builtin.hash_ref.clone()
             } else {
                 bail!("manifest references unknown {kind} '{}'", reference.name);
             }
         } else if kind == "module" {
-            if let Some(builtin) = air_types::builtins::find_builtin_module(reference.name.as_str())
-            {
+            if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
                 builtin.hash_ref.clone()
             } else {
                 bail!("manifest references unknown {kind} '{}'", reference.name);
@@ -282,7 +285,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
             if let Some(Value::String(kind)) = map.get("$kind") {
                 match kind.as_str() {
                     "manifest" => normalize_manifest_authoring(map),
-                    "defmodule" => ensure_hash_field(map, "wasm_hash"),
+                    "defmodule" => ensure_module_artifact_hash(map),
                     _ => {}
                 }
             }
@@ -295,7 +298,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in ["schemas", "modules", "effects", "secrets"] {
+    for key in ["schemas", "modules", "workflows", "effects", "secrets"] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {
@@ -303,6 +306,21 @@ fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
                 }
             }
         }
+    }
+}
+
+fn ensure_module_artifact_hash(map: &mut serde_json::Map<String, Value>) {
+    let Some(Value::Object(runtime)) = map.get_mut("runtime") else {
+        return;
+    };
+    if runtime.get("kind").and_then(Value::as_str) != Some("wasm") {
+        return;
+    }
+    let Some(Value::Object(artifact)) = runtime.get_mut("artifact") else {
+        return;
+    };
+    if artifact.get("kind").and_then(Value::as_str) == Some("wasm_module") {
+        ensure_hash_field(artifact, "hash");
     }
 }
 

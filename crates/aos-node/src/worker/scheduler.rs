@@ -4,8 +4,7 @@ use aos_kernel::WorldControl;
 use aos_kernel::WorldInput;
 use aos_node::{
     EffectRuntimeEvent, HostControl, JournalBackend, SubmissionEnvelope, SubmissionPayload,
-    SubmissionRejection, WorldId, WorldLogFrame, classify_effect_kind,
-    validate_create_world_request,
+    SubmissionRejection, WorldId, WorldLogFrame, validate_create_world_request,
 };
 
 use super::core::{
@@ -1020,12 +1019,7 @@ impl HostedWorkerCore {
         if slice.checkpoint.is_some() {
             return true;
         }
-        if slice.opened_effects.iter().any(|opened| {
-            matches!(
-                classify_effect_kind(opened.intent.kind.as_str()),
-                aos_node::EffectExecutionClass::InlineInternal
-            )
-        }) {
+        if !slice.opened_effects.is_empty() {
             return true;
         }
         match slice.original_item.as_ref() {
@@ -1098,8 +1092,9 @@ mod tests {
             air_version: CURRENT_AIR_VERSION.to_string(),
             schemas: Vec::new(),
             modules: Vec::new(),
+            ops: Vec::new(),
+            workflows: Vec::new(),
             effects: Vec::new(),
-            effect_bindings: Vec::new(),
             secrets: Vec::new(),
             routing: None,
         };

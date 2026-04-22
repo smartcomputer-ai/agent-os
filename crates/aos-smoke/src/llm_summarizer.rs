@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use aos_air_types::HashRef;
 use aos_effects::builtins::{LlmFinishReason, LlmGenerateReceipt, TokenUsage};
-use aos_effects::{EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectReceipt, ReceiptStatus, effect_ops};
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
@@ -81,7 +81,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let intents = host.kernel_mut().drain_effects()?;
     let llm_intent = intents
         .into_iter()
-        .find(|intent| intent.kind.as_str() == EffectKind::LLM_GENERATE)
+        .find(|intent| intent.effect.as_str() == effect_ops::LLM_GENERATE)
         .ok_or_else(|| anyhow!("expected one llm.generate intent"))?;
 
     let output_ref =
@@ -107,7 +107,6 @@ pub fn run(example_root: &Path) -> Result<()> {
     };
     host.kernel_mut().handle_receipt(EffectReceipt {
         intent_hash: llm_intent.intent_hash,
-        adapter_id: "mock.llm".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&llm_receipt_payload)?,
         cost_cents: Some(0),

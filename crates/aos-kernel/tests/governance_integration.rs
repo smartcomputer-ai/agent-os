@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use aos_air_types::{AirNode, DefSchema, WorkflowAbi};
+use aos_air_types::{AirNode, DefSchema};
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
 use aos_kernel::shadow::ShadowHarness;
 use aos_wasm_abi::WorkflowOutput;
-use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
+use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld, WorkflowAbi};
 use indexmap::IndexMap;
 
 #[path = "support/helpers.rs"]
@@ -252,6 +252,7 @@ fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> 
         .cloned()
         .map(AirNode::Defmodule)
         .collect();
+    nodes.extend(loaded.workflows.values().cloned().map(AirNode::Defworkflow));
     nodes.extend(loaded.effects.values().cloned().map(AirNode::Defeffect));
     nodes.extend(loaded.schemas.values().cloned().map(AirNode::Defschema));
 

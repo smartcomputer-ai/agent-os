@@ -21,10 +21,10 @@ def _intent_hash(effect: Mapping[str, Any]) -> bytes:
     raise TypeError("effect.intent_hash must be bytes or a list of byte values")
 
 
-def _require_kind(effect: Mapping[str, Any], expected: str) -> None:
-    kind = effect.get("kind")
-    if kind != expected:
-        raise ValueError(f"expected effect kind {expected!r}, got {kind!r}")
+def _require_effect(effect: Mapping[str, Any], expected: str) -> None:
+    actual = effect.get("effect")
+    if actual != expected:
+        raise ValueError(f"expected effect {expected!r}, got {actual!r}")
 
 
 def timer_set_ok(
@@ -34,7 +34,7 @@ def timer_set_ok(
     delivered_at_ns: int,
     key: Optional[str] = None,
 ) -> ReceiptObject:
-    _require_kind(effect, "timer.set")
+    _require_effect(effect, "sys/timer.set@1")
     return harness.receipt_timer_set_ok(_intent_hash(effect), delivered_at_ns, key)
 
 
@@ -46,7 +46,7 @@ def blob_put_ok(
     edge_ref: str,
     size: int,
 ) -> ReceiptObject:
-    _require_kind(effect, "blob.put")
+    _require_effect(effect, "sys/blob.put@1")
     return harness.receipt_blob_put_ok(_intent_hash(effect), blob_ref, edge_ref, size)
 
 
@@ -58,7 +58,7 @@ def blob_get_ok(
     data: bytes,
     size: Optional[int] = None,
 ) -> ReceiptObject:
-    _require_kind(effect, "blob.get")
+    _require_effect(effect, "sys/blob.get@1")
     return harness.receipt_blob_get_ok(_intent_hash(effect), blob_ref, data, size)
 
 
@@ -69,15 +69,13 @@ def http_request_ok(
     status: int,
     headers: Optional[JsonValue] = None,
     body_ref: Optional[str] = None,
-    adapter_id: str = "adapter.http.harness",
     start_ns: Optional[int] = None,
     end_ns: Optional[int] = None,
 ) -> ReceiptObject:
-    _require_kind(effect, "http.request")
+    _require_effect(effect, "sys/http.request@1")
     return harness.receipt_http_request_ok(
         _intent_hash(effect),
         status,
-        adapter_id=adapter_id,
         headers=headers,
         body_ref=body_ref,
         start_ns=start_ns,
@@ -101,7 +99,7 @@ def llm_generate_ok(
     warnings_ref: Optional[str] = None,
     rate_limit_ref: Optional[str] = None,
 ) -> ReceiptObject:
-    _require_kind(effect, "llm.generate")
+    _require_effect(effect, "sys/llm.generate@1")
     return harness.receipt_llm_generate_ok(
         _intent_hash(effect),
         output_ref,

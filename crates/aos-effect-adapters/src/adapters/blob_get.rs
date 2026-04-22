@@ -21,7 +21,7 @@ impl<S: Store> BlobGetAdapter<S> {
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for BlobGetAdapter<S> {
     fn kind(&self) -> &str {
-        aos_effects::EffectKind::BLOB_GET
+        aos_effects::effect_ops::BLOB_GET
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -35,7 +35,6 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for BlobGetAdapter<S> 
         };
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "host.blob.get".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&receipt)?,
             cost_cents: Some(0),

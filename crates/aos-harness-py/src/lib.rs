@@ -171,7 +171,6 @@ fn receipt_status_name(status: &ReceiptStatus) -> &'static str {
 fn receipt_to_py(py: Python<'_>, receipt: &EffectReceipt) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("intent_hash", PyBytes::new(py, &receipt.intent_hash))?;
-    dict.set_item("adapter_id", &receipt.adapter_id)?;
     dict.set_item("status", receipt_status_name(&receipt.status))?;
     dict.set_item("payload_cbor", PyBytes::new(py, &receipt.payload_cbor))?;
     dict.set_item("cost_cents", receipt.cost_cents)?;
@@ -186,10 +185,6 @@ fn receipt_from_py(receipt: &Bound<'_, PyAny>) -> PyResult<EffectReceipt> {
     let intent_hash: Vec<u8> = receipt
         .get_item("intent_hash")?
         .ok_or_else(|| PyValueError::new_err("receipt.intent_hash is required"))?
-        .extract()?;
-    let adapter_id: String = receipt
-        .get_item("adapter_id")?
-        .ok_or_else(|| PyValueError::new_err("receipt.adapter_id is required"))?
         .extract()?;
     let status: String = receipt
         .get_item("status")?
@@ -210,7 +205,6 @@ fn receipt_from_py(receipt: &Bound<'_, PyAny>) -> PyResult<EffectReceipt> {
         .unwrap_or_default();
     Ok(EffectReceipt {
         intent_hash: parse_intent_hash(intent_hash)?,
-        adapter_id,
         status: parse_receipt_status(&status)?,
         payload_cbor,
         cost_cents,
@@ -237,19 +231,16 @@ trait CommonHarnessOps {
     fn receipt_ok(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError>;
     fn receipt_error(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError>;
     fn receipt_timeout(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError>;
     fn receipt_timer_set_ok(
@@ -339,28 +330,25 @@ impl CommonHarnessOps for NodeRuntimeWorldHarness {
     fn receipt_ok(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError> {
-        self.receipt_ok(intent_hash, adapter_id, payload)
+        self.receipt_ok(intent_hash, payload)
     }
 
     fn receipt_error(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError> {
-        self.receipt_error(intent_hash, adapter_id, payload)
+        self.receipt_error(intent_hash, payload)
     }
 
     fn receipt_timeout(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError> {
-        self.receipt_timeout(intent_hash, adapter_id, payload)
+        self.receipt_timeout(intent_hash, payload)
     }
 
     fn receipt_timer_set_ok(
@@ -461,28 +449,25 @@ impl CommonHarnessOps for RuntimeWorkflowHarness<MemStore> {
     fn receipt_ok(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError> {
-        self.receipt_ok(intent_hash, adapter_id, payload)
+        self.receipt_ok(intent_hash, payload)
     }
 
     fn receipt_error(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError> {
-        self.receipt_error(intent_hash, adapter_id, payload)
+        self.receipt_error(intent_hash, payload)
     }
 
     fn receipt_timeout(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt, HostError> {
-        self.receipt_timeout(intent_hash, adapter_id, payload)
+        self.receipt_timeout(intent_hash, payload)
     }
 
     fn receipt_timer_set_ok(
@@ -610,9 +595,33 @@ fn effect_intent_to_py_json(intent: &EffectIntent) -> PyResult<JsonValue> {
         .map_err(|err| py_runtime_error(format!("decode effect params: {err}")))?;
     let mut object = JsonMap::new();
     object.insert(
-        "kind".to_string(),
-        JsonValue::String(intent.kind.to_string()),
+        "effect".to_string(),
+        JsonValue::String(intent.effect.clone()),
     );
+    if let Some(effect_hash) = &intent.effect_hash {
+        object.insert(
+            "effect_hash".to_string(),
+            JsonValue::String(effect_hash.clone()),
+        );
+    }
+    if let Some(executor_module) = &intent.executor_module {
+        object.insert(
+            "executor_module".to_string(),
+            JsonValue::String(executor_module.clone()),
+        );
+    }
+    if let Some(executor_module_hash) = &intent.executor_module_hash {
+        object.insert(
+            "executor_module_hash".to_string(),
+            JsonValue::String(executor_module_hash.clone()),
+        );
+    }
+    if let Some(executor_entrypoint) = &intent.executor_entrypoint {
+        object.insert(
+            "executor_entrypoint".to_string(),
+            JsonValue::String(executor_entrypoint.clone()),
+        );
+    }
     object.insert(
         "intent_hash".to_string(),
         JsonValue::Array(
@@ -683,7 +692,6 @@ fn common_apply_receipt<H: CommonHarnessOps>(
     mutex: &Mutex<H>,
     label: &'static str,
     intent_hash: Vec<u8>,
-    adapter_id: &str,
     status: &str,
     payload_cbor: Vec<u8>,
     cost_cents: Option<u64>,
@@ -691,7 +699,6 @@ fn common_apply_receipt<H: CommonHarnessOps>(
 ) -> PyResult<()> {
     let receipt = EffectReceipt {
         intent_hash: parse_intent_hash(intent_hash)?,
-        adapter_id: adapter_id.to_string(),
         status: parse_receipt_status(status)?,
         payload_cbor,
         cost_cents,
@@ -707,15 +714,10 @@ fn common_receipt_ok<H: CommonHarnessOps>(
     label: &'static str,
     py: Python<'_>,
     intent_hash: Vec<u8>,
-    adapter_id: &str,
     payload: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyAny>> {
     let receipt = lock_harness(mutex, label)?
-        .receipt_ok(
-            parse_intent_hash(intent_hash)?,
-            adapter_id,
-            &py_any_to_json(payload)?,
-        )
+        .receipt_ok(parse_intent_hash(intent_hash)?, &py_any_to_json(payload)?)
         .map_err(host_to_py_error)?;
     receipt_to_py(py, &receipt)
 }
@@ -725,15 +727,10 @@ fn common_receipt_error<H: CommonHarnessOps>(
     label: &'static str,
     py: Python<'_>,
     intent_hash: Vec<u8>,
-    adapter_id: &str,
     payload: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyAny>> {
     let receipt = lock_harness(mutex, label)?
-        .receipt_error(
-            parse_intent_hash(intent_hash)?,
-            adapter_id,
-            &py_any_to_json(payload)?,
-        )
+        .receipt_error(parse_intent_hash(intent_hash)?, &py_any_to_json(payload)?)
         .map_err(host_to_py_error)?;
     receipt_to_py(py, &receipt)
 }
@@ -743,15 +740,10 @@ fn common_receipt_timeout<H: CommonHarnessOps>(
     label: &'static str,
     py: Python<'_>,
     intent_hash: Vec<u8>,
-    adapter_id: &str,
     payload: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyAny>> {
     let receipt = lock_harness(mutex, label)?
-        .receipt_timeout(
-            parse_intent_hash(intent_hash)?,
-            adapter_id,
-            &py_any_to_json(payload)?,
-        )
+        .receipt_timeout(parse_intent_hash(intent_hash)?, &py_any_to_json(payload)?)
         .map_err(host_to_py_error)?;
     receipt_to_py(py, &receipt)
 }
@@ -816,7 +808,6 @@ fn common_receipt_http_request_ok<H: CommonHarnessOps>(
     py: Python<'_>,
     intent_hash: Vec<u8>,
     status: i32,
-    adapter_id: &str,
     headers: Option<&Bound<'_, PyAny>>,
     body_ref: Option<&str>,
     start_ns: Option<u64>,
@@ -838,12 +829,10 @@ fn common_receipt_http_request_ok<H: CommonHarnessOps>(
             start_ns: start_ns.unwrap_or(current_time_ns),
             end_ns: end_ns.unwrap_or(current_time_ns),
         },
-        adapter_id: adapter_id.to_string(),
     };
     let receipt = lock_harness(mutex, label)?
         .receipt_ok(
             parse_intent_hash(intent_hash)?,
-            adapter_id,
             &serde_json::to_value(payload).map_err(|err| py_runtime_error(err.to_string()))?,
         )
         .map_err(host_to_py_error)?;
@@ -1298,11 +1287,10 @@ impl PyWorkflowHarness {
         common_apply_receipt_object(&self.inner, Self::LABEL, receipt)
     }
 
-    #[pyo3(signature=(intent_hash, adapter_id, status, payload_cbor, cost_cents=None, signature=None))]
+    #[pyo3(signature=(intent_hash, status, payload_cbor, cost_cents=None, signature=None))]
     fn apply_receipt(
         &self,
         intent_hash: Vec<u8>,
-        adapter_id: &str,
         status: &str,
         payload_cbor: Vec<u8>,
         cost_cents: Option<u64>,
@@ -1312,7 +1300,6 @@ impl PyWorkflowHarness {
             &self.inner,
             Self::LABEL,
             intent_hash,
-            adapter_id,
             status,
             payload_cbor,
             cost_cents,
@@ -1324,51 +1311,27 @@ impl PyWorkflowHarness {
         &self,
         py: Python<'_>,
         intent_hash: Vec<u8>,
-        adapter_id: &str,
         payload: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        common_receipt_ok(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            adapter_id,
-            payload,
-        )
+        common_receipt_ok(&self.inner, Self::LABEL, py, intent_hash, payload)
     }
 
     fn receipt_error(
         &self,
         py: Python<'_>,
         intent_hash: Vec<u8>,
-        adapter_id: &str,
         payload: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        common_receipt_error(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            adapter_id,
-            payload,
-        )
+        common_receipt_error(&self.inner, Self::LABEL, py, intent_hash, payload)
     }
 
     fn receipt_timeout(
         &self,
         py: Python<'_>,
         intent_hash: Vec<u8>,
-        adapter_id: &str,
         payload: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        common_receipt_timeout(
-            &self.inner,
-            Self::LABEL,
-            py,
-            intent_hash,
-            adapter_id,
-            payload,
-        )
+        common_receipt_timeout(&self.inner, Self::LABEL, py, intent_hash, payload)
     }
 
     #[pyo3(signature=(intent_hash, delivered_at_ns, key=None))]
@@ -1428,13 +1391,12 @@ impl PyWorkflowHarness {
         )
     }
 
-    #[pyo3(signature=(intent_hash, status, adapter_id="adapter.http.harness", headers=None, body_ref=None, start_ns=None, end_ns=None))]
+    #[pyo3(signature=(intent_hash, status, headers=None, body_ref=None, start_ns=None, end_ns=None))]
     fn receipt_http_request_ok(
         &self,
         py: Python<'_>,
         intent_hash: Vec<u8>,
         status: i32,
-        adapter_id: &str,
         headers: Option<&Bound<'_, PyAny>>,
         body_ref: Option<&str>,
         start_ns: Option<u64>,
@@ -1446,7 +1408,6 @@ impl PyWorkflowHarness {
             py,
             intent_hash,
             status,
-            adapter_id,
             headers,
             body_ref,
             start_ns,

@@ -11,6 +11,7 @@ pub mod internal_effects;
 pub mod journal;
 pub mod manifest;
 pub mod manifest_catalog;
+mod module_runtime;
 pub mod patch_doc;
 pub mod pure;
 pub mod query;

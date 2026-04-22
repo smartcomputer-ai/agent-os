@@ -1,68 +1,65 @@
 use indexmap::IndexMap;
 
-use crate::{DefEffect, EffectKind, OriginScope, SchemaRef};
+use crate::{DefEffect, Name, SchemaRef};
 
 #[derive(Debug, Clone)]
 pub struct EffectCatalogEntry {
-    pub kind: EffectKind,
+    pub effect: Name,
     pub params_schema: SchemaRef,
     pub receipt_schema: SchemaRef,
-    pub origin_scope: OriginScope,
+    pub impl_module: Name,
+    pub impl_entrypoint: String,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct EffectCatalog {
-    by_kind: IndexMap<String, EffectCatalogEntry>,
+    by_effect: IndexMap<Name, EffectCatalogEntry>,
 }
 
 impl EffectCatalog {
     pub fn new() -> Self {
         Self {
-            by_kind: IndexMap::new(),
+            by_effect: IndexMap::new(),
         }
     }
 
-    /// Builds a catalog from a list of `defeffect` nodes. Duplicate kinds keep the first definition.
-    pub fn from_defs<I>(defs: I) -> Self
+    /// Builds a catalog from `defeffect` nodes. Duplicate names keep the first definition.
+    pub fn from_effects<I>(defs: I) -> Self
     where
         I: IntoIterator<Item = DefEffect>,
     {
         let mut catalog = EffectCatalog::new();
         for def in defs {
-            let key = def.kind.as_str().to_string();
-            if catalog.by_kind.contains_key(&key) {
+            if catalog.by_effect.contains_key(&def.name) {
                 continue;
             }
-            catalog.by_kind.insert(
-                key,
+            catalog.by_effect.insert(
+                def.name.clone(),
                 EffectCatalogEntry {
-                    kind: def.kind.clone(),
-                    params_schema: def.params_schema.clone(),
-                    receipt_schema: def.receipt_schema.clone(),
-                    origin_scope: def.origin_scope,
+                    effect: def.name,
+                    params_schema: def.params,
+                    receipt_schema: def.receipt,
+                    impl_module: def.implementation.module,
+                    impl_entrypoint: def.implementation.entrypoint,
                 },
             );
         }
         catalog
     }
 
-    pub fn get(&self, kind: &EffectKind) -> Option<&EffectCatalogEntry> {
-        self.by_kind.get(kind.as_str())
+    pub fn get(&self, effect: &str) -> Option<&EffectCatalogEntry> {
+        self.by_effect.get(effect)
     }
 
-    pub fn params_schema(&self, kind: &EffectKind) -> Option<&SchemaRef> {
-        self.get(kind).map(|e| &e.params_schema)
+    pub fn params_schema(&self, op: &str) -> Option<&SchemaRef> {
+        self.get(op).map(|e| &e.params_schema)
     }
 
-    pub fn receipt_schema(&self, kind: &EffectKind) -> Option<&SchemaRef> {
-        self.get(kind).map(|e| &e.receipt_schema)
+    pub fn receipt_schema(&self, op: &str) -> Option<&SchemaRef> {
+        self.get(op).map(|e| &e.receipt_schema)
     }
 
-    pub fn origin_scope(&self, kind: &EffectKind) -> Option<OriginScope> {
-        self.get(kind).map(|e| e.origin_scope)
-    }
-
-    pub fn kinds(&self) -> impl Iterator<Item = &EffectKind> {
-        self.by_kind.values().map(|e| &e.kind)
+    pub fn ops(&self) -> impl Iterator<Item = &str> {
+        self.by_effect.keys().map(String::as_str)
     }
 }

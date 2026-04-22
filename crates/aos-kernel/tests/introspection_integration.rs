@@ -2,9 +2,9 @@
 
 #[path = "support/helpers.rs"]
 mod helpers;
-use helpers::fixtures;
+use helpers::fixtures::{self, WorkflowAbi};
 
-use aos_effects::{EffectKind, IntentBuilder, ReceiptStatus};
+use aos_effects::{IntentBuilder, ReceiptStatus, effect_ops};
 use aos_kernel::StateReader;
 use aos_wasm_abi::WorkflowOutput;
 use serde::Deserialize;
@@ -23,7 +23,7 @@ fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
             ann: None,
         },
     );
-    workflow.abi.workflow = Some(aos_air_types::WorkflowAbi {
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/StoreState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
@@ -61,7 +61,7 @@ fn introspect_manifest_matches_kernel_manifest() {
 
     let kernel = &mut world.kernel;
     let intent = IntentBuilder::new(
-        EffectKind::introspect_manifest(),
+        effect_ops::INTROSPECT_MANIFEST,
         &json!({ "consistency": "head" }),
     )
     .build()
@@ -105,7 +105,7 @@ fn introspect_workflow_state_returns_value_and_meta() {
 
     let kernel = &mut world.kernel;
     let intent = IntentBuilder::new(
-        EffectKind::introspect_workflow_state(),
+        effect_ops::INTROSPECT_WORKFLOW_STATE,
         &json!({
             "workflow": "com.acme/Store@1",
             "consistency": "head"
@@ -140,7 +140,7 @@ fn introspect_list_cells_returns_sentinel_for_non_keyed() {
     let kernel = &mut world.kernel;
 
     let intent = IntentBuilder::new(
-        EffectKind::introspect_list_cells(),
+        effect_ops::INTROSPECT_LIST_CELLS,
         &json!({ "workflow": "com.acme/Store@1" }),
     )
     .build()
@@ -194,7 +194,7 @@ fn introspect_journal_head_matches_state_reader() {
     world.tick_n(1).unwrap();
 
     let kernel = &mut world.kernel;
-    let intent = IntentBuilder::new(EffectKind::introspect_journal_head(), &json!({}))
+    let intent = IntentBuilder::new(effect_ops::INTROSPECT_JOURNAL_HEAD, &json!({}))
         .build()
         .unwrap();
 

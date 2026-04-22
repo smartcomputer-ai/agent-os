@@ -6,16 +6,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "$tag", content = "$value")]
 pub enum ToolExecutor {
-    Effect {
-        effect_kind: String,
-        cap_slot: Option<String>,
-    },
-    DomainEvent {
-        schema: String,
-    },
-    HostLoop {
-        bridge: String,
-    },
+    Effect { effect: String },
+    DomainEvent { schema: String },
+    HostLoop { bridge: String },
 }
 
 impl Default for ToolExecutor {

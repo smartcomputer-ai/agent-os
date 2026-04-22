@@ -10,7 +10,7 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const HTTP_REQUEST_EFFECT: &str = "http.request";
+const HTTP_REQUEST_EFFECT: &str = "sys/http.request@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ChainState {
@@ -93,7 +93,6 @@ struct HttpRequestReceipt {
     headers: BTreeMap<String, String>,
     body_ref: Option<String>,
     timings: RequestTimings,
-    adapter_id: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -187,7 +186,7 @@ fn handle_receipt(
     ctx: &mut WorkflowCtx<ChainState, ()>,
     envelope: EffectReceiptEnvelope,
 ) -> Result<(), ReduceError> {
-    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
+    if envelope.effect != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
 
@@ -254,7 +253,6 @@ fn emit_for_step(ctx: &mut WorkflowCtx<ChainState, ()>, step: SagaStep) -> Resul
     ctx.effects().emit_raw_with_issuer_ref(
         HTTP_REQUEST_EFFECT,
         &params,
-        Some("default"),
         Some(step_issuer_ref(step)),
     );
     Ok(())

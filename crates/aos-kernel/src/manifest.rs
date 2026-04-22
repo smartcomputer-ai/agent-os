@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use aos_air_types::{
-    self as air_types, AirNode, DefEffect, DefModule, DefSchema, HashRef, Manifest, Name,
-    NamedRef, SecretDecl, SecretEntry, catalog::EffectCatalog, validate_manifest,
+    AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, HashRef, Manifest, Name,
+    NamedRef, builtins, catalog::EffectCatalog, validate_manifest,
 };
 use aos_cbor::Hash;
 use aos_cbor::to_canonical_cbor;
@@ -15,8 +15,9 @@ use crate::manifest_catalog::{Catalog, load_manifest_from_bytes, load_manifest_f
 #[derive(Debug, Clone)]
 pub struct LoadedManifest {
     pub manifest: Manifest,
-    pub secrets: Vec<SecretDecl>,
+    pub secrets: Vec<DefSecret>,
     pub modules: HashMap<Name, DefModule>,
+    pub workflows: HashMap<Name, DefWorkflow>,
     pub effects: HashMap<Name, DefEffect>,
     pub schemas: HashMap<Name, DefSchema>,
     pub effect_catalog: EffectCatalog,
@@ -58,12 +59,17 @@ impl ManifestLoader {
 
     fn from_catalog(catalog: Catalog) -> Result<LoadedManifest, KernelError> {
         let mut modules = HashMap::new();
+        let mut workflows = HashMap::new();
         let mut effects = HashMap::new();
         let mut schemas = HashMap::new();
+        let mut secrets = HashMap::new();
         for (name, entry) in catalog.nodes {
             match entry.node {
                 AirNode::Defmodule(module) => {
                     modules.insert(name, module);
+                }
+                AirNode::Defworkflow(workflow) => {
+                    workflows.insert(name, workflow);
                 }
                 AirNode::Defeffect(effect) => {
                     effects.insert(name, effect);
@@ -71,17 +77,43 @@ impl ManifestLoader {
                 AirNode::Defschema(schema) => {
                     schemas.insert(name, schema);
                 }
+                AirNode::Defsecret(secret) => {
+                    secrets.insert(name, secret);
+                }
                 _ => {}
             }
         }
+        for builtin in builtins::builtin_schemas() {
+            schemas
+                .entry(builtin.schema.name.clone())
+                .or_insert_with(|| builtin.schema.clone());
+        }
+        for builtin in builtins::builtin_modules() {
+            modules
+                .entry(builtin.module.name.clone())
+                .or_insert_with(|| builtin.module.clone());
+        }
+        for builtin in builtins::builtin_workflows() {
+            workflows
+                .entry(builtin.workflow.name.clone())
+                .or_insert_with(|| builtin.workflow.clone());
+        }
+        for builtin in builtins::builtin_effects() {
+            effects
+                .entry(builtin.effect.name.clone())
+                .or_insert_with(|| builtin.effect.clone());
+        }
         let manifest = catalog.manifest;
-        validate_manifest(&manifest, &modules, &schemas, &effects)
-            .map_err(|e| KernelError::ManifestValidation(e.to_string()))?;
-        let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
+        validate_manifest(
+            &manifest, &modules, &schemas, &workflows, &effects, &secrets,
+        )
+        .map_err(|e| KernelError::ManifestValidation(e.to_string()))?;
+        let effect_catalog = EffectCatalog::from_effects(effects.values().cloned());
         Ok(LoadedManifest {
             manifest,
             secrets: catalog.resolved_secrets,
             modules,
+            workflows,
             effects,
             schemas,
             effect_catalog,
@@ -97,7 +129,9 @@ pub fn manifest_patch_from_loaded(loaded: &LoadedManifest) -> ManifestPatch {
         .map(AirNode::Defmodule)
         .collect();
     nodes.extend(loaded.schemas.values().cloned().map(AirNode::Defschema));
+    nodes.extend(loaded.workflows.values().cloned().map(AirNode::Defworkflow));
     nodes.extend(loaded.effects.values().cloned().map(AirNode::Defeffect));
+    nodes.extend(loaded.secrets.iter().cloned().map(AirNode::Defsecret));
 
     ManifestPatch {
         manifest: loaded.manifest.clone(),
@@ -123,8 +157,19 @@ pub fn store_loaded_manifest<S: Store + ?Sized>(
             .filter(|schema| !schema.name.starts_with("sys/"))
             .cloned()
             .collect(),
-        loaded.modules.values().cloned().collect(),
+        loaded
+            .modules
+            .values()
+            .filter(|module| !module.name.starts_with("sys/"))
+            .cloned()
+            .collect(),
         Vec::new(),
+        loaded
+            .workflows
+            .values()
+            .filter(|workflow| !workflow.name.starts_with("sys/"))
+            .cloned()
+            .collect(),
         loaded
             .effects
             .values()
@@ -142,7 +187,8 @@ fn write_nodes<S: Store + ?Sized>(
     allow_reserved_sys: bool,
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
-    secrets: Vec<aos_air_types::DefSecret>,
+    secrets: Vec<DefSecret>,
+    workflows: Vec<DefWorkflow>,
     effects: Vec<DefEffect>,
 ) -> Result<StoredHashes, KernelError> {
     let mut hashes = StoredHashes::default();
@@ -169,6 +215,14 @@ fn write_nodes<S: Store + ?Sized>(
         }
         let hash = store.put_node(&AirNode::Defsecret(secret))?;
         insert_or_verify_hash("defsecret", &mut hashes.secrets, name, hash)?;
+    }
+    for workflow in workflows {
+        let name = workflow.name.clone();
+        if !allow_reserved_sys {
+            reject_sys_name("defworkflow", name.as_str())?;
+        }
+        let hash = store.put_node(&AirNode::Defworkflow(workflow))?;
+        insert_or_verify_hash("defworkflow", &mut hashes.workflows, name, hash)?;
     }
     for effect in effects {
         let name = effect.name.clone();
@@ -217,6 +271,7 @@ fn reject_sys_name(kind: &str, name: &str) -> Result<(), KernelError> {
 struct StoredHashes {
     schemas: HashMap<Name, HashRef>,
     modules: HashMap<Name, HashRef>,
+    workflows: HashMap<Name, HashRef>,
     effects: HashMap<Name, HashRef>,
     secrets: HashMap<Name, HashRef>,
 }
@@ -224,27 +279,10 @@ struct StoredHashes {
 fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result<(), KernelError> {
     patch_named_refs("schema", &mut manifest.schemas, &hashes.schemas)?;
     patch_named_refs("module", &mut manifest.modules, &hashes.modules)?;
+    patch_named_refs("workflow", &mut manifest.workflows, &hashes.workflows)?;
     patch_named_refs("effect", &mut manifest.effects, &hashes.effects)?;
-    let mut secret_refs = secrets_as_named_refs(&manifest.secrets)?;
-    patch_named_refs("secret", &mut secret_refs, &hashes.secrets)?;
-    manifest.secrets = secret_refs.into_iter().map(SecretEntry::Ref).collect();
+    patch_named_refs("secret", &mut manifest.secrets, &hashes.secrets)?;
     Ok(())
-}
-
-fn secrets_as_named_refs(entries: &[SecretEntry]) -> Result<Vec<NamedRef>, KernelError> {
-    let mut refs = Vec::new();
-    for entry in entries {
-        match entry {
-            SecretEntry::Ref(r) => refs.push(r.clone()),
-            SecretEntry::Decl(_) => {
-                return Err(KernelError::Manifest(
-                    "inline secret declarations are unsupported; provide defsecret nodes instead"
-                        .into(),
-                ));
-            }
-        }
-    }
-    Ok(refs)
 }
 
 fn patch_named_refs(
@@ -255,13 +293,19 @@ fn patch_named_refs(
     for reference in refs {
         let actual = if let Some(found) = hashes.get(reference.name.as_str()) {
             found.clone()
-        } else if let Some(builtin) =
-            air_types::builtins::find_builtin_schema(reference.name.as_str())
-        {
+        } else if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
             builtin.hash_ref.clone()
+        } else if kind == "workflow" {
+            if let Some(builtin) = builtins::find_builtin_workflow(reference.name.as_str()) {
+                builtin.hash_ref.clone()
+            } else {
+                return Err(KernelError::Manifest(format!(
+                    "manifest references unknown {kind} '{}'",
+                    reference.name
+                )));
+            }
         } else if kind == "effect" {
-            if let Some(builtin) = air_types::builtins::find_builtin_effect(reference.name.as_str())
-            {
+            if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
                 builtin.hash_ref.clone()
             } else {
                 return Err(KernelError::Manifest(format!(
@@ -270,8 +314,7 @@ fn patch_named_refs(
                 )));
             }
         } else if kind == "module" {
-            if let Some(builtin) = air_types::builtins::find_builtin_module(reference.name.as_str())
-            {
+            if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
                 builtin.hash_ref.clone()
             } else {
                 return Err(KernelError::Manifest(format!(

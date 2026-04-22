@@ -18,7 +18,7 @@ use crate::local::local_state_paths;
 use crate::manifest_loader;
 use crate::sync::ResolvedAirImport;
 use crate::sync::{load_sync_config, resolve_air_sources};
-use crate::util::is_placeholder_hash;
+use crate::util::{is_placeholder_hash, set_module_wasm_hash};
 
 pub struct CompiledWorkflow {
     pub hash: HashRef,
@@ -328,7 +328,9 @@ pub fn resolve_placeholder_modules(
                 if !is_placeholder_hash(module) {
                     anyhow::bail!("module '{target}' already has a wasm_hash; remove it to patch");
                 }
-                module.wasm_hash = hash.clone();
+                if !set_module_wasm_hash(module, hash.clone()) {
+                    anyhow::bail!("module '{target}' is not a wasm module");
+                }
                 patched += 1;
             }
         }
@@ -347,8 +349,9 @@ pub fn resolve_placeholder_modules(
         if let Some(spec) = sys_module_spec(name.as_str()) {
             match resolve_sys_module(store, paths, world_root, spec)? {
                 Some(hash) => {
-                    module.wasm_hash = hash;
-                    patched += 1;
+                    if set_module_wasm_hash(module, hash) {
+                        patched += 1;
+                    }
                 }
                 None => {
                     unresolved_sys.push(name.to_string());
@@ -357,8 +360,9 @@ pub fn resolve_placeholder_modules(
             continue;
         }
         if let Some(hash) = resolve_from_world_modules(store, world_root, name.as_str())? {
-            module.wasm_hash = hash;
-            patched += 1;
+            if set_module_wasm_hash(module, hash) {
+                patched += 1;
+            }
             continue;
         }
         unresolved_non_sys.push(name.to_string());
@@ -369,8 +373,9 @@ pub fn resolve_placeholder_modules(
             if unresolved_non_sys.len() == 1 {
                 let target = unresolved_non_sys.remove(0);
                 if let Some(module) = loaded.modules.get_mut(target.as_str()) {
-                    module.wasm_hash = hash.clone();
-                    patched += 1;
+                    if set_module_wasm_hash(module, hash.clone()) {
+                        patched += 1;
+                    }
                 }
             }
         }
@@ -518,11 +523,11 @@ fn sys_module_spec(name: &str) -> Option<&'static SysModuleSpec> {
 
 const SYS_MODULES: &[SysModuleSpec] = &[
     SysModuleSpec {
-        name: "sys/Workspace@1",
+        name: "sys/workspace_wasm@1",
         bin: "workspace",
     },
     SysModuleSpec {
-        name: "sys/HttpPublish@1",
+        name: "sys/http_publish_wasm@1",
         bin: "http_publish",
     },
 ];
@@ -737,6 +742,7 @@ fn imported_cargo_target_dir(
 fn module_bin_name(module_name: &str) -> Option<String> {
     let tail = module_name.rsplit('/').next()?;
     let name = tail.split('@').next()?;
+    let name = name.strip_suffix("_wasm").unwrap_or(name);
     if name.is_empty() {
         return None;
     }
@@ -818,9 +824,14 @@ mod tests {
             WorkflowBuildProfile::Debug,
         )?;
 
-        assert!(loaded.modules.contains_key("demo/TimerSM@1"));
-        let module = loaded.modules.get("demo/TimerSM@1").unwrap();
-        assert_ne!(module.wasm_hash.as_str(), ZERO_HASH_SENTINEL);
+        assert!(loaded.modules.contains_key("demo/TimerSM_wasm@1"));
+        let module = loaded.modules.get("demo/TimerSM_wasm@1").unwrap();
+        assert_ne!(
+            crate::util::wasm_module_hash(module)
+                .expect("workflow wasm hash")
+                .as_str(),
+            ZERO_HASH_SENTINEL
+        );
         assert!(loaded.schemas.contains_key("demo/TimerEvent@1"));
         Ok(())
     }
@@ -877,5 +888,17 @@ mod tests {
         assert!(!temp.path().join(".aos/cas").exists());
         assert!(temp.path().join(".aos/cache/modules").exists());
         Ok(())
+    }
+
+    #[test]
+    fn module_bin_name_ignores_wasm_suffix() {
+        assert_eq!(
+            module_bin_name("aos.agent/SessionWorkflow_wasm@1").as_deref(),
+            Some("session_workflow")
+        );
+        assert_eq!(
+            module_bin_name("demo/CounterSM_wasm@1").as_deref(),
+            Some("counter_sm")
+        );
     }
 }

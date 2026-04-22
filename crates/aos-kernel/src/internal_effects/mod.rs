@@ -1,5 +1,5 @@
 use aos_cbor::to_canonical_cbor;
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
 use serde::{Deserialize, Serialize};
 
 use crate::query::{Consistency, ReadMeta};
@@ -9,30 +9,27 @@ mod governance;
 mod introspect;
 mod workspace;
 
-const INTROSPECT_ADAPTER_ID: &str = "kernel.introspect";
-const GOVERNANCE_ADAPTER_ID: &str = "kernel.governance";
-
-/// Kinds handled entirely inside the kernel (no host adapter).
-pub(crate) static INTERNAL_EFFECT_KINDS: &[&str] = &[
-    "introspect.manifest",
-    "introspect.workflow_state",
-    "introspect.journal_head",
-    "introspect.list_cells",
-    "workspace.resolve",
-    "workspace.empty_root",
-    "workspace.list",
-    "workspace.read_ref",
-    "workspace.read_bytes",
-    "workspace.write_bytes",
-    "workspace.write_ref",
-    "workspace.remove",
-    "workspace.diff",
-    "workspace.annotations_get",
-    "workspace.annotations_set",
-    "governance.propose",
-    "governance.shadow",
-    "governance.approve",
-    "governance.apply",
+/// Executor entrypoints handled entirely inside the kernel (no host adapter).
+pub(crate) static INTERNAL_EFFECT_ENTRYPOINTS: &[&str] = &[
+    effect_ops::INTROSPECT_MANIFEST,
+    effect_ops::INTROSPECT_WORKFLOW_STATE,
+    effect_ops::INTROSPECT_JOURNAL_HEAD,
+    effect_ops::INTROSPECT_LIST_CELLS,
+    effect_ops::WORKSPACE_RESOLVE,
+    effect_ops::WORKSPACE_EMPTY_ROOT,
+    effect_ops::WORKSPACE_LIST,
+    effect_ops::WORKSPACE_READ_REF,
+    effect_ops::WORKSPACE_READ_BYTES,
+    effect_ops::WORKSPACE_WRITE_BYTES,
+    effect_ops::WORKSPACE_WRITE_REF,
+    effect_ops::WORKSPACE_REMOVE,
+    effect_ops::WORKSPACE_DIFF,
+    effect_ops::WORKSPACE_ANNOTATIONS_GET,
+    effect_ops::WORKSPACE_ANNOTATIONS_SET,
+    "sys/governance.propose@1",
+    "sys/governance.shadow@1",
+    "sys/governance.approve@1",
+    "sys/governance.apply@1",
 ];
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -83,47 +80,42 @@ impl<S> Kernel<S>
 where
     S: crate::Store + 'static,
 {
-    /// Handle an internal effect intent and return its receipt if the kind is supported.
+    /// Handle an internal effect intent and return its receipt if the op is supported.
     pub fn handle_internal_intent(
         &mut self,
         intent: &EffectIntent,
     ) -> Result<Option<EffectReceipt>, KernelError> {
-        if !INTERNAL_EFFECT_KINDS.contains(&intent.kind.as_str()) {
+        let effect = intent.effect.as_str();
+        if !INTERNAL_EFFECT_ENTRYPOINTS.contains(&effect) {
             return Ok(None);
         }
 
-        let receipt_result = match intent.kind.as_str() {
-            EffectKind::INTROSPECT_MANIFEST => self.handle_manifest(intent),
-            EffectKind::INTROSPECT_WORKFLOW_STATE => self.handle_workflow_state(intent),
-            EffectKind::INTROSPECT_JOURNAL_HEAD => self.handle_journal_head(intent),
-            EffectKind::INTROSPECT_LIST_CELLS => self.handle_list_cells(intent),
-            "workspace.resolve" => self.handle_workspace_resolve(intent),
-            "workspace.empty_root" => self.handle_workspace_empty_root(intent),
-            "workspace.list" => self.handle_workspace_list(intent),
-            "workspace.read_ref" => self.handle_workspace_read_ref(intent),
-            "workspace.read_bytes" => self.handle_workspace_read_bytes(intent),
-            "workspace.write_bytes" => self.handle_workspace_write_bytes(intent),
-            "workspace.write_ref" => self.handle_workspace_write_ref(intent),
-            "workspace.remove" => self.handle_workspace_remove(intent),
-            "workspace.diff" => self.handle_workspace_diff(intent),
-            "workspace.annotations_get" => self.handle_workspace_annotations_get(intent),
-            "workspace.annotations_set" => self.handle_workspace_annotations_set(intent),
-            "governance.propose" => self.handle_governance_propose(intent),
-            "governance.shadow" => self.handle_governance_shadow(intent),
-            "governance.approve" => self.handle_governance_approve(intent),
-            "governance.apply" => self.handle_governance_apply(intent),
+        let receipt_result = match effect {
+            effect_ops::INTROSPECT_MANIFEST => self.handle_manifest(intent),
+            effect_ops::INTROSPECT_WORKFLOW_STATE => self.handle_workflow_state(intent),
+            effect_ops::INTROSPECT_JOURNAL_HEAD => self.handle_journal_head(intent),
+            effect_ops::INTROSPECT_LIST_CELLS => self.handle_list_cells(intent),
+            effect_ops::WORKSPACE_RESOLVE => self.handle_workspace_resolve(intent),
+            effect_ops::WORKSPACE_EMPTY_ROOT => self.handle_workspace_empty_root(intent),
+            effect_ops::WORKSPACE_LIST => self.handle_workspace_list(intent),
+            effect_ops::WORKSPACE_READ_REF => self.handle_workspace_read_ref(intent),
+            effect_ops::WORKSPACE_READ_BYTES => self.handle_workspace_read_bytes(intent),
+            effect_ops::WORKSPACE_WRITE_BYTES => self.handle_workspace_write_bytes(intent),
+            effect_ops::WORKSPACE_WRITE_REF => self.handle_workspace_write_ref(intent),
+            effect_ops::WORKSPACE_REMOVE => self.handle_workspace_remove(intent),
+            effect_ops::WORKSPACE_DIFF => self.handle_workspace_diff(intent),
+            effect_ops::WORKSPACE_ANNOTATIONS_GET => self.handle_workspace_annotations_get(intent),
+            effect_ops::WORKSPACE_ANNOTATIONS_SET => self.handle_workspace_annotations_set(intent),
+            "sys/governance.propose@1" => self.handle_governance_propose(intent),
+            "sys/governance.shadow@1" => self.handle_governance_shadow(intent),
+            "sys/governance.approve@1" => self.handle_governance_approve(intent),
+            "sys/governance.apply@1" => self.handle_governance_apply(intent),
             _ => unreachable!("guard ensures only internal kinds reach here"),
         };
 
-        let adapter_id = if intent.kind.as_str().starts_with("governance.") {
-            GOVERNANCE_ADAPTER_ID
-        } else {
-            INTROSPECT_ADAPTER_ID
-        };
         let receipt = match receipt_result {
             Ok(payload_cbor) => EffectReceipt {
                 intent_hash: intent.intent_hash,
-                adapter_id: adapter_id.to_string(),
                 status: ReceiptStatus::Ok,
                 payload_cbor,
                 cost_cents: Some(0),
@@ -133,7 +125,6 @@ where
                 let payload_cbor = to_canonical_cbor(&err.to_string()).unwrap_or_default();
                 EffectReceipt {
                     intent_hash: intent.intent_hash,
-                    adapter_id: adapter_id.to_string(),
                     status: ReceiptStatus::Error,
                     payload_cbor,
                     cost_cents: Some(0),
@@ -163,14 +154,12 @@ mod tests {
 
     fn write_minimal_manifest(path: &std::path::Path) {
         let manifest = json!({
-            "air_version": "1",
+            "air_version": "2",
             "schemas": [],
             "modules": [],
-            "plans": [],
+            "workflows": [],
             "effects": [],
-            "caps": [],
-            "policies": [],
-            "triggers": []
+            "secrets": []
         });
         let bytes = serde_cbor::to_vec(&manifest).expect("cbor encode");
         let mut file = File::create(path).expect("create manifest");
@@ -193,7 +182,7 @@ mod tests {
         let params = ManifestParams {
             consistency: "head".into(),
         };
-        let intent = IntentBuilder::new(EffectKind::introspect_manifest(), &params)
+        let intent = IntentBuilder::new(effect_ops::INTROSPECT_MANIFEST, &params)
             .build()
             .unwrap();
 
@@ -224,7 +213,11 @@ mod tests {
         let mut kernel = open_kernel();
         // bogus CBOR payload
         let intent = EffectIntent {
-            kind: EffectKind::introspect_manifest(),
+            effect: effect_ops::INTROSPECT_MANIFEST.into(),
+            effect_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: Some(effect_ops::INTROSPECT_MANIFEST.into()),
             params_cbor: b"\x01\x02\x03".to_vec(),
             idempotency_key: [0; 32],
             intent_hash: [9; 32],
@@ -234,7 +227,6 @@ mod tests {
             .unwrap()
             .expect("handled");
         assert_eq!(receipt.status, ReceiptStatus::Error);
-        assert_eq!(receipt.adapter_id, INTROSPECT_ADAPTER_ID);
     }
 
     #[test]
@@ -243,7 +235,7 @@ mod tests {
         let params = ListCellsParams {
             workflow: "missing/Workflow@1".into(),
         };
-        let intent = IntentBuilder::new(EffectKind::introspect_list_cells(), &params)
+        let intent = IntentBuilder::new(effect_ops::INTROSPECT_LIST_CELLS, &params)
             .build()
             .unwrap();
 

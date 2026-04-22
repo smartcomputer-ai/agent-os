@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/LlmSummarizerPc@1"
@@ -13,39 +13,25 @@
     },
     {
       "name": "demo/LlmSummarizerEvent@1"
-    },
-    {
-      "name": "sys/HttpRequestParams@1"
-    },
-    {
-      "name": "sys/HttpRequestReceipt@1"
-    },
-    {
-      "name": "sys/LlmGenerateParams@1"
-    },
-    {
-      "name": "sys/LlmGenerateReceipt@1"
     }
   ],
   "modules": [
     {
-      "name": "demo/LlmSummarizer@1"
+      "name": "demo/LlmSummarizer_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/LlmSummarizerEvent@1",
-        "module": "demo/LlmSummarizer@1"
+        "workflow": "demo/LlmSummarizer@1"
       }
     ]
   },
-  "effects": [
+  "workflows": [
     {
-      "name": "sys/http.request@1"
-    },
-    {
-      "name": "sys/llm.generate@1"
+      "name": "demo/LlmSummarizer@1"
     }
-  ]
+  ],
+  "effects": []
 }

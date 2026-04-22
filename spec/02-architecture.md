@@ -10,23 +10,23 @@ These are not separate runtimes. Under the hood, there is one unified system: th
 
 ## Runtime Model
 
-One world is the unit of computation and ownership. Each world runs a single‑threaded deterministic stepper over an append‑only event journal with periodic snapshots. All public control‑plane changes—modules, effects, schemas, secrets, manifests, and routing—are expressed as AIR patches and validated by the kernel before use.
+One world is the unit of computation and ownership. Each world runs a single‑threaded deterministic stepper over an append‑only event journal with periodic snapshots. All public control‑plane changes—modules, workflows, effects, schemas, secrets, manifests, and routing—are expressed as AIR patches and validated by the kernel before use.
 
-Application logic runs inside sandboxed WASM modules: workflow modules for stateful orchestration and pure modules for side-effect-free computation. External I/O happens through explicit effects executed by adapters; every effect yields a signed receipt that is appended to the journal and used for replay. The kernel also stamps each ingress with deterministic time/entropy and journals those values; modules can opt in to receiving that call context as explicit input. This separation between pure computation and effectful I/O is what enables deterministic replay: the same journal and receipts always produce the same state.
+Application logic runs through workflows backed by sandboxed modules. External I/O happens through explicit effects executed by adapters; every effect yields a signed receipt that is appended to the journal and used for replay. The kernel also stamps each ingress with deterministic time/entropy and journals those values; workflows can opt in to receiving that call context as explicit input. This separation between deterministic workflow execution and effectful I/O is what enables deterministic replay: the same journal and receipts always produce the same state.
 
 ## Components (High Level)
 
-- Kernel (Stepper): deterministic event processor, applies journal entries, validates emitted effect contracts, and drives workflow modules.
+- Kernel (Stepper): deterministic event processor, applies journal entries, validates emitted effect contracts, and drives workflows.
 - Kernel Clock: samples wall-clock + monotonic time at ingress and records deterministic timestamps.
 - Journal: append‑only log of all events (proposals, approvals, manifest application, effect intents, receipts, snapshots).
 - Snapshotter: materializes state at intervals for fast restore; replay from journal remains authoritative.
 - Store (CAS): content‑addressed object store for AIR nodes, WASM modules, blobs, receipts, and snapshots.
 - Workspace Registry: built-in `sys/Workspace@1` workflow and CAS-backed tree nodes for versioned source/artifact trees; exposed via internal `workspace.*` effects.
 - AIR Loader/Validator: loads the manifest, validates forms, resolves references, and exposes a typed view to the kernel.
-- Workflow Runtime: tracks in-flight workflow module effects and receipt continuations deterministically, including shadow runs.
-- WASM Runtime: deterministic sandbox (Wasmtime profile) for workflow and pure modules.
+- Workflow Runtime: tracks in-flight workflow effects and receipt continuations deterministically, including shadow runs.
+- WASM Runtime: deterministic sandbox (Wasmtime profile) for workflow modules.
 - Effect Runtime: starts opened async effects only after durable journal flush, ingests receipts/stream frames back through world input, and keeps execution state reconstructible.
-- Adapters: host‑side executors for effect kinds (HTTP, Blob/FS, Timer, LLM ship in v1; custom adapters can register additional kinds) with signing.
+- Adapters: host-side executors for effect routes (HTTP, Blob/FS, Timer, LLM, host/session, and custom routes) with signing.
 - CLI/Tooling: world lifecycle commands, shadow/diff, approvals, module build/register, and inspection.
 - Observability: provenance (“why graph”), journal tailing, receipt viewers, and minimal metrics.
 
@@ -36,7 +36,7 @@ Application logic runs inside sandboxed WASM modules: workflow modules for state
 
 The kernel processes exactly one event at a time per world. It applies events to both control‑plane state (AIR manifest/catalog) and data‑plane state (workflow states) in a fixed order. When appropriate, the stepper produces derived events such as Applied or SnapshotCreated.
 
-### Event Kinds (v1)
+### Event Kinds
 
 The kernel handles several categories of events. The first four are **design-time** events (control-plane evolution); the rest are **runtime** events (normal operation):
 
@@ -48,7 +48,7 @@ The kernel handles several categories of events. The first four are **design-tim
 - **Manifest** {manifest_hash} (appended whenever the active manifest changes; replay uses these to swap manifests in-order)
 
 **Runtime events:**
-- **EffectQueued** {intent_hash, kind, params_ref, origin}
+- **EffectQueued** {intent_hash, effect, params_ref, origin}
 - **ReceiptAppended** {intent_hash, receipt_ref, status}
 - **SnapshotCreated** {height, snapshot_ref, logical_time_ns, receipt_horizon_height?, manifest_hash?}
 
@@ -91,17 +91,17 @@ loading and snapshot blob reads do not require a local world-root filesystem sto
 
 ### AIR Manifest
 
-The manifest is read-only at runtime and serves as the authoritative public catalog of defmodule, defeffect, defschema, and defsecret objects. Built-in catalogs provide `sys/*` schemas/effects/modules; external manifests may reference `sys/*` entries but may not define them. Updates occur only via approved Proposed → Applied events.
+The manifest is read-only at runtime and serves as the authoritative public catalog of `defschema`, `defmodule`, `defworkflow`, `defeffect`, and `defsecret` objects. Built-in catalogs provide `sys/*` schemas, modules, workflows, and effects ambiently; external manifests may reference `sys/*` entries but may not define them. Updates occur only via approved Proposed -> Applied events.
 
 ### AIR Loader/Validator
 
 Authoring ergonomics and determinism meet here. The loader accepts either JSON lens described in the AIR spec—concise schema-directed “sugar” JSON or the tagged canonical overlay used by tools/agents—and canonicalizes both to typed values before anything touches the kernel. Built-in catalogs are merged for `sys/*` schemas/effects/modules; external `sys/*` definitions are rejected. Every value is normalized (set dedupe/order, map ordering, numeric range checks, decimal128, option/variant envelopes) and then encoded as canonical CBOR with the declared schema hash bound in. That canonical form is the only thing the kernel, store, and hash engine ever see.
 
-After canonicalization, the loader validates references, shapes, effect allowlists, and routing semantics, then exposes a typed view for the kernel. Tooling hooks (`air fmt`, `air diff`, `air patch`) operate on the same canonical CBOR but can render either lens for humans.
+After canonicalization, the loader validates references, shapes, op/module compatibility, effect allowlists, and routing semantics, then exposes a typed view for the kernel. Tooling hooks (`air fmt`, `air diff`, `air patch`) operate on the same canonical CBOR but can render either lens for humans.
 
 ### Effect Admission
 
-The public v0.22 AIR surface has no caps or policy language. At enqueue time the kernel validates that workflow effects are declared in `abi.workflow.effects_emitted`, that the effect catalog allows the emitter, and that open work is recorded before external execution starts. Hosted deployments can layer stronger admission policy outside the public AIR model.
+The public v0.22 AIR surface has no caps or policy language. At enqueue time the kernel validates that workflow effects are declared in `workflow.effects_emitted`, that the target effect is active, and that open work is recorded before external execution starts. Hosted deployments can layer stronger admission policy outside the public AIR model.
 
 ## Routing and Events (Runtime)
 
@@ -109,22 +109,22 @@ This section describes **runtime** behavior: how workflow modules and effects co
 
 ### Routing Subscriptions
 
-The manifest contains `routing.subscriptions`: mappings from DomainEvent schemas to workflow modules, with optional `key_field` extraction for keyed workflows. When an event is appended, the router delivers it to subscribed workflow modules deterministically.
+The manifest contains `routing.subscriptions`: mappings from DomainEvent schemas to workflows, with optional `key_field` extraction for keyed workflows. When an event is appended, the router delivers it to subscribed workflows deterministically.
 
 ### Communication Pattern
 
 The typical runtime flow between workflow modules and effects follows five steps:
 
-1. **Workflow module receives an event** (e.g., `ChargeRequested`) via routing and executes deterministically.
-2. **Workflow module emits effect intents**; the kernel checks declared effect allowlists and catalog emitter constraints, then records open work.
+1. **Workflow receives an event** (e.g., `ChargeRequested`) via routing and executes deterministically.
+2. **Workflow emits effect intents**; the kernel checks declared effect-op allowlists, validates params, then records open work.
 3. **Unified node flushes** the frame containing that open work, then publishes opened async effects to the effect runtime.
 4. **Adapter executes** the effect and returns signed stream frames and/or a terminal receipt through world input.
 5. **Kernel delivers receipt progress** by admitting the continuation and emitting normalized receipt events (for example `sys/EffectReceiptEnvelope@1`, or `sys/EffectReceiptRejected@1` when payload decoding fails) to the recorded workflow origin.
-6. **Workflow module emits follow-up domain events** (e.g., `PaymentResult`) as state advances; routing fans those events out to downstream subscribers.
+6. **Workflow emits follow-up domain events** (e.g., `PaymentResult`) as state advances; routing fans those events out to downstream subscribers.
 
 ### Governance and Observability
 
-All external I/O crosses `emit_effect`; receipts are signed and journaled. State changes occur only via events → workflow modules; no adapter mutates module state directly. Correlation keys in event payloads and receipt envelopes tie effects to domain entities in the "why graph".
+All external I/O crosses `emit_effect`; receipts are signed and journaled. State changes occur only via events -> workflows; no adapter mutates workflow state directly. Correlation keys in event payloads and receipt envelopes tie effects to domain entities in the "why graph".
 
 ## Compute Layer
 
@@ -132,48 +132,48 @@ All external I/O crosses `emit_effect`; receipts are signed and journaled. State
 
 The WASM runtime uses a deterministic profile: no threads, no ambient clock or randomness, stable float behavior, and limited hostcalls for pure intrinsics (serialization, hashing) and foreign‑memory copy. When a module declares a context schema, the kernel passes in deterministic time/entropy captured at ingress; there are no direct syscalls.
 
-### Module Registry
+### Module, Workflow, And Effect Registry
 
-Modules are content‑addressed WASM artifacts registered in the manifest with declared interfaces. Two types exist in v1:
+Modules are runtime/artifact declarations registered in the manifest. Workflows and effects are the
+callable contracts that point at a module and entrypoint.
 
 - **Workflow**: state machine reacting to events.
-  - ABI: `step(envelope) → envelope`, where the input envelope includes state/event bytes and an optional call context (if declared).
-- **Pure Component**: pure function.
-  - ABI: `run(envelope) → envelope`, where the input envelope includes input bytes and an optional call context (if declared).
+  - ABI: `entrypoint(envelope) -> envelope`, where the input envelope includes state/event bytes and an optional call context.
+- **Effect**: external or internal effect contract.
+  - Declares params/receipt schemas and an implementation module/entrypoint.
 
 ### Keyed Workflows (Cells)
 
-Version 1.1 adds first‑class "cells": many instances of the same workflow state machine keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with an optional call context, and for keyed workflows that context includes `key` and `cell_mode`. Routing uses `manifest.routing.subscriptions[].key_field`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and queued workflow work. See [spec/04-workflows.md](04-workflows.md) for the full behavior.
+Cells are many instances of the same workflow keyed by an id such as `order_id`. The kernel passes an envelope with optional call context; for keyed workflows that context includes `key` and `cell_mode`. Routing uses `manifest.routing.subscriptions[].key_field`. Per-cell state is stored via a CAS-backed `CellIndex` whose root hash is kept in world state/snapshots; returning `state = null` deletes the cell. Scheduler round-robins between ready cells and queued workflow work. See [spec/04-workflows.md](04-workflows.md) for the full behavior.
 
-### Router and Inbox
+### Router
 
-Deterministic routing delivers events to workflow modules based on manifest routing tables. Workflow modules emit effect intents (not side‑effects) which enter the outbox.
+Deterministic routing delivers events to workflows based on manifest routing subscriptions. Workflows emit effect intents, not side effects.
 
 ## Effects, Adapters, and Receipts
 
 ### Effect Runtime
 
-The kernel records open effect work; the unified node publishes async opened effects to the effect runtime only after the containing frame has durably flushed. Each intent is typed and bound to its recorded origin. **Before hashing/enqueueing**, the kernel decodes effect params CBOR using the effect kind's param schema, canonicalizes to the AIR `$tag/$value` form, and re-encodes; the canonical bytes are stored, hashed, and passed to adapters. Non-conforming params are rejected early. Workflow modules and internal tooling all traverse this same normalizer so authoring sugar cannot perturb intent identity. The effect runtime starts adapters with idempotency keys and deadlines, retrying with backoff for transient failures. The final status is captured in a receipt. `introspect.*`, `workspace.*`, and in-world `governance.*` effects are internal deterministic effects handled on the owner side while still passing through the same intent/receipt journal path.
+The kernel records open effect work; the unified node publishes async opened effects to the effect runtime only after the containing frame has durably flushed. Each intent is typed and bound to its recorded origin. Before hashing/enqueueing, the kernel decodes effect params CBOR using the effect's param schema, canonicalizes to the AIR typed value form, and re-encodes; the canonical bytes are stored, hashed, and passed to adapters. Non-conforming params are rejected early. Workflows and internal tooling all traverse this same normalizer so authoring sugar cannot perturb intent identity. The effect runtime starts adapters with idempotency keys and deadlines, retrying with backoff for transient failures. The final status is captured in a receipt. `sys/introspect.*@1`, `sys/workspace.*@1`, and in-world governance effects are internal deterministic effects handled on the owner side while still passing through the same intent/receipt journal path.
 
-### Adapters (v1)
+### Adapters
 
-Built-in external adapters in v1 include:
+Built-in external effects include:
 
-- **HTTP**: `http.request(method, url, headers, body_ref) → receipt(status, headers, body_ref, timings)`
-- **Blob**: `blob.{put,get} → receipt(blob_ref, size)`
-- **Timer**: `timer.set(deliver_at_ns) → receipt(delivered_at_ns)` (logical time)
-- **LLM**: `llm.generate(model, params, message_refs) → receipt(output_ref, raw_output_ref?, token_usage, cost, provider_id)`
-- **Vault**: `vault.{put,rotate} → receipt(alias, version, binding_id, digest)`
+- **HTTP**: `sys/http.request@1`
+- **Blob**: `sys/blob.{put,get}@1`
+- **Timer**: `sys/timer.set@1`
+- **LLM**: `sys/llm.generate@1`
+- **Vault**: `sys/vault.{put,rotate}@1`
+- **Host/session**: `sys/host.*@1`
 
 Each adapter signs receipts (ed25519/HMAC) including intent_hash, inputs/outputs hashes, timings, and cost.
 
-The effect catalog is **not closed**: the core schemas leave `EffectKind` open. V1 ships the above built-ins, and additional adapters can register new kinds as soon as the runtime knows how to map them to schemas and receipts.
-
-Version 1.2 will add **WASM-based adapters**: custom effect implementations that run as WASM modules with a non-deterministic profile, including WASI and other host capabilities. These enable extensible effect types while maintaining the receipt-based audit boundary—adapters can be deployed, upgraded, and sandboxed like any other module, but they operate outside the deterministic replay guarantees of workflow modules.
+The effect catalog is open through `defeffect`: worlds can define additional effects as soon as the runtime knows how to map their implementation module/entrypoint to an executor route.
 
 ### Receipt Handling
 
-ReceiptAppended events advance workflow modules waiting on effects. During replay, the system consumes recorded receipts to produce identical state without re‑executing effects.
+Receipt events advance workflows waiting on effects. During replay, the system consumes recorded receipts to produce identical state without re-executing effects.
 
 ## Constitutional Loop (Design Time)
 
@@ -182,7 +182,7 @@ The constitutional loop governs **design-time** changes: how the system proposes
 1. **Propose**: Submit AIR patches forming a proposal; the kernel validates and records **Proposed**, storing both the monotonic `proposal_id` (correlation key) and the content-addressed `patch_hash`.
 2. **Shadow**: The kernel clones state and runs a shadow simulation with stubbed receipts; it records **ShadowReport** with predicted effects/costs and diffs (optionally as an opaque summary blob for compatibility).
 3. **Approve/Reject**: Humans or governance integrations record **Approved** with a `decision` (approve/reject) plus approver identity. A rejected proposal cannot be applied.
-4. **Apply**: The kernel commits the new manifest root (**Applied**), recording `manifest_hash_new` alongside the ids for auditability; routing tables and effect definitions update atomically. Apply is only permitted after an approve decision.
+4. **Apply**: The kernel commits the new manifest root (**Applied**), recording `manifest_hash_new` alongside the ids for auditability; routing tables and workflow/effect definitions update atomically. Apply is only permitted after an approve decision.
 5. **Execute**: Normal event flow resumes; new modules/effects are active; effects produce receipts; audit trails accumulate.
 
 ### Shadow Runs
@@ -199,7 +199,7 @@ Modules have no ambient access to time or randomness; all nondeterminism is isol
 
 ### Safety
 
-**Structural effect gates**: Workflows can emit only known effect kinds listed in their ABI contract, and open work is recorded before dispatch.
+**Structural effect gates**: Workflows can emit only effects listed in `workflow.effects_emitted`, and open work is recorded before dispatch.
 
 **Governance gates**: Design-time changes move through proposal, shadow, approval, and apply records before becoming active.
 

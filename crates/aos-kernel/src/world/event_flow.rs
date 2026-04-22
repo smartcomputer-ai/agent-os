@@ -99,10 +99,6 @@ impl<S: Store + 'static> Kernel<S> {
                 })?;
         let event_value = normalized.value;
         for binding in bindings {
-            let module_def = self
-                .module_defs
-                .get(&binding.workflow)
-                .ok_or_else(|| KernelError::WorkflowNotFound(binding.workflow.clone()))?;
             let workflow_schema =
                 self.workflow_schemas
                     .get(&binding.workflow)
@@ -112,7 +108,7 @@ impl<S: Store + 'static> Kernel<S> {
                             binding.workflow
                         ))
                     })?;
-            let keyed = module_def.key_schema.is_some();
+            let keyed = workflow_schema.key_schema.is_some();
 
             match (keyed, &binding.key_field) {
                 (true, None) => {
@@ -153,20 +149,10 @@ impl<S: Store + 'static> Kernel<S> {
 
             let key_bytes = if keyed {
                 if let Some(field) = &binding.key_field {
-                    let key_schema_ref = module_def
+                    let key_schema = workflow_schema
                         .key_schema
                         .as_ref()
                         .expect("keyed workflows have key_schema");
-                    let key_schema =
-                        self.schema_index
-                            .get(key_schema_ref.as_str())
-                            .ok_or_else(|| {
-                                KernelError::Manifest(format!(
-                                    "key schema '{}' not found for workflow '{}'",
-                                    key_schema_ref.as_str(),
-                                    binding.workflow
-                                ))
-                            })?;
                     let value_for_key = if binding.route_event_schema == event.schema {
                         &event_value
                     } else {
@@ -241,27 +227,20 @@ impl<S: Store + 'static> Kernel<S> {
             metrics.domain_events += 1;
         }
         let workflow_name = event.workflow.clone();
-        let (keyed, wants_context) = {
-            let module_def = self
-                .module_defs
-                .get(&workflow_name)
-                .ok_or_else(|| KernelError::WorkflowNotFound(workflow_name.clone()))?;
-            if module_def.module_kind != aos_air_types::ModuleKind::Workflow {
-                return Err(KernelError::Manifest(format!(
-                    "module '{workflow_name}' is not a workflow/workflow module"
-                )));
-            }
-            self.workflows.ensure_loaded(&workflow_name, module_def)?;
+        let (keyed, wants_context, module_name, entrypoint) = {
+            let workflow = self.workflow_def(&workflow_name)?;
             (
-                module_def.key_schema.is_some(),
-                module_def
-                    .abi
-                    .workflow
-                    .as_ref()
-                    .and_then(|abi| abi.context.as_ref())
-                    .is_some(),
+                workflow.key_schema.is_some(),
+                workflow.context.is_some(),
+                workflow.implementation.module.clone(),
+                workflow.implementation.entrypoint.clone(),
             )
         };
+        let module_def = self
+            .module_defs
+            .get(&module_name)
+            .ok_or_else(|| KernelError::WorkflowNotFound(module_name.clone()))?;
+        self.workflows.ensure_loaded(&workflow_name, module_def)?;
         let key = event.event.key.clone();
         if keyed && key.is_none() {
             return Err(KernelError::Manifest(format!(
@@ -358,6 +337,7 @@ impl<S: Store + 'static> Kernel<S> {
                 event_hash,
                 manifest_hash: event.stamp.manifest_hash.clone(),
                 workflow: workflow_name.clone(),
+                workflow_hash: self.workflow_def_hash(&workflow_name).ok(),
                 key: key.clone(),
                 cell_mode: keyed,
             };
@@ -377,7 +357,7 @@ impl<S: Store + 'static> Kernel<S> {
         let invoke_started = Instant::now();
         let output = self
             .workflows
-            .invoke(&workflow_name, &input)
+            .invoke_export(&workflow_name, &entrypoint, &input)
             .with_context(|| {
                 let key_hint = key
                     .as_ref()
@@ -427,13 +407,6 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<(), KernelError> {
         Self::enforce_workflow_output_limits(&output)?;
 
-        let declared_effects = self
-            .module_defs
-            .get(&workflow_name)
-            .and_then(|module| module.abi.workflow.as_ref())
-            .map(|abi| abi.effects_emitted.clone())
-            .unwrap_or_default();
-
         if keyed {
             self.ensure_cell_index_root(&workflow_name)?;
         }
@@ -445,10 +418,7 @@ impl<S: Store + 'static> Kernel<S> {
         };
         let key_hash = Hash::of_bytes(&key_bytes);
         let state_for_workflow = output.state.clone();
-        let module_version = self
-            .module_defs
-            .get(&workflow_name)
-            .map(|module| module.wasm_hash.as_str().to_string());
+        let module_version = self.workflow_wasm_hash(&workflow_name).ok();
         match output.state {
             Some(state) => {
                 let state_hash = Hash::of_bytes(&state);
@@ -521,29 +491,41 @@ impl<S: Store + 'static> Kernel<S> {
             self.process_domain_event(event)?;
         }
         for (effect_index, effect) in output.effects.iter().enumerate() {
-            if !declared_effects
-                .iter()
-                .any(|kind| kind.as_str() == effect.kind.as_str())
-            {
-                return Err(KernelError::WorkflowOutput(format!(
-                    "module '{workflow_name}' emitted undeclared effect kind '{}'; declare it in abi.workflow.effects_emitted",
-                    effect.kind
-                )));
-            }
+            let effect_def = self.resolve_declared_effect(&workflow_name, effect.kind.as_str())?;
+            let effect_name = effect_def.name.clone();
+            let effect_hash = self.effect_hash(effect_def)?;
+            let executor_module = effect_def.implementation.module.clone();
+            let executor_module_hash = self
+                .module_defs
+                .get(&executor_module)
+                .map(|module| self.module_hash(module))
+                .transpose()?;
+            let executor_entrypoint = effect_def.implementation.entrypoint.clone();
+            let workflow_hash = self.workflow_def_hash(&workflow_name).ok();
             let mut effect_for_enqueue = effect.clone();
             let derived_idempotency = derive_workflow_intent_idempotency_key(
                 workflow_name.as_str(),
+                workflow_hash.as_deref(),
                 key.as_deref(),
-                effect,
+                effect_name.as_str(),
+                effect_hash.as_str(),
+                effect.idempotency_key.as_deref(),
                 effect_index,
                 emitted_at_seq,
             )
             .map_err(KernelError::WorkflowOutput)?;
             effect_for_enqueue.idempotency_key = Some(derived_idempotency.to_vec());
-            let intent = match self
-                .effect_manager
-                .enqueue_workflow_effect_authorized(&workflow_name, &effect_for_enqueue)
-            {
+            let intent = match self.effect_manager.enqueue_workflow_effect_with_identity(
+                &workflow_name,
+                &effect_for_enqueue,
+                crate::effects::EffectRuntimeIdentity {
+                    effect_name: effect_name.clone(),
+                    effect_hash: Some(effect_hash.clone()),
+                    executor_module: Some(executor_module.clone()),
+                    executor_module_hash: executor_module_hash.clone(),
+                    executor_entrypoint: executor_entrypoint.clone(),
+                },
+            ) {
                 Ok(intent) => intent,
                 Err(err) => {
                     self.record_decisions()?;
@@ -555,6 +537,7 @@ impl<S: Store + 'static> Kernel<S> {
                 &intent,
                 IntentOriginRecord::Workflow {
                     name: workflow_name.clone(),
+                    workflow_hash: workflow_hash.clone(),
                     instance_key: key.clone(),
                     issuer_ref: effect.issuer_ref.clone(),
                     emitted_at_seq: Some(emitted_at_seq),
@@ -565,22 +548,28 @@ impl<S: Store + 'static> Kernel<S> {
                 WorkflowEffectContext::new(
                     workflow_name.clone(),
                     key.clone(),
-                    effect.kind.clone(),
+                    effect_name.clone(),
                     intent.params_cbor.clone(),
                     intent.idempotency_key,
                     effect.issuer_ref.clone(),
                     intent.intent_hash,
                     emitted_at_seq,
-                    self.module_defs
-                        .get(&workflow_name)
-                        .map(|module| module.wasm_hash.as_str().to_string()),
+                    self.workflow_wasm_hash(&workflow_name).ok(),
+                )
+                .with_effect_identity(
+                    workflow_hash,
+                    effect_name.clone(),
+                    Some(effect_hash),
+                    Some(executor_module),
+                    executor_module_hash,
+                    Some(executor_entrypoint),
                 ),
             );
             self.record_workflow_inflight_intent(
                 &workflow_name,
                 key.as_deref(),
                 intent.intent_hash,
-                effect.kind.as_str(),
+                effect_name.as_str(),
                 &intent.params_cbor,
                 emitted_at_seq,
             );
@@ -605,7 +594,7 @@ fn workflow_output_size_bytes(output: &WorkflowOutput) -> usize {
     for effect in &output.effects {
         total = total.saturating_add(effect.kind.len());
         total = total.saturating_add(effect.params_cbor.len());
-        total = total.saturating_add(effect.cap_slot.as_ref().map_or(0, String::len));
+        total = total.saturating_add(effect.issuer_ref.as_ref().map_or(0, String::len));
         total = total.saturating_add(effect.idempotency_key.as_ref().map_or(0, Vec::len));
     }
     total
@@ -613,19 +602,23 @@ fn workflow_output_size_bytes(output: &WorkflowOutput) -> usize {
 
 fn derive_workflow_intent_idempotency_key(
     workflow_name: &str,
+    workflow_hash: Option<&str>,
     workflow_key: Option<&[u8]>,
-    effect: &aos_wasm_abi::WorkflowEffect,
+    effect_name: &str,
+    effect_hash: &str,
+    requested_idempotency_key: Option<&[u8]>,
     effect_index: usize,
     emitted_at_seq: u64,
 ) -> Result<[u8; 32], String> {
     #[derive(Serialize)]
     struct Preimage<'a> {
-        origin_module_id: &'a str,
+        origin_workflow: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        origin_workflow_hash: Option<&'a str>,
         #[serde(with = "serde_bytes")]
         origin_instance_key: &'a [u8],
-        effect_kind: &'a str,
-        #[serde(with = "serde_bytes")]
-        params_cbor: &'a [u8],
+        effect: &'a str,
+        effect_hash: &'a str,
         #[serde(with = "serde_bytes")]
         requested_idempotency_key: &'a [u8],
         effect_index: u64,
@@ -633,11 +626,12 @@ fn derive_workflow_intent_idempotency_key(
     }
 
     let preimage = Preimage {
-        origin_module_id: workflow_name,
+        origin_workflow: workflow_name,
+        origin_workflow_hash: workflow_hash,
         origin_instance_key: workflow_key.unwrap_or_default(),
-        effect_kind: effect.kind.as_str(),
-        params_cbor: &effect.params_cbor,
-        requested_idempotency_key: effect.idempotency_key.as_deref().unwrap_or(&[]),
+        effect: effect_name,
+        effect_hash,
+        requested_idempotency_key: requested_idempotency_key.unwrap_or(&[]),
         effect_index: effect_index as u64,
         emitted_at_seq,
     };
@@ -666,11 +660,11 @@ mod tests {
     use crate::world::test_support::{
         dummy_stamp, hash, minimal_kernel_keyed_missing_key_field, minimal_kernel_non_keyed,
         minimal_kernel_with_router, minimal_kernel_with_router_non_keyed, schema_event_record,
+        workflow_def, workflow_module,
     };
     use aos_air_types::{
-        CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, Routing,
-        RoutingEvent, SchemaRef, TypePrimitive, TypePrimitiveHash, TypePrimitiveText, WorkflowAbi,
-        catalog::EffectCatalog,
+        CURRENT_AIR_VERSION, DefSchema, HashRef, NamedRef, Routing, RoutingEvent, SchemaRef,
+        TypePrimitive, TypePrimitiveHash, TypePrimitiveText, catalog::EffectCatalog,
     };
     use aos_cbor::Hash;
     use aos_wasm_abi::WorkflowEffect;
@@ -804,11 +798,8 @@ mod tests {
     }
 
     #[test]
-    fn workflow_output_rejects_undeclared_effect_kind_before_cap_resolution() {
-        let store = Arc::new(crate::MemStore::default());
-        let journal = crate::journal::Journal::new();
-        let mut kernel =
-            crate::world::test_support::kernel_with_store_and_journal(store.clone(), journal);
+    fn workflow_output_rejects_undeclared_effect_before_cap_resolution() {
+        let mut kernel = minimal_kernel_non_keyed();
         let workflow = "com.acme/Workflow@1".to_string();
 
         let err = kernel
@@ -817,32 +808,37 @@ mod tests {
                 None,
                 false,
                 WorkflowOutput {
-                    effects: vec![WorkflowEffect::new("timer.set", vec![1])],
+                    effects: vec![WorkflowEffect::new("sys/timer.set@1", vec![1])],
                     ..Default::default()
                 },
             )
             .unwrap_err();
         assert!(
-            matches!(err, KernelError::WorkflowOutput(ref message) if message.contains("undeclared effect kind")),
+            matches!(err, KernelError::WorkflowOutput(ref message) if message.contains("undeclared effect")),
             "unexpected error: {err:?}"
         );
     }
 
     #[test]
     fn intent_key_derivation_includes_instance_identity() {
-        let effect = WorkflowEffect::new("http.request", vec![1, 2, 3]);
         let key_a = derive_workflow_intent_idempotency_key(
             "com.acme/Workflow@1",
+            Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             Some(b"instance-a"),
-            &effect,
+            "sys/http.request@1",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            None,
             0,
             42,
         )
         .expect("derive a");
         let key_b = derive_workflow_intent_idempotency_key(
             "com.acme/Workflow@1",
+            Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             Some(b"instance-b"),
-            &effect,
+            "sys/http.request@1",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            None,
             0,
             42,
         )
@@ -852,19 +848,24 @@ mod tests {
 
     #[test]
     fn intent_key_derivation_includes_emission_position() {
-        let effect = WorkflowEffect::new("http.request", vec![1, 2, 3]);
         let key_a = derive_workflow_intent_idempotency_key(
             "com.acme/Workflow@1",
+            Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             Some(b"instance-a"),
-            &effect,
+            "sys/http.request@1",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            None,
             0,
             42,
         )
         .expect("derive a");
         let key_b = derive_workflow_intent_idempotency_key(
             "com.acme/Workflow@1",
+            Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             Some(b"instance-a"),
-            &effect,
+            "sys/http.request@1",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            None,
             1,
             42,
         )
@@ -1000,24 +1001,14 @@ mod tests {
     #[test]
     fn workflow_state_traversal_collects_only_typed_hash_refs() {
         let store = crate::MemStore::default();
-        let module = DefModule {
-            name: "com.acme/Workflow@1".into(),
-            module_kind: ModuleKind::Workflow,
-            wasm_hash: HashRef::new(hash(1)).unwrap(),
-            key_schema: None,
-            abi: ModuleAbi {
-                workflow: Some(WorkflowAbi {
-                    state: SchemaRef::new("com.acme/StateRefs@1").unwrap(),
-                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                    context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
-                    annotations: None,
-                    effects_emitted: vec![],
-                }),
-                pure: None,
-            },
-        };
+        let module = workflow_module("com.acme/Workflow@1", 1);
+        let mut workflow_def =
+            workflow_def("com.acme/Workflow@1", "com.acme/Workflow@1", None, vec![]);
+        workflow_def.state = SchemaRef::new("com.acme/StateRefs@1").unwrap();
         let mut modules = HashMap::new();
         modules.insert(module.name.clone(), module);
+        let mut workflows = HashMap::new();
+        workflows.insert(workflow_def.name.clone(), workflow_def);
         let mut schemas = HashMap::new();
         schemas.insert(
             "com.acme/StateRefs@1".into(),
@@ -1062,25 +1053,29 @@ mod tests {
                 name: "com.acme/Workflow@1".into(),
                 hash: HashRef::new(hash(1)).unwrap(),
             }],
-            effects: vec![],
-            effect_bindings: vec![],
+            ops: vec![],
+            workflows: vec![NamedRef {
+                name: "com.acme/Workflow@1".into(),
+                hash: HashRef::new(hash(2)).unwrap(),
+            }],
+            effects: Vec::new(),
             secrets: vec![],
             routing: Some(Routing {
                 subscriptions: vec![RoutingEvent {
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                    module: "com.acme/Workflow@1".to_string(),
+                    workflow: "com.acme/Workflow@1".to_string(),
                     key_field: None,
                 }],
-                inboxes: vec![],
             }),
         };
         let loaded = LoadedManifest {
             manifest,
             secrets: vec![],
             modules,
+            workflows,
             effects: HashMap::new(),
             schemas,
-            effect_catalog: EffectCatalog::from_defs(Vec::new()),
+            effect_catalog: EffectCatalog::new(),
         };
         let mut kernel = Kernel::from_loaded_manifest(
             Arc::new(store),

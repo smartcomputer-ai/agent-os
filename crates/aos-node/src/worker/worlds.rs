@@ -8,7 +8,7 @@ use aos_kernel::{Kernel, KernelConfig, ManifestLoader, Store};
 use aos_node::{
     CheckpointBackend, CreateWorldRequest, CreateWorldSource, EffectExecutionClass, EffectRuntime,
     JournalBackend, SharedEffectRuntime, SnapshotRecord, TimerScheduler, UniverseId, WorldId,
-    WorldLogFrame, classify_effect_kind, partition_for_world,
+    WorldLogFrame, classify_effect_identity, partition_for_world,
 };
 
 use crate::blobstore::HostedCas;
@@ -258,10 +258,9 @@ impl HostedWorkerCore {
             self.build_registered_effect_runtime(universe_id, Arc::clone(&store), &loaded)?;
         let async_state = self.build_async_world_state();
         let workflow_modules = loaded
-            .modules
+            .workflows
             .values()
-            .filter(|module| matches!(module.module_kind, aos_air_types::ModuleKind::Workflow))
-            .map(|module| module.name.to_string())
+            .map(|workflow| workflow.name.to_string())
             .collect::<Vec<_>>();
 
         let registered = RegisteredWorld {
@@ -331,7 +330,7 @@ impl HostedWorkerCore {
         EffectRuntime::from_loaded_manifest_with_shared(
             shared,
             loaded,
-            world_config.strict_effect_bindings,
+            world_config.strict_effect_routes,
         )
         .map_err(WorkerError::Runtime)
     }
@@ -365,7 +364,13 @@ impl HostedWorkerCore {
 
             for pending in &pending {
                 let intent = effect_intent_from_pending(pending)?;
-                match classify_effect_kind(intent.kind.as_str()) {
+                let class = self
+                    .state
+                    .registered_worlds
+                    .get(&world_id)
+                    .map(|registered| registered.effect_runtime.classify_intent(&intent))
+                    .unwrap_or_else(|| classify_effect_identity(&intent));
+                match class {
                     EffectExecutionClass::ExternalAsync => {
                         external_intents
                             .push((intent, Some(adapter_start_context_from_pending(pending))));
@@ -498,10 +503,9 @@ impl HostedWorkerCore {
         let effect_runtime =
             self.build_registered_effect_runtime(universe_id, Arc::clone(&store), &loaded)?;
         let workflow_modules = loaded
-            .modules
+            .workflows
             .values()
-            .filter(|module| matches!(module.module_kind, aos_air_types::ModuleKind::Workflow))
-            .map(|module| module.name.to_string())
+            .map(|workflow| workflow.name.to_string())
             .collect::<Vec<_>>();
         self.state.registered_worlds.insert(
             world_id,

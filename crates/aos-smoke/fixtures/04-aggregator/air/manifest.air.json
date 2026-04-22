@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/AggregatorPc@1"
@@ -19,30 +19,25 @@
     },
     {
       "name": "demo/AggregateResponse@1"
-    },
-    {
-      "name": "sys/HttpRequestParams@1"
-    },
-    {
-      "name": "sys/HttpRequestReceipt@1"
     }
   ],
   "modules": [
     {
-      "name": "demo/Aggregator@1"
-    }
-  ],
-  "effects": [
-    {
-      "name": "sys/http.request@1"
+      "name": "demo/Aggregator_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/AggregatorEvent@1",
-        "module": "demo/Aggregator@1"
+        "workflow": "demo/Aggregator@1"
       }
     ]
-  }
+  },
+  "workflows": [
+    {
+      "name": "demo/Aggregator@1"
+    }
+  ],
+  "effects": []
 }

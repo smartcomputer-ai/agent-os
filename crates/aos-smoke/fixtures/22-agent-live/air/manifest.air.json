@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "aos.agent/SessionId@1"
@@ -113,42 +113,22 @@
   ],
   "modules": [
     {
-      "name": "aos.agent/SessionWorkflow@1"
+      "name": "aos.agent/SessionWorkflow_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "aos.agent/SessionIngress@1",
-        "module": "aos.agent/SessionWorkflow@1",
-        "key_field": "session_id"
+        "key_field": "session_id",
+        "workflow": "aos.agent/SessionWorkflow@1"
       }
-    ],
-    "inboxes": []
+    ]
   },
-  "effects": [
+  "workflows": [
     {
-      "name": "sys/blob.put@1"
-    },
-    {
-      "name": "sys/blob.get@1"
-    },
-    {
-      "name": "sys/llm.generate@1"
+      "name": "aos.agent/SessionWorkflow@1"
     }
   ],
-  "effect_bindings": [
-    {
-      "kind": "blob.put",
-      "adapter_id": "blob.put"
-    },
-    {
-      "kind": "blob.get",
-      "adapter_id": "blob.get"
-    },
-    {
-      "kind": "llm.generate",
-      "adapter_id": "llm.generate"
-    }
-  ]
+  "effects": []
 }

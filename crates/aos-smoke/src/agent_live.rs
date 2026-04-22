@@ -18,7 +18,7 @@ use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::builtins::{
     LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolChoice,
 };
-use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
+use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::Store;
 use aos_node::WorldConfig;
 use clap::ValueEnum;
@@ -545,9 +545,8 @@ fn execute_llm<S: aos_kernel::Store + 'static>(
         let error_text = load_text_blob(store, payload.output_ref.as_str())
             .unwrap_or_else(|_| "<unable to decode provider error>".into());
         return Err(anyhow!(
-            "llm receipt failed status={:?} adapter={} error={}",
+            "llm receipt failed status={:?} error={}",
             receipt.status,
-            receipt.adapter_id,
             error_text
         ));
     }
@@ -558,7 +557,7 @@ fn execute_llm<S: aos_kernel::Store + 'static>(
 
 fn build_llm_intent(params: &LlmGenerateParams) -> Result<EffectIntent> {
     let params_cbor = serde_cbor::to_vec(params).context("encode llm params cbor")?;
-    EffectIntent::from_raw_params(EffectKind::llm_generate(), params_cbor, [0u8; 32])
+    EffectIntent::from_raw_params(effect_ops::LLM_GENERATE, params_cbor, [0u8; 32])
         .context("build llm intent")
 }
 

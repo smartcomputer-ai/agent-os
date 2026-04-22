@@ -177,7 +177,6 @@ pub(super) fn reopen_kernel_from_frame_log(
 pub(super) fn build_timer_receipt(entry: &TimerEntry) -> Result<EffectReceipt, WorkerError> {
     Ok(EffectReceipt {
         intent_hash: entry.intent_hash,
-        adapter_id: "timer.local".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: entry.deliver_at_ns,
@@ -202,8 +201,12 @@ pub(super) fn timer_entry_from_intent(intent: &EffectIntent) -> Result<TimerEntr
 pub(super) fn effect_intent_from_pending(
     pending: &aos_kernel::snapshot::WorkflowReceiptSnapshot,
 ) -> Result<EffectIntent, WorkerError> {
-    let mut intent = aos_effects::EffectIntent::from_raw_params(
-        pending.effect_kind.clone().into(),
+    let mut intent = aos_effects::EffectIntent::from_raw_params_with_identity(
+        pending.effect.clone(),
+        pending.effect_hash.clone(),
+        pending.executor_module.clone(),
+        pending.executor_module_hash.clone(),
+        pending.executor_entrypoint.clone(),
         pending.params_cbor.clone(),
         pending.idempotency_key,
     )
@@ -217,8 +220,13 @@ pub(super) fn adapter_start_context_from_pending(
 ) -> AdapterStartContext {
     AdapterStartContext {
         origin_module_id: pending.origin_module_id.clone(),
+        origin_workflow_hash: pending.origin_workflow_hash.clone(),
         origin_instance_key: pending.origin_instance_key.clone(),
-        effect_kind: pending.effect_kind.clone(),
+        effect: pending.effect.clone(),
+        effect_hash: pending.effect_hash.clone(),
+        executor_module: pending.executor_module.clone(),
+        executor_module_hash: pending.executor_module_hash.clone(),
+        executor_entrypoint: pending.executor_entrypoint.clone(),
         emitted_at_seq: pending.emitted_at_seq,
     }
 }
@@ -229,13 +237,19 @@ pub(super) fn adapter_start_context_from_opened(
     match &opened.record.origin {
         IntentOriginRecord::Workflow {
             name,
+            workflow_hash,
             instance_key,
             emitted_at_seq,
             ..
         } => Some(AdapterStartContext {
             origin_module_id: name.clone(),
+            origin_workflow_hash: workflow_hash.clone(),
             origin_instance_key: instance_key.clone(),
-            effect_kind: opened.record.kind.clone(),
+            effect: opened.record.effect.clone(),
+            effect_hash: opened.record.effect_hash.clone(),
+            executor_module: opened.record.executor_module.clone(),
+            executor_module_hash: opened.record.executor_module_hash.clone(),
+            executor_entrypoint: opened.record.executor_entrypoint.clone(),
             emitted_at_seq: emitted_at_seq.unwrap_or_default(),
         }),
         IntentOriginRecord::Plan { .. } => None,

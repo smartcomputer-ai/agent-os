@@ -138,7 +138,16 @@ pub struct DomainEventRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectIntentRecord {
     pub intent_hash: [u8; 32],
-    pub kind: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub effect: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_entrypoint: Option<String>,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -157,6 +166,8 @@ pub struct EffectIntentRecord {
 pub enum IntentOriginRecord {
     Workflow {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workflow_hash: Option<String>,
         #[serde(
             default,
             skip_serializing_if = "Option::is_none",
@@ -177,7 +188,6 @@ pub enum IntentOriginRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectReceiptRecord {
     pub intent_hash: [u8; 32],
-    pub adapter_id: String,
     pub status: ReceiptStatus,
     #[serde(with = "serde_bytes")]
     pub payload_cbor: Vec<u8>,
@@ -206,15 +216,25 @@ pub struct EffectReceiptRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StreamFrameRecord {
     pub intent_hash: [u8; 32],
-    pub adapter_id: String,
     pub origin_module_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_workflow_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         with = "serde_bytes_opt"
     )]
     pub origin_instance_key: Option<Vec<u8>>,
-    pub effect_kind: String,
+    #[serde(default)]
+    pub effect: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_module_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_entrypoint: Option<String>,
     pub emitted_at_seq: u64,
     pub seq: u64,
     pub frame_kind: String,

@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow, ensure};
 use aos_effects::builtins::{
     HttpRequestParams, HttpRequestReceipt, RequestTimings, TimerSetParams, TimerSetReceipt,
 };
-use aos_effects::{EffectKind as EffectsEffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectReceipt, ReceiptStatus, effect_ops as EffectsEffectOps};
 use aos_kernel::Kernel;
 use aos_kernel::Store;
 use aos_wasm_sdk::aos_variant;
@@ -17,8 +17,6 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 const WORKFLOW_NAME: &str = "demo/RetrySM@1";
 const EVENT_SCHEMA: &str = "demo/RetryEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/08-retry-backoff/workflow";
-const ADAPTER_ID_HTTP: &str = "adapter.http.fake";
-const ADAPTER_ID_TIMER: &str = "adapter.timer.fake";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartWork {
@@ -127,8 +125,8 @@ fn drive_retry_flow<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
             break;
         }
         for intent in intents {
-            match intent.kind.as_str() {
-                EffectsEffectKind::HTTP_REQUEST => {
+            match intent.effect.as_str() {
+                EffectsEffectOps::HTTP_REQUEST => {
                     let params: HttpRequestParams = serde_cbor::from_slice(&intent.params_cbor)?;
                     http_attempts += 1;
                     let status = if http_attempts < 3 { 503 } else { 200 };
@@ -144,11 +142,9 @@ fn drive_retry_flow<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
                             start_ns: 0,
                             end_ns: 0,
                         },
-                        adapter_id: ADAPTER_ID_HTTP.into(),
                     };
                     kernel.handle_receipt(EffectReceipt {
                         intent_hash: intent.intent_hash,
-                        adapter_id: ADAPTER_ID_HTTP.into(),
                         status: ReceiptStatus::Ok,
                         payload_cbor: serde_cbor::to_vec(&receipt_payload)?,
                         cost_cents: Some(0),
@@ -156,7 +152,7 @@ fn drive_retry_flow<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
                     })?;
                     kernel.tick_until_idle()?;
                 }
-                EffectsEffectKind::TIMER_SET => {
+                EffectsEffectOps::TIMER_SET => {
                     let params: TimerSetParams = serde_cbor::from_slice(&intent.params_cbor)?;
                     println!(
                         "     timer.set -> key={:?} deliver_ns={}",
@@ -169,7 +165,6 @@ fn drive_retry_flow<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
                     };
                     kernel.handle_receipt(EffectReceipt {
                         intent_hash: intent.intent_hash,
-                        adapter_id: ADAPTER_ID_TIMER.into(),
                         status: ReceiptStatus::Ok,
                         payload_cbor: serde_cbor::to_vec(&receipt_payload)?,
                         cost_cents: Some(0),
@@ -177,7 +172,7 @@ fn drive_retry_flow<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
                     })?;
                     kernel.tick_until_idle()?;
                 }
-                other => return Err(anyhow!("unexpected effect kind {other}")),
+                other => return Err(anyhow!("unexpected effect {other}")),
             }
         }
         safety += 1;

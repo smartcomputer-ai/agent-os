@@ -66,12 +66,7 @@ pub(super) fn enqueue_blob_get(
         {
             Ok(begin) => begin,
             Err(_) => state.pending_blob_gets.attach(
-                PendingEffect::new(
-                    "blob.get",
-                    String::new(),
-                    Some(String::from("blob")),
-                    state.updated_at,
-                ),
+                PendingEffect::new("sys/blob.get@1", String::new(), state.updated_at),
                 pending_entry,
             ),
         };
@@ -107,12 +102,7 @@ pub(super) fn enqueue_blob_put(
         {
             Ok(begin) => begin,
             Err(_) => state.pending_blob_puts.attach(
-                PendingEffect::new(
-                    "blob.put",
-                    String::new(),
-                    Some(String::from("blob")),
-                    state.updated_at,
-                ),
+                PendingEffect::new("sys/blob.put@1", String::new(), state.updated_at),
                 pending_entry,
             ),
         };

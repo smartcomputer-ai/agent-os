@@ -14,7 +14,7 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const LLM_GENERATE_EFFECT: &str = "llm.generate";
+const LLM_GENERATE_EFFECT: &str = "sys/llm.generate@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LiveState {
@@ -162,14 +162,14 @@ fn on_run_requested(
         })),
     };
 
-    ctx.effects().emit_raw(LLM_GENERATE_EFFECT, &params, Some("default"));
+    ctx.effects().emit_raw(LLM_GENERATE_EFFECT, &params);
 }
 
 fn on_receipt(
     ctx: &mut WorkflowCtx<LiveState, ()>,
     envelope: EffectReceiptEnvelope,
 ) -> Result<(), ReduceError> {
-    if envelope.effect_kind != LLM_GENERATE_EFFECT {
+    if envelope.effect != LLM_GENERATE_EFFECT {
         return Ok(());
     }
 
@@ -230,6 +230,7 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: "demo/LiveChat@1".into(),
+            workflow_hash: None,
             key: None,
             cell_mode: false,
         };

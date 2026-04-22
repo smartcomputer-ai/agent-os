@@ -8,8 +8,8 @@ Active specs:
 
 - **01 — [Overview](01-overview.md)**: core concepts and mental model.
 - **02 — [Architecture](02-architecture.md)**: runtime components, storage layout, execution, and governance.
-- **03 — [AIR](03-air.md)**: AIR v1 control-plane IR, schemas, manifests, effects, routing, secrets, receipts, and patch format.
-- **04 — [Workflows](04-workflows.md)**: workflow module runtime contract, orchestration patterns, and keyed cells.
+- **03 — [AIR](03-air.md)**: AIR v2 control-plane IR, schemas, manifests, workflows, effects, routing, secrets, receipts, and patch format.
+- **04 — [Workflows](04-workflows.md)**: workflow runtime contract, orchestration patterns, and keyed cells.
 - **05 — [Effects](05-effects.md)**: async execution, durable open work, adapters, receipts, and continuation admission.
 - **06 — [Backends](06-backends.md)**: SQLite/Kafka journals, local/object-store CAS, checkpoint metadata, and recovery.
 
@@ -20,5 +20,5 @@ Future protocol notes:
 ## Reference Shelves
 
 - **[schemas/](schemas/)** — JSON Schemas for AIR documents.
-- **[defs/](defs/)** — Built-in schemas, effects, and modules.
+- **[defs/](defs/)** — Built-in schemas, modules, workflows, and effects.
 - **[test-vectors/](test-vectors/)** — Canonicalization and schema test vectors.

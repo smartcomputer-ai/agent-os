@@ -172,6 +172,8 @@ pub struct WorkflowContext {
     pub event_hash: String,
     pub manifest_hash: String,
     pub workflow: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_hash: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -209,8 +211,6 @@ pub struct WorkflowEffect {
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cap_slot: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issuer_ref: Option<String>,
     #[serde(
         default,
@@ -225,21 +225,6 @@ impl WorkflowEffect {
         Self {
             kind: kind.into(),
             params_cbor,
-            cap_slot: None,
-            issuer_ref: None,
-            idempotency_key: None,
-        }
-    }
-
-    pub fn with_cap_slot(
-        kind: impl Into<String>,
-        params_cbor: Vec<u8>,
-        slot: impl Into<String>,
-    ) -> Self {
-        Self {
-            kind: kind.into(),
-            params_cbor,
-            cap_slot: Some(slot.into()),
             issuer_ref: None,
             idempotency_key: None,
         }
@@ -276,6 +261,9 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: "com.acme/Workflow@1".into(),
+            workflow_hash: Some(
+                "sha256:2222222222222222222222222222222222222222222222222222222222222222".into(),
+            ),
             key: Some(vec![0x01, 0x02]),
             cell_mode: true,
         };
@@ -303,6 +291,7 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: "com.acme/Workflow@1".into(),
+            workflow_hash: None,
             key: None,
             cell_mode: false,
         };
@@ -324,7 +313,7 @@ mod tests {
         let output = WorkflowOutput {
             state: None,
             domain_events: vec![DomainEvent::new("schema", vec![1, 2])],
-            effects: vec![WorkflowEffect::with_cap_slot("timer.set", vec![9], "timer")],
+            effects: vec![WorkflowEffect::new("timer.set", vec![9])],
             ann: Some(vec![0, 1]),
         };
         let bytes = output.encode().expect("encode");

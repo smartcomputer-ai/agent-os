@@ -14,7 +14,7 @@ use aos_effect_adapters::{
     traits::{AdapterStartContext, AsyncEffectAdapter, EffectUpdate},
 };
 use aos_effects::{
-    EffectIntent, EffectKind, ReceiptStatus,
+    EffectIntent, ReceiptStatus,
     builtins::{
         HostExecParams, HostExecProgressFrame, HostExecReceipt, HostFileContentInput,
         HostFsApplyPatchParams, HostFsApplyPatchReceipt, HostFsEditFileParams,
@@ -26,6 +26,7 @@ use aos_effects::{
         HostSessionOpenReceipt, HostSessionSignalParams, HostSessionSignalReceipt, HostTarget,
         HostTextOutput,
     },
+    effect_ops,
 };
 use aos_kernel::{MemStore, Store};
 use axum::{
@@ -49,7 +50,7 @@ use globset::Glob;
 use tokio::task::JoinHandle;
 
 fn build_intent(kind: &str, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
-    EffectIntent::from_raw_params(EffectKind::new(kind), params_cbor, [seed; 32]).unwrap()
+    EffectIntent::from_raw_params(kind, params_cbor, [seed; 32]).unwrap()
 }
 
 #[test]
@@ -103,7 +104,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
         labels: Some(BTreeMap::from([("world".to_string(), "test".to_string())])),
     };
     let open_intent = build_intent(
-        EffectKind::HOST_SESSION_OPEN,
+        effect_ops::HOST_SESSION_OPEN,
         serde_cbor::to_vec(&open_params).unwrap(),
         1,
     );
@@ -131,7 +132,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
         output_mode: Some("require_inline".to_string()),
     };
     let exec_intent = build_intent(
-        EffectKind::HOST_EXEC,
+        effect_ops::HOST_EXEC,
         serde_cbor::to_vec(&exec_params).unwrap(),
         2,
     );
@@ -165,7 +166,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let write_receipt = adapters
         .fs_write_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_WRITE_FILE,
+            effect_ops::HOST_FS_WRITE_FILE,
             serde_cbor::to_vec(&write_params).unwrap(),
             3,
         ))
@@ -188,7 +189,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let read_receipt = adapters
         .fs_read_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_READ_FILE,
+            effect_ops::HOST_FS_READ_FILE,
             serde_cbor::to_vec(&read_params).unwrap(),
             4,
         ))
@@ -219,7 +220,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let _ = adapters
         .fs_write_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_WRITE_FILE,
+            effect_ops::HOST_FS_WRITE_FILE,
             serde_cbor::to_vec(&write_source_params).unwrap(),
             10,
         ))
@@ -229,7 +230,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let exists_receipt = adapters
         .fs_exists
         .execute(&build_intent(
-            EffectKind::HOST_FS_EXISTS,
+            effect_ops::HOST_FS_EXISTS,
             serde_cbor::to_vec(&HostFsExistsParams {
                 session_id: open_payload.session_id.clone(),
                 path: "src/main.rs".to_string(),
@@ -248,7 +249,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let stat_receipt = adapters
         .fs_stat
         .execute(&build_intent(
-            EffectKind::HOST_FS_STAT,
+            effect_ops::HOST_FS_STAT,
             serde_cbor::to_vec(&HostFsStatParams {
                 session_id: open_payload.session_id.clone(),
                 path: "src".to_string(),
@@ -268,7 +269,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let list_receipt = adapters
         .fs_list_dir
         .execute(&build_intent(
-            EffectKind::HOST_FS_LIST_DIR,
+            effect_ops::HOST_FS_LIST_DIR,
             serde_cbor::to_vec(&HostFsListDirParams {
                 session_id: open_payload.session_id.clone(),
                 path: Some("src".to_string()),
@@ -293,7 +294,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let edit_receipt = adapters
         .fs_edit_file
         .execute(&build_intent(
-            EffectKind::HOST_FS_EDIT_FILE,
+            effect_ops::HOST_FS_EDIT_FILE,
             serde_cbor::to_vec(&HostFsEditFileParams {
                 session_id: open_payload.session_id.clone(),
                 path: "src/main.rs".to_string(),
@@ -316,7 +317,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let grep_receipt = adapters
         .fs_grep
         .execute(&build_intent(
-            EffectKind::HOST_FS_GREP,
+            effect_ops::HOST_FS_GREP,
             serde_cbor::to_vec(&HostFsGrepParams {
                 session_id: open_payload.session_id.clone(),
                 pattern: "fn".to_string(),
@@ -344,7 +345,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let glob_receipt = adapters
         .fs_glob
         .execute(&build_intent(
-            EffectKind::HOST_FS_GLOB,
+            effect_ops::HOST_FS_GLOB,
             serde_cbor::to_vec(&HostFsGlobParams {
                 session_id: open_payload.session_id.clone(),
                 pattern: "*.rs".to_string(),
@@ -375,7 +376,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let apply_patch_receipt = adapters
         .fs_apply_patch
         .execute(&build_intent(
-            EffectKind::HOST_FS_APPLY_PATCH,
+            effect_ops::HOST_FS_APPLY_PATCH,
             serde_cbor::to_vec(&HostFsApplyPatchParams {
                 session_id: open_payload.session_id.clone(),
                 patch: HostPatchInput::InlineText {
@@ -410,7 +411,7 @@ async fn fabric_host_adapters_open_exec_signal_and_binary_fs_roundtrip() {
     let signal_receipt = adapters
         .session_signal
         .execute(&build_intent(
-            EffectKind::HOST_SESSION_SIGNAL,
+            effect_ops::HOST_SESSION_SIGNAL,
             serde_cbor::to_vec(&signal_params).unwrap(),
             5,
         ))
@@ -440,14 +441,19 @@ async fn fabric_exec_async_start_emits_progress_frames_before_terminal_receipt()
         output_mode: Some("require_inline".to_string()),
     };
     let exec_intent = build_intent(
-        EffectKind::HOST_EXEC,
+        effect_ops::HOST_EXEC,
         serde_cbor::to_vec(&exec_params).unwrap(),
         6,
     );
     let context = AdapterStartContext {
         origin_module_id: "com.acme/Workflow@1".to_string(),
+        origin_workflow_hash: None,
         origin_instance_key: Some(vec![1, 2, 3]),
-        effect_kind: EffectKind::HOST_EXEC.to_string(),
+        effect: "sys/host.exec@1".to_string(),
+        effect_hash: None,
+        executor_module: Some("sys/Host@1".to_string()),
+        executor_module_hash: None,
+        executor_entrypoint: Some(effect_ops::HOST_EXEC.to_string()),
         emitted_at_seq: 42,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel(16);
@@ -476,10 +482,9 @@ async fn fabric_exec_async_start_emits_progress_frames_before_terminal_receipt()
         unreachable!();
     };
     assert_eq!(first_frame.intent_hash, exec_intent.intent_hash);
-    assert_eq!(first_frame.adapter_id, "host.exec.fabric");
     assert_eq!(first_frame.origin_module_id, context.origin_module_id);
     assert_eq!(first_frame.origin_instance_key, context.origin_instance_key);
-    assert_eq!(first_frame.effect_kind, context.effect_kind);
+    assert_eq!(first_frame.effect, context.effect);
     assert_eq!(first_frame.emitted_at_seq, context.emitted_at_seq);
     assert_eq!(first_frame.seq, 1);
     assert_eq!(first_frame.kind, "host.exec.progress");
@@ -518,14 +523,19 @@ async fn fabric_exec_async_start_fast_exec_emits_only_terminal_receipt() {
         output_mode: Some("require_inline".to_string()),
     };
     let exec_intent = build_intent(
-        EffectKind::HOST_EXEC,
+        effect_ops::HOST_EXEC,
         serde_cbor::to_vec(&exec_params).unwrap(),
         7,
     );
     let context = AdapterStartContext {
         origin_module_id: "com.acme/Workflow@1".to_string(),
+        origin_workflow_hash: None,
         origin_instance_key: None,
-        effect_kind: EffectKind::HOST_EXEC.to_string(),
+        effect: "sys/host.exec@1".to_string(),
+        effect_hash: None,
+        executor_module: Some("sys/Host@1".to_string()),
+        executor_module_hash: None,
+        executor_entrypoint: Some(effect_ops::HOST_EXEC.to_string()),
         emitted_at_seq: 43,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel(16);
@@ -576,7 +586,7 @@ async fn local_host_adapter_rejects_sandbox_target() {
     let receipt = adapters
         .session_open
         .execute(&build_intent(
-            EffectKind::HOST_SESSION_OPEN,
+            effect_ops::HOST_SESSION_OPEN,
             serde_cbor::to_vec(&open_params).unwrap(),
             9,
         ))

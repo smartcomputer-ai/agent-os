@@ -143,7 +143,27 @@ pub struct StateCellSummary {
 pub struct ManifestResponse {
     pub journal_head: u64,
     pub manifest_hash: String,
+    pub summary: ManifestSummary,
     pub manifest: Manifest,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ManifestSummary {
+    pub schema_count: usize,
+    pub module_count: usize,
+    pub workflow_count: usize,
+    pub effect_count: usize,
+    pub secret_count: usize,
+    pub routing_subscription_count: usize,
+    pub routes: Vec<RouteSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RouteSummary {
+    pub event: String,
+    pub workflow: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_field: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

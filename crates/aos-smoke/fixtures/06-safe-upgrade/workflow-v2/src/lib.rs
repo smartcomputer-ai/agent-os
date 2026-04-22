@@ -9,7 +9,7 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const HTTP_REQUEST_EFFECT: &str = "http.request";
+const HTTP_REQUEST_EFFECT: &str = "sys/http.request@1";
 const FOLLOW_URL: &str = "https://example.com/follow.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -66,7 +66,6 @@ struct HttpRequestReceipt {
     headers: BTreeMap<String, String>,
     body_ref: Option<String>,
     timings: RequestTimings,
-    adapter_id: String,
 }
 
 aos_workflow!(SafeUpgradeSm);
@@ -115,7 +114,7 @@ fn handle_receipt(
     if ctx.state.pending_request.is_none() {
         return Ok(());
     }
-    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
+    if envelope.effect != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
 
@@ -145,5 +144,5 @@ fn emit_fetch(ctx: &mut WorkflowCtx<SafeUpgradeState, ()>, url: String) {
         body_ref: None,
     };
     ctx.effects()
-        .emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+        .emit_raw(HTTP_REQUEST_EFFECT, &params);
 }

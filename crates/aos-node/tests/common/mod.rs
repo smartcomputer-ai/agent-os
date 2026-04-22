@@ -7,8 +7,8 @@ use std::sync::{Once, OnceLock};
 use std::time::{Duration, Instant};
 
 use aos_air_types::{
-    AirNode, DefModule, DefSchema, EffectBinding, HashRef, Manifest, NamedRef, Routing,
-    RoutingEvent, SchemaRef, builtins,
+    AirNode, DefModule, DefSchema, DefWorkflow, HashRef, Impl, Manifest, ModuleRuntime, NamedRef,
+    Routing, RoutingEvent, SchemaRef, WasmArtifact, WorkflowDeterminism, builtins,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_node::blobstore::{
@@ -510,7 +510,7 @@ fn prepare_fetch_notify_manifest() -> PreparedManifest {
     let schemas =
         load_json_file::<Vec<DefSchema>>(&fetch_notify_world_root().join("air/schemas.air.json"));
     let wasm_hash = Hash::of_bytes(&wasm_bytes);
-    let modules = load_fixture_modules(
+    let (modules, workflows) = load_fixture_workflow_defs(
         &fetch_notify_world_root().join("air/module.air.json"),
         &wasm_hash,
     );
@@ -523,22 +523,22 @@ fn prepare_fetch_notify_manifest() -> PreparedManifest {
         builtin_schema_ref("sys/EffectReceiptEnvelope@1"),
     ]);
     let module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
-    let effect_refs = vec![builtin_effect_ref("sys/http.request@1")];
+    let workflow_refs = store_defs(&mut blobs, workflows.into_iter().map(AirNode::Defworkflow));
 
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: schema_refs,
         modules: module_refs,
-        effects: effect_refs,
-        effect_bindings: Vec::new(),
+        ops: vec![],
+        workflows: workflow_refs,
+        effects: Vec::new(),
         secrets: Vec::new(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/FetchNotifyEvent@1"),
-                module: "demo/FetchNotify@1".into(),
+                workflow: "demo/FetchNotify@1".into(),
                 key_field: None,
             }],
-            inboxes: Vec::new(),
         }),
     };
 
@@ -553,7 +553,7 @@ fn prepare_workspace_manifest() -> PreparedManifest {
     let schemas =
         load_json_file::<Vec<DefSchema>>(&workspace_world_root().join("air/schemas.air.json"));
     let wasm_hash = Hash::of_bytes(&wasm_bytes);
-    let modules = load_fixture_modules(
+    let (modules, workflows) = load_fixture_workflow_defs(
         &workspace_world_root().join("air/module.air.json"),
         &wasm_hash,
     );
@@ -581,35 +581,29 @@ fn prepare_workspace_manifest() -> PreparedManifest {
     let (workspace_module_ref, workspace_module_blobs) = authored_builtin_module("sys/Workspace@1");
     blobs.extend(workspace_module_blobs);
     module_refs.push(workspace_module_ref);
-    let effect_refs = vec![
-        builtin_effect_ref("sys/workspace.resolve@1"),
-        builtin_effect_ref("sys/workspace.empty_root@1"),
-        builtin_effect_ref("sys/workspace.write_bytes@1"),
-        builtin_effect_ref("sys/workspace.list@1"),
-        builtin_effect_ref("sys/workspace.diff@1"),
-    ];
+    let workflow_refs = store_defs(&mut blobs, workflows.into_iter().map(AirNode::Defworkflow));
 
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: schema_refs,
         modules: module_refs,
-        effects: effect_refs,
-        effect_bindings: Vec::new(),
+        ops: vec![],
+        workflows: workflow_refs,
+        effects: Vec::new(),
         secrets: Vec::new(),
         routing: Some(Routing {
             subscriptions: vec![
                 RoutingEvent {
                     event: schema_ref("demo/WorkspaceEvent@1"),
-                    module: "demo/WorkspaceDemo@1".into(),
+                    workflow: "demo/WorkspaceDemo@1".into(),
                     key_field: None,
                 },
                 RoutingEvent {
                     event: schema_ref("sys/WorkspaceCommit@1"),
-                    module: "sys/Workspace@1".into(),
+                    workflow: "sys/Workspace@1".into(),
                     key_field: Some("workspace".into()),
                 },
             ],
-            inboxes: Vec::new(),
         }),
     };
 
@@ -625,7 +619,7 @@ fn prepare_fabric_exec_progress_manifest() -> PreparedManifest {
         &fabric_exec_progress_world_root().join("air/schemas.air.json"),
     );
     let wasm_hash = Hash::of_bytes(&wasm_bytes);
-    let modules = load_fixture_modules(
+    let (modules, workflows) = load_fixture_workflow_defs(
         &fabric_exec_progress_world_root().join("air/module.air.json"),
         &wasm_hash,
     );
@@ -640,23 +634,21 @@ fn prepare_fabric_exec_progress_manifest() -> PreparedManifest {
         builtin_schema_ref("sys/HostExecProgressFrame@1"),
     ]);
     let module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
+    let workflow_refs = store_defs(&mut blobs, workflows.into_iter().map(AirNode::Defworkflow));
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: schema_refs,
         modules: module_refs,
-        effects: vec![builtin_effect_ref("sys/host.exec@1")],
-        effect_bindings: vec![EffectBinding {
-            kind: aos_air_types::EffectKind::host_exec(),
-            adapter_id: "host.exec.fabric".to_string(),
-        }],
+        ops: vec![],
+        workflows: workflow_refs,
+        effects: Vec::new(),
         secrets: Vec::new(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/FabricExecProgressEvent@1"),
-                module: "demo/FabricExecProgress@1".into(),
+                workflow: "demo/FabricExecProgress@1".into(),
                 key_field: None,
             }],
-            inboxes: Vec::new(),
         }),
     };
 
@@ -671,7 +663,7 @@ fn prepare_counter_manifest() -> PreparedManifest {
     let schemas =
         load_json_file::<Vec<DefSchema>>(&counter_world_root().join("air/schemas.air.json"));
     let wasm_hash = Hash::of_bytes(&wasm_bytes);
-    let modules = load_fixture_modules(
+    let (modules, workflows) = load_fixture_workflow_defs(
         &counter_world_root().join("air/module.air.json"),
         &wasm_hash,
     );
@@ -679,21 +671,22 @@ fn prepare_counter_manifest() -> PreparedManifest {
     let mut blobs = vec![wasm_bytes];
     let schema_refs = store_defs(&mut blobs, schemas.into_iter().map(AirNode::Defschema));
     let module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
+    let workflow_refs = store_defs(&mut blobs, workflows.into_iter().map(AirNode::Defworkflow));
 
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: schema_refs,
         modules: module_refs,
+        ops: vec![],
+        workflows: workflow_refs,
         effects: Vec::new(),
-        effect_bindings: Vec::new(),
         secrets: Vec::new(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/CounterEvent@1"),
-                module: "demo/CounterSM@1".into(),
+                workflow: "demo/CounterSM@1".into(),
                 key_field: None,
             }],
-            inboxes: Vec::new(),
         }),
     };
 
@@ -708,7 +701,8 @@ fn prepare_timer_manifest() -> PreparedManifest {
     let schemas =
         load_json_file::<Vec<DefSchema>>(&timer_world_root().join("air/schemas.air.json"));
     let wasm_hash = Hash::of_bytes(&wasm_bytes);
-    let modules = load_fixture_modules(&timer_world_root().join("air/module.air.json"), &wasm_hash);
+    let (modules, workflows) =
+        load_fixture_workflow_defs(&timer_world_root().join("air/module.air.json"), &wasm_hash);
 
     let mut blobs = vec![wasm_bytes];
     let mut schema_refs = store_defs(&mut blobs, schemas.into_iter().map(AirNode::Defschema));
@@ -718,21 +712,22 @@ fn prepare_timer_manifest() -> PreparedManifest {
         builtin_schema_ref("sys/TimerFired@1"),
     ]);
     let module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
+    let workflow_refs = store_defs(&mut blobs, workflows.into_iter().map(AirNode::Defworkflow));
 
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: schema_refs,
         modules: module_refs,
-        effects: vec![builtin_effect_ref("sys/timer.set@1")],
-        effect_bindings: Vec::new(),
+        ops: vec![],
+        workflows: workflow_refs,
+        effects: Vec::new(),
         secrets: Vec::new(),
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: schema_ref("demo/TimerEvent@1"),
-                module: "demo/TimerSM@1".into(),
+                workflow: "demo/TimerSM@1".into(),
                 key_field: None,
             }],
-            inboxes: Vec::new(),
         }),
     };
 
@@ -761,6 +756,7 @@ fn air_node_name(node: &AirNode) -> String {
     match node {
         AirNode::Defschema(schema) => schema.name.clone(),
         AirNode::Defmodule(module) => module.name.clone(),
+        AirNode::Defworkflow(workflow) => workflow.name.clone(),
         AirNode::Defeffect(effect) => effect.name.clone(),
         AirNode::Defsecret(secret) => secret.name.clone(),
         AirNode::Manifest(_) => panic!("manifest is not stored as a named AIR node in tests"),
@@ -775,14 +771,6 @@ fn builtin_schema_ref(name: &str) -> NamedRef {
     }
 }
 
-fn builtin_effect_ref(name: &str) -> NamedRef {
-    let builtin = builtins::find_builtin_effect(name).expect("builtin effect");
-    NamedRef {
-        name: builtin.effect.name.clone(),
-        hash: builtin.hash_ref.clone(),
-    }
-}
-
 fn schema_ref(name: &str) -> SchemaRef {
     SchemaRef::new(name).expect("schema ref")
 }
@@ -792,13 +780,52 @@ fn load_json_file<T: serde::de::DeserializeOwned>(path: &Path) -> T {
     serde_json::from_slice(&bytes).expect("parse fixture json")
 }
 
-fn load_fixture_modules(path: &Path, wasm_hash: &Hash) -> Vec<DefModule> {
-    let mut values = load_json_file::<Vec<serde_json::Value>>(path);
+fn load_fixture_workflow_defs(path: &Path, wasm_hash: &Hash) -> (Vec<DefModule>, Vec<DefWorkflow>) {
+    let value = load_json_file::<serde_json::Value>(path);
+    let values = match value {
+        serde_json::Value::Array(values) => values,
+        serde_json::Value::Object(_) => vec![value],
+        other => panic!("fixture module json must be object or array, got {other:?}"),
+    };
     let wasm_hash = wasm_hash.to_hex();
-    for value in &mut values {
-        value["wasm_hash"] = serde_json::Value::String(wasm_hash.clone());
+    let mut modules = Vec::new();
+    let mut workflows = Vec::new();
+    for value in values {
+        let node: AirNode = serde_json::from_value(value).expect("fixture AIR node");
+        match node {
+            AirNode::Defmodule(mut module) => {
+                module.runtime = ModuleRuntime::Wasm {
+                    artifact: WasmArtifact::WasmModule {
+                        hash: HashRef::new(wasm_hash.clone()).expect("workflow wasm hash ref"),
+                    },
+                };
+                modules.push(module);
+            }
+            AirNode::Defworkflow(mut workflow) => {
+                workflow.effects_emitted = workflow
+                    .effects_emitted
+                    .iter()
+                    .map(|effect| canonical_effect_name(effect))
+                    .collect();
+                workflow.determinism = WorkflowDeterminism::Strict;
+                workflow.implementation = Impl {
+                    module: workflow.implementation.module,
+                    entrypoint: workflow.implementation.entrypoint,
+                };
+                workflows.push(workflow);
+            }
+            other => panic!("fixture module AIR must contain defmodule/defworkflow, got {other:?}"),
+        }
     }
-    serde_json::from_value(serde_json::Value::Array(values)).expect("parse fixture modules")
+    (modules, workflows)
+}
+
+fn canonical_effect_name(name: &str) -> String {
+    if name.starts_with("sys/") {
+        name.to_string()
+    } else {
+        format!("sys/{name}@1")
+    }
 }
 
 fn compile_fixture_workflow(workflow_dir: PathBuf) -> Vec<u8> {
@@ -901,7 +928,11 @@ fn authored_builtin_module(name: &str) -> (NamedRef, Vec<Vec<u8>>) {
     let mut module = builtin.module.clone();
     let wasm_bytes = builtin_module_wasm_bytes(name);
     let wasm_hash = Hash::of_bytes(&wasm_bytes).to_hex();
-    module.wasm_hash = HashRef::new(wasm_hash).expect("builtin module wasm hash ref");
+    module.runtime = ModuleRuntime::Wasm {
+        artifact: WasmArtifact::WasmModule {
+            hash: HashRef::new(wasm_hash).expect("builtin module wasm hash ref"),
+        },
+    };
     let module_bytes =
         to_canonical_cbor(&AirNode::Defmodule(module.clone())).expect("encode builtin module");
     let module_hash = Hash::of_bytes(&module_bytes);

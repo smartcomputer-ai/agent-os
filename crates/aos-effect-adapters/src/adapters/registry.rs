@@ -14,10 +14,10 @@ pub struct AdapterRegistry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdapterStartError {
     MissingRoute {
-        adapter_id: String,
+        route_id: String,
     },
     MissingAdapter {
-        adapter_id: String,
+        route_id: String,
         adapter_kind: String,
     },
 }
@@ -37,12 +37,15 @@ impl AdapterRegistry {
         self.routes.insert(kind.clone(), kind);
     }
 
-    pub fn register_route(&mut self, adapter_id: impl Into<String>, adapter_kind: &str) -> bool {
-        if !self.adapters.contains_key(adapter_kind) {
+    pub fn register_route(&mut self, route_id: impl Into<String>, adapter_kind: &str) -> bool {
+        let adapter_kind = if self.adapters.contains_key(adapter_kind) {
+            adapter_kind.to_string()
+        } else if let Some(resolved_kind) = self.routes.get(adapter_kind) {
+            resolved_kind.clone()
+        } else {
             return false;
-        }
-        self.routes
-            .insert(adapter_id.into(), adapter_kind.to_string());
+        };
+        self.routes.insert(route_id.into(), adapter_kind);
         true
     }
 
@@ -50,13 +53,13 @@ impl AdapterRegistry {
         self.adapters.get(kind).map(|a| a.as_ref())
     }
 
-    pub fn get_route(&self, adapter_id: &str) -> Option<&dyn AsyncEffectAdapter> {
-        let kind = self.routes.get(adapter_id)?;
+    pub fn get_route(&self, route_id: &str) -> Option<&dyn AsyncEffectAdapter> {
+        let kind = self.routes.get(route_id)?;
         self.get(kind)
     }
 
-    pub fn has_route(&self, adapter_id: &str) -> bool {
-        self.routes.contains_key(adapter_id)
+    pub fn has_route(&self, route_id: &str) -> bool {
+        self.routes.contains_key(route_id)
     }
 
     pub fn route_ids(&self) -> Vec<String> {
@@ -68,7 +71,7 @@ impl AdapterRegistry {
     pub fn route_mappings(&self) -> BTreeMap<String, String> {
         self.routes
             .iter()
-            .map(|(adapter_id, adapter_kind)| (adapter_id.clone(), adapter_kind.clone()))
+            .map(|(route_id, adapter_kind)| (route_id.clone(), adapter_kind.clone()))
             .collect()
     }
 
@@ -77,34 +80,36 @@ impl AdapterRegistry {
         intent: EffectIntent,
         updates: EffectUpdateSender,
     ) -> Result<(), AdapterStartError> {
-        let route_id = intent.kind.as_str().to_string();
+        let route_id = intent.effect.clone();
         self.ensure_started_routed(intent, route_id, updates)
     }
 
     pub fn ensure_started_routed(
         &self,
         intent: EffectIntent,
-        adapter_id: String,
+        route_id: String,
         updates: EffectUpdateSender,
     ) -> Result<(), AdapterStartError> {
-        self.ensure_started_routed_with_context(intent, adapter_id, None, updates)
+        self.ensure_started_routed_with_context(intent, route_id, None, updates)
     }
 
     pub fn ensure_started_routed_with_context(
         &self,
         intent: EffectIntent,
-        adapter_id: String,
+        route_id: String,
         context: Option<AdapterStartContext>,
         updates: EffectUpdateSender,
     ) -> Result<(), AdapterStartError> {
-        let adapter_kind = self.routes.get(&adapter_id).cloned().ok_or_else(|| {
-            AdapterStartError::MissingRoute {
-                adapter_id: adapter_id.clone(),
-            }
-        })?;
+        let adapter_kind =
+            self.routes
+                .get(&route_id)
+                .cloned()
+                .ok_or_else(|| AdapterStartError::MissingRoute {
+                    route_id: route_id.clone(),
+                })?;
         let adapter = self.adapters.get(&adapter_kind).cloned().ok_or_else(|| {
             AdapterStartError::MissingAdapter {
-                adapter_id: adapter_id.clone(),
+                route_id: route_id.clone(),
                 adapter_kind: adapter_kind.clone(),
             }
         })?;
@@ -113,7 +118,7 @@ impl AdapterRegistry {
                 .ensure_started_with_context(intent, context, updates)
                 .await
             {
-                warn!("adapter '{adapter_id}' failed after start: {err:#}");
+                warn!("route '{route_id}' failed after start: {err:#}");
             }
         });
         Ok(())
@@ -141,7 +146,6 @@ mod tests {
         ) -> anyhow::Result<aos_effects::EffectReceipt> {
             Ok(EffectReceipt {
                 intent_hash: [9; 32],
-                adapter_id: "adapter.mismatched".into(),
                 status: ReceiptStatus::Ok,
                 payload_cbor: vec![1, 2, 3],
                 cost_cents: Some(7),
@@ -166,9 +170,9 @@ mod tests {
         }
     }
 
-    fn test_intent(effect_kind: &str) -> EffectIntent {
+    fn test_intent(effect: &str) -> EffectIntent {
         EffectIntent::from_raw_params(
-            effect_kind.into(),
+            effect,
             serde_cbor::to_vec(&serde_json::json!({ "ok": true })).expect("params"),
             [3; 32],
         )
@@ -192,7 +196,6 @@ mod tests {
             panic!("expected terminal receipt");
         };
         assert_eq!(receipt.intent_hash, [9; 32]);
-        assert_eq!(receipt.adapter_id, "adapter.mismatched");
         assert_eq!(receipt.status, ReceiptStatus::Ok);
         assert_eq!(receipt.payload_cbor, vec![1, 2, 3]);
         assert_eq!(receipt.cost_cents, Some(7));
@@ -213,6 +216,25 @@ mod tests {
         assert!(
             rx.recv().await.is_none(),
             "panic should close update channel"
+        );
+    }
+
+    #[test]
+    fn register_route_accepts_existing_route_alias_target() {
+        let mut registry = AdapterRegistry::new();
+        registry.register(Box::new(MismatchedHashAdapter));
+
+        assert!(registry.register_route("legacy.llm", "mismatched"));
+        assert!(registry.register_route("profile.llm", "legacy.llm"));
+
+        let mappings = registry.route_mappings();
+        assert_eq!(
+            mappings.get("legacy.llm").map(String::as_str),
+            Some("mismatched")
+        );
+        assert_eq!(
+            mappings.get("profile.llm").map(String::as_str),
+            Some("mismatched")
         );
     }
 }

@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aos.dev/air/v1/manifest.schema.json",
-  "title": "AIR v1 manifest",
+  "$id": "https://aos.dev/air/v2/manifest.schema.json",
+  "title": "AIR v2 manifest",
   "type": "object",
   "properties": {
     "$kind": { "const": "manifest" },
     "air_version": {
       "type": "string",
-      "enum": ["1"],
-      "description": "AIR format major version (string). Required; must be \"1\" for v1 manifests."
+      "enum": ["2"],
+      "description": "AIR format major version. v2 manifests must set this to \"2\"."
     },
     "schemas": {
       "type": "array",
@@ -18,51 +18,21 @@
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
-    "effects": {
+    "workflows": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
-    "effect_bindings": {
+    "effects": {
       "type": "array",
-      "items": { "$ref": "#/$defs/EffectBinding" }
+      "items": { "$ref": "#/$defs/NamedRef" }
     },
     "secrets": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
-    "routing": {
-      "type": "object",
-      "properties": {
-        "subscriptions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-              "module": { "$ref": "common.schema.json#/$defs/Name" },
-              "key_field": { "type": "string", "description": "Field in event value that carries the cell key (for keyed workflows)" }
-            },
-            "required": ["event","module"],
-            "additionalProperties": false
-          }
-        },
-        "inboxes": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "source": { "type": "string", "description": "External inbox or adapter channel name (e.g., http.inbox:contact_form)" },
-              "workflow": { "$ref": "common.schema.json#/$defs/Name", "description": "Workflow that will receive messages from this inbox; Name-formatted string" }
-            },
-            "required": ["source","workflow"],
-            "additionalProperties": false
-          }
-        }
-      },
-      "additionalProperties": false
-    }
+    "routing": { "$ref": "#/$defs/Routing" }
   },
-  "required": ["$kind","air_version","schemas","modules","effects"],
+  "required": ["$kind", "air_version", "schemas", "modules", "workflows", "effects"],
   "additionalProperties": false,
   "$defs": {
     "NamedRef": {
@@ -71,19 +41,30 @@
         "name": { "$ref": "common.schema.json#/$defs/Name" },
         "hash": { "$ref": "common.schema.json#/$defs/Hash" }
       },
-      "required": ["name","hash"],
+      "required": ["name", "hash"],
       "additionalProperties": false
     },
-    "EffectBinding": {
+    "Routing": {
       "type": "object",
       "properties": {
-        "kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
-        "adapter_id": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
+        "subscriptions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RoutingSubscription" }
         }
       },
-      "required": ["kind", "adapter_id"],
+      "additionalProperties": false
+    },
+    "RoutingSubscription": {
+      "type": "object",
+      "properties": {
+        "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+        "workflow": { "$ref": "common.schema.json#/$defs/Name" },
+        "key_field": {
+          "type": "string",
+          "description": "Field path in event value that carries the cell key for keyed workflows."
+        }
+      },
+      "required": ["event", "workflow"],
       "additionalProperties": false
     }
   }

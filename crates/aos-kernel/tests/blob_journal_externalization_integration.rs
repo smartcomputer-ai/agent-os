@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use aos_air_types::{TypeExpr, TypeVariant, WorkflowAbi};
+use aos_air_types::{TypeExpr, TypeVariant};
 use aos_effects::builtins::{BlobGetReceipt, BlobPutParams};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::Store;
 use aos_kernel::journal::Journal;
 use aos_kernel::journal::{JournalKind, JournalRecord};
 use aos_wasm_abi::WorkflowEffect;
-use helpers::fixtures::{self, START_SCHEMA, TestWorld};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld, WorkflowAbi};
 use indexmap::IndexMap;
 
 #[path = "support/helpers.rs"]
@@ -18,7 +18,8 @@ use helpers::{def_text_record_schema, insert_test_schemas, text_type};
 fn blob_put_intent_is_externalized_in_journal() {
     let store = fixtures::new_mem_store();
     let mut world =
-        TestWorld::with_store(store.clone(), blob_world_manifest(&store, "blob.put")).unwrap();
+        TestWorld::with_store(store.clone(), blob_world_manifest(&store, "sys/blob.put@1"))
+            .unwrap();
     world
         .submit_event_result(START_SCHEMA, &fixtures::start_event("blob-put"))
         .expect("submit start");
@@ -36,7 +37,7 @@ fn blob_put_intent_is_externalized_in_journal() {
         .filter_map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok())
         .find_map(|record| match record {
             JournalRecord::EffectIntent(record)
-                if record.kind == aos_effects::EffectKind::BLOB_PUT =>
+                if record.effect == aos_effects::effect_ops::BLOB_PUT =>
             {
                 Some(record)
             }
@@ -66,7 +67,8 @@ fn blob_put_intent_is_externalized_in_journal() {
 fn blob_get_receipt_is_externalized_and_replay_requires_cas_dependency() {
     let store = fixtures::new_mem_store();
     let mut world =
-        TestWorld::with_store(store.clone(), blob_world_manifest(&store, "blob.get")).unwrap();
+        TestWorld::with_store(store.clone(), blob_world_manifest(&store, "sys/blob.get@1"))
+            .unwrap();
     world
         .submit_event_result(START_SCHEMA, &fixtures::start_event("blob-get"))
         .expect("submit start");
@@ -82,7 +84,6 @@ fn blob_get_receipt_is_externalized_and_replay_requires_cas_dependency() {
         .kernel
         .handle_receipt(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "adapter.blob".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&BlobGetReceipt {
                 blob_ref: fixtures::fake_hash(0x44),
@@ -132,7 +133,7 @@ fn blob_get_receipt_is_externalized_and_replay_requires_cas_dependency() {
         .collect();
     let replay = TestWorld::with_store_and_journal(
         store_missing.clone(),
-        blob_world_manifest(&store_missing, "blob.get"),
+        blob_world_manifest(&store_missing, "sys/blob.get@1"),
         Journal::from_entries(&replay_entries).unwrap(),
     );
     let err = match replay {
@@ -147,28 +148,26 @@ fn blob_get_receipt_is_externalized_and_replay_requires_cas_dependency() {
 
 fn blob_world_manifest(
     store: &Arc<fixtures::TestStore>,
-    effect_kind: &str,
+    effect: &str,
 ) -> aos_kernel::manifest::LoadedManifest {
-    let effect = match effect_kind {
-        "blob.put" => WorkflowEffect::with_cap_slot(
-            aos_effects::EffectKind::BLOB_PUT,
+    let effect = match effect {
+        "sys/blob.put@1" => WorkflowEffect::new(
+            "sys/blob.put@1",
             serde_cbor::to_vec(&BlobPutParams {
                 bytes: b"journal-externalized".to_vec(),
                 blob_ref: None,
                 refs: None,
             })
             .unwrap(),
-            "blob",
         ),
-        "blob.get" => WorkflowEffect::with_cap_slot(
-            aos_effects::EffectKind::BLOB_GET,
+        "sys/blob.get@1" => WorkflowEffect::new(
+            "sys/blob.get@1",
             serde_cbor::to_vec(&aos_effects::builtins::BlobGetParams {
                 blob_ref: fixtures::fake_hash(0x10),
             })
             .unwrap(),
-            "blob",
         ),
-        other => panic!("unexpected effect kind {other}"),
+        other => panic!("unexpected effect {other}"),
     };
     let mut workflow = fixtures::stub_workflow_module(
         store,
@@ -176,7 +175,7 @@ fn blob_world_manifest(
         &aos_wasm_abi::WorkflowOutput {
             state: Some(vec![0x01]),
             domain_events: vec![],
-            effects: vec![effect],
+            effects: vec![effect.clone()],
             ann: None,
         },
     );
@@ -185,7 +184,7 @@ fn blob_world_manifest(
         event: fixtures::schema("com.acme/BlobEvent@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![effect_kind.into()],
+        effects_emitted: vec![effect.kind.clone()],
     });
 
     let mut loaded = fixtures::build_loaded_manifest(

@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aos.dev/air/v1/patch.schema.json",
-  "title": "AIR v1 Manifest Patch",
+  "$id": "https://aos.dev/air/v2/patch.schema.json",
+  "title": "AIR v2 Manifest Patch",
   "type": "object",
   "properties": {
     "version": {
-      "description": "Patch document format version (string major). v1 kernels only accept \"1\".",
+      "description": "Patch document format version. AIR v2 kernels only accept \"2\".",
       "type": "string",
-      "enum": ["1"],
-      "default": "1"
+      "enum": ["2"],
+      "default": "2"
     },
     "base_manifest_hash": { "$ref": "common.schema.json#/$defs/Hash" },
     "patches": {
@@ -20,9 +20,7 @@
           { "$ref": "#/$defs/replace_def" },
           { "$ref": "#/$defs/remove_def" },
           { "$ref": "#/$defs/set_manifest_refs" },
-          { "$ref": "#/$defs/set_routing_events" },
-          { "$ref": "#/$defs/set_routing_inboxes" },
-          { "$ref": "#/$defs/set_secrets" }
+          { "$ref": "#/$defs/set_routing_subscriptions" }
         ]
       }
     }
@@ -32,7 +30,7 @@
 
   "$defs": {
     "node_json": {
-      "description": "Authoring form of any AIR node (defschema, defmodule, defeffect, defsecret). Structural validation happens in the loader; patch schema only checks presence and basic typing.",
+      "description": "Authoring form of any AIR definition node: defschema, defmodule, defworkflow, defeffect, or defsecret.",
       "type": "object",
       "minProperties": 1
     },
@@ -99,28 +97,11 @@
           "properties": {
             "add": {
               "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "kind": { "$ref": "common.schema.json#/$defs/DefKind" },
-                  "name": { "$ref": "common.schema.json#/$defs/Name" },
-                  "hash": { "$ref": "common.schema.json#/$defs/Hash" }
-                },
-                "required": ["kind", "name", "hash"],
-                "additionalProperties": false
-              }
+              "items": { "$ref": "#/$defs/ManifestRefAdd" }
             },
             "remove": {
               "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "kind": { "$ref": "common.schema.json#/$defs/DefKind" },
-                  "name": { "$ref": "common.schema.json#/$defs/Name" }
-                },
-                "required": ["kind", "name"],
-                "additionalProperties": false
-              }
+              "items": { "$ref": "#/$defs/ManifestRefRemove" }
             }
           },
           "anyOf": [
@@ -134,103 +115,44 @@
       "additionalProperties": false
     },
 
-    "set_routing_events": {
+    "ManifestRefAdd": {
       "type": "object",
       "properties": {
-        "set_routing_events": {
+        "kind": { "$ref": "common.schema.json#/$defs/DefKind" },
+        "name": { "$ref": "common.schema.json#/$defs/Name" },
+        "hash": { "$ref": "common.schema.json#/$defs/Hash" }
+      },
+      "required": ["kind", "name", "hash"],
+      "additionalProperties": false
+    },
+
+    "ManifestRefRemove": {
+      "type": "object",
+      "properties": {
+        "kind": { "$ref": "common.schema.json#/$defs/DefKind" },
+        "name": { "$ref": "common.schema.json#/$defs/Name" }
+      },
+      "required": ["kind", "name"],
+      "additionalProperties": false
+    },
+
+    "set_routing_subscriptions": {
+      "type": "object",
+      "properties": {
+        "set_routing_subscriptions": {
           "type": "object",
           "properties": {
             "pre_hash": { "$ref": "common.schema.json#/$defs/Hash" },
             "subscriptions": {
               "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-                  "module": { "$ref": "common.schema.json#/$defs/Name" },
-                  "key_field": { "type": "string" }
-                },
-                "required": ["event","module"],
-                "additionalProperties": false
-              }
+              "items": { "$ref": "manifest.schema.json#/$defs/RoutingSubscription" }
             }
           },
-          "required": ["pre_hash","subscriptions"],
+          "required": ["pre_hash", "subscriptions"],
           "additionalProperties": false
         }
       },
-      "required": ["set_routing_events"],
-      "additionalProperties": false
-    },
-
-    "set_routing_inboxes": {
-      "type": "object",
-      "properties": {
-        "set_routing_inboxes": {
-          "type": "object",
-          "properties": {
-            "pre_hash": { "$ref": "common.schema.json#/$defs/Hash" },
-            "inboxes": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "source": { "type": "string" },
-                  "workflow": { "$ref": "common.schema.json#/$defs/Name" }
-                },
-                "required": ["source","workflow"],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": ["pre_hash","inboxes"],
-          "additionalProperties": false
-        }
-      },
-      "required": ["set_routing_inboxes"],
-      "additionalProperties": false
-    },
-
-    "set_secrets": {
-      "type": "object",
-      "properties": {
-        "set_secrets": {
-          "type": "object",
-          "properties": {
-            "pre_hash": { "$ref": "common.schema.json#/$defs/Hash" },
-            "secrets": {
-              "type": "array",
-              "items": {
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "name": { "$ref": "common.schema.json#/$defs/Name" },
-                      "hash": { "$ref": "common.schema.json#/$defs/Hash" }
-                    },
-                    "required": ["name","hash"],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "alias": { "type": "string" },
-                      "version": { "type": "integer", "minimum": 0 },
-                      "binding_id": { "type": "string" },
-                      "expected_digest": { "$ref": "common.schema.json#/$defs/Hash" }
-                    },
-                    "required": ["alias","version","binding_id"],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            }
-          },
-          "required": ["pre_hash","secrets"],
-          "additionalProperties": false
-        }
-      },
-      "required": ["set_secrets"],
+      "required": ["set_routing_subscriptions"],
       "additionalProperties": false
     }
   }

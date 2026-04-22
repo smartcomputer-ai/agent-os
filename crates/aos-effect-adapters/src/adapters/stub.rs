@@ -30,11 +30,9 @@ impl AsyncEffectAdapter for StubHttpAdapter {
                 start_ns: 0,
                 end_ns: 0,
             },
-            adapter_id: "stub.http".into(),
         };
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "stub.http".to_string(),
             status: ReceiptStatus::Ok,
             payload_cbor: encode_receipt_payload("http.request", &receipt_payload)?,
             cost_cents: Some(0),
@@ -75,7 +73,6 @@ impl AsyncEffectAdapter for StubLlmAdapter {
         };
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "stub.llm".to_string(),
             status: ReceiptStatus::Ok,
             payload_cbor: encode_receipt_payload("llm.generate", &receipt_payload)?,
             cost_cents: Some(0),
@@ -102,7 +99,6 @@ impl AsyncEffectAdapter for StubBlobAdapter {
         };
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "stub.blob.put".to_string(),
             status: ReceiptStatus::Ok,
             payload_cbor: encode_receipt_payload("blob.put", &receipt_payload)?,
             cost_cents: Some(0),
@@ -129,7 +125,6 @@ impl AsyncEffectAdapter for StubBlobGetAdapter {
         };
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "stub.blob.get".to_string(),
             status: ReceiptStatus::Ok,
             payload_cbor: encode_receipt_payload("blob.get", &receipt_payload)?,
             cost_cents: Some(0),
@@ -156,7 +151,6 @@ impl AsyncEffectAdapter for StubTimerAdapter {
 
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "stub.timer".to_string(),
             status: ReceiptStatus::Ok,
             payload_cbor: encode_receipt_payload("timer.set", &receipt_payload)?,
             cost_cents: Some(0),
@@ -176,7 +170,6 @@ impl AsyncEffectAdapter for StubVaultPutAdapter {
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "stub.vault.put".to_string(),
             status: ReceiptStatus::Error,
             payload_cbor: vec![],
             cost_cents: Some(0),
@@ -196,7 +189,6 @@ impl AsyncEffectAdapter for StubVaultRotateAdapter {
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "stub.vault.rotate".to_string(),
             status: ReceiptStatus::Error,
             payload_cbor: vec![],
             cost_cents: Some(0),

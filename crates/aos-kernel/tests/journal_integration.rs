@@ -1,6 +1,5 @@
 use aos_air_types::{
-    DefModule, HashRef, ModuleAbi, ModuleKind, TypeExpr, TypeRecord, TypeRef, TypeVariant,
-    WorkflowAbi,
+    DefModule, HashRef, ModuleRuntime, TypeExpr, TypeRecord, TypeRef, TypeVariant, WasmArtifact,
 };
 use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
@@ -12,7 +11,7 @@ use aos_wasm_abi::{DomainEvent, WorkflowEffect, WorkflowOutput};
 use std::sync::Arc;
 use wat::parse_str;
 
-use helpers::fixtures::{self, START_SCHEMA, TestWorld};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld, WorkflowAbi};
 
 #[path = "support/helpers.rs"]
 mod helpers;
@@ -22,6 +21,7 @@ use helpers::timer_manifest;
 fn workflow_timer_receipt_replays_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
     world
         .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
@@ -35,7 +35,6 @@ fn workflow_timer_receipt_replays_from_journal() {
         .expect("timer effect");
     let receipt = EffectReceipt {
         intent_hash: effect.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 10,
@@ -56,7 +55,7 @@ fn workflow_timer_receipt_replays_from_journal() {
 
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        timer_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
@@ -73,6 +72,7 @@ fn workflow_timer_receipt_replays_from_journal() {
 fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = no_plan_workflow_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let start_event = serde_json::json!({
@@ -86,9 +86,15 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
 
     let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 2);
-    effects.sort_by(|a, b| a.kind.as_str().cmp(b.kind.as_str()));
-    assert_eq!(effects[0].kind.as_str(), aos_effects::EffectKind::BLOB_PUT);
-    assert_eq!(effects[1].kind.as_str(), aos_effects::EffectKind::TIMER_SET);
+    effects.sort_by(|a, b| a.effect.as_str().cmp(b.effect.as_str()));
+    assert_eq!(
+        effects[0].effect.as_str(),
+        aos_effects::effect_ops::BLOB_PUT
+    );
+    assert_eq!(
+        effects[1].effect.as_str(),
+        aos_effects::effect_ops::TIMER_SET
+    );
 
     let snapshot = world.kernel.workflow_instances_snapshot();
     let workflow = snapshot
@@ -99,10 +105,9 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     assert_eq!(workflow.status, WorkflowStatusSnapshot::Waiting);
 
     for intent in effects {
-        let receipt = match intent.kind.as_str() {
-            aos_effects::EffectKind::BLOB_PUT => EffectReceipt {
+        let receipt = match intent.effect.as_str() {
+            aos_effects::effect_ops::BLOB_PUT => EffectReceipt {
                 intent_hash: intent.intent_hash,
-                adapter_id: "adapter.blob".into(),
                 status: ReceiptStatus::Ok,
                 payload_cbor: serde_cbor::to_vec(&BlobPutReceipt {
                     blob_ref: fixtures::fake_hash(0x21),
@@ -113,9 +118,8 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
                 cost_cents: Some(1),
                 signature: vec![1, 2, 3],
             },
-            aos_effects::EffectKind::TIMER_SET => EffectReceipt {
+            aos_effects::effect_ops::TIMER_SET => EffectReceipt {
                 intent_hash: intent.intent_hash,
-                adapter_id: "adapter.timer".into(),
                 status: ReceiptStatus::Ok,
                 payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
                     delivered_at_ns: 42,
@@ -146,7 +150,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     let journal_entries = world.kernel.dump_journal().unwrap();
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        no_plan_workflow_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
@@ -168,8 +172,9 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
 #[test]
 fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
     let store = fixtures::new_mem_store();
-    let mut world =
-        TestWorld::with_store(store.clone(), no_plan_workflow_manifest(&store)).unwrap();
+    let manifest = no_plan_workflow_manifest(&store);
+    let replay_manifest = manifest.clone();
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
     let start_event = serde_json::json!({
         "$tag": "Start",
         "$value": fixtures::start_event("replay-once")
@@ -183,12 +188,11 @@ fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
     assert_eq!(effects.len(), 2);
     let timer_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::TIMER_SET)
         .expect("timer.set intent");
 
     let receipt = EffectReceipt {
         intent_hash: timer_intent.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 77,
@@ -218,7 +222,7 @@ fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
 
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        no_plan_workflow_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
@@ -258,16 +262,15 @@ fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending(
     assert_eq!(effects.len(), 2);
     let blob_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::BLOB_PUT)
         .expect("blob.put intent");
     let timer_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::TIMER_SET)
         .expect("timer.set intent");
 
     let malformed = EffectReceipt {
         intent_hash: blob_intent.intent_hash,
-        adapter_id: "adapter.blob".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: vec![0xa0],
         cost_cents: None,
@@ -294,7 +297,6 @@ fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending(
 
     let timer_receipt = EffectReceipt {
         intent_hash: timer_intent.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 42,
@@ -330,16 +332,15 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
     assert_eq!(effects.len(), 2);
     let blob_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::BLOB_PUT)
         .expect("blob.put intent");
     let timer_intent = effects
         .iter()
-        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
+        .find(|intent| intent.effect.as_str() == aos_effects::effect_ops::TIMER_SET)
         .expect("timer.set intent");
 
     let malformed = EffectReceipt {
         intent_hash: blob_intent.intent_hash,
-        adapter_id: "adapter.blob".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: vec![0xa0],
         cost_cents: None,
@@ -360,7 +361,6 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
 
     let timer_receipt = EffectReceipt {
         intent_hash: timer_intent.intent_hash,
-        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
             delivered_at_ns: 42,
@@ -382,9 +382,10 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
 #[test]
 fn workflow_replay_restores_waiting_state_across_restarts() {
     let store = fixtures::new_mem_store();
+    let manifest = no_plan_workflow_manifest(&store);
+    let replay_manifest = manifest.clone();
     let journal_entries = {
-        let mut world =
-            TestWorld::with_store(store.clone(), no_plan_workflow_manifest(&store)).unwrap();
+        let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
         let start_event = serde_json::json!({
             "$tag": "Start",
             "$value": fixtures::start_event("wf-journal")
@@ -399,7 +400,7 @@ fn workflow_replay_restores_waiting_state_across_restarts() {
 
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        no_plan_workflow_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
@@ -434,22 +435,21 @@ fn no_plan_workflow_manifest_impl(
         domain_events: vec![],
         effects: vec![
             WorkflowEffect::new(
-                aos_effects::EffectKind::TIMER_SET,
+                "sys/timer.set@1",
                 serde_cbor::to_vec(&TimerSetParams {
                     deliver_at_ns: 42,
                     key: Some("wf".into()),
                 })
                 .unwrap(),
             ),
-            WorkflowEffect::with_cap_slot(
-                aos_effects::EffectKind::BLOB_PUT,
+            WorkflowEffect::new(
+                "sys/blob.put@1",
                 serde_cbor::to_vec(&BlobPutParams {
                     bytes: b"workflow".to_vec(),
                     blob_ref: None,
                     refs: None,
                 })
                 .unwrap(),
-                "blob",
             ),
         ],
         ann: None,
@@ -472,8 +472,8 @@ fn no_plan_workflow_manifest_impl(
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![
-            aos_effects::EffectKind::TIMER_SET.into(),
-            aos_effects::EffectKind::BLOB_PUT.into(),
+            aos_effects::effect_ops::TIMER_SET.into(),
+            aos_effects::effect_ops::BLOB_PUT.into(),
         ],
     });
 
@@ -562,7 +562,8 @@ fn sequenced_workflow_module<S: Store + ?Sized>(
     name: impl Into<String>,
     first: &WorkflowOutput,
     then: &WorkflowOutput,
-) -> DefModule {
+) -> fixtures::TestModule {
+    let name = name.into();
     let first_bytes = first.encode().expect("encode first workflow output");
     let then_bytes = then.encode().expect("encode second workflow output");
     let first_literal = first_bytes
@@ -697,14 +698,17 @@ fn sequenced_workflow_module<S: Store + ?Sized>(
     let wasm_bytes = parse_str(&wat).expect("compile sequenced workflow wat");
     let wasm_hash = store.put_blob(&wasm_bytes).expect("store workflow wasm");
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
-    DefModule {
-        name: name.into(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: wasm_hash_ref,
-        key_schema: None,
-        abi: ModuleAbi {
-            workflow: None,
-            pure: None,
+    fixtures::TestModule {
+        name: name.clone(),
+        module: DefModule {
+            name,
+            runtime: ModuleRuntime::Wasm {
+                artifact: WasmArtifact::WasmModule {
+                    hash: wasm_hash_ref,
+                },
+            },
         },
+        key_schema: None,
+        abi: fixtures::ModuleAbi { workflow: None },
     }
 }

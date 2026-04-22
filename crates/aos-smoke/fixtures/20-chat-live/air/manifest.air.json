@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/RunOutput@1"
@@ -16,29 +16,11 @@
     },
     {
       "name": "demo/LiveState@1"
-    },
-    {
-      "name": "sys/LlmGenerateParams@1"
-    },
-    {
-      "name": "sys/LlmGenerateReceipt@1"
-    },
-    {
-      "name": "sys/LlmToolChoice@1"
-    },
-    {
-      "name": "sys/SecretRef@1"
-    },
-    {
-      "name": "sys/TextOrSecretRef@1"
-    },
-    {
-      "name": "sys/BytesOrSecretRef@1"
     }
   ],
   "modules": [
     {
-      "name": "demo/LiveChat@1"
+      "name": "demo/LiveChat_wasm@1"
     }
   ],
   "secrets": [
@@ -53,14 +35,14 @@
     "subscriptions": [
       {
         "event": "demo/LiveEvent@1",
-        "module": "demo/LiveChat@1"
+        "workflow": "demo/LiveChat@1"
       }
-    ],
-    "inboxes": []
+    ]
   },
-  "effects": [
+  "workflows": [
     {
-      "name": "sys/llm.generate@1"
+      "name": "demo/LiveChat@1"
     }
-  ]
+  ],
+  "effects": []
 }

@@ -12,7 +12,7 @@ use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::builtins::{
     BlobGetReceipt, BlobPutReceipt, LlmGenerateReceipt, TimerSetParams, TimerSetReceipt,
 };
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::cell_index::CellMeta;
 use aos_kernel::journal::Journal;
 use aos_kernel::{
@@ -322,7 +322,18 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
     fn restore_open_work(&mut self) -> Result<()> {
         for pending in self.kernel.pending_workflow_receipts_snapshot() {
             let intent = EffectIntent {
-                kind: pending.effect_kind.clone().into(),
+                effect: if pending.effect.is_empty() {
+                    pending
+                        .executor_entrypoint
+                        .clone()
+                        .unwrap_or_else(|| pending.effect.clone())
+                } else {
+                    pending.effect.clone()
+                },
+                effect_hash: pending.effect_hash.clone(),
+                executor_module: pending.executor_module.clone(),
+                executor_module_hash: pending.executor_module_hash.clone(),
+                executor_entrypoint: pending.executor_entrypoint.clone(),
                 params_cbor: pending.params_cbor.clone(),
                 idempotency_key: pending.idempotency_key,
                 intent_hash: pending.intent_hash,
@@ -541,43 +552,26 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         })
     }
 
-    fn receipt_ok(
-        &self,
-        intent_hash: [u8; 32],
-        adapter_id: &str,
-        payload: &JsonValue,
-    ) -> Result<EffectReceipt> {
-        self.receipt_with_status(intent_hash, adapter_id, ReceiptStatus::Ok, payload)
+    fn receipt_ok(&self, intent_hash: [u8; 32], payload: &JsonValue) -> Result<EffectReceipt> {
+        self.receipt_with_status(intent_hash, ReceiptStatus::Ok, payload)
     }
 
-    fn receipt_error(
-        &self,
-        intent_hash: [u8; 32],
-        adapter_id: &str,
-        payload: &JsonValue,
-    ) -> Result<EffectReceipt> {
-        self.receipt_with_status(intent_hash, adapter_id, ReceiptStatus::Error, payload)
+    fn receipt_error(&self, intent_hash: [u8; 32], payload: &JsonValue) -> Result<EffectReceipt> {
+        self.receipt_with_status(intent_hash, ReceiptStatus::Error, payload)
     }
 
-    fn receipt_timeout(
-        &self,
-        intent_hash: [u8; 32],
-        adapter_id: &str,
-        payload: &JsonValue,
-    ) -> Result<EffectReceipt> {
-        self.receipt_with_status(intent_hash, adapter_id, ReceiptStatus::Timeout, payload)
+    fn receipt_timeout(&self, intent_hash: [u8; 32], payload: &JsonValue) -> Result<EffectReceipt> {
+        self.receipt_with_status(intent_hash, ReceiptStatus::Timeout, payload)
     }
 
     fn receipt_with_status(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         status: ReceiptStatus,
         payload: &JsonValue,
     ) -> Result<EffectReceipt> {
         Ok(EffectReceipt {
             intent_hash,
-            adapter_id: adapter_id.to_string(),
             status,
             payload_cbor: to_canonical_cbor(payload)?,
             cost_cents: None,
@@ -593,7 +587,6 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
     ) -> Result<EffectReceipt> {
         self.receipt_ok(
             intent_hash,
-            "adapter.timer.harness",
             &serde_json::to_value(TimerSetReceipt {
                 delivered_at_ns,
                 key,
@@ -606,11 +599,7 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         intent_hash: [u8; 32],
         payload: &BlobPutReceipt,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(
-            intent_hash,
-            "adapter.blob.put.harness",
-            &serde_json::to_value(payload)?,
-        )
+        self.receipt_ok(intent_hash, &serde_json::to_value(payload)?)
     }
 
     fn receipt_blob_get_ok(
@@ -618,11 +607,7 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         intent_hash: [u8; 32],
         payload: &BlobGetReceipt,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(
-            intent_hash,
-            "adapter.blob.get.harness",
-            &serde_json::to_value(payload)?,
-        )
+        self.receipt_ok(intent_hash, &serde_json::to_value(payload)?)
     }
 
     fn receipt_llm_generate_ok(
@@ -630,11 +615,7 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         intent_hash: [u8; 32],
         payload: &LlmGenerateReceipt,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(
-            intent_hash,
-            payload.provider_id.as_str(),
-            &serde_json::to_value(payload)?,
-        )
+        self.receipt_ok(intent_hash, &serde_json::to_value(payload)?)
     }
 
     fn state_json(&self, workflow: &str, key: Option<&[u8]>) -> Result<JsonValue> {
@@ -688,7 +669,6 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         for timer in &ready {
             let receipt = EffectReceipt {
                 intent_hash: timer.intent_hash,
-                adapter_id: "timer.local".into(),
                 status: ReceiptStatus::Ok,
                 payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
                     delivered_at_ns: timer.params.deliver_at_ns,
@@ -887,15 +867,9 @@ impl NodeRuntimeWorldHarness {
         })
     }
 
-    pub fn receipt_ok(
-        &self,
-        intent_hash: [u8; 32],
-        adapter_id: &str,
-        payload: &JsonValue,
-    ) -> Result<EffectReceipt> {
+    pub fn receipt_ok(&self, intent_hash: [u8; 32], payload: &JsonValue) -> Result<EffectReceipt> {
         Ok(EffectReceipt {
             intent_hash,
-            adapter_id: adapter_id.to_string(),
             status: ReceiptStatus::Ok,
             payload_cbor: to_canonical_cbor(payload)?,
             cost_cents: None,
@@ -906,12 +880,10 @@ impl NodeRuntimeWorldHarness {
     pub fn receipt_error(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt> {
         Ok(EffectReceipt {
             intent_hash,
-            adapter_id: adapter_id.to_string(),
             status: ReceiptStatus::Error,
             payload_cbor: to_canonical_cbor(payload)?,
             cost_cents: None,
@@ -922,12 +894,10 @@ impl NodeRuntimeWorldHarness {
     pub fn receipt_timeout(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt> {
         Ok(EffectReceipt {
             intent_hash,
-            adapter_id: adapter_id.to_string(),
             status: ReceiptStatus::Timeout,
             payload_cbor: to_canonical_cbor(payload)?,
             cost_cents: None,
@@ -943,7 +913,6 @@ impl NodeRuntimeWorldHarness {
     ) -> Result<EffectReceipt> {
         self.receipt_ok(
             intent_hash,
-            "adapter.timer.harness",
             &serde_json::to_value(TimerSetReceipt {
                 delivered_at_ns,
                 key,
@@ -956,11 +925,7 @@ impl NodeRuntimeWorldHarness {
         intent_hash: [u8; 32],
         payload: &BlobPutReceipt,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(
-            intent_hash,
-            "adapter.blob.put.harness",
-            &serde_json::to_value(payload)?,
-        )
+        self.receipt_ok(intent_hash, &serde_json::to_value(payload)?)
     }
 
     pub fn receipt_blob_get_ok(
@@ -968,11 +933,7 @@ impl NodeRuntimeWorldHarness {
         intent_hash: [u8; 32],
         payload: &BlobGetReceipt,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(
-            intent_hash,
-            "adapter.blob.get.harness",
-            &serde_json::to_value(payload)?,
-        )
+        self.receipt_ok(intent_hash, &serde_json::to_value(payload)?)
     }
 
     pub fn receipt_llm_generate_ok(
@@ -980,11 +941,7 @@ impl NodeRuntimeWorldHarness {
         intent_hash: [u8; 32],
         payload: &LlmGenerateReceipt,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(
-            intent_hash,
-            payload.provider_id.as_str(),
-            &serde_json::to_value(payload)?,
-        )
+        self.receipt_ok(intent_hash, &serde_json::to_value(payload)?)
     }
 
     pub fn state_json(&self, workflow: &str, key: Option<&[u8]>) -> Result<JsonValue> {
@@ -1107,31 +1064,24 @@ impl RuntimeWorkflowHarness<MemStore> {
         self.inner.export_artifacts()
     }
 
-    pub fn receipt_ok(
-        &self,
-        intent_hash: [u8; 32],
-        adapter_id: &str,
-        payload: &JsonValue,
-    ) -> Result<EffectReceipt> {
-        self.inner.receipt_ok(intent_hash, adapter_id, payload)
+    pub fn receipt_ok(&self, intent_hash: [u8; 32], payload: &JsonValue) -> Result<EffectReceipt> {
+        self.inner.receipt_ok(intent_hash, payload)
     }
 
     pub fn receipt_error(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt> {
-        self.inner.receipt_error(intent_hash, adapter_id, payload)
+        self.inner.receipt_error(intent_hash, payload)
     }
 
     pub fn receipt_timeout(
         &self,
         intent_hash: [u8; 32],
-        adapter_id: &str,
         payload: &JsonValue,
     ) -> Result<EffectReceipt> {
-        self.inner.receipt_timeout(intent_hash, adapter_id, payload)
+        self.inner.receipt_timeout(intent_hash, payload)
     }
 
     pub fn receipt_timer_set_ok(
@@ -1199,33 +1149,33 @@ fn decode_state_json(bytes: &[u8]) -> Result<JsonValue> {
 }
 
 fn classify_effect_intent(intent: &EffectIntent) -> EffectExecutionClass {
-    if INTERNAL_EFFECT_KINDS.contains(&intent.kind.as_str()) {
+    if INTERNAL_EFFECT_KINDS.contains(&intent.effect.as_str()) {
         return EffectExecutionClass::InlineInternal;
     }
-    if intent.kind.as_str() == EffectKind::TIMER_SET {
+    if intent.effect.as_str() == effect_ops::TIMER_SET {
         return EffectExecutionClass::OwnerLocalTimer;
     }
     EffectExecutionClass::ExternalAsync
 }
 
 const INTERNAL_EFFECT_KINDS: &[&str] = &[
-    "introspect.manifest",
-    "introspect.workflow_state",
-    "introspect.journal_head",
-    "introspect.list_cells",
-    "workspace.resolve",
-    "workspace.empty_root",
-    "workspace.list",
-    "workspace.read_ref",
-    "workspace.read_bytes",
-    "workspace.write_bytes",
-    "workspace.write_ref",
-    "workspace.remove",
-    "workspace.diff",
-    "workspace.annotations_get",
-    "workspace.annotations_set",
-    "governance.propose",
-    "governance.shadow",
-    "governance.approve",
-    "governance.apply",
+    effect_ops::INTROSPECT_MANIFEST,
+    effect_ops::INTROSPECT_WORKFLOW_STATE,
+    effect_ops::INTROSPECT_JOURNAL_HEAD,
+    effect_ops::INTROSPECT_LIST_CELLS,
+    effect_ops::WORKSPACE_RESOLVE,
+    effect_ops::WORKSPACE_EMPTY_ROOT,
+    effect_ops::WORKSPACE_LIST,
+    effect_ops::WORKSPACE_READ_REF,
+    effect_ops::WORKSPACE_READ_BYTES,
+    effect_ops::WORKSPACE_WRITE_BYTES,
+    effect_ops::WORKSPACE_WRITE_REF,
+    effect_ops::WORKSPACE_REMOVE,
+    effect_ops::WORKSPACE_DIFF,
+    effect_ops::WORKSPACE_ANNOTATIONS_GET,
+    effect_ops::WORKSPACE_ANNOTATIONS_SET,
+    "sys/governance.propose@1",
+    "sys/governance.shadow@1",
+    "sys/governance.approve@1",
+    "sys/governance.apply@1",
 ];

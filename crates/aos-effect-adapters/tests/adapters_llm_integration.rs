@@ -8,7 +8,7 @@ use aos_effect_adapters::adapters::llm::LlmAdapter;
 use aos_effect_adapters::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::builtins::{LlmGenerateParams, LlmRuntimeArgs};
-use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
+use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::{MemStore, Store};
 use serde_cbor;
 use serde_json::json;
@@ -16,7 +16,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
-fn build_intent(kind: EffectKind, params_cbor: Vec<u8>) -> EffectIntent {
+fn build_intent(kind: impl Into<String>, params_cbor: Vec<u8>) -> EffectIntent {
     EffectIntent::from_raw_params(kind, params_cbor, [0u8; 32]).unwrap()
 }
 
@@ -161,7 +161,7 @@ async fn llm_errors_missing_api_key() {
         api_key: None,
     };
     let intent = build_intent(
-        EffectKind::llm_generate(),
+        effect_ops::LLM_GENERATE,
         serde_cbor::to_vec(&params).unwrap(),
     );
     let receipt = adapter.execute(&intent).await.unwrap();
@@ -197,7 +197,7 @@ async fn llm_unknown_provider_errors() {
         api_key: Some("key".into()),
     };
     let intent = build_intent(
-        EffectKind::llm_generate(),
+        effect_ops::LLM_GENERATE,
         serde_cbor::to_vec(&params).unwrap(),
     );
     let receipt = adapter.execute(&intent).await.unwrap();
@@ -246,7 +246,7 @@ async fn llm_message_ref_missing_errors() {
         api_key: Some("key".into()),
     };
     let intent = build_intent(
-        EffectKind::llm_generate(),
+        effect_ops::LLM_GENERATE,
         serde_cbor::to_vec(&params).unwrap(),
     );
     let receipt = adapter.execute(&intent).await.unwrap();
@@ -308,13 +308,12 @@ async fn llm_happy_path_ok_receipt() {
         api_key: Some("key".into()),
     };
     let intent = build_intent(
-        EffectKind::llm_generate(),
+        effect_ops::LLM_GENERATE,
         serde_cbor::to_vec(&params).unwrap(),
     );
 
     let receipt = adapter.execute(&intent).await.unwrap();
     assert_eq!(receipt.status, ReceiptStatus::Ok);
-    assert_eq!(receipt.adapter_id, "host.llm.mock");
     // output_ref should exist in payload; parse to confirm
     let payload: aos_effects::builtins::LlmGenerateReceipt =
         serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
@@ -399,7 +398,7 @@ async fn llm_runtime_refs_roundtrip_into_provider_request_body() {
         api_key: Some("key".into()),
     };
     let intent = build_intent(
-        EffectKind::llm_generate(),
+        effect_ops::LLM_GENERATE,
         serde_cbor::to_vec(&params).unwrap(),
     );
 

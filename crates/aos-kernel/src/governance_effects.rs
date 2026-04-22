@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::Store;
-use aos_air_types::{HashRef, Manifest, NamedRef, Routing, SecretEntry};
+use aos_air_types::{HashRef, Manifest, NamedRef, Routing};
 use aos_cbor::{Hash, to_canonical_cbor};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
@@ -143,7 +143,7 @@ pub(crate) struct GovApplyReceipt {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GovPredictedEffect {
-    pub kind: String,
+    pub op: String,
     pub intent_hash: HashRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_json: Option<String>,
@@ -156,7 +156,7 @@ pub(crate) struct GovPendingWorkflowReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_instance_key_b64: Option<String>,
     pub intent_hash: HashRef,
-    pub effect_kind: String,
+    pub effect: String,
     pub emitted_at_seq: u64,
 }
 
@@ -314,10 +314,10 @@ impl<S: Store> EffectParamPreprocessor for GovernanceParamPreprocessor<S> {
     fn preprocess(
         &self,
         _source: &aos_effects::EffectSource,
-        kind: &aos_effects::EffectKind,
+        effect: &str,
         params_cbor: Vec<u8>,
     ) -> Result<Vec<u8>, KernelError> {
-        if kind.as_str() != "governance.propose" {
+        if effect != "sys/governance.propose@1" {
             return Ok(params_cbor);
         }
         let raw: GovProposeParamsRaw = serde_cbor::from_slice(&params_cbor)
@@ -531,16 +531,23 @@ fn build_patch_summary(
         &mut def_changes,
     );
     refs_changed |= push_named_ref_changes(
+        "defworkflow",
+        &base_manifest.workflows,
+        &patch.manifest.workflows,
+        &mut def_changes,
+    );
+    refs_changed |= push_named_ref_changes(
         "defeffect",
         &base_manifest.effects,
         &patch.manifest.effects,
         &mut def_changes,
     );
-    refs_changed |= diff_secret_refs(
+    refs_changed |= push_named_ref_changes(
+        "defsecret",
         &base_manifest.secrets,
         &patch.manifest.secrets,
         &mut def_changes,
-    )?;
+    );
 
     def_changes.sort_by(|a, b| {
         let a_key = (&a.kind, &a.name, change_rank(a.action));
@@ -551,17 +558,12 @@ fn build_patch_summary(
     let mut manifest_sections = HashSet::new();
     let base_routing = base_manifest.routing.clone().unwrap_or_else(|| Routing {
         subscriptions: Vec::new(),
-        inboxes: Vec::new(),
     });
     let next_routing = patch.manifest.routing.clone().unwrap_or_else(|| Routing {
         subscriptions: Vec::new(),
-        inboxes: Vec::new(),
     });
     if section_changed(&base_routing.subscriptions, &next_routing.subscriptions)? {
-        manifest_sections.insert("routing_events".to_string());
-    }
-    if section_changed(&base_routing.inboxes, &next_routing.inboxes)? {
-        manifest_sections.insert("routing_inboxes".to_string());
+        manifest_sections.insert("routing_subscriptions".to_string());
     }
     if section_changed(&base_manifest.secrets, &patch.manifest.secrets)? {
         manifest_sections.insert("secrets".to_string());
@@ -589,14 +591,11 @@ fn build_patch_summary(
     }
     for section in &manifest_sections {
         match section.as_str() {
-            "routing_events" => {
-                ops.insert("set_routing_events".to_string());
-            }
-            "routing_inboxes" => {
-                ops.insert("set_routing_inboxes".to_string());
+            "routing_subscriptions" => {
+                ops.insert("set_routing_subscriptions".to_string());
             }
             "secrets" => {
-                ops.insert("set_secrets".to_string());
+                ops.insert("set_manifest_refs".to_string());
             }
             "manifest_refs" => {}
             _ => {}
@@ -639,72 +638,6 @@ fn push_named_ref_changes(
     changed
 }
 
-fn diff_secret_refs(
-    base: &[SecretEntry],
-    next: &[SecretEntry],
-    changes: &mut Vec<GovDefChange>,
-) -> Result<bool, KernelError> {
-    let base_map = map_secrets(base)?;
-    let next_map = map_secrets(next)?;
-    let mut changed = false;
-    for (name, hash) in &next_map {
-        match base_map.get(name) {
-            None => {
-                changes.push(GovDefChange {
-                    kind: "defsecret".to_string(),
-                    name: name.clone(),
-                    action: GovChangeAction::Added,
-                });
-                changed = true;
-            }
-            Some(existing) if existing != hash => {
-                changes.push(GovDefChange {
-                    kind: "defsecret".to_string(),
-                    name: name.clone(),
-                    action: GovChangeAction::Changed,
-                });
-                changed = true;
-            }
-            _ => {}
-        }
-    }
-    for name in base_map.keys() {
-        if !next_map.contains_key(name) {
-            changes.push(GovDefChange {
-                kind: "defsecret".to_string(),
-                name: name.clone(),
-                action: GovChangeAction::Removed,
-            });
-            changed = true;
-        }
-    }
-    Ok(changed)
-}
-
-fn map_secrets(secrets: &[SecretEntry]) -> Result<HashMap<String, String>, KernelError> {
-    let mut map = HashMap::new();
-    for entry in secrets {
-        let (name, hash) = secret_entry_identity(entry)?;
-        map.insert(name, hash);
-    }
-    Ok(map)
-}
-
-fn secret_entry_identity(entry: &SecretEntry) -> Result<(String, String), KernelError> {
-    match entry {
-        SecretEntry::Ref(reference) => Ok((
-            reference.name.as_str().to_string(),
-            reference.hash.as_str().to_string(),
-        )),
-        SecretEntry::Decl(decl) => {
-            let name = format!("{}@{}", decl.alias, decl.version);
-            let hash = Hash::of_cbor(entry)
-                .map_err(|err| KernelError::Manifest(format!("hash secret decl: {err}")))?;
-            Ok((name, hash.to_hex()))
-        }
-    }
-}
-
 fn section_changed<T: Serialize>(base: &T, next: &T) -> Result<bool, KernelError> {
     let base_bytes = to_canonical_cbor(base)
         .map_err(|err| KernelError::Manifest(format!("encode manifest section: {err}")))?;
@@ -718,5 +651,78 @@ fn change_rank(action: GovChangeAction) -> u8 {
         GovChangeAction::Added => 0,
         GovChangeAction::Changed => 1,
         GovChangeAction::Removed => 2,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GovChangeAction, build_patch_summary};
+    use crate::governance::ManifestPatch;
+    use aos_air_types::{HashRef, Manifest, NamedRef, Routing, RoutingSubscription, SchemaRef};
+
+    fn hash_ref(byte: char) -> HashRef {
+        HashRef::new(format!("sha256:{}", byte.to_string().repeat(64))).expect("hash ref")
+    }
+
+    fn named_ref(name: &str, byte: char) -> NamedRef {
+        NamedRef {
+            name: name.into(),
+            hash: hash_ref(byte),
+        }
+    }
+
+    fn empty_manifest() -> Manifest {
+        Manifest {
+            air_version: "2".into(),
+            schemas: Vec::new(),
+            modules: Vec::new(),
+            ops: Vec::new(),
+            workflows: Vec::new(),
+            effects: Vec::new(),
+            secrets: Vec::new(),
+            routing: None,
+        }
+    }
+
+    #[test]
+    fn patch_summary_reports_defworkflow_changes_and_routing_subscription_section() {
+        let base = empty_manifest();
+        let patch = ManifestPatch {
+            manifest: Manifest {
+                workflows: vec![named_ref("demo/workflow@1", '1')],
+                routing: Some(Routing {
+                    subscriptions: vec![RoutingSubscription {
+                        event: SchemaRef::new("demo/Event@1").expect("schema ref"),
+                        workflow: "demo/workflow@1".into(),
+                        key_field: Some("tenant_id".into()),
+                    }],
+                }),
+                ..empty_manifest()
+            },
+            nodes: Vec::new(),
+        };
+        let patch_hash = hash_ref('9');
+
+        let summary = build_patch_summary(&base, &patch, None, &patch_hash).expect("build summary");
+
+        assert_eq!(
+            summary.ops,
+            vec![
+                "add_def".to_string(),
+                "set_manifest_refs".to_string(),
+                "set_routing_subscriptions".to_string()
+            ]
+        );
+        assert_eq!(summary.def_changes.len(), 1);
+        assert_eq!(summary.def_changes[0].kind, "defworkflow");
+        assert_eq!(summary.def_changes[0].name, "demo/workflow@1");
+        assert_eq!(summary.def_changes[0].action, GovChangeAction::Added);
+        assert_eq!(
+            summary.manifest_sections,
+            vec![
+                "manifest_refs".to_string(),
+                "routing_subscriptions".to_string()
+            ]
+        );
     }
 }

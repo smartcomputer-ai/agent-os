@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "aos.agent/SessionId@1"
@@ -113,125 +113,27 @@
   ],
   "modules": [
     {
-      "name": "aos.agent/SessionWorkflow@1"
-    },
-    {
-      "name": "sys/Workspace@1"
-    }
-  ],
-  "effects": [
-    {
-      "name": "sys/blob.put@1"
-    },
-    {
-      "name": "sys/blob.get@1"
-    },
-    {
-      "name": "sys/llm.generate@1"
-    },
-    {
-      "name": "sys/host.session.open@1"
-    },
-    {
-      "name": "sys/host.fs.write_file@1"
-    },
-    {
-      "name": "sys/host.fs.exists@1"
-    },
-    {
-      "name": "sys/host.fs.read_file@1"
-    },
-    {
-      "name": "sys/host.fs.list_dir@1"
-    },
-    {
-      "name": "sys/host.exec@1"
-    },
-    {
-      "name": "sys/introspect.manifest@1"
-    },
-    {
-      "name": "sys/introspect.workflow_state@1"
-    },
-    {
-      "name": "sys/introspect.list_cells@1"
-    },
-    {
-      "name": "sys/workspace.resolve@1"
-    },
-    {
-      "name": "sys/workspace.empty_root@1"
-    },
-    {
-      "name": "sys/workspace.list@1"
-    },
-    {
-      "name": "sys/workspace.read_ref@1"
-    },
-    {
-      "name": "sys/workspace.read_bytes@1"
-    },
-    {
-      "name": "sys/workspace.write_bytes@1"
-    },
-    {
-      "name": "sys/workspace.write_ref@1"
-    },
-    {
-      "name": "sys/workspace.diff@1"
-    }
-  ],
-  "effect_bindings": [
-    {
-      "kind": "blob.put",
-      "adapter_id": "blob.put"
-    },
-    {
-      "kind": "blob.get",
-      "adapter_id": "blob.get"
-    },
-    {
-      "kind": "llm.generate",
-      "adapter_id": "llm.generate"
-    },
-    {
-      "kind": "host.session.open",
-      "adapter_id": "host.session.open"
-    },
-    {
-      "kind": "host.fs.write_file",
-      "adapter_id": "host.fs.write_file"
-    },
-    {
-      "kind": "host.fs.exists",
-      "adapter_id": "host.fs.exists"
-    },
-    {
-      "kind": "host.fs.read_file",
-      "adapter_id": "host.fs.read_file"
-    },
-    {
-      "kind": "host.fs.list_dir",
-      "adapter_id": "host.fs.list_dir"
-    },
-    {
-      "kind": "host.exec",
-      "adapter_id": "host.exec"
+      "name": "aos.agent/SessionWorkflow_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "aos.agent/SessionIngress@1",
-        "module": "aos.agent/SessionWorkflow@1",
-        "key_field": "session_id"
+        "key_field": "session_id",
+        "workflow": "aos.agent/SessionWorkflow@1"
       },
       {
         "event": "sys/WorkspaceCommit@1",
-        "module": "sys/Workspace@1",
-        "key_field": "workspace"
+        "key_field": "workspace",
+        "workflow": "sys/Workspace@1"
       }
-    ],
-    "inboxes": []
-  }
+    ]
+  },
+  "workflows": [
+    {
+      "name": "aos.agent/SessionWorkflow@1"
+    }
+  ],
+  "effects": []
 }

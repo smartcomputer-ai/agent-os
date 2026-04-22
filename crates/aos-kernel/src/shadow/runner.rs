@@ -39,20 +39,19 @@ impl ShadowExecutor {
 
         let loaded = config.patch.to_loaded_manifest(store.as_ref())?;
         let module_effect_allowlists = loaded
-            .modules
+            .workflows
             .values()
-            .filter_map(|module| {
-                let workflow = module.abi.workflow.as_ref()?;
+            .map(|workflow| {
                 let mut effects = workflow
                     .effects_emitted
                     .iter()
                     .map(|kind| kind.as_str().to_string())
                     .collect::<Vec<_>>();
                 effects.sort();
-                Some(ModuleEffectAllowlist {
-                    module: module.name.clone(),
+                ModuleEffectAllowlist {
+                    module: workflow.name.clone(),
                     effects_emitted: effects,
-                })
+                }
             })
             .collect::<Vec<_>>();
         let mut kernel = Kernel::from_loaded_manifest_with_config(
@@ -87,7 +86,7 @@ impl ShadowExecutor {
             for opened in drain.opened_effects {
                 let intent = opened.intent;
                 predicted_effects.push(PredictedEffect {
-                    kind: intent.kind.as_str().to_string(),
+                    op: intent.effect.clone(),
                     intent_hash: hex::encode(intent.intent_hash),
                     params_json: params_to_json(&intent.params_cbor),
                 });
@@ -100,7 +99,6 @@ impl ShadowExecutor {
 
                 let receipt = EffectReceipt {
                     intent_hash: intent.intent_hash,
-                    adapter_id: "shadow.mock".into(),
                     status: ReceiptStatus::Ok,
                     payload_cbor: Vec::new(),
                     cost_cents: None,
@@ -121,7 +119,7 @@ impl ShadowExecutor {
                         .as_ref()
                         .map(|key| base64::prelude::BASE64_STANDARD.encode(key)),
                     intent_hash: hex::encode(inflight.intent_id),
-                    effect_kind: inflight.effect_kind.clone(),
+                    effect: inflight.effect.clone(),
                     emitted_at_seq: inflight.emitted_at_seq,
                 });
             }
@@ -167,19 +165,20 @@ mod tests {
     use super::*;
     use crate::MemStore;
     use crate::governance::ManifestPatch;
-    use aos_air_types::{
-        AirNode, DefSchema, HashRef, Manifest, NamedRef, SecretDecl, SecretEntry, TypeExpr,
-        TypePrimitive, TypePrimitiveText,
-    };
     use aos_air_types::EmptyObject;
+    use aos_air_types::{
+        AirNode, DefSchema, DefSecret, HashRef, Manifest, NamedRef, TypeExpr, TypePrimitive,
+        TypePrimitiveText,
+    };
 
     fn empty_manifest() -> Manifest {
         Manifest {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: vec![],
-            effects: vec![],
-            effect_bindings: vec![],
+            ops: vec![],
+            workflows: Vec::new(),
+            effects: Vec::new(),
             secrets: vec![],
             routing: None,
         }
@@ -261,17 +260,23 @@ mod tests {
     #[test]
     fn shadow_executor_uses_placeholder_when_secrets_present() {
         let store = Arc::new(MemStore::new());
+        let secret = DefSecret {
+            name: "payments/stripe@1".into(),
+            binding_id: "stripe:prod".into(),
+            expected_digest: None,
+        };
         let patch = ManifestPatch {
             manifest: Manifest {
-                secrets: vec![SecretEntry::Decl(SecretDecl {
-                    alias: "payments/stripe".into(),
-                    version: 1,
-                    binding_id: "stripe:prod".into(),
-                    expected_digest: None,
-                })],
+                secrets: vec![NamedRef {
+                    name: secret.name.clone(),
+                    hash: HashRef::new(
+                        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+                    )
+                    .unwrap(),
+                }],
                 ..empty_manifest()
             },
-            nodes: vec![],
+            nodes: vec![AirNode::Defsecret(secret)],
         };
         let patch_hash = hash_of_patch(&patch);
         let manifest_hash = hash_of_manifest(&patch);

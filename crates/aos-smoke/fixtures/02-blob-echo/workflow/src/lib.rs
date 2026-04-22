@@ -111,7 +111,7 @@ fn handle_start(ctx: &mut WorkflowCtx<EchoState>, event: StartEvent) {
         blob_ref: Some(HashRef::new(blob_ref).expect("blob hash")),
         refs: None,
     };
-    ctx.effects().emit_raw("blob.put", &params, Some("default"));
+    ctx.effects().emit_raw("sys/blob.put@1", &params);
 }
 
 fn handle_put_result(ctx: &mut WorkflowCtx<EchoState>, event: BlobPutResultEvent) {
@@ -134,7 +134,7 @@ fn handle_put_result(ctx: &mut WorkflowCtx<EchoState>, event: BlobPutResultEvent
         let params = BlobGetParams {
             blob_ref: HashRef::new(stored_blob_ref.clone()).expect("blob hash"),
         };
-        ctx.effects().emit_raw("blob.get", &params, Some("default"));
+        ctx.effects().emit_raw("sys/blob.get@1", &params);
     }
 }
 

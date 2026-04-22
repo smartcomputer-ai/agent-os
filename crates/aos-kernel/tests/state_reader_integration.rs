@@ -1,11 +1,11 @@
 #[path = "support/helpers.rs"]
 mod helpers;
 use aos_air_types::{
-    DefSchema, WorkflowAbi, schema_index::SchemaIndex, value_normalize::normalize_cbor_by_name,
+    DefSchema, schema_index::SchemaIndex, value_normalize::normalize_cbor_by_name,
 };
 use aos_kernel::{Consistency, StateReader};
 use aos_wasm_abi::WorkflowOutput;
-use helpers::fixtures;
+use helpers::fixtures::{self, WorkflowAbi};
 use std::collections::HashMap;
 
 /// Build a test world with a single stub workflow whose state is set to `payload` on first event.
@@ -72,7 +72,7 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
         },
     );
     workflow.key_schema = Some(fixtures::schema("com.acme/Key@1"));
-    workflow.abi.workflow = Some(aos_air_types::WorkflowAbi {
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/State@1"),
         event: fixtures::schema("com.acme/Event@1"),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
@@ -82,7 +82,7 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
 
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("com.acme/Event@1"),
-        module: workflow.name.clone(),
+        workflow: workflow.name.clone(),
         key_field: Some(key_field.to_string()),
     }];
 

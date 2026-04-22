@@ -1,6 +1,7 @@
 #[path = "support/fixtures.rs"]
 mod fixtures;
 
+use aos_effects::effect_ops;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::Journal;
 use aos_wasm_abi::WorkflowEffect;
@@ -11,9 +12,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use aos_air_types::{
-    DefSchema, EffectKind, TypeExpr, TypeRef, TypeVariant, WorkflowAbi, builtins,
-    catalog::EffectCatalog, schema_index::SchemaIndex,
+    DefSchema, TypeExpr, TypeRef, TypeVariant, builtins, catalog::EffectCatalog,
+    schema_index::SchemaIndex,
 };
+use fixtures::WorkflowAbi;
 
 /// Plan-origin effects with semantically identical params but different CBOR shapes
 /// must canonicalize to the same params bytes and intent hash.
@@ -29,7 +31,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let intent_a = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::llm_generate(),
+            &effect_ops::LLM_GENERATE,
             params_a.clone(),
             [0u8; 32],
         )
@@ -37,7 +39,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let intent_b = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::llm_generate(),
+            &effect_ops::LLM_GENERATE,
             params_b.clone(),
             [0u8; 32],
         )
@@ -71,11 +73,7 @@ fn workflow_effect_params_canonicalize_noop() {
     );
     let params_cbor = serde_cbor::to_vec(&CborValue::Map(params)).expect("encode");
 
-    let effect = WorkflowEffect::with_cap_slot(
-        aos_effects::EffectKind::TIMER_SET,
-        params_cbor.clone(),
-        "timer",
-    );
+    let effect = WorkflowEffect::new("sys/timer.set@1", params_cbor.clone());
     let intent = mgr
         .enqueue_workflow_effect("com.acme/Timer", &effect)
         .expect("enqueue workflow effect");
@@ -86,7 +84,7 @@ fn workflow_effect_params_canonicalize_noop() {
     let canonical_again = aos_effects::normalize_effect_params(
         &effects,
         &schemas,
-        &aos_effects::EffectKind::new(aos_effects::EffectKind::TIMER_SET),
+        &aos_effects::effect_ops::TIMER_SET,
         &params_cbor,
     )
     .expect("normalize direct");
@@ -100,14 +98,14 @@ fn workflow_effect_params_canonicalize_noop() {
     let roundtrip = aos_effects::normalize_effect_params(
         &effects,
         &schemas,
-        &aos_effects::EffectKind::new(aos_effects::EffectKind::TIMER_SET),
+        &aos_effects::effect_ops::TIMER_SET,
         &intent.params_cbor,
     )
     .expect("normalize again");
     assert_eq!(intent.params_cbor, roundtrip, "canonical form is stable");
 
     let rehashed = aos_effects::EffectIntent::from_raw_params(
-        intent.kind.clone(),
+        intent.effect.clone(),
         intent.params_cbor.clone(),
         intent.idempotency_key,
     )
@@ -145,7 +143,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let intent_a = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::http_request(),
+            &effect_ops::HTTP_REQUEST,
             params_a.clone(),
             [0u8; 32],
         )
@@ -153,7 +151,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let intent_b = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::http_request(),
+            &effect_ops::HTTP_REQUEST,
             params_b.clone(),
             [0u8; 32],
         )
@@ -174,11 +172,7 @@ fn workflow_params_round_trip_journal_replay() {
     // Build workflow that emits a timer.set micro-effect.
     let workflow_event_schema = "com.acme/WorkflowEvent@1";
     let params = timer_params_cbor(42, Some("k".into()));
-    let effect = WorkflowEffect::with_cap_slot(
-        aos_effects::EffectKind::TIMER_SET,
-        params.clone(),
-        "default",
-    );
+    let effect = WorkflowEffect::new("sys/timer.set@1", params.clone());
     let store = fixtures::new_mem_store();
     let mut workflow = fixtures::stub_workflow_module(
         &store,
@@ -195,7 +189,7 @@ fn workflow_params_round_trip_journal_replay() {
         event: fixtures::schema(workflow_event_schema),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
-        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        effects_emitted: vec![aos_effects::effect_ops::TIMER_SET.into()],
     });
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
@@ -236,6 +230,7 @@ fn workflow_params_round_trip_journal_replay() {
     );
 
     // Run kernel to emit effect, record journal, replay, and compare params_cbor.
+    let replay_manifest = manifest.clone();
     let mut world = fixtures::TestWorld::with_store(store.clone(), manifest).unwrap();
     world
         .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "1" }))
@@ -248,64 +243,7 @@ fn workflow_params_round_trip_journal_replay() {
 
     let mut replay_world = fixtures::TestWorld::with_store_and_journal(
         store.clone(),
-        {
-            let mut replay_manifest = fixtures::build_loaded_manifest(
-                {
-                    let mut workflow = fixtures::stub_workflow_module(
-                        &store,
-                        "com.acme/Workflow@1",
-                        &aos_wasm_abi::WorkflowOutput {
-                            state: None,
-                            domain_events: vec![],
-                            effects: vec![effect.clone()],
-                            ann: None,
-                        },
-                    );
-                    workflow.abi.workflow = Some(WorkflowAbi {
-                        state: fixtures::schema("com.acme/WorkflowState@1"),
-                        event: fixtures::schema(workflow_event_schema),
-                        context: Some(fixtures::schema("sys/WorkflowContext@1")),
-                        annotations: None,
-                        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
-                    });
-                    vec![workflow]
-                },
-                routing.clone(),
-            );
-            fixtures::insert_test_schemas(
-                &mut replay_manifest,
-                vec![
-                    fixtures::def_text_record_schema(
-                        fixtures::START_SCHEMA,
-                        vec![("id", fixtures::text_type())],
-                    ),
-                    DefSchema {
-                        name: workflow_event_schema.into(),
-                        ty: TypeExpr::Variant(TypeVariant {
-                            variant: IndexMap::from([
-                                (
-                                    "Start".into(),
-                                    TypeExpr::Ref(TypeRef {
-                                        reference: fixtures::schema(fixtures::START_SCHEMA),
-                                    }),
-                                ),
-                                (
-                                    "Fired".into(),
-                                    TypeExpr::Ref(TypeRef {
-                                        reference: fixtures::schema(fixtures::SYS_TIMER_FIRED),
-                                    }),
-                                ),
-                            ]),
-                        }),
-                    },
-                    DefSchema {
-                        name: "com.acme/WorkflowState@1".into(),
-                        ty: fixtures::text_type(),
-                    },
-                ],
-            );
-            replay_manifest
-        },
+        replay_manifest,
         Journal::from_entries(&journal).unwrap(),
     )
     .unwrap();
@@ -329,7 +267,7 @@ fn workflow_params_round_trip_journal_replay() {
 
 fn builtin_effect_context() -> (Arc<EffectCatalog>, Arc<SchemaIndex>) {
     let catalog =
-        EffectCatalog::from_defs(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
+        EffectCatalog::from_effects(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
     let mut schemas = HashMap::new();
     for builtin in builtins::builtin_schemas() {
         schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());

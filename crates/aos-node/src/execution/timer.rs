@@ -9,7 +9,7 @@ use std::collections::BinaryHeap;
 use std::time::{Duration, Instant};
 
 use aos_effects::builtins::TimerSetParams;
-use aos_effects::{EffectIntent, EffectKind};
+use aos_effects::{EffectIntent, effect_ops};
 use aos_kernel::snapshot::WorkflowReceiptSnapshot;
 use aos_kernel::{Kernel, Store};
 use tracing::warn;
@@ -145,7 +145,9 @@ impl TimerScheduler {
 
     pub fn rehydrate_from_pending(&mut self, contexts: &[WorkflowReceiptSnapshot]) {
         for ctx in contexts {
-            if ctx.effect_kind == EffectKind::TIMER_SET {
+            if ctx.effect == "sys/timer.set@1"
+                || ctx.executor_entrypoint.as_deref() == Some(effect_ops::TIMER_SET)
+            {
                 if let Ok(params) = serde_cbor::from_slice::<TimerSetParams>(&ctx.params_cbor) {
                     let entry = TimerEntry {
                         deliver_at_ns: params.deliver_at_ns,
@@ -255,7 +257,13 @@ mod tests {
         let contexts = vec![
             WorkflowReceiptSnapshot {
                 intent_hash: [1; 32],
-                effect_kind: EffectKind::TIMER_SET.to_string(),
+                origin_module_id: "demo/Timer@1".into(),
+                origin_workflow_hash: None,
+                effect: "sys/timer.set@1".to_string(),
+                effect_hash: None,
+                executor_module: None,
+                executor_module_hash: None,
+                executor_entrypoint: Some(effect_ops::TIMER_SET.to_string()),
                 origin_instance_key: None,
                 params_cbor: serde_cbor::to_vec(&TimerSetParams {
                     deliver_at_ns: 42,
@@ -264,18 +272,22 @@ mod tests {
                 .unwrap(),
                 idempotency_key: [0; 32],
                 issuer_ref: None,
-                origin_module_id: "demo/Timer@1".into(),
                 emitted_at_seq: 1,
                 module_version: None,
             },
             WorkflowReceiptSnapshot {
                 intent_hash: [2; 32],
-                effect_kind: EffectKind::HTTP_REQUEST.to_string(),
+                origin_module_id: "demo/Http@1".into(),
+                origin_workflow_hash: None,
+                effect: "sys/http.request@1".to_string(),
+                effect_hash: None,
+                executor_module: None,
+                executor_module_hash: None,
+                executor_entrypoint: Some(effect_ops::HTTP_REQUEST.to_string()),
                 origin_instance_key: None,
                 params_cbor: Vec::new(),
                 idempotency_key: [0; 32],
                 issuer_ref: None,
-                origin_module_id: "demo/Http@1".into(),
                 emitted_at_seq: 2,
                 module_version: None,
             },

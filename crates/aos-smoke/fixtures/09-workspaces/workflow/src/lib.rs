@@ -9,11 +9,11 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const WORKSPACE_RESOLVE_EFFECT: &str = "workspace.resolve";
-const WORKSPACE_EMPTY_ROOT_EFFECT: &str = "workspace.empty_root";
-const WORKSPACE_WRITE_BYTES_EFFECT: &str = "workspace.write_bytes";
-const WORKSPACE_LIST_EFFECT: &str = "workspace.list";
-const WORKSPACE_DIFF_EFFECT: &str = "workspace.diff";
+const WORKSPACE_RESOLVE_EFFECT: &str = "sys/workspace.resolve@1";
+const WORKSPACE_EMPTY_ROOT_EFFECT: &str = "sys/workspace.empty_root@1";
+const WORKSPACE_WRITE_BYTES_EFFECT: &str = "sys/workspace.write_bytes@1";
+const WORKSPACE_LIST_EFFECT: &str = "sys/workspace.list@1";
+const WORKSPACE_DIFF_EFFECT: &str = "sys/workspace.diff@1";
 const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 
 aos_workflow!(WorkspaceDemo);
@@ -201,7 +201,7 @@ fn handle_receipt(
     let Some(step) = ctx.state.active_step.clone() else {
         return Ok(());
     };
-    if envelope.effect_kind != effect_kind_for_step(&step) {
+    if envelope.effect != effect_for_step(&step) {
         return Ok(());
     }
 
@@ -308,7 +308,7 @@ fn maybe_begin_next_workspace(ctx: &mut WorkflowCtx<WorkspaceState, ()>) -> Resu
         version: None,
     };
     ctx.effects()
-        .emit_raw(WORKSPACE_RESOLVE_EFFECT, &params, Some("default"));
+        .emit_raw(WORKSPACE_RESOLVE_EFFECT, &params);
     ctx.state.active_step = Some(WorkspaceStep::Resolving);
     Ok(())
 }
@@ -321,7 +321,7 @@ fn emit_empty_root(ctx: &mut WorkflowCtx<WorkspaceState, ()>) -> Result<(), Redu
         .ok_or_else(|| ReduceError::new("missing active workspace"))?;
     let params = WorkspaceEmptyRootParams { workspace };
     ctx.effects()
-        .emit_raw(WORKSPACE_EMPTY_ROOT_EFFECT, &params, Some("default"));
+        .emit_raw(WORKSPACE_EMPTY_ROOT_EFFECT, &params);
     ctx.state.active_step = Some(WorkspaceStep::CreatingEmptyRoot);
     Ok(())
 }
@@ -342,7 +342,7 @@ fn emit_write_marker(
         mode: None,
     };
     ctx.effects()
-        .emit_raw(WORKSPACE_WRITE_BYTES_EFFECT, &params, Some("default"));
+        .emit_raw(WORKSPACE_WRITE_BYTES_EFFECT, &params);
     ctx.state.active_step = Some(WorkspaceStep::WritingMarker);
     Ok(())
 }
@@ -358,7 +358,7 @@ fn emit_write_readme(
         mode: None,
     };
     ctx.effects()
-        .emit_raw(WORKSPACE_WRITE_BYTES_EFFECT, &params, Some("default"));
+        .emit_raw(WORKSPACE_WRITE_BYTES_EFFECT, &params);
     ctx.state.active_step = Some(WorkspaceStep::WritingReadme);
     Ok(())
 }
@@ -374,7 +374,7 @@ fn emit_write_data(
         mode: None,
     };
     ctx.effects()
-        .emit_raw(WORKSPACE_WRITE_BYTES_EFFECT, &params, Some("default"));
+        .emit_raw(WORKSPACE_WRITE_BYTES_EFFECT, &params);
     ctx.state.active_step = Some(WorkspaceStep::WritingData);
     Ok(())
 }
@@ -388,7 +388,7 @@ fn emit_list(ctx: &mut WorkflowCtx<WorkspaceState, ()>, root_hash: String) -> Re
         limit: 200,
     };
     ctx.effects()
-        .emit_raw(WORKSPACE_LIST_EFFECT, &params, Some("default"));
+        .emit_raw(WORKSPACE_LIST_EFFECT, &params);
     ctx.state.active_step = Some(WorkspaceStep::Listing);
     Ok(())
 }
@@ -404,7 +404,7 @@ fn emit_write_readme_update(
         mode: None,
     };
     ctx.effects()
-        .emit_raw(WORKSPACE_WRITE_BYTES_EFFECT, &params, Some("default"));
+        .emit_raw(WORKSPACE_WRITE_BYTES_EFFECT, &params);
     ctx.state.active_step = Some(WorkspaceStep::WritingReadmeUpdate);
     Ok(())
 }
@@ -420,7 +420,7 @@ fn emit_diff(
         prefix: None,
     };
     ctx.effects()
-        .emit_raw(WORKSPACE_DIFF_EFFECT, &params, Some("default"));
+        .emit_raw(WORKSPACE_DIFF_EFFECT, &params);
     ctx.state.active_step = Some(WorkspaceStep::Diffing);
     Ok(())
 }
@@ -488,7 +488,7 @@ fn finalize_active_workspace(
     Ok(())
 }
 
-fn effect_kind_for_step(step: &WorkspaceStep) -> &'static str {
+fn effect_for_step(step: &WorkspaceStep) -> &'static str {
     match step {
         WorkspaceStep::Resolving => WORKSPACE_RESOLVE_EFFECT,
         WorkspaceStep::CreatingEmptyRoot => WORKSPACE_EMPTY_ROOT_EFFECT,

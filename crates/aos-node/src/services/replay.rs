@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use aos_air_types::builtins;
+use aos_air_types::{DefModule, ModuleRuntime, WasmArtifact, builtins};
 use aos_cbor::{HASH_PREFIX, Hash};
 use aos_kernel::journal::{Journal, OwnedJournalEntry, SnapshotRecord as KernelSnapshotRecord};
 use aos_kernel::{
@@ -121,7 +121,9 @@ impl HostedReplayService {
             .schemas
             .iter()
             .chain(manifest_doc.modules.iter())
+            .chain(manifest_doc.workflows.iter())
             .chain(manifest_doc.effects.iter())
+            .chain(manifest_doc.secrets.iter())
         {
             if is_builtin_manifest_ref(named.name.as_str()) {
                 continue;
@@ -129,24 +131,17 @@ impl HostedReplayService {
             let hash = parse_plane_hash_like(named.hash.as_str(), "manifest_ref")?;
             let _ = store.get(hash).map_err(WorkerError::Persist)?;
         }
-        for secret in &manifest_doc.secrets {
-            let aos_air_types::SecretEntry::Ref(named) = secret else {
-                continue;
-            };
-            let hash = parse_plane_hash_like(named.hash.as_str(), "secret_ref")?;
-            let _ = store.get(hash).map_err(WorkerError::Persist)?;
-        }
         let loaded = ManifestLoader::load_from_hash(store.as_ref(), manifest)?;
         for module in loaded.modules.values() {
-            if is_builtin_module(module.name.as_str()) || is_zero_hash(module.wasm_hash.as_str()) {
+            let Some(hash_ref) = wasm_module_hash(module) else {
+                continue;
+            };
+            if is_builtin_module(module.name.as_str()) || is_zero_hash(hash_ref.as_str()) {
                 continue;
             }
-            let wasm_hash =
-                aos_cbor::Hash::from_hex_str(module.wasm_hash.as_str()).map_err(|_| {
-                    WorkerError::LogFirst(BackendError::InvalidHashRef(
-                        module.wasm_hash.to_string(),
-                    ))
-                })?;
+            let wasm_hash = aos_cbor::Hash::from_hex_str(hash_ref.as_str()).map_err(|_| {
+                WorkerError::LogFirst(BackendError::InvalidHashRef(hash_ref.to_string()))
+            })?;
             let _ = store.get(wasm_hash).map_err(WorkerError::Persist)?;
         }
         Ok(loaded)
@@ -424,6 +419,7 @@ fn resolved_universe_from_frames(frames: &[aos_node::WorldLogFrame]) -> Option<U
 fn is_builtin_manifest_ref(name: &str) -> bool {
     builtins::find_builtin_schema(name).is_some()
         || builtins::find_builtin_module(name).is_some()
+        || builtins::find_builtin_workflow(name).is_some()
         || builtins::find_builtin_effect(name).is_some()
 }
 
@@ -434,6 +430,15 @@ fn is_builtin_module(name: &str) -> bool {
 fn is_zero_hash(value: &str) -> bool {
     let trimmed = value.strip_prefix("sha256:").unwrap_or(value);
     trimmed.len() == 64 && trimmed.bytes().all(|byte| byte == b'0')
+}
+
+fn wasm_module_hash(module: &DefModule) -> Option<&aos_air_types::HashRef> {
+    match &module.runtime {
+        ModuleRuntime::Wasm {
+            artifact: WasmArtifact::WasmModule { hash },
+        } => Some(hash),
+        _ => None,
+    }
 }
 
 fn parse_plane_hash_like(value: &str, field: &str) -> Result<Hash, WorkerError> {

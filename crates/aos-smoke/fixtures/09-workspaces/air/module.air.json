@@ -1,20 +1,30 @@
 [
   {
     "$kind": "defmodule",
-    "name": "demo/WorkspaceDemo@1",
-    "module_kind": "workflow",
-    "abi": {
-      "workflow": {
-        "state": "demo/WorkspaceState@1",
-        "event": "demo/WorkspaceEvent@1",
-        "effects_emitted": [
-          "workspace.resolve",
-          "workspace.empty_root",
-          "workspace.write_bytes",
-          "workspace.list",
-          "workspace.diff"
-        ]
+    "name": "demo/WorkspaceDemo_wasm@1",
+    "runtime": {
+      "kind": "wasm",
+      "artifact": {
+        "kind": "wasm_module"
       }
+    }
+  },
+  {
+    "$kind": "defworkflow",
+    "name": "demo/WorkspaceDemo@1",
+    "state": "demo/WorkspaceState@1",
+    "event": "demo/WorkspaceEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [
+      "sys/workspace.resolve@1",
+      "sys/workspace.empty_root@1",
+      "sys/workspace.write_bytes@1",
+      "sys/workspace.list@1",
+      "sys/workspace.diff@1"
+    ],
+    "impl": {
+      "module": "demo/WorkspaceDemo_wasm@1",
+      "entrypoint": "step"
     }
   }
 ]

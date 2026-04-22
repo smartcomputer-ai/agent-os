@@ -2,13 +2,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use aos_air_types::{AirNode, Manifest};
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effect_types::HashRef;
 use aos_kernel::{Consistency, StateReader, Store, WorldInput};
 use aos_node::control::{
     AcceptWaitQuery, DefGetResponse, DefsListResponse, HeadInfoResponse, JournalEntriesResponse,
-    JournalEntryResponse, ManifestResponse, RawJournalEntriesResponse, RawJournalEntryResponse,
-    StateCellSummary, StateGetResponse, StateListResponse, WorkspaceResolveResponse,
+    JournalEntryResponse, ManifestResponse, ManifestSummary, RawJournalEntriesResponse,
+    RawJournalEntryResponse, RouteSummary, StateCellSummary, StateGetResponse, StateListResponse,
+    WorkspaceResolveResponse,
 };
 use aos_node::{
     BlobBackend, CborPayload, CheckpointBackend, CommandIngress, CommandRecord, CreateWorldRequest,
@@ -663,7 +665,6 @@ impl HostedWorkerRuntime {
                             ingress.intent_hash.len(),
                         ))
                     })?,
-                    adapter_id: ingress.adapter_id,
                     status: ingress.status,
                     payload_cbor: resolve_cbor_payload(store.as_ref(), &ingress.payload)?,
                     cost_cents: ingress.cost_cents,
@@ -1166,6 +1167,7 @@ impl HostedWorkerRuntime {
             Ok(ManifestResponse {
                 journal_head: world.kernel.heights().head,
                 manifest_hash: world.kernel.manifest_hash().to_hex(),
+                summary: manifest_summary(&manifest, |name| world.kernel.get_def(name)),
                 manifest,
             })
         })
@@ -1536,6 +1538,89 @@ impl HostedWorkerRuntime {
 
     pub(super) fn lock_core(&self) -> Result<MutexGuard<'_, HostedWorkerCore>, WorkerError> {
         self.core.lock().map_err(|_| WorkerError::RuntimePoisoned)
+    }
+}
+
+fn manifest_summary(
+    manifest: &Manifest,
+    _get_def: impl FnMut(&str) -> Option<AirNode>,
+) -> ManifestSummary {
+    let workflow_count = manifest.workflows.len();
+    let effect_count = manifest.effects.len();
+
+    let routes = manifest
+        .routing
+        .as_ref()
+        .map(|routing| {
+            routing
+                .subscriptions
+                .iter()
+                .map(|route| RouteSummary {
+                    event: route.event.as_str().to_string(),
+                    workflow: route.workflow.as_str().to_string(),
+                    key_field: route.key_field.clone(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    ManifestSummary {
+        schema_count: manifest.schemas.len(),
+        module_count: manifest.modules.len(),
+        workflow_count,
+        effect_count,
+        secret_count: manifest.secrets.len(),
+        routing_subscription_count: routes.len(),
+        routes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::manifest_summary;
+    use aos_air_types::{HashRef, Manifest, NamedRef, Routing, RoutingSubscription, SchemaRef};
+
+    fn hash_ref(byte: char) -> HashRef {
+        HashRef::new(format!("sha256:{}", byte.to_string().repeat(64))).expect("hash ref")
+    }
+
+    fn named_ref(name: &str, byte: char) -> NamedRef {
+        NamedRef {
+            name: name.into(),
+            hash: hash_ref(byte),
+        }
+    }
+
+    #[test]
+    fn manifest_summary_counts_workflows_and_effects_and_routes_by_workflow() {
+        let manifest = Manifest {
+            air_version: "2".into(),
+            schemas: vec![named_ref("demo/Event@1", '1')],
+            modules: vec![named_ref("demo/workflow_wasm@1", '2')],
+            ops: Vec::new(),
+            workflows: vec![named_ref("demo/workflow@1", '3')],
+            effects: vec![named_ref("demo/http.request@1", '4')],
+            secrets: vec![named_ref("demo/secret@1", '5')],
+            routing: Some(Routing {
+                subscriptions: vec![RoutingSubscription {
+                    event: SchemaRef::new("demo/Event@1").expect("schema ref"),
+                    workflow: "demo/workflow@1".into(),
+                    key_field: Some("tenant_id".into()),
+                }],
+            }),
+        };
+
+        let summary = manifest_summary(&manifest, |_| None);
+
+        assert_eq!(summary.schema_count, 1);
+        assert_eq!(summary.module_count, 1);
+        assert_eq!(summary.workflow_count, 1);
+        assert_eq!(summary.effect_count, 1);
+        assert_eq!(summary.secret_count, 1);
+        assert_eq!(summary.routing_subscription_count, 1);
+        assert_eq!(summary.routes[0].event, "demo/Event@1");
+        assert_eq!(summary.routes[0].workflow, "demo/workflow@1");
+        assert_eq!(summary.routes[0].key_field.as_deref(), Some("tenant_id"));
     }
 }
 

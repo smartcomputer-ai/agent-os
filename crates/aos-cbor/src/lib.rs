@@ -161,31 +161,31 @@ mod tests {
         let cases = [
             (
                 "spec/schemas/common.schema.json",
-                "sha256:0d217c20164ccc948361c3142f4c514fc80c86777a29186605b1fcd442b48f1e",
+                "sha256:4bdbee3df35f0ddf883713f666a52625f0019e7c86934e0d593a8213f21c7ffd",
             ),
             (
                 "spec/schemas/defschema.schema.json",
-                "sha256:492c7e9583481d3060bf444efb82f7263434f49f85aab238504152ff8ec1115c",
+                "sha256:4fad7ee2d0b90680d6b312984e275b33f1abe59aeade4a9c05b9f45fb445b44a",
             ),
             (
                 "spec/schemas/defmodule.schema.json",
-                "sha256:f8fe13397d7d4d882463022330b3074ed4e4a2d5ed4f56678fd0e6ff0793cb8c",
+                "sha256:efdfd0d0ce015b5da609cbfd65dfd1f558fe22f24c566c93349791d36fa2df6f",
             ),
             (
                 "spec/schemas/manifest.schema.json",
-                "sha256:1c97f761b926e90629bbdb1a97f3b5ea2f1f56b6a1016d5bb76132998e959c8f",
+                "sha256:41657058a062a06bee5242917232340e1b3168e27521214ed4b0faced10a01b7",
             ),
             (
                 "spec/schemas/defsecret.schema.json",
-                "sha256:44aeadb93b11faaf4fa0901ac04e7aaf4a70fe2b7b03b7fbb0fc670bb1045b58",
+                "sha256:b0fe80f34c69d6a55f24847599847dee8fcf030beee30f1c147e543c0fc624d2",
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:8593fc538a5162b67b2888da48d9d5de5ae016fd26d35adc357fa9beb80fcbc3",
+                "sha256:f527c7e3ac5c6dcba8799f95241b4de2b72cdd6ae7f6c9d5324d2e2502eae3bf",
             ),
             (
                 "spec/defs/builtin-schemas-sdk.air.json",
-                "sha256:9c8eddc4d6d23b1cce34b8ae07907e2161ec123581c7e10cded3ba82f765cccc",
+                "sha256:114371dfc21eccdd36d8770304174437de952da07be62bff23c3003d83afc582",
             ),
             (
                 "spec/defs/builtin-schemas-host.air.json",

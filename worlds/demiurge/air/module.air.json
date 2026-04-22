@@ -1,16 +1,28 @@
-{
-  "$kind": "defmodule",
-  "name": "demiurge/Demiurge@1",
-  "module_kind": "workflow",
-  "key_schema": "aos.agent/SessionId@1",
-  "abi": {
-    "workflow": {
-      "state": "demiurge/State@1",
-      "event": "demiurge/WorkflowEvent@1",
-      "effects_emitted": [
-        "blob.put",
-        "host.session.open"
-      ]
+[
+  {
+    "$kind": "defmodule",
+    "name": "demiurge/Demiurge_wasm@1",
+    "runtime": {
+      "kind": "wasm",
+      "artifact": {
+        "kind": "wasm_module"
+      }
+    }
+  },
+  {
+    "$kind": "defworkflow",
+    "name": "demiurge/Demiurge@1",
+    "state": "demiurge/State@1",
+    "event": "demiurge/WorkflowEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [
+      "sys/blob.put@1",
+      "sys/host.session.open@1"
+    ],
+    "key_schema": "aos.agent/SessionId@1",
+    "impl": {
+      "module": "demiurge/Demiurge_wasm@1",
+      "entrypoint": "step"
     }
   }
-}
+]

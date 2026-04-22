@@ -3,67 +3,127 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::{
-    DefEffect, DefModule, DefSchema, Manifest, ModuleKind, RoutingEvent, TypeExpr, builtins,
+    DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, Manifest, ModuleRuntime, RoutingEvent,
+    TypeExpr, builtins,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ValidationError {
-    #[error("route to keyed module '{module}' must specify key_field")]
-    RoutingMissingKeyField { module: String },
-    #[error("route to non-keyed module '{module}' must not specify key_field")]
-    RoutingUnexpectedKeyField { module: String },
-    #[error("route to module '{module}' references unknown module")]
-    RoutingUnknownModule { module: String },
+    #[error("manifest {kind} ref '{name}' does not resolve")]
+    ManifestRefNotFound { kind: &'static str, name: String },
+    #[error("definition '{name}' implementation references inactive module '{module}'")]
+    DefUnknownModule { name: String, module: String },
+    #[error("schema '{schema}' not found")]
+    SchemaNotFound { schema: String },
+    #[error("effect '{effect}' not found or not active")]
+    EffectNotFound { effect: String },
+    #[error("workflow '{workflow}' not found or not active")]
+    WorkflowNotFound { workflow: String },
+    #[error("route to keyed workflow '{workflow}' must specify key_field")]
+    RoutingMissingKeyField { workflow: String },
+    #[error("route to non-keyed workflow '{workflow}' must not specify key_field")]
+    RoutingUnexpectedKeyField { workflow: String },
     #[error(
-        "route to module '{module}' uses schema '{event}' but module ABI declares '{expected}'"
+        "route to workflow '{workflow}' uses schema '{event}' but workflow event schema is '{expected}'"
     )]
     RoutingSchemaMismatch {
-        module: String,
+        workflow: String,
         event: String,
         expected: String,
     },
     #[error(
-        "route to module '{module}' uses key_field '{key_field}' with schema '{event}', but key schema '{expected}' does not match '{found}'"
+        "route to workflow '{workflow}' uses key_field '{key_field}' with schema '{event}', but key schema '{expected}' does not match '{found}'"
     )]
     RoutingKeyFieldMismatch {
-        module: String,
+        workflow: String,
         event: String,
         key_field: String,
         expected: String,
         found: String,
     },
-    #[error("module '{module}' event family schema '{event_schema}' is invalid: {reason}")]
-    ModuleEventFamilyInvalid {
-        module: String,
+    #[error("workflow '{workflow}' event family schema '{event_schema}' is invalid: {reason}")]
+    WorkflowEventFamilyInvalid {
+        workflow: String,
         event_schema: String,
         reason: String,
     },
-    #[error("schema '{schema}' not found")]
-    SchemaNotFound { schema: String },
-    #[error("effect kind '{kind}' not found in catalog or built-ins")]
-    EffectNotFound { kind: String },
-    #[error("effect binding kind '{kind}' is not declared in manifest.effects")]
-    EffectBindingKindNotDeclared { kind: String },
-    #[error("effect binding kind '{kind}' is duplicated")]
-    EffectBindingDuplicateKind { kind: String },
-    #[error("effect binding kind '{kind}' is internal and cannot be bound")]
-    EffectBindingInternalKind { kind: String },
-    #[error("workflow module '{module}' must define workflow ABI")]
-    WorkflowAbiMissingWorkflow { module: String },
-    #[error("pure module '{module}' must define pure ABI")]
-    PureAbiMissingPure { module: String },
-    #[error("pure module '{module}' must not define workflow ABI")]
-    PureAbiHasWorkflow { module: String },
+    #[error(
+        "module '{module}' runtime '{runtime}' does not support {def_kind} definition '{name}'"
+    )]
+    UnsupportedRuntimeForDef {
+        module: String,
+        runtime: &'static str,
+        def_kind: &'static str,
+        name: String,
+    },
 }
 
 pub fn validate_manifest(
     manifest: &Manifest,
     modules: &HashMap<String, DefModule>,
     schemas: &HashMap<String, DefSchema>,
+    workflows: &HashMap<String, DefWorkflow>,
     effects: &HashMap<String, DefEffect>,
+    secrets: &HashMap<String, DefSecret>,
 ) -> Result<(), ValidationError> {
+    let active_schemas: HashSet<String> = manifest.schemas.iter().map(|r| r.name.clone()).collect();
+    let active_modules: HashSet<String> = manifest.modules.iter().map(|r| r.name.clone()).collect();
+    let active_workflows: HashSet<String> =
+        manifest.workflows.iter().map(|r| r.name.clone()).collect();
+    let active_effects: HashSet<String> = manifest.effects.iter().map(|r| r.name.clone()).collect();
+    let active_secrets: HashSet<String> = manifest.secrets.iter().map(|r| r.name.clone()).collect();
+
+    for reference in &manifest.schemas {
+        if !schemas.contains_key(&reference.name)
+            && builtins::find_builtin_schema(reference.name.as_str()).is_none()
+        {
+            return Err(ValidationError::ManifestRefNotFound {
+                kind: "schema",
+                name: reference.name.clone(),
+            });
+        }
+    }
+    for reference in &manifest.modules {
+        if !modules.contains_key(&reference.name)
+            && builtins::find_builtin_module(reference.name.as_str()).is_none()
+        {
+            return Err(ValidationError::ManifestRefNotFound {
+                kind: "module",
+                name: reference.name.clone(),
+            });
+        }
+    }
+    for reference in &manifest.workflows {
+        if !workflows.contains_key(&reference.name)
+            && builtins::find_builtin_workflow(reference.name.as_str()).is_none()
+        {
+            return Err(ValidationError::ManifestRefNotFound {
+                kind: "workflow",
+                name: reference.name.clone(),
+            });
+        }
+    }
+    for reference in &manifest.effects {
+        if !effects.contains_key(&reference.name)
+            && builtins::find_builtin_effect(reference.name.as_str()).is_none()
+        {
+            return Err(ValidationError::ManifestRefNotFound {
+                kind: "effect",
+                name: reference.name.clone(),
+            });
+        }
+    }
+    for reference in &manifest.secrets {
+        if !secrets.contains_key(&reference.name) {
+            return Err(ValidationError::ManifestRefNotFound {
+                kind: "secret",
+                name: reference.name.clone(),
+            });
+        }
+    }
+
     let schema_exists =
-        |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
+        |name: &str| active_schemas.contains(name) || builtins::find_builtin_schema(name).is_some();
     let schema_type = |name: &str| -> Option<TypeExpr> {
         schemas
             .get(name)
@@ -72,21 +132,107 @@ pub fn validate_manifest(
                 builtins::find_builtin_schema(name).map(|builtin| builtin.schema.ty.clone())
             })
     };
+    let workflow_lookup = |name: &str| -> Option<DefWorkflow> {
+        workflows.get(name).cloned().or_else(|| {
+            builtins::find_builtin_workflow(name).map(|builtin| builtin.workflow.clone())
+        })
+    };
+    let effect_lookup = |name: &str| -> Option<DefEffect> {
+        effects
+            .get(name)
+            .cloned()
+            .or_else(|| builtins::find_builtin_effect(name).map(|builtin| builtin.effect.clone()))
+    };
+    let module_lookup = |name: &str| -> Option<DefModule> {
+        modules
+            .get(name)
+            .cloned()
+            .or_else(|| builtins::find_builtin_module(name).map(|builtin| builtin.module.clone()))
+    };
 
-    let mut known_effect_kinds: HashSet<String> = builtins::builtin_effects()
+    for workflow_name in &active_workflows {
+        let workflow =
+            workflow_lookup(workflow_name).ok_or_else(|| ValidationError::ManifestRefNotFound {
+                kind: "workflow",
+                name: workflow_name.clone(),
+            })?;
+        if !active_modules.contains(&workflow.implementation.module)
+            && builtins::find_builtin_module(workflow.implementation.module.as_str()).is_none()
+        {
+            return Err(ValidationError::DefUnknownModule {
+                name: workflow.name,
+                module: workflow.implementation.module,
+            });
+        }
+
+        let module = module_lookup(&workflow.implementation.module).expect("module checked above");
+        validate_runtime_support("workflow", &workflow.name, &module)?;
+
+        for schema_ref in [
+            Some(workflow.state.as_str()),
+            Some(workflow.event.as_str()),
+            workflow.context.as_ref().map(|s| s.as_str()),
+            workflow.annotations.as_ref().map(|s| s.as_str()),
+            workflow.key_schema.as_ref().map(|s| s.as_str()),
+        ]
         .iter()
-        .map(|e| e.effect.kind.as_str().to_string())
-        .collect();
-    known_effect_kinds.extend(effects.values().map(|def| def.kind.as_str().to_string()));
-    let declared_effect_kinds: HashSet<String> = effects
-        .values()
-        .map(|def| def.kind.as_str().to_string())
-        .collect();
+        .flatten()
+        {
+            if !schema_exists(schema_ref) {
+                return Err(ValidationError::SchemaNotFound {
+                    schema: schema_ref.to_string(),
+                });
+            }
+        }
+        let event_schema_name = workflow.event.as_str();
+        let event_schema =
+            schema_type(event_schema_name).ok_or_else(|| ValidationError::SchemaNotFound {
+                schema: event_schema_name.to_string(),
+            })?;
+        validate_event_family(workflow.name.as_str(), event_schema_name, &event_schema)?;
+        for effect in &workflow.effects_emitted {
+            if effect_lookup(effect).is_none()
+                || (!active_effects.contains(effect)
+                    && builtins::find_builtin_effect(effect.as_str()).is_none())
+            {
+                return Err(ValidationError::EffectNotFound {
+                    effect: effect.clone(),
+                });
+            }
+        }
+    }
+
+    for effect_name in &active_effects {
+        let effect =
+            effect_lookup(effect_name).ok_or_else(|| ValidationError::ManifestRefNotFound {
+                kind: "effect",
+                name: effect_name.clone(),
+            })?;
+        if !active_modules.contains(&effect.implementation.module)
+            && builtins::find_builtin_module(effect.implementation.module.as_str()).is_none()
+        {
+            return Err(ValidationError::DefUnknownModule {
+                name: effect.name,
+                module: effect.implementation.module,
+            });
+        }
+
+        let module = module_lookup(&effect.implementation.module).expect("module checked above");
+        validate_runtime_support("effect", &effect.name, &module)?;
+
+        for schema_ref in [effect.params.as_str(), effect.receipt.as_str()] {
+            if !schema_exists(schema_ref) {
+                return Err(ValidationError::SchemaNotFound {
+                    schema: schema_ref.to_string(),
+                });
+            }
+        }
+    }
 
     if let Some(routing) = manifest.routing.as_ref() {
         for RoutingEvent {
             event,
-            module,
+            workflow,
             key_field,
         } in &routing.subscriptions
         {
@@ -95,55 +241,50 @@ pub fn validate_manifest(
                     schema: event.as_str().to_string(),
                 });
             }
-
-            let module_def =
-                modules
-                    .get(module)
-                    .ok_or_else(|| ValidationError::RoutingUnknownModule {
-                        module: module.clone(),
-                    })?;
-            let workflow_abi = module_def.abi.workflow.as_ref().ok_or_else(|| {
-                ValidationError::WorkflowAbiMissingWorkflow {
-                    module: module.clone(),
-                }
-            })?;
-
-            let expected = workflow_abi.event.as_str();
+            let Some(workflow_def) = workflow_lookup(workflow) else {
+                return Err(ValidationError::WorkflowNotFound {
+                    workflow: workflow.clone(),
+                });
+            };
+            if !active_workflows.contains(workflow)
+                && builtins::find_builtin_workflow(workflow.as_str()).is_none()
+            {
+                return Err(ValidationError::WorkflowNotFound {
+                    workflow: workflow.clone(),
+                });
+            }
+            let expected = workflow_def.event.as_str();
             let family_schema =
                 schema_type(expected).ok_or_else(|| ValidationError::SchemaNotFound {
                     schema: expected.to_string(),
                 })?;
             if !event_in_family(event.as_str(), expected, &family_schema) {
                 return Err(ValidationError::RoutingSchemaMismatch {
-                    module: module.clone(),
+                    workflow: workflow.clone(),
                     event: event.as_str().to_string(),
                     expected: expected.to_string(),
                 });
             }
 
-            let keyed = module_def.key_schema.is_some();
+            let keyed = workflow_def.key_schema.is_some();
             match (keyed, key_field.is_some()) {
                 (true, false) => {
-                    if !receipt_schema_allows_missing_key_field(event.as_str()) {
-                        return Err(ValidationError::RoutingMissingKeyField {
-                            module: module.clone(),
-                        });
-                    }
+                    return Err(ValidationError::RoutingMissingKeyField {
+                        workflow: workflow.clone(),
+                    });
                 }
                 (false, true) => {
                     return Err(ValidationError::RoutingUnexpectedKeyField {
-                        module: module.clone(),
+                        workflow: workflow.clone(),
                     });
                 }
                 _ => {}
             }
 
-            if let (true, Some(field)) = (keyed, key_field.as_ref()) {
-                let key_schema_name = module_def
-                    .key_schema
-                    .as_ref()
-                    .expect("keyed modules have key_schema")
-                    .as_str();
+            if let (Some(key_schema_ref), Some(field)) =
+                (workflow_def.key_schema.as_ref(), key_field.as_ref())
+            {
+                let key_schema_name = key_schema_ref.as_str();
                 let key_schema = schema_type(key_schema_name).ok_or_else(|| {
                     ValidationError::SchemaNotFound {
                         schema: key_schema_name.to_string(),
@@ -156,7 +297,7 @@ pub fn validate_manifest(
                 let field_ty =
                     key_field_type(&event_schema, field, &schema_type).ok_or_else(|| {
                         ValidationError::RoutingKeyFieldMismatch {
-                            module: module.clone(),
+                            workflow: workflow.clone(),
                             event: event.as_str().to_string(),
                             key_field: field.to_string(),
                             expected: key_schema_name.to_string(),
@@ -167,7 +308,7 @@ pub fn validate_manifest(
                     key_type_matches(&field_ty, &key_schema, &schema_type).unwrap_or(false);
                 if !matches {
                     return Err(ValidationError::RoutingKeyFieldMismatch {
-                        module: module.clone(),
+                        workflow: workflow.clone(),
                         event: event.as_str().to_string(),
                         key_field: field.to_string(),
                         expected: key_schema_name.to_string(),
@@ -178,123 +319,36 @@ pub fn validate_manifest(
         }
     }
 
-    let mut bound_kinds = HashSet::new();
-    for binding in &manifest.effect_bindings {
-        let kind = binding.kind.as_str();
-        if is_internal_effect_kind(kind) {
-            return Err(ValidationError::EffectBindingInternalKind {
-                kind: kind.to_string(),
+    for secret in &active_secrets {
+        if !secrets.contains_key(secret) {
+            return Err(ValidationError::ManifestRefNotFound {
+                kind: "secret",
+                name: secret.clone(),
             });
-        }
-        if !declared_effect_kinds.contains(kind) {
-            return Err(ValidationError::EffectBindingKindNotDeclared {
-                kind: kind.to_string(),
-            });
-        }
-        if !bound_kinds.insert(kind.to_string()) {
-            return Err(ValidationError::EffectBindingDuplicateKind {
-                kind: kind.to_string(),
-            });
-        }
-    }
-
-    for (module_name, module) in modules {
-        match module.module_kind {
-            ModuleKind::Workflow => {
-                if module.abi.workflow.is_none() {
-                    return Err(ValidationError::WorkflowAbiMissingWorkflow {
-                        module: module_name.clone(),
-                    });
-                }
-            }
-            ModuleKind::Pure => {
-                if module.abi.pure.is_none() {
-                    return Err(ValidationError::PureAbiMissingPure {
-                        module: module_name.clone(),
-                    });
-                }
-                if module.abi.workflow.is_some() {
-                    return Err(ValidationError::PureAbiHasWorkflow {
-                        module: module_name.clone(),
-                    });
-                }
-            }
-        }
-
-        if let Some(key) = module.key_schema.as_ref() {
-            if !schema_exists(key.as_str()) {
-                return Err(ValidationError::SchemaNotFound {
-                    schema: key.as_str().to_string(),
-                });
-            }
-        }
-
-        if let Some(abi) = module.abi.workflow.as_ref() {
-            for schema_ref in [
-                Some(abi.state.as_str()),
-                Some(abi.event.as_str()),
-                abi.context.as_ref().map(|s| s.as_str()),
-                abi.annotations.as_ref().map(|s| s.as_str()),
-            ]
-            .iter()
-            .flatten()
-            .filter(|s| !s.is_empty())
-            {
-                if !schema_exists(schema_ref) {
-                    return Err(ValidationError::SchemaNotFound {
-                        schema: schema_ref.to_string(),
-                    });
-                }
-            }
-
-            let event_schema_name = abi.event.as_str();
-            let event_schema =
-                schema_type(event_schema_name).ok_or_else(|| ValidationError::SchemaNotFound {
-                    schema: event_schema_name.to_string(),
-                })?;
-            validate_event_family(module_name, event_schema_name, &event_schema)?;
-
-            for effect in &abi.effects_emitted {
-                if !known_effect_kinds.contains(effect.as_str()) {
-                    return Err(ValidationError::EffectNotFound {
-                        kind: effect.as_str().to_string(),
-                    });
-                }
-            }
-        }
-
-        if let Some(abi) = module.abi.pure.as_ref() {
-            for schema_ref in [abi.input.as_str(), abi.output.as_str()]
-                .into_iter()
-                .chain(abi.context.as_ref().map(|s| s.as_str()))
-            {
-                if !schema_exists(schema_ref) {
-                    return Err(ValidationError::SchemaNotFound {
-                        schema: schema_ref.to_string(),
-                    });
-                }
-            }
-        }
-    }
-
-    for effect in effects.values() {
-        for schema_ref in [
-            effect.params_schema.as_str(),
-            effect.receipt_schema.as_str(),
-        ] {
-            if !schema_exists(schema_ref) {
-                return Err(ValidationError::SchemaNotFound {
-                    schema: schema_ref.to_string(),
-                });
-            }
         }
     }
 
     Ok(())
 }
 
+fn validate_runtime_support(
+    def_kind: &'static str,
+    name: &str,
+    module: &DefModule,
+) -> Result<(), ValidationError> {
+    match (&module.runtime, def_kind) {
+        (ModuleRuntime::Builtin {}, "workflow") => Err(ValidationError::UnsupportedRuntimeForDef {
+            module: module.name.clone(),
+            runtime: "builtin",
+            def_kind,
+            name: name.to_string(),
+        }),
+        _ => Ok(()),
+    }
+}
+
 fn validate_event_family(
-    module_name: &str,
+    workflow_name: &str,
     event_schema_name: &str,
     event_schema: &TypeExpr,
 ) -> Result<(), ValidationError> {
@@ -304,16 +358,16 @@ fn validate_event_family(
             let mut seen = HashSet::new();
             for ty in variant.variant.values() {
                 let TypeExpr::Ref(reference) = ty else {
-                    return Err(ValidationError::ModuleEventFamilyInvalid {
-                        module: module_name.to_string(),
+                    return Err(ValidationError::WorkflowEventFamilyInvalid {
+                        workflow: workflow_name.to_string(),
                         event_schema: event_schema_name.to_string(),
                         reason: "variant arm is not a ref".into(),
                     });
                 };
                 let name = reference.reference.as_str().to_string();
                 if !seen.insert(name) {
-                    return Err(ValidationError::ModuleEventFamilyInvalid {
-                        module: module_name.to_string(),
+                    return Err(ValidationError::WorkflowEventFamilyInvalid {
+                        workflow: workflow_name.to_string(),
                         event_schema: event_schema_name.to_string(),
                         reason: "duplicate event schema in variant".into(),
                     });
@@ -322,8 +376,8 @@ fn validate_event_family(
             Ok(())
         }
         TypeExpr::Record(_) => Ok(()),
-        _ => Err(ValidationError::ModuleEventFamilyInvalid {
-            module: module_name.to_string(),
+        _ => Err(ValidationError::WorkflowEventFamilyInvalid {
+            workflow: workflow_name.to_string(),
             event_schema: event_schema_name.to_string(),
             reason: "event family must be a ref, variant of refs, or record".into(),
         }),
@@ -341,19 +395,6 @@ fn event_in_family(event: &str, family_name: &str, family_schema: &TypeExpr) -> 
         ),
         _ => false,
     }
-}
-
-fn receipt_schema_allows_missing_key_field(event_schema: &str) -> bool {
-    matches!(
-        event_schema,
-        "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
-    )
-}
-
-fn is_internal_effect_kind(kind: &str) -> bool {
-    kind.starts_with("workspace.")
-        || kind.starts_with("introspect.")
-        || kind.starts_with("governance.")
 }
 
 fn resolve_type(
@@ -390,50 +431,7 @@ fn key_field_type(
         return None;
     }
 
-    let resolved = resolve_type(event_schema, schema_type)?;
-    if let TypeExpr::Variant(variant) = &resolved {
-        if segments[0] == "$value" {
-            let remaining = &segments[1..];
-            if remaining.is_empty() {
-                return None;
-            }
-            let mut found: Option<TypeExpr> = None;
-            for ty in variant.variant.values() {
-                if let TypeExpr::Ref(reference) = ty
-                    && receipt_schema_allows_missing_key_field(reference.reference.as_str())
-                {
-                    continue;
-                }
-                let resolved_arm = resolve_type(ty, schema_type)?;
-                let mut current = resolved_arm;
-                for seg in remaining {
-                    current = match current {
-                        TypeExpr::Record(record) => {
-                            let field_ty = record.record.get(*seg)?;
-                            resolve_type(field_ty, schema_type)?
-                        }
-                        _ => return None,
-                    };
-                }
-                if let Some(existing) = &found {
-                    let resolved_existing = resolve_type(existing, schema_type)?;
-                    let resolved_current = resolve_type(&current, schema_type)?;
-                    if !type_eq(&resolved_existing, &resolved_current) {
-                        return None;
-                    }
-                } else {
-                    found = Some(current);
-                }
-            }
-            return found;
-        }
-        if segments[0] == "$tag" {
-            return None;
-        }
-        return None;
-    }
-
-    let mut current = resolved;
+    let mut current = resolve_type(event_schema, schema_type)?;
     for seg in segments {
         current = match current {
             TypeExpr::Record(record) => {
@@ -460,277 +458,4 @@ fn key_type_matches(
         return Some(field_ref.reference == key_ref.reference);
     }
     Some(false)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        DefModule, EffectBinding, ModuleAbi, NamedRef, Routing, SchemaRef, TypePrimitive,
-        TypePrimitiveText, TypeRecord, WorkflowAbi,
-    };
-    use indexmap::IndexMap;
-
-    fn text_type() -> TypeExpr {
-        TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
-            text: crate::EmptyObject::default(),
-        }))
-    }
-
-    fn record_type() -> TypeExpr {
-        TypeExpr::Record(TypeRecord {
-            record: IndexMap::new(),
-        })
-    }
-
-    fn named_ref(name: &str) -> NamedRef {
-        NamedRef {
-            name: name.to_string(),
-            hash: crate::HashRef::new(format!("sha256:{}", "a".repeat(64))).unwrap(),
-        }
-    }
-
-    fn base_manifest() -> Manifest {
-        Manifest {
-            air_version: "1".into(),
-            schemas: vec![named_ref("com.acme/Event@1"), named_ref("com.acme/State@1")],
-            modules: vec![named_ref("com.acme/workflow@1")],
-            effects: Vec::new(),
-            effect_bindings: Vec::new(),
-            secrets: Vec::new(),
-            routing: None,
-        }
-    }
-
-    fn base_module() -> DefModule {
-        DefModule {
-            name: "com.acme/workflow@1".into(),
-            module_kind: ModuleKind::Workflow,
-            wasm_hash: crate::HashRef::new(format!("sha256:{}", "b".repeat(64))).unwrap(),
-            key_schema: None,
-            abi: ModuleAbi {
-                workflow: Some(WorkflowAbi {
-                    state: SchemaRef::new("com.acme/State@1").unwrap(),
-                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                    context: None,
-                    annotations: None,
-                    effects_emitted: Vec::new(),
-                }),
-                pure: None,
-            },
-        }
-    }
-
-    #[test]
-    fn validate_manifest_accepts_minimal_workflow_manifest() {
-        let manifest = base_manifest();
-        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
-        let schemas = HashMap::from([
-            (
-                String::from("com.acme/Event@1"),
-                DefSchema {
-                    name: "com.acme/Event@1".into(),
-                    ty: record_type(),
-                },
-            ),
-            (
-                String::from("com.acme/State@1"),
-                DefSchema {
-                    name: "com.acme/State@1".into(),
-                    ty: text_type(),
-                },
-            ),
-        ]);
-        assert!(validate_manifest(&manifest, &modules, &schemas, &HashMap::new()).is_ok());
-    }
-
-    #[test]
-    fn validate_manifest_rejects_unknown_routing_module() {
-        let mut manifest = base_manifest();
-        manifest.routing = Some(Routing {
-            subscriptions: vec![RoutingEvent {
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                module: "com.acme/missing@1".into(),
-                key_field: None,
-            }],
-            inboxes: Vec::new(),
-        });
-
-        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
-        let schemas = HashMap::from([
-            (
-                String::from("com.acme/Event@1"),
-                DefSchema {
-                    name: "com.acme/Event@1".into(),
-                    ty: record_type(),
-                },
-            ),
-            (
-                String::from("com.acme/State@1"),
-                DefSchema {
-                    name: "com.acme/State@1".into(),
-                    ty: text_type(),
-                },
-            ),
-        ]);
-
-        let err = validate_manifest(&manifest, &modules, &schemas, &HashMap::new()).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::RoutingUnknownModule { module } if module == "com.acme/missing@1"
-        ));
-    }
-
-    #[test]
-    fn validate_manifest_rejects_effect_binding_kind_not_declared() {
-        let mut manifest = base_manifest();
-        manifest.effect_bindings.push(EffectBinding {
-            kind: crate::EffectKind::new("http.request"),
-            adapter_id: "http.default".into(),
-        });
-
-        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
-        let schemas = HashMap::from([
-            (
-                String::from("com.acme/Event@1"),
-                DefSchema {
-                    name: "com.acme/Event@1".into(),
-                    ty: record_type(),
-                },
-            ),
-            (
-                String::from("com.acme/State@1"),
-                DefSchema {
-                    name: "com.acme/State@1".into(),
-                    ty: text_type(),
-                },
-            ),
-        ]);
-
-        let err = validate_manifest(&manifest, &modules, &schemas, &HashMap::new()).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::EffectBindingKindNotDeclared { kind } if kind == "http.request"
-        ));
-    }
-
-    #[test]
-    fn validate_manifest_rejects_duplicate_effect_binding_kind() {
-        let mut manifest = base_manifest();
-        manifest.effect_bindings = vec![
-            EffectBinding {
-                kind: crate::EffectKind::new("http.request"),
-                adapter_id: "http.default".into(),
-            },
-            EffectBinding {
-                kind: crate::EffectKind::new("http.request"),
-                adapter_id: "http.alt".into(),
-            },
-        ];
-
-        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
-        let schemas = HashMap::from([
-            (
-                String::from("com.acme/Event@1"),
-                DefSchema {
-                    name: "com.acme/Event@1".into(),
-                    ty: record_type(),
-                },
-            ),
-            (
-                String::from("com.acme/State@1"),
-                DefSchema {
-                    name: "com.acme/State@1".into(),
-                    ty: text_type(),
-                },
-            ),
-            (
-                String::from("com.acme/HttpParams@1"),
-                DefSchema {
-                    name: "com.acme/HttpParams@1".into(),
-                    ty: record_type(),
-                },
-            ),
-            (
-                String::from("com.acme/HttpReceipt@1"),
-                DefSchema {
-                    name: "com.acme/HttpReceipt@1".into(),
-                    ty: record_type(),
-                },
-            ),
-        ]);
-        let effects = HashMap::from([(
-            String::from("com.acme/http.request@1"),
-            DefEffect {
-                name: "com.acme/http.request@1".into(),
-                kind: crate::EffectKind::new("http.request"),
-                params_schema: SchemaRef::new("com.acme/HttpParams@1").unwrap(),
-                receipt_schema: SchemaRef::new("com.acme/HttpReceipt@1").unwrap(),
-                origin_scope: crate::OriginScope::Both,
-            },
-        )]);
-
-        let err = validate_manifest(&manifest, &modules, &schemas, &effects).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::EffectBindingDuplicateKind { kind } if kind == "http.request"
-        ));
-    }
-
-    #[test]
-    fn validate_manifest_rejects_internal_effect_binding_kind() {
-        let mut manifest = base_manifest();
-        manifest.effect_bindings.push(EffectBinding {
-            kind: crate::EffectKind::new("workspace.read_bytes"),
-            adapter_id: "workspace.default".into(),
-        });
-
-        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
-        let schemas = HashMap::from([
-            (
-                String::from("com.acme/Event@1"),
-                DefSchema {
-                    name: "com.acme/Event@1".into(),
-                    ty: record_type(),
-                },
-            ),
-            (
-                String::from("com.acme/State@1"),
-                DefSchema {
-                    name: "com.acme/State@1".into(),
-                    ty: text_type(),
-                },
-            ),
-            (
-                String::from("com.acme/WorkspaceParams@1"),
-                DefSchema {
-                    name: "com.acme/WorkspaceParams@1".into(),
-                    ty: record_type(),
-                },
-            ),
-            (
-                String::from("com.acme/WorkspaceReceipt@1"),
-                DefSchema {
-                    name: "com.acme/WorkspaceReceipt@1".into(),
-                    ty: record_type(),
-                },
-            ),
-        ]);
-        let effects = HashMap::from([(
-            String::from("com.acme/workspace.read_bytes@1"),
-            DefEffect {
-                name: "com.acme/workspace.read_bytes@1".into(),
-                kind: crate::EffectKind::new("workspace.read_bytes"),
-                params_schema: SchemaRef::new("com.acme/WorkspaceParams@1").unwrap(),
-                receipt_schema: SchemaRef::new("com.acme/WorkspaceReceipt@1").unwrap(),
-                origin_scope: crate::OriginScope::Both,
-            },
-        )]);
-
-        let err = validate_manifest(&manifest, &modules, &schemas, &effects).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::EffectBindingInternalKind { kind } if kind == "workspace.read_bytes"
-        ));
-    }
 }

@@ -15,10 +15,10 @@ use aos_effects::builtins::{
     HostExecParams, HostExecReceipt, HostLocalTarget, HostOutput, HostSessionOpenParams,
     HostSessionOpenReceipt, HostSessionSignalParams, HostSessionSignalReceipt, HostTarget,
 };
-use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
+use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::{MemStore, Store};
 
-fn build_intent(kind: EffectKind, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
+fn build_intent(kind: impl Into<String>, params_cbor: Vec<u8>, seed: u8) -> EffectIntent {
     EffectIntent::from_raw_params(kind, params_cbor, [seed; 32]).unwrap()
 }
 
@@ -42,7 +42,7 @@ fn open_params() -> HostSessionOpenParams {
 async fn open_session(open: &HostSessionOpenAdapter) -> String {
     let receipt = open
         .execute(&build_intent(
-            EffectKind::host_session_open(),
+            effect_ops::HOST_SESSION_OPEN,
             serde_cbor::to_vec(&open_params()).unwrap(),
             1,
         ))
@@ -66,7 +66,7 @@ async fn signal_session(
     };
     let receipt = signal
         .execute(&build_intent(
-            EffectKind::host_session_signal(),
+            effect_ops::HOST_SESSION_SIGNAL,
             serde_cbor::to_vec(&params).unwrap(),
             seed,
         ))
@@ -113,7 +113,7 @@ async fn process_exec_reads_stdin_and_signal_transitions() {
     };
     let exec_receipt = exec
         .execute(&build_intent(
-            EffectKind::host_exec(),
+            effect_ops::HOST_EXEC,
             serde_cbor::to_vec(&exec_params).unwrap(),
             2,
         ))
@@ -137,7 +137,7 @@ async fn process_exec_reads_stdin_and_signal_transitions() {
 
     let exec_after_close = exec
         .execute(&build_intent(
-            EffectKind::host_exec(),
+            effect_ops::HOST_EXEC,
             serde_cbor::to_vec(&exec_params).unwrap(),
             5,
         ))
@@ -172,7 +172,7 @@ async fn process_exec_timeout_maps_timeout_status() {
 
     let receipt = exec
         .execute(&build_intent(
-            EffectKind::host_exec(),
+            effect_ops::HOST_EXEC,
             serde_cbor::to_vec(&exec_params).unwrap(),
             6,
         ))
@@ -210,7 +210,7 @@ async fn process_exec_auto_large_output_writes_blob() {
 
     let receipt = exec
         .execute(&build_intent(
-            EffectKind::host_exec(),
+            effect_ops::HOST_EXEC,
             serde_cbor::to_vec(&exec_params).unwrap(),
             7,
         ))
@@ -261,7 +261,7 @@ async fn process_exec_require_inline_rejects_large_output() {
 
     let receipt = exec
         .execute(&build_intent(
-            EffectKind::host_exec(),
+            effect_ops::HOST_EXEC,
             serde_cbor::to_vec(&exec_params).unwrap(),
             8,
         ))

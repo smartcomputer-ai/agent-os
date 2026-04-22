@@ -89,7 +89,6 @@ impl<S: Store> LlmAdapter<S> {
 
         EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: format!("host.llm.{provider_id}"),
             status,
             payload_cbor: serde_cbor::to_vec(&receipt)
                 .expect("encode host.llm failure receipt payload"),
@@ -238,7 +237,7 @@ impl<S: Store> LlmAdapter<S> {
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
     fn kind(&self) -> &str {
-        aos_effects::EffectKind::LLM_GENERATE
+        aos_effects::effect_ops::LLM_GENERATE
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -522,7 +521,6 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
 
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: format!("host.llm.{provider_id}"),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&receipt)?,
             cost_cents: None,

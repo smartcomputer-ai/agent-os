@@ -4,7 +4,7 @@ use crate::contracts::{
     default_tool_profiles, default_tool_registry,
 };
 use crate::helpers::workflow::SessionReduceError;
-use crate::{helpers::llm::LlmMappingError, tools::ToolEffectKind};
+use crate::{helpers::llm::LlmMappingError, tools::ToolEffectOp};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -23,7 +23,7 @@ pub enum SessionEffectCommand {
         pending: PendingEffect,
     },
     ToolEffect {
-        kind: ToolEffectKind,
+        kind: ToolEffectOp,
         params_json: String,
         pending: PendingEffect,
     },
@@ -51,9 +51,8 @@ impl SessionEffectCommand {
         match self {
             Self::LlmGenerate { params, pending } => {
                 ctx.effects().emit_raw_with_issuer_ref(
-                    "llm.generate",
+                    "sys/llm.generate@1",
                     &params,
-                    pending.cap_slot.as_deref(),
                     pending.issuer_ref.as_deref(),
                 );
             }
@@ -67,23 +66,20 @@ impl SessionEffectCommand {
                 ctx.effects().emit_raw_with_issuer_ref(
                     kind.as_str(),
                     &params,
-                    pending.cap_slot.as_deref(),
                     pending.issuer_ref.as_deref(),
                 );
             }
             Self::BlobPut { params, pending } => {
                 ctx.effects().emit_raw_with_issuer_ref(
-                    "blob.put",
+                    "sys/blob.put@1",
                     &params,
-                    pending.cap_slot.as_deref(),
                     pending.issuer_ref.as_deref(),
                 );
             }
             Self::BlobGet { params, pending } => {
                 ctx.effects().emit_raw_with_issuer_ref(
-                    "blob.get",
+                    "sys/blob.get@1",
                     &params,
-                    pending.cap_slot.as_deref(),
                     pending.issuer_ref.as_deref(),
                 );
             }
@@ -152,7 +148,6 @@ pub enum SpawnOrHandoffSessionPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestLlm {
     pub step: LlmStepContext,
-    pub cap_slot: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,7 +170,7 @@ pub fn request_llm(
     }
     let params = materialize_llm_generate_params_with_prompt_refs(&run_config, request.step)
         .map_err(map_llm_mapping_error)?;
-    let pending = begin_pending_effect(state, "llm.generate", &params, request.cap_slot, None);
+    let pending = begin_pending_effect(state, "sys/llm.generate@1", &params, None);
     out.effects.push(SessionEffectCommand::LlmGenerate {
         params: params.clone(),
         pending: pending.clone(),
@@ -315,34 +310,31 @@ pub fn spawn_or_handoff_session(
 
 pub fn begin_pending_effect<T: serde::Serialize>(
     state: &mut SessionState,
-    effect_kind: &'static str,
+    effect: &'static str,
     params: &T,
-    cap_slot: Option<String>,
     issuer_ref: Option<String>,
 ) -> PendingEffect {
-    let issuer_ref = issuer_ref.or_else(|| Some(synthesize_pending_issuer_ref(state, effect_kind)));
+    let issuer_ref = issuer_ref.or_else(|| Some(synthesize_pending_issuer_ref(state, effect)));
     match state.pending_effects.begin_with_issuer_ref(
-        effect_kind,
+        effect,
         params,
-        cap_slot.clone(),
         state.updated_at,
         issuer_ref.clone(),
     ) {
         Ok(pending) => pending,
         Err(_) => {
-            let pending =
-                PendingEffect::new(effect_kind, String::new(), cap_slot, state.updated_at)
-                    .with_issuer_ref_opt(issuer_ref);
+            let pending = PendingEffect::new(effect, String::new(), state.updated_at)
+                .with_issuer_ref_opt(issuer_ref);
             state.pending_effects.insert(pending.clone());
             pending
         }
     }
 }
 
-fn synthesize_pending_issuer_ref(state: &SessionState, effect_kind: &str) -> String {
+fn synthesize_pending_issuer_ref(state: &SessionState, effect: &str) -> String {
     let mut ordinal = state.pending_effects.len();
     loop {
-        let candidate = format!("session:{effect_kind}:{}:{ordinal}", state.updated_at);
+        let candidate = format!("session:{effect}:{}:{ordinal}", state.updated_at);
         if state
             .pending_effects
             .values()

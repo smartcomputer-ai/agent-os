@@ -1,16 +1,26 @@
 [
   {
     "$kind": "defmodule",
-    "name": "demo/SafeUpgrade@2",
-    "module_kind": "workflow",
-    "abi": {
-      "workflow": {
-        "state": "demo/SafeUpgradeState@1",
-        "event": "demo/SafeUpgradeEvent@1",
-        "effects_emitted": [
-          "http.request"
-        ]
+    "name": "demo/SafeUpgrade@2_wasm",
+    "runtime": {
+      "kind": "wasm",
+      "artifact": {
+        "kind": "wasm_module"
       }
+    }
+  },
+  {
+    "$kind": "defworkflow",
+    "name": "demo/SafeUpgrade@2",
+    "state": "demo/SafeUpgradeState@1",
+    "event": "demo/SafeUpgradeEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [
+      "sys/http.request@1"
+    ],
+    "impl": {
+      "module": "demo/SafeUpgrade@2_wasm",
+      "entrypoint": "step"
     }
   }
 ]

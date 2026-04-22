@@ -4,7 +4,7 @@ use crate::Store;
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
-    AirNode, DefEffect, DefModule, DefSchema, Manifest, Name, SecretDecl, SecretEntry, builtins,
+    AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, Manifest, Name, builtins,
     catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
@@ -144,67 +144,53 @@ impl ManifestPatch {
     pub fn to_loaded_manifest<S: Store>(&self, store: &S) -> Result<LoadedManifest, KernelError> {
         let manifest = self.manifest.clone();
         let mut modules: HashMap<Name, DefModule> = HashMap::new();
+        let mut workflows: HashMap<Name, DefWorkflow> = HashMap::new();
         let mut effects: HashMap<Name, DefEffect> = HashMap::new();
         let mut schemas: HashMap<Name, DefSchema> = HashMap::new();
-        let mut secrets: Vec<SecretDecl> = Vec::new();
+        let mut secrets: Vec<DefSecret> = Vec::new();
 
         for node in &self.nodes {
             match node {
                 AirNode::Defmodule(m) => {
                     modules.insert(m.name.clone(), m.clone());
                 }
-                AirNode::Defeffect(e) => {
-                    effects.insert(e.name.clone(), e.clone());
+                AirNode::Defworkflow(workflow) => {
+                    workflows.insert(workflow.name.clone(), workflow.clone());
+                }
+                AirNode::Defeffect(effect) => {
+                    effects.insert(effect.name.clone(), effect.clone());
                 }
                 AirNode::Defschema(s) => {
                     schemas.insert(s.name.clone(), s.clone());
                 }
                 AirNode::Defsecret(s) => {
-                    let (alias, version) = parse_secret_name(&s.name)?;
-                    secrets.push(SecretDecl {
-                        alias,
-                        version,
-                        binding_id: s.binding_id.clone(),
-                        expected_digest: s.expected_digest.clone(),
-                    });
+                    parse_secret_name(&s.name)?;
+                    secrets.push(s.clone());
                 }
                 AirNode::Manifest(_) => {}
             }
         }
 
-        // Ensure built-ins referenced by the manifest are present in catalogs.
+        // Built-in sys/* definitions are ambient in every manifest.
         for builtin in builtins::builtin_schemas() {
-            if manifest
-                .schemas
-                .iter()
-                .any(|nr| nr.name == builtin.schema.name)
-            {
-                schemas
-                    .entry(builtin.schema.name.clone())
-                    .or_insert(builtin.schema.clone());
-            }
+            schemas
+                .entry(builtin.schema.name.clone())
+                .or_insert_with(|| builtin.schema.clone());
+        }
+        for builtin in builtins::builtin_workflows() {
+            workflows
+                .entry(builtin.workflow.name.clone())
+                .or_insert_with(|| builtin.workflow.clone());
         }
         for builtin in builtins::builtin_effects() {
-            if manifest
-                .effects
-                .iter()
-                .any(|nr| nr.name == builtin.effect.name)
-            {
-                effects
-                    .entry(builtin.effect.name.clone())
-                    .or_insert(builtin.effect.clone());
-            }
+            effects
+                .entry(builtin.effect.name.clone())
+                .or_insert_with(|| builtin.effect.clone());
         }
         for builtin in builtins::builtin_modules() {
-            if manifest
-                .modules
-                .iter()
-                .any(|nr| nr.name == builtin.module.name)
-            {
-                modules
-                    .entry(builtin.module.name.clone())
-                    .or_insert(builtin.module.clone());
-            }
+            modules
+                .entry(builtin.module.name.clone())
+                .or_insert_with(|| builtin.module.clone());
         }
 
         load_defs_from_manifest(
@@ -239,6 +225,21 @@ impl ManifestPatch {
         )?;
         load_defs_from_manifest(
             store,
+            &manifest.workflows,
+            &mut workflows,
+            "defworkflow",
+            |node| {
+                if let AirNode::Defworkflow(workflow) = node {
+                    Ok(workflow)
+                } else {
+                    Err(KernelError::Manifest(
+                        "manifest workflow ref did not point to defworkflow".into(),
+                    ))
+                }
+            },
+        )?;
+        load_defs_from_manifest(
+            store,
             &manifest.effects,
             &mut effects,
             "defeffect",
@@ -252,44 +253,33 @@ impl ManifestPatch {
                 }
             },
         )?;
-        for entry in &manifest.secrets {
-            match entry {
-                SecretEntry::Decl(secret) => secrets.push(secret.clone()),
-                SecretEntry::Ref(reference) => {
-                    let hash = parse_manifest_hash(reference.hash.as_str())?;
-                    let node: AirNode = store
-                        .get_node(hash)
-                        .map_err(|err| KernelError::Manifest(format!("load secret: {err}")))?;
-                    match node {
-                        AirNode::Defsecret(secret) => {
-                            let (alias, version) = parse_secret_name(&secret.name)?;
-                            secrets.push(SecretDecl {
-                                alias,
-                                version,
-                                binding_id: secret.binding_id.clone(),
-                                expected_digest: secret.expected_digest.clone(),
-                            });
-                        }
-                        _ => {
-                            return Err(KernelError::Manifest(
-                                "manifest secret ref did not point to defsecret".into(),
-                            ));
-                        }
-                    }
+        for reference in &manifest.secrets {
+            if secrets.iter().any(|secret| secret.name == reference.name) {
+                continue;
+            }
+            let hash = parse_manifest_hash(reference.hash.as_str())?;
+            let node: AirNode = store
+                .get_node(hash)
+                .map_err(|err| KernelError::Manifest(format!("load secret: {err}")))?;
+            match node {
+                AirNode::Defsecret(secret) => {
+                    parse_secret_name(&secret.name)?;
+                    secrets.push(secret);
+                }
+                _ => {
+                    return Err(KernelError::Manifest(
+                        "manifest secret ref did not point to defsecret".into(),
+                    ));
                 }
             }
         }
 
-        if effects.is_empty() {
-            for builtin in builtins::builtin_effects() {
-                effects.insert(builtin.effect.name.clone(), builtin.effect.clone());
-            }
-        }
-        let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
+        let effect_catalog = EffectCatalog::from_effects(effects.values().cloned());
         Ok(LoadedManifest {
             manifest,
             secrets,
             modules,
+            workflows,
             effects,
             schemas,
             effect_catalog,

@@ -30,8 +30,8 @@ Optional `config` fields:
 ## Give It A Spin
 
 If you want live LLM calls, set a provider API key first. You can either export it in your shell or
-put it in `worlds/demiurge/.env`. Local Demiurge reads local secrets from env/`.env`; nothing is
-stored in the world or local backend. For example:
+put it in `worlds/demiurge/.env`. `aos world create --sync-secrets` uploads the selected values
+into the local node secret store for the active universe. For example:
 
 ```bash
 export OPENAI_API_KEY=...
@@ -44,23 +44,24 @@ From the repo root, build the local debug binaries and workflow artifacts once:
 ```bash
 rustup target add wasm32-unknown-unknown
 
-cargo build -p aos-cli -p aos-node-local
+cargo build -p aos-cli
 cargo build -p aos-sys --target wasm32-unknown-unknown
 cargo build -p aos-agent --bin session_workflow --target wasm32-unknown-unknown
 ```
 
-In terminal 1, start the local node against the Demiurge world root:
+In terminal 1, start the unified local node:
 
 ```bash
-target/debug/aos local up --root worlds/demiurge --select
+target/debug/aos node up --select
 ```
 
-In terminal 2, create and select the world, and emit verbose progress while building/uploading:
+In terminal 2, create and select the world, sync provider secrets, and emit verbose progress while
+building/uploading:
 
 ```bash
 target/debug/aos world create \
   --local-root worlds/demiurge \
-  --handle demiurge \
+  --sync-secrets \
   --select \
   --verbose
 ```
@@ -83,8 +84,8 @@ Run:
 worlds/demiurge/scripts/smoke_task_submit.sh
 ```
 
-The script uses the current local runtime path:
-- starts `aos local` with `worlds/demiurge` as the local root
+The script manages an isolated local runtime path:
+- starts a local node for `worlds/demiurge`
 - creates a fresh local universe/world from `--local-root worlds/demiurge`
 - submits `demiurge/TaskSubmitted@1` via `aos world send --follow`
 - fetches both keyed workflow states plus the final output blob

@@ -5,7 +5,7 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(tag = "$tag", content = "$value")]
-pub enum ToolEffectKind {
+pub enum ToolEffectOp {
     HostSessionOpen,
     HostExec,
     HostSessionSignal,
@@ -32,33 +32,33 @@ pub enum ToolEffectKind {
     WorkspaceDiff,
 }
 
-impl ToolEffectKind {
+impl ToolEffectOp {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::HostSessionOpen => "host.session.open",
-            Self::HostExec => "host.exec",
-            Self::HostSessionSignal => "host.session.signal",
-            Self::HostFsReadFile => "host.fs.read_file",
-            Self::HostFsWriteFile => "host.fs.write_file",
-            Self::HostFsEditFile => "host.fs.edit_file",
-            Self::HostFsApplyPatch => "host.fs.apply_patch",
-            Self::HostFsGrep => "host.fs.grep",
-            Self::HostFsGlob => "host.fs.glob",
-            Self::HostFsStat => "host.fs.stat",
-            Self::HostFsExists => "host.fs.exists",
-            Self::HostFsListDir => "host.fs.list_dir",
-            Self::IntrospectManifest => "introspect.manifest",
-            Self::IntrospectWorkflowState => "introspect.workflow_state",
-            Self::IntrospectListCells => "introspect.list_cells",
-            Self::WorkspaceResolve => "workspace.resolve",
-            Self::WorkspaceEmptyRoot => "workspace.empty_root",
-            Self::WorkspaceList => "workspace.list",
-            Self::WorkspaceReadRef => "workspace.read_ref",
-            Self::WorkspaceReadBytes => "workspace.read_bytes",
-            Self::WorkspaceWriteBytes => "workspace.write_bytes",
-            Self::WorkspaceWriteRef => "workspace.write_ref",
-            Self::WorkspaceRemove => "workspace.remove",
-            Self::WorkspaceDiff => "workspace.diff",
+            Self::HostSessionOpen => "sys/host.session.open@1",
+            Self::HostExec => "sys/host.exec@1",
+            Self::HostSessionSignal => "sys/host.session.signal@1",
+            Self::HostFsReadFile => "sys/host.fs.read_file@1",
+            Self::HostFsWriteFile => "sys/host.fs.write_file@1",
+            Self::HostFsEditFile => "sys/host.fs.edit_file@1",
+            Self::HostFsApplyPatch => "sys/host.fs.apply_patch@1",
+            Self::HostFsGrep => "sys/host.fs.grep@1",
+            Self::HostFsGlob => "sys/host.fs.glob@1",
+            Self::HostFsStat => "sys/host.fs.stat@1",
+            Self::HostFsExists => "sys/host.fs.exists@1",
+            Self::HostFsListDir => "sys/host.fs.list_dir@1",
+            Self::IntrospectManifest => "sys/introspect.manifest@1",
+            Self::IntrospectWorkflowState => "sys/introspect.workflow_state@1",
+            Self::IntrospectListCells => "sys/introspect.list_cells@1",
+            Self::WorkspaceResolve => "sys/workspace.resolve@1",
+            Self::WorkspaceEmptyRoot => "sys/workspace.empty_root@1",
+            Self::WorkspaceList => "sys/workspace.list@1",
+            Self::WorkspaceReadRef => "sys/workspace.read_ref@1",
+            Self::WorkspaceReadBytes => "sys/workspace.read_bytes@1",
+            Self::WorkspaceWriteBytes => "sys/workspace.write_bytes@1",
+            Self::WorkspaceWriteRef => "sys/workspace.write_ref@1",
+            Self::WorkspaceRemove => "sys/workspace.remove@1",
+            Self::WorkspaceDiff => "sys/workspace.diff@1",
         }
     }
 }
@@ -66,21 +66,21 @@ impl ToolEffectKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolMappedArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_kind: Option<ToolEffectKind>,
+    pub effect: Option<ToolEffectOp>,
     pub params_json: Value,
 }
 
 impl ToolMappedArgs {
     pub fn params(params_json: Value) -> Self {
         Self {
-            effect_kind: None,
+            effect: None,
             params_json,
         }
     }
 
-    pub fn with_effect_kind(effect_kind: ToolEffectKind, params_json: Value) -> Self {
+    pub fn with_effect(effect: ToolEffectOp, params_json: Value) -> Self {
         Self {
-            effect_kind: Some(effect_kind),
+            effect: Some(effect),
             params_json,
         }
     }
@@ -158,29 +158,29 @@ impl ToolMappingError {
     }
 }
 
-pub fn mapper_effect_kind(mapper: ToolMapper) -> ToolEffectKind {
+pub fn mapper_effect(mapper: ToolMapper) -> ToolEffectOp {
     match mapper {
-        ToolMapper::HostSessionOpen => ToolEffectKind::HostSessionOpen,
-        ToolMapper::HostExec => ToolEffectKind::HostExec,
-        ToolMapper::HostSessionSignal => ToolEffectKind::HostSessionSignal,
-        ToolMapper::HostFsReadFile => ToolEffectKind::HostFsReadFile,
-        ToolMapper::HostFsWriteFile => ToolEffectKind::HostFsWriteFile,
-        ToolMapper::HostFsEditFile => ToolEffectKind::HostFsEditFile,
-        ToolMapper::HostFsApplyPatch => ToolEffectKind::HostFsApplyPatch,
-        ToolMapper::HostFsGrep => ToolEffectKind::HostFsGrep,
-        ToolMapper::HostFsGlob => ToolEffectKind::HostFsGlob,
-        ToolMapper::HostFsStat => ToolEffectKind::HostFsStat,
-        ToolMapper::HostFsExists => ToolEffectKind::HostFsExists,
-        ToolMapper::HostFsListDir => ToolEffectKind::HostFsListDir,
-        ToolMapper::InspectWorld => ToolEffectKind::IntrospectManifest,
-        ToolMapper::InspectWorkflow => ToolEffectKind::IntrospectWorkflowState,
-        ToolMapper::WorkspaceInspect => ToolEffectKind::WorkspaceResolve,
-        ToolMapper::WorkspaceList => ToolEffectKind::WorkspaceList,
-        ToolMapper::WorkspaceRead => ToolEffectKind::WorkspaceReadRef,
-        ToolMapper::WorkspaceApply => ToolEffectKind::WorkspaceWriteBytes,
-        ToolMapper::WorkspaceDiff => ToolEffectKind::WorkspaceDiff,
+        ToolMapper::HostSessionOpen => ToolEffectOp::HostSessionOpen,
+        ToolMapper::HostExec => ToolEffectOp::HostExec,
+        ToolMapper::HostSessionSignal => ToolEffectOp::HostSessionSignal,
+        ToolMapper::HostFsReadFile => ToolEffectOp::HostFsReadFile,
+        ToolMapper::HostFsWriteFile => ToolEffectOp::HostFsWriteFile,
+        ToolMapper::HostFsEditFile => ToolEffectOp::HostFsEditFile,
+        ToolMapper::HostFsApplyPatch => ToolEffectOp::HostFsApplyPatch,
+        ToolMapper::HostFsGrep => ToolEffectOp::HostFsGrep,
+        ToolMapper::HostFsGlob => ToolEffectOp::HostFsGlob,
+        ToolMapper::HostFsStat => ToolEffectOp::HostFsStat,
+        ToolMapper::HostFsExists => ToolEffectOp::HostFsExists,
+        ToolMapper::HostFsListDir => ToolEffectOp::HostFsListDir,
+        ToolMapper::InspectWorld => ToolEffectOp::IntrospectManifest,
+        ToolMapper::InspectWorkflow => ToolEffectOp::IntrospectWorkflowState,
+        ToolMapper::WorkspaceInspect => ToolEffectOp::WorkspaceResolve,
+        ToolMapper::WorkspaceList => ToolEffectOp::WorkspaceList,
+        ToolMapper::WorkspaceRead => ToolEffectOp::WorkspaceReadRef,
+        ToolMapper::WorkspaceApply => ToolEffectOp::WorkspaceWriteBytes,
+        ToolMapper::WorkspaceDiff => ToolEffectOp::WorkspaceDiff,
         ToolMapper::WorkspaceCommit => {
-            panic!("workspace commit does not map to an effect kind")
+            panic!("workspace commit does not map to an effect")
         }
     }
 }

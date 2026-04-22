@@ -31,8 +31,8 @@ aos_workflow!(Demiurge);
 const DEFAULT_PROVIDER: &str = "openai-responses";
 const DEFAULT_MODEL: &str = "gpt-5.3-codex";
 const DEFAULT_MAX_TOKENS: u64 = 4096;
-const EFFECT_HOST_SESSION_OPEN: &str = "host.session.open";
-const EFFECT_BLOB_PUT: &str = "blob.put";
+const EFFECT_HOST_SESSION_OPEN: &str = "sys/host.session.open@1";
+const EFFECT_BLOB_PUT: &str = "sys/blob.put@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct TaskConfig {
@@ -198,14 +198,14 @@ fn on_task_submitted(
     let bytes = serde_json::to_vec(&message_blob)
         .map_err(|_| ReduceError::new("failed to encode task message JSON"))?;
 
-    let mut effects = ctx.effects();
-    effects.sys().blob_put(
+    ctx.effects().emit_raw_with_issuer_ref(
+        EFFECT_BLOB_PUT,
         &BlobPutParams {
             bytes,
             blob_ref: None,
             refs: None,
         },
-        "blob",
+        Some("blob"),
     );
     ctx.state.pending_stage = Some(PendingStage::AwaitBlobPut);
     Ok(())
@@ -225,7 +225,7 @@ fn on_receipt(
 
     match stage {
         PendingStage::AwaitBlobPut => {
-            if receipt.effect_kind != EFFECT_BLOB_PUT {
+            if receipt.effect != EFFECT_BLOB_PUT {
                 return Ok(());
             }
             if receipt.status != "ok" {
@@ -259,12 +259,12 @@ fn on_receipt(
                 SpawnOrHandoffSessionPlan::Handoff(_) => unreachable!(),
             };
             ctx.effects()
-                .emit_raw(EFFECT_HOST_SESSION_OPEN, &params, Some("host"));
+                .emit_raw_with_issuer_ref(EFFECT_HOST_SESSION_OPEN, &params, Some("host"));
             ctx.state.pending_stage = Some(PendingStage::AwaitHostSessionOpen);
             Ok(())
         }
         PendingStage::AwaitHostSessionOpen => {
-            if receipt.effect_kind != EFFECT_HOST_SESSION_OPEN {
+            if receipt.effect != EFFECT_HOST_SESSION_OPEN {
                 return Ok(());
             }
             let payload: HostSessionOpenReceipt = serde_cbor::from_slice(&receipt.receipt_payload)
@@ -338,7 +338,7 @@ fn on_receipt_rejected(
         PendingStage::AwaitHostSessionOpen => EFFECT_HOST_SESSION_OPEN,
         PendingStage::AwaitRunCompletion => return Ok(()),
     };
-    if rejected.effect_kind != expected {
+    if rejected.effect != expected {
         return Ok(());
     }
 

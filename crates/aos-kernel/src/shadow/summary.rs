@@ -15,7 +15,7 @@ pub struct ShadowSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PredictedEffect {
-    pub kind: String,
+    pub op: String,
     pub intent_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_json: Option<serde_json::Value>,
@@ -28,7 +28,7 @@ pub struct PendingWorkflowReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_instance_key_b64: Option<String>,
     pub intent_hash: String,
-    pub effect_kind: String,
+    pub effect: String,
     pub emitted_at_seq: u64,
 }
 

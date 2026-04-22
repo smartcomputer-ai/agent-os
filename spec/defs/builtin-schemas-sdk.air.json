@@ -11,6 +11,7 @@
         "event_hash": { "hash": {} },
         "manifest_hash": { "hash": {} },
         "workflow": { "text": {}, "$comment": "Name-formatted string" },
+        "workflow_hash": { "option": { "hash": {} } },
         "key": { "option": { "bytes": {} } },
         "cell_mode": { "bool": {} }
       }
@@ -33,11 +34,10 @@
     "name": "sys/PendingEffect@1",
     "type": {
       "record": {
-        "effect_kind": { "text": {} },
+        "effect": { "text": {} },
         "params_hash": { "hash": {} },
         "intent_id": { "option": { "hash": {} } },
         "issuer_ref": { "option": { "text": {} } },
-        "cap_slot": { "option": { "text": {} } },
         "emitted_at_ns": { "time": {} },
         "last_stream_seq": { "nat": {} }
       }
@@ -49,15 +49,19 @@
     "type": {
       "record": {
         "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
+        "origin_workflow_hash": { "option": { "hash": {} } },
         "origin_instance_key": { "option": { "bytes": {} } },
         "intent_id": { "hash": {} },
-        "effect_kind": { "text": {} },
+        "effect": { "text": {} },
+        "effect_hash": { "option": { "hash": {} } },
+        "executor_module": { "option": { "text": {} } },
+        "executor_module_hash": { "option": { "hash": {} } },
+        "executor_entrypoint": { "option": { "text": {} } },
         "params_hash": { "option": { "hash": {} } },
         "issuer_ref": { "option": { "text": {} } },
         "receipt_payload": { "bytes": {} },
         "status": { "text": {} },
         "emitted_at_seq": { "nat": {} },
-        "adapter_id": { "text": {} },
         "cost_cents": { "option": { "nat": {} } },
         "signature": { "bytes": {} }
       }
@@ -69,9 +73,14 @@
     "type": {
       "record": {
         "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
+        "origin_workflow_hash": { "option": { "hash": {} } },
         "origin_instance_key": { "option": { "bytes": {} } },
         "intent_id": { "hash": {} },
-        "effect_kind": { "text": {} },
+        "effect": { "text": {} },
+        "effect_hash": { "option": { "hash": {} } },
+        "executor_module": { "option": { "text": {} } },
+        "executor_module_hash": { "option": { "hash": {} } },
+        "executor_entrypoint": { "option": { "text": {} } },
         "params_hash": { "option": { "hash": {} } },
         "issuer_ref": { "option": { "text": {} } },
         "emitted_at_seq": { "nat": {} },
@@ -79,7 +88,6 @@
         "kind": { "text": {} },
         "payload": { "bytes": {} },
         "payload_ref": { "option": { "hash": {} } },
-        "adapter_id": { "text": {} },
         "signature": { "bytes": {} }
       }
     }
@@ -90,12 +98,16 @@
     "type": {
       "record": {
         "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
+        "origin_workflow_hash": { "option": { "hash": {} } },
         "origin_instance_key": { "option": { "bytes": {} } },
         "intent_id": { "hash": {} },
-        "effect_kind": { "text": {} },
+        "effect": { "text": {} },
+        "effect_hash": { "option": { "hash": {} } },
+        "executor_module": { "option": { "text": {} } },
+        "executor_module_hash": { "option": { "hash": {} } },
+        "executor_entrypoint": { "option": { "text": {} } },
         "params_hash": { "option": { "hash": {} } },
         "issuer_ref": { "option": { "text": {} } },
-        "adapter_id": { "text": {} },
         "status": { "text": {} },
         "error_code": { "text": {} },
         "error_message": { "text": {} },

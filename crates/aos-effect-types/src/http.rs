@@ -24,7 +24,6 @@ pub struct HttpRequestReceipt {
     #[serde(default)]
     pub body_ref: Option<HashRef>,
     pub timings: RequestTimings,
-    pub adapter_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

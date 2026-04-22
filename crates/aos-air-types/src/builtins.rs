@@ -4,19 +4,27 @@ use aos_cbor::Hash;
 use once_cell::sync::Lazy;
 use serde_json;
 
-use crate::{DefEffect, DefModule, DefSchema, HashRef};
+use crate::{DefEffect, DefModule, DefSchema, DefWorkflow, HashRef};
 
 static BUILTIN_SCHEMAS_RAW: &str = include_str!("../../../spec/defs/builtin-schemas.air.json");
 static BUILTIN_SCHEMAS_SDK_RAW: &str =
     include_str!("../../../spec/defs/builtin-schemas-sdk.air.json");
 static BUILTIN_SCHEMAS_HOST_RAW: &str =
     include_str!("../../../spec/defs/builtin-schemas-host.air.json");
-static BUILTIN_EFFECTS_RAW: &str = include_str!("../../../spec/defs/builtin-effects.air.json");
 static BUILTIN_MODULES_RAW: &str = include_str!("../../../spec/defs/builtin-modules.air.json");
+static BUILTIN_WORKFLOWS_RAW: &str = include_str!("../../../spec/defs/builtin-workflows.air.json");
+static BUILTIN_EFFECTS_RAW: &str = include_str!("../../../spec/defs/builtin-effects.air.json");
 
 #[derive(Debug)]
 pub struct BuiltinSchema {
     pub schema: DefSchema,
+    pub hash: Hash,
+    pub hash_ref: HashRef,
+}
+
+#[derive(Debug, Clone)]
+pub struct BuiltinWorkflow {
+    pub workflow: DefWorkflow,
     pub hash: Hash,
     pub hash_ref: HashRef,
 }
@@ -64,6 +72,22 @@ static BUILTIN_SCHEMAS: Lazy<Vec<BuiltinSchema>> = Lazy::new(|| {
         .collect()
 });
 
+static BUILTIN_WORKFLOWS: Lazy<Vec<BuiltinWorkflow>> = Lazy::new(|| {
+    let defs: Vec<DefWorkflow> = serde_json::from_str(BUILTIN_WORKFLOWS_RAW)
+        .expect("spec/defs/builtin-workflows.air.json must parse");
+    defs.into_iter()
+        .map(|workflow| {
+            let hash = Hash::of_cbor(&workflow).expect("canonical hash");
+            let hash_ref = HashRef::new(hash.to_hex()).expect("valid hash");
+            BuiltinWorkflow {
+                workflow,
+                hash,
+                hash_ref,
+            }
+        })
+        .collect()
+});
+
 static BUILTIN_EFFECTS: Lazy<Vec<BuiltinEffect>> = Lazy::new(|| {
     let defs: Vec<DefEffect> = serde_json::from_str(BUILTIN_EFFECTS_RAW)
         .expect("spec/defs/builtin-effects.air.json must parse");
@@ -104,6 +128,14 @@ static BUILTIN_SCHEMA_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
         .collect()
 });
 
+static BUILTIN_WORKFLOW_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
+    BUILTIN_WORKFLOWS
+        .iter()
+        .enumerate()
+        .map(|(idx, workflow)| (workflow.workflow.name.clone(), idx))
+        .collect()
+});
+
 static BUILTIN_EFFECT_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
     BUILTIN_EFFECTS
         .iter()
@@ -125,6 +157,11 @@ pub fn builtin_schemas() -> &'static [BuiltinSchema] {
     &BUILTIN_SCHEMAS
 }
 
+/// Returns the parsed list of built-in `defworkflow` nodes.
+pub fn builtin_workflows() -> &'static [BuiltinWorkflow] {
+    &BUILTIN_WORKFLOWS
+}
+
 /// Returns the parsed list of built-in `defeffect` nodes.
 pub fn builtin_effects() -> &'static [BuiltinEffect] {
     &BUILTIN_EFFECTS
@@ -140,6 +177,13 @@ pub fn find_builtin_schema(name: &str) -> Option<&'static BuiltinSchema> {
     BUILTIN_SCHEMA_INDEX
         .get(name)
         .and_then(|idx| BUILTIN_SCHEMAS.get(*idx))
+}
+
+/// Finds a built-in workflow definition by name (e.g., `sys/Workspace@1`).
+pub fn find_builtin_workflow(name: &str) -> Option<&'static BuiltinWorkflow> {
+    BUILTIN_WORKFLOW_INDEX
+        .get(name)
+        .and_then(|idx| BUILTIN_WORKFLOWS.get(*idx))
 }
 
 /// Finds a built-in effect definition by name (e.g., `sys/http.request@1`).
@@ -312,8 +356,31 @@ mod tests {
             .iter()
             .map(|m| m.module.name.as_str())
             .collect();
-        for name in ["sys/Workspace@1", "sys/HttpPublish@1"] {
+        for name in [
+            "sys/builtin_effects@1",
+            "sys/workspace_wasm@1",
+            "sys/http_publish_wasm@1",
+        ] {
             assert!(names.contains(&name));
+        }
+    }
+
+    #[test]
+    fn exposes_expected_workflows_and_effects() {
+        let workflow_names: Vec<_> = builtin_workflows()
+            .iter()
+            .map(|workflow| workflow.workflow.name.as_str())
+            .collect();
+        for name in ["sys/Workspace@1", "sys/HttpPublish@1"] {
+            assert!(workflow_names.contains(&name));
+        }
+
+        let effect_names: Vec<_> = builtin_effects()
+            .iter()
+            .map(|effect| effect.effect.name.as_str())
+            .collect();
+        for name in ["sys/timer.set@1"] {
+            assert!(effect_names.contains(&name));
         }
     }
 }

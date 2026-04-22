@@ -406,6 +406,17 @@ fn load_text_blob<S: aos_kernel::Store>(store: &S, reference: &str) -> Result<St
 
 fn print_live_diagnostics(host: &mut ExampleHost) -> Result<()> {
     println!("   diagnostics: missing run result/output_ref");
+    if let Ok(state) = host.read_state::<Value>() {
+        println!(
+            "   diagnostics: workflow state {}",
+            preview(&state.to_string())
+        );
+    }
+    let q = host.quiescence_status();
+    println!(
+        "   diagnostics: quiescence kernel_idle={} runtime_quiescent={} timers_pending={}",
+        q.kernel_idle, q.runtime_quiescent, q.timers_pending
+    );
     let entries = host.kernel_mut().dump_journal().context("dump journal")?;
     let store = host.store();
 
@@ -430,27 +441,27 @@ fn print_live_diagnostics(host: &mut ExampleHost) -> Result<()> {
         let JournalRecord::EffectReceipt(receipt) = record else {
             continue;
         };
-        if !receipt.adapter_id.starts_with("host.llm.") {
-            continue;
-        }
-        if receipt.status == ReceiptStatus::Ok {
-            continue;
-        }
-
-        let message = if let Ok(payload) =
-            serde_cbor::from_slice::<LlmGenerateReceipt>(&receipt.payload_cbor)
-        {
-            load_text_blob(store.as_ref(), payload.output_ref.as_str())
-                .unwrap_or_else(|_| "<unable to decode provider error text>".to_string())
-        } else {
-            "<unable to decode llm receipt payload>".to_string()
+        let Ok(payload) = serde_cbor::from_slice::<LlmGenerateReceipt>(&receipt.payload_cbor)
+        else {
+            println!("   diagnostics: unable to decode llm receipt payload");
+            break;
         };
-        println!(
-            "   diagnostics: llm receipt status={:?} adapter={} error={}",
-            receipt.status,
-            receipt.adapter_id,
-            preview(&message)
-        );
+        if receipt.status == ReceiptStatus::Ok {
+            let envelope = load_json_blob(store.as_ref(), payload.output_ref.as_str())
+                .unwrap_or_else(|_| json!({"error":"unable to decode llm output envelope"}));
+            println!(
+                "   diagnostics: llm receipt status=Ok output={}",
+                preview(&envelope.to_string())
+            );
+        } else {
+            let message = load_text_blob(store.as_ref(), payload.output_ref.as_str())
+                .unwrap_or_else(|_| "<unable to decode provider error text>".to_string());
+            println!(
+                "   diagnostics: llm receipt status={:?} error={}",
+                receipt.status,
+                preview(&message)
+            );
+        }
         break;
     }
 

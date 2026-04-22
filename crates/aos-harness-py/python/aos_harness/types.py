@@ -15,15 +15,17 @@ ReceiptStatusName = Literal["ok", "error", "timeout"]
 
 
 class EffectObject(TypedDict, total=False):
-    kind: str
+    effect: str
+    effect_hash: str
+    executor_module: str
+    executor_module_hash: str
+    executor_entrypoint: str
     intent_hash: HashBytes
     params: JsonValue
-    adapter_id: str
 
 
 class ReceiptObject(TypedDict, total=False):
     intent_hash: bytes
-    adapter_id: str
     status: ReceiptStatusName
     payload_cbor: bytes
     cost_cents: int

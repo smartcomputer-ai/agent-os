@@ -10,7 +10,7 @@ mod helpers;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use aos_effects::{EffectKind, IntentBuilder, ReceiptStatus};
+use aos_effects::{IntentBuilder, ReceiptStatus, effect_ops};
 use aos_kernel::Kernel;
 use aos_kernel::Store;
 use helpers::fixtures::{self, TestStore, TestWorld};
@@ -202,9 +202,9 @@ struct WorkspaceAnnotationsSetReceipt {
 }
 
 fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let workflow = fixtures::workflow_module_from_target(
+    let module = fixtures::workflow_module_from_target(
         store,
-        "sys/Workspace@1",
+        "sys/workspace_wasm@1",
         "workspace.wasm",
         Some("sys/WorkspaceName@1"),
         "sys/WorkspaceHistory@1",
@@ -212,10 +212,31 @@ fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     );
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("sys/WorkspaceCommit@1"),
-        module: workflow.name.clone(),
+        workflow: "sys/Workspace@1".into(),
         key_field: Some("workspace".into()),
     }];
-    fixtures::build_loaded_manifest(vec![workflow], routing)
+    let mut loaded = fixtures::build_loaded_manifest(vec![module], routing);
+
+    loaded.workflows.remove("sys/workspace_wasm@1");
+    loaded
+        .manifest
+        .workflows
+        .retain(|workflow| workflow.name.as_str() != "sys/workspace_wasm@1");
+
+    let workflow = aos_air_types::builtins::find_builtin_workflow("sys/Workspace@1")
+        .expect("built-in workspace workflow")
+        .workflow
+        .clone();
+    let workflow_hash =
+        aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defworkflow(workflow.clone()))
+            .expect("hash workspace workflow");
+    loaded.manifest.workflows.push(aos_air_types::NamedRef {
+        name: workflow.name.clone(),
+        hash: aos_air_types::HashRef::new(workflow_hash.to_hex()).expect("workflow hash ref"),
+    });
+    loaded.workflows.insert(workflow.name.clone(), workflow);
+
+    loaded
 }
 
 fn commit_event(workspace: &str, root_hash: &str, expected_head: Option<u64>) -> Vec<u8> {
@@ -244,7 +265,7 @@ fn handle_internal<T: serde::de::DeserializeOwned>(
     receipt.payload().unwrap_or_else(|err| {
         panic!(
             "decode receipt for {} as {}: {:?}",
-            intent.kind.as_str(),
+            intent.effect.as_str(),
             type_name,
             err
         )
@@ -260,8 +281,13 @@ fn handle_internal_bytes(
         .expect("intent handled")
         .expect("receipt");
     assert_eq!(receipt.status, ReceiptStatus::Ok);
-    let payload: serde_cbor::Value = serde_cbor::from_slice(&receipt.payload_cbor)
-        .unwrap_or_else(|err| panic!("decode receipt payload for {}: {err}", intent.kind.as_str()));
+    let payload: serde_cbor::Value =
+        serde_cbor::from_slice(&receipt.payload_cbor).unwrap_or_else(|err| {
+            panic!(
+                "decode receipt payload for {}: {err}",
+                intent.effect.as_str()
+            )
+        });
     match payload {
         serde_cbor::Value::Bytes(bytes) => bytes,
         serde_cbor::Value::Array(items) => items
@@ -301,7 +327,7 @@ async fn workspace_commit_and_resolve() {
         workspace: "dev-workspace".into(),
         version: None,
     };
-    let intent = IntentBuilder::new(EffectKind::workspace_resolve(), &params)
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_RESOLVE, &params)
         .build()
         .expect("intent");
     let receipt: WorkspaceResolveReceipt = handle_internal(&mut world.kernel, intent);
@@ -314,7 +340,7 @@ async fn workspace_commit_and_resolve() {
         workspace: "dev-workspace".into(),
         version: Some(2),
     };
-    let intent = IntentBuilder::new(EffectKind::workspace_resolve(), &missing)
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_RESOLVE, &missing)
         .build()
         .expect("intent");
     let receipt: WorkspaceResolveReceipt = handle_internal(&mut world.kernel, intent);
@@ -342,12 +368,9 @@ async fn workspace_tree_effects_roundtrip() {
         bytes: b"fn main() {}\n".to_vec(),
         mode: None,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_write_bytes(),
-        &write_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_WRITE_BYTES, &write_params)
+        .build()
+        .expect("intent");
     let write_receipt: WorkspaceWriteBytesReceipt = handle_internal(&mut world.kernel, intent);
 
     let list_params = WorkspaceListParams {
@@ -357,12 +380,9 @@ async fn workspace_tree_effects_roundtrip() {
         cursor: None,
         limit: 0,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_list(),
-        &list_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_LIST, &list_params)
+        .build()
+        .expect("intent");
     let list_receipt: WorkspaceListReceipt = handle_internal(&mut world.kernel, intent);
     let paths: Vec<_> = list_receipt
         .entries
@@ -378,12 +398,9 @@ async fn workspace_tree_effects_roundtrip() {
         cursor: None,
         limit: 0,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_list(),
-        &list_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_LIST, &list_params)
+        .build()
+        .expect("intent");
     let list_receipt: WorkspaceListReceipt = handle_internal(&mut world.kernel, intent);
     let paths: Vec<_> = list_receipt
         .entries
@@ -396,12 +413,9 @@ async fn workspace_tree_effects_roundtrip() {
         root_hash: write_receipt.new_root_hash.clone(),
         path: "src/lib.rs".into(),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_read_ref(),
-        &read_ref_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_READ_REF, &read_ref_params)
+        .build()
+        .expect("intent");
     let entry: Option<WorkspaceRefEntry> = handle_internal(&mut world.kernel, intent);
     let entry = entry.expect("entry");
     assert_eq!(entry.kind, "file");
@@ -412,12 +426,9 @@ async fn workspace_tree_effects_roundtrip() {
         path: "src/lib.rs".into(),
         range: Some(WorkspaceReadBytesRange { start: 0, end: 7 }),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_read_bytes(),
-        &read_bytes_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_READ_BYTES, &read_bytes_params)
+        .build()
+        .expect("intent");
     let bytes = handle_internal_bytes(&mut world.kernel, intent);
     assert_eq!(bytes, b"fn main".to_vec());
 
@@ -427,12 +438,9 @@ async fn workspace_tree_effects_roundtrip() {
         bytes: b"hello\n".to_vec(),
         mode: Some(0o644),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_write_bytes(),
-        &write_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_WRITE_BYTES, &write_params)
+        .build()
+        .expect("intent");
     let write_readme: WorkspaceWriteBytesReceipt = handle_internal(&mut world.kernel, intent);
 
     let diff_params = WorkspaceDiffParams {
@@ -440,12 +448,9 @@ async fn workspace_tree_effects_roundtrip() {
         root_b: write_readme.new_root_hash.clone(),
         prefix: None,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_diff(),
-        &diff_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_DIFF, &diff_params)
+        .build()
+        .expect("intent");
     let diff: WorkspaceDiffReceipt = handle_internal(&mut world.kernel, intent);
     assert!(
         diff.changes
@@ -458,12 +463,9 @@ async fn workspace_tree_effects_roundtrip() {
         root_b: write_readme.new_root_hash.clone(),
         prefix: Some("README.md".into()),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_diff(),
-        &diff_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_DIFF, &diff_params)
+        .build()
+        .expect("intent");
     let diff: WorkspaceDiffReceipt = handle_internal(&mut world.kernel, intent);
     assert_eq!(diff.changes.len(), 1);
     assert_eq!(diff.changes[0].path, "README.md");
@@ -474,24 +476,18 @@ async fn workspace_tree_effects_roundtrip() {
         root_hash: write_readme.new_root_hash.clone(),
         path: "README.md".into(),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_remove(),
-        &remove_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_REMOVE, &remove_params)
+        .build()
+        .expect("intent");
     let removed: WorkspaceRemoveReceipt = handle_internal(&mut world.kernel, intent);
 
     let read_ref_params = WorkspaceReadRefParams {
         root_hash: removed.new_root_hash.clone(),
         path: "README.md".into(),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_read_ref(),
-        &read_ref_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_READ_REF, &read_ref_params)
+        .build()
+        .expect("intent");
     let entry: Option<WorkspaceRefEntry> = handle_internal(&mut world.kernel, intent);
     assert!(entry.is_none());
 
@@ -499,24 +495,18 @@ async fn workspace_tree_effects_roundtrip() {
         root_hash: removed.new_root_hash.clone(),
         path: "src/lib.rs".into(),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_remove(),
-        &remove_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_REMOVE, &remove_params)
+        .build()
+        .expect("intent");
     let removed_file: WorkspaceRemoveReceipt = handle_internal(&mut world.kernel, intent);
 
     let remove_params = WorkspaceRemoveParams {
         root_hash: removed_file.new_root_hash.clone(),
         path: "src".into(),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_remove(),
-        &remove_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_REMOVE, &remove_params)
+        .build()
+        .expect("intent");
     let removed_dir: WorkspaceRemoveReceipt = handle_internal(&mut world.kernel, intent);
 
     let list_params = WorkspaceListParams {
@@ -526,12 +516,9 @@ async fn workspace_tree_effects_roundtrip() {
         cursor: None,
         limit: 0,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_list(),
-        &list_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_LIST, &list_params)
+        .build()
+        .expect("intent");
     let list_receipt: WorkspaceListReceipt = handle_internal(&mut world.kernel, intent);
     assert!(list_receipt.entries.is_empty());
 }
@@ -555,12 +542,9 @@ async fn workspace_write_ref_links_existing_blob() {
         blob_hash: blob_hash.clone(),
         mode: Some(0o644),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_write_ref(),
-        &write_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_WRITE_REF, &write_params)
+        .build()
+        .expect("intent");
     let write_receipt: WorkspaceWriteRefReceipt = handle_internal(&mut world.kernel, intent);
     assert_eq!(write_receipt.blob_hash, blob_hash);
 
@@ -568,12 +552,9 @@ async fn workspace_write_ref_links_existing_blob() {
         root_hash: write_receipt.new_root_hash.clone(),
         path: "assets/logo.txt".into(),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_read_ref(),
-        &read_ref_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_READ_REF, &read_ref_params)
+        .build()
+        .expect("intent");
     let entry: Option<WorkspaceRefEntry> = handle_internal(&mut world.kernel, intent);
     let entry = entry.expect("entry");
     assert_eq!(entry.hash, blob_hash);
@@ -584,12 +565,9 @@ async fn workspace_write_ref_links_existing_blob() {
         path: "assets/logo.txt".into(),
         range: None,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_read_bytes(),
-        &read_bytes_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_READ_BYTES, &read_bytes_params)
+        .build()
+        .expect("intent");
     let bytes = handle_internal_bytes(&mut world.kernel, intent);
     assert_eq!(bytes, b"linked from cas".to_vec());
 }
@@ -616,12 +594,9 @@ async fn workspace_annotations_roundtrip_on_root() {
         path: None,
         annotations_patch: WorkspaceAnnotationsPatch(patch_map),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_annotations_set(),
-        &set_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_ANNOTATIONS_SET, &set_params)
+        .build()
+        .expect("intent");
     let set_receipt: WorkspaceAnnotationsSetReceipt = handle_internal(&mut world.kernel, intent);
     assert!(set_receipt.annotations_hash.starts_with("sha256:"));
 
@@ -629,12 +604,9 @@ async fn workspace_annotations_roundtrip_on_root() {
         root_hash: set_receipt.new_root_hash.clone(),
         path: None,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_annotations_get(),
-        &get_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_ANNOTATIONS_GET, &get_params)
+        .build()
+        .expect("intent");
     let get_receipt: WorkspaceAnnotationsGetReceipt = handle_internal(&mut world.kernel, intent);
     let annotations = get_receipt.annotations.expect("annotations");
     assert_eq!(annotations.0.get(&key), Some(&val_hash));
@@ -646,24 +618,18 @@ async fn workspace_annotations_roundtrip_on_root() {
         path: None,
         annotations_patch: WorkspaceAnnotationsPatch(delete_patch),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_annotations_set(),
-        &delete_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_ANNOTATIONS_SET, &delete_params)
+        .build()
+        .expect("intent");
     let delete_receipt: WorkspaceAnnotationsSetReceipt = handle_internal(&mut world.kernel, intent);
 
     let get_params = WorkspaceAnnotationsGetParams {
         root_hash: delete_receipt.new_root_hash,
         path: None,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_annotations_get(),
-        &get_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_ANNOTATIONS_GET, &get_params)
+        .build()
+        .expect("intent");
     let get_receipt: WorkspaceAnnotationsGetReceipt = handle_internal(&mut world.kernel, intent);
     let annotations = get_receipt.annotations.expect("annotations");
     assert!(annotations.0.is_empty());
@@ -687,12 +653,9 @@ async fn workspace_annotations_survive_file_write() {
         bytes: b"hello".to_vec(),
         mode: None,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_write_bytes(),
-        &write_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_WRITE_BYTES, &write_params)
+        .build()
+        .expect("intent");
     let write_receipt: WorkspaceWriteBytesReceipt = handle_internal(&mut world.kernel, intent);
 
     let key = "doc.tag".to_string();
@@ -704,12 +667,9 @@ async fn workspace_annotations_survive_file_write() {
         path: Some("notes/readme.txt".into()),
         annotations_patch: WorkspaceAnnotationsPatch(patch_map),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_annotations_set(),
-        &set_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_ANNOTATIONS_SET, &set_params)
+        .build()
+        .expect("intent");
     let set_receipt: WorkspaceAnnotationsSetReceipt = handle_internal(&mut world.kernel, intent);
 
     let write_params = WorkspaceWriteBytesParams {
@@ -718,24 +678,18 @@ async fn workspace_annotations_survive_file_write() {
         bytes: b"hello again".to_vec(),
         mode: None,
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_write_bytes(),
-        &write_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_WRITE_BYTES, &write_params)
+        .build()
+        .expect("intent");
     let write_receipt: WorkspaceWriteBytesReceipt = handle_internal(&mut world.kernel, intent);
 
     let get_params = WorkspaceAnnotationsGetParams {
         root_hash: write_receipt.new_root_hash,
         path: Some("notes/readme.txt".into()),
     };
-    let intent = IntentBuilder::new(
-        EffectKind::workspace_annotations_get(),
-        &get_params,
-    )
-    .build()
-    .expect("intent");
+    let intent = IntentBuilder::new(effect_ops::WORKSPACE_ANNOTATIONS_GET, &get_params)
+        .build()
+        .expect("intent");
     let get_receipt: WorkspaceAnnotationsGetReceipt = handle_internal(&mut world.kernel, intent);
     let annotations = get_receipt.annotations.expect("annotations");
     assert_eq!(annotations.0.get(&key), Some(&val_hash));

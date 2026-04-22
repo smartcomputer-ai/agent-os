@@ -255,13 +255,8 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
     }
 
     /// Escape hatch for future micro-effects.
-    pub fn emit_raw(
-        &mut self,
-        kind: &'static str,
-        params: &impl Serialize,
-        cap_slot: Option<&str>,
-    ) {
-        self.emit_raw_with_refs(kind, params, cap_slot, None, None);
+    pub fn emit_raw(&mut self, kind: &'static str, params: &impl Serialize) {
+        self.emit_raw_with_refs(kind, params, None, None);
     }
 
     /// Emit a micro-effect with an explicit idempotency key (32 bytes).
@@ -269,10 +264,9 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         &mut self,
         kind: &'static str,
         params: &impl Serialize,
-        cap_slot: Option<&str>,
         idempotency_key: Option<&[u8]>,
     ) {
-        self.emit_raw_with_refs(kind, params, cap_slot, idempotency_key, None);
+        self.emit_raw_with_refs(kind, params, idempotency_key, None);
     }
 
     /// Emit a micro-effect with an explicit issuer reference echoed in continuations.
@@ -280,17 +274,15 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         &mut self,
         kind: &'static str,
         params: &impl Serialize,
-        cap_slot: Option<&str>,
         issuer_ref: Option<&str>,
     ) {
-        self.emit_raw_with_refs(kind, params, cap_slot, None, issuer_ref);
+        self.emit_raw_with_refs(kind, params, None, issuer_ref);
     }
 
     fn emit_raw_with_refs(
         &mut self,
         kind: &'static str,
         params: &impl Serialize,
-        cap_slot: Option<&str>,
         idempotency_key: Option<&[u8]>,
         issuer_ref: Option<&str>,
     ) {
@@ -302,7 +294,6 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         self.ctx.emit_effect(EmittedEffect {
             kind,
             params: payload,
-            cap_slot: cap_slot.map(|s| s.to_string()),
             idempotency_key: key,
             issuer_ref: issuer_ref.map(|value| value.to_string()),
         });
@@ -314,9 +305,8 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         pending: &mut crate::PendingEffects,
         kind: &'static str,
         params: &impl Serialize,
-        cap_slot: Option<&str>,
     ) -> crate::PendingEffect {
-        self.emit_tracked_with_issuer_ref(pending, kind, params, cap_slot, None)
+        self.emit_tracked_with_issuer_ref(pending, kind, params, None)
     }
 
     /// Emit and register a durable handle with an issuer reference echoed in continuations.
@@ -325,7 +315,6 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         pending: &mut crate::PendingEffects,
         kind: &'static str,
         params: &impl Serialize,
-        cap_slot: Option<&str>,
         issuer_ref: Option<&str>,
     ) -> crate::PendingEffect {
         let payload = match serde_cbor::to_vec(params) {
@@ -336,11 +325,9 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         let issuer_ref = issuer_ref
             .map(|value| value.to_string())
             .or_else(|| Some(synthesize_pending_issuer_ref(pending, kind, emitted_at_ns)));
-        let cap_slot = cap_slot.map(|slot| slot.to_string());
         let pending_effect = match crate::PendingEffect::from_params_with_issuer_ref(
             kind,
             params,
-            cap_slot.clone(),
             emitted_at_ns,
             issuer_ref.clone(),
         ) {
@@ -351,7 +338,6 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         self.ctx.emit_effect(EmittedEffect {
             kind,
             params: payload,
-            cap_slot,
             idempotency_key: None,
             issuer_ref,
         });
@@ -378,7 +364,6 @@ impl PendingEvent {
 struct EmittedEffect {
     kind: &'static str,
     params: Vec<u8>,
-    cap_slot: Option<String>,
     idempotency_key: Option<Vec<u8>>,
     issuer_ref: Option<String>,
 }
@@ -404,9 +389,6 @@ fn synthesize_pending_issuer_ref(
 impl EmittedEffect {
     fn into_abi(self) -> AbiWorkflowEffect {
         let mut eff = AbiWorkflowEffect::new(self.kind, self.params);
-        if let Some(slot) = self.cap_slot {
-            eff.cap_slot = Some(slot);
-        }
         if let Some(issuer_ref) = self.issuer_ref {
             eff.issuer_ref = Some(issuer_ref);
         }
@@ -637,6 +619,7 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: workflow.into(),
+            workflow_hash: None,
             key: None,
             cell_mode: false,
         };
@@ -721,8 +704,8 @@ mod tests {
                     deliver_at_ns: 42,
                     key: None,
                 };
-                ctx.effects().sys().timer_set(&params, "clock");
-                ctx.effects().sys().timer_set(&params, "clock");
+                ctx.effects().sys().timer_set(&params);
+                ctx.effects().sys().timer_set(&params);
                 Ok(())
             }
         }
@@ -796,16 +779,20 @@ mod tests {
         let payload = serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap();
         let envelope = EffectReceiptEnvelope {
             origin_module_id: "com.acme/Workflow@1".into(),
+            origin_workflow_hash: None,
             origin_instance_key: Some(b"key-1".to_vec()),
             intent_id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .into(),
-            effect_kind: "http.request".into(),
+            effect: "sys/http.request@1".into(),
+            effect_hash: None,
+            executor_module: Some("sys/Http@1".into()),
+            executor_module_hash: None,
+            executor_entrypoint: Some("http.request".into()),
             params_hash: None,
             issuer_ref: None,
             receipt_payload: payload,
             status: "ok".into(),
             emitted_at_seq: 42,
-            adapter_id: "http.mock".into(),
             cost_cents: Some(0),
             signature: vec![0; 64],
         };
@@ -845,14 +832,13 @@ mod tests {
                 let mut pending = core::mem::take(&mut ctx.state.pending);
                 let handle = ctx.effects().emit_tracked(
                     &mut pending,
-                    "llm.generate",
+                    "sys/llm.generate@1",
                     &TrackedParams {
                         prompt: "hello".into(),
                     },
-                    Some("llm"),
                 );
                 ctx.state.pending = pending;
-                assert_eq!(handle.effect_kind, "llm.generate");
+                assert_eq!(handle.effect, "sys/llm.generate@1");
                 Ok(())
             }
         }
@@ -874,11 +860,10 @@ mod tests {
         let pending = state.pending.values().next().expect("pending handle");
         assert_eq!(pending.issuer_ref, decoded.effects[0].issuer_ref);
         let expected = PendingEffect::from_params(
-            "llm.generate",
+            "sys/llm.generate@1",
             &TrackedParams {
                 prompt: "hello".into(),
             },
-            Some("llm".into()),
             1,
         )
         .expect("expected pending handle");
@@ -914,14 +899,10 @@ mod tests {
                     blob_ref: None,
                     refs: None,
                 };
-                let handle = ctx
-                    .effects()
-                    .sys()
-                    .blob_put_tracked(&mut pending, &params, "blob");
+                let handle = ctx.effects().sys().blob_put_tracked(&mut pending, &params);
                 ctx.state.pending = pending;
-                let expected =
-                    PendingEffect::from_params("blob.put", &params, Some("blob".into()), 1)
-                        .expect("expected blob pending handle");
+                let expected = PendingEffect::from_params("sys/blob.put@1", &params, 1)
+                    .expect("expected blob pending handle");
                 assert_eq!(handle.params_hash, expected.params_hash);
                 Ok(())
             }
@@ -941,13 +922,12 @@ mod tests {
             serde_cbor::from_slice(decoded.state.as_ref().expect("state")).expect("state decode");
         let pending = state.pending.values().next().expect("pending handle");
         let expected = PendingEffect::from_params(
-            "blob.put",
+            "sys/blob.put@1",
             &BlobPutParams {
                 bytes: b"hello".to_vec(),
                 blob_ref: None,
                 refs: None,
             },
-            Some("blob".into()),
             1,
         )
         .expect("expected blob pending handle");

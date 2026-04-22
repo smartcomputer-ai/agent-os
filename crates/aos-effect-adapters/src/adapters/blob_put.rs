@@ -21,7 +21,7 @@ impl<S: Store> BlobPutAdapter<S> {
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for BlobPutAdapter<S> {
     fn kind(&self) -> &str {
-        aos_effects::EffectKind::BLOB_PUT
+        aos_effects::effect_ops::BLOB_PUT
     }
 
     async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
@@ -43,7 +43,6 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for BlobPutAdapter<S> 
         if expected != computed {
             return Ok(EffectReceipt {
                 intent_hash: intent.intent_hash,
-                adapter_id: "host.blob.put".into(),
                 status: ReceiptStatus::Error,
                 payload_cbor: serde_cbor::to_vec(&BlobPutReceipt {
                     blob_ref: computed_ref,
@@ -65,7 +64,6 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for BlobPutAdapter<S> 
 
         Ok(EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: "host.blob.put".into(),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&receipt)?,
             cost_cents: Some(0),
@@ -77,12 +75,11 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for BlobPutAdapter<S> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_effects::EffectKind;
     use aos_kernel::MemStore;
 
     fn blob_intent(params: BlobPutParams) -> EffectIntent {
         EffectIntent::from_raw_params(
-            EffectKind::new(aos_effects::EffectKind::BLOB_PUT),
+            aos_effects::effect_ops::BLOB_PUT,
             serde_cbor::to_vec(&params).expect("encode params"),
             [0u8; 32],
         )

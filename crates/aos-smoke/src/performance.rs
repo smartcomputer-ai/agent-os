@@ -80,9 +80,17 @@ impl MemPerfHost {
             .context("load manifest from assets")?
             .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
 
-        let patched = patch_modules(&mut loaded, &wasm_hash_ref, |name, _| name == WORKFLOW_NAME);
+        let module_name = loaded
+            .workflows
+            .get(WORKFLOW_NAME)
+            .map(|workflow| workflow.implementation.module.as_str())
+            .unwrap_or(WORKFLOW_NAME)
+            .to_string();
+        let patched = patch_modules(&mut loaded, &wasm_hash_ref, |name, _| name == module_name);
         if patched == 0 {
-            anyhow::bail!("module '{WORKFLOW_NAME}' missing from manifest");
+            anyhow::bail!(
+                "module '{module_name}' for workflow '{WORKFLOW_NAME}' missing from manifest"
+            );
         }
 
         let kernel = Kernel::from_loaded_manifest_with_config(

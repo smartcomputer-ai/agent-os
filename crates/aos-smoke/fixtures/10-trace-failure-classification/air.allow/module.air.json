@@ -1,16 +1,26 @@
 [
   {
     "$kind": "defmodule",
-    "name": "demo/FetchNotify@1",
-    "module_kind": "workflow",
-    "abi": {
-      "workflow": {
-        "state": "demo/FetchNotifyState@1",
-        "event": "demo/FetchNotifyEvent@1",
-        "effects_emitted": [
-          "http.request"
-        ]
+    "name": "demo/FetchNotify_wasm@1",
+    "runtime": {
+      "kind": "wasm",
+      "artifact": {
+        "kind": "wasm_module"
       }
+    }
+  },
+  {
+    "$kind": "defworkflow",
+    "name": "demo/FetchNotify@1",
+    "state": "demo/FetchNotifyState@1",
+    "event": "demo/FetchNotifyEvent@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [
+      "sys/http.request@1"
+    ],
+    "impl": {
+      "module": "demo/FetchNotify_wasm@1",
+      "entrypoint": "step"
     }
   }
 ]

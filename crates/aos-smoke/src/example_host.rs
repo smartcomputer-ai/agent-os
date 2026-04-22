@@ -11,7 +11,7 @@ use aos_authoring::{
 use aos_cbor::Hash;
 use aos_effect_adapters::config::EffectAdapterConfig;
 use aos_effects::builtins::{TimerSetParams, TimerSetReceipt};
-use aos_effects::{EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::journal::{Journal, OwnedJournalEntry};
 use aos_kernel::{Kernel, KernelConfig, KernelQuiescence, LoadedManifest, Store, WorldInput};
 use aos_node::{EffectExecutionClass, EffectRuntime, EffectRuntimeEvent, FsCas, WorldConfig};
@@ -215,7 +215,7 @@ impl ExampleHost {
                     store.clone(),
                     &host_config.adapters,
                     &loaded,
-                    host_config.world.strict_effect_bindings,
+                    host_config.world.strict_effect_routes,
                     tx,
                 )
                 .context("build example host effect runtime")?;
@@ -452,7 +452,7 @@ impl ExampleHost {
                 continue;
             }
 
-            if intent.kind.as_str() == EffectKind::TIMER_SET {
+            if intent.effect.as_str() == effect_ops::TIMER_SET {
                 let params: TimerSetParams =
                     serde_cbor::from_slice(&intent.params_cbor).context("decode timer.set")?;
                 self.pending_timers.push(PendingTimer {
@@ -510,7 +510,6 @@ impl ExampleHost {
         for timer in &ready {
             let receipt = EffectReceipt {
                 intent_hash: timer.intent_hash,
-                adapter_id: "timer.default".into(),
                 status: ReceiptStatus::Ok,
                 payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
                     delivered_at_ns: timer.params.deliver_at_ns,
@@ -541,7 +540,10 @@ impl ExampleHost {
     }
 
     fn classify_effect_intent(&self, intent: &aos_effects::EffectIntent) -> EffectExecutionClass {
-        aos_node::classify_effect_kind(intent.kind.as_str())
+        self.effect_runtime
+            .as_ref()
+            .map(|runtime| runtime.classify_intent(intent))
+            .unwrap_or_else(|| aos_node::classify_effect_identity(intent))
     }
 
     fn dispatch_external_intent(&mut self, intent: aos_effects::EffectIntent) -> Result<usize> {
@@ -666,9 +668,17 @@ fn patch_module_hash(
     workflow_name: &str,
     wasm_hash: &HashRef,
 ) -> Result<()> {
-    let patched = patch_modules(loaded, wasm_hash, |name, _| name == workflow_name);
+    let module_name = loaded
+        .workflows
+        .get(workflow_name)
+        .map(|workflow| workflow.implementation.module.as_str())
+        .unwrap_or(workflow_name)
+        .to_string();
+    let patched = patch_modules(loaded, wasm_hash, |name, _| name == module_name);
     if patched == 0 {
-        anyhow::bail!("module '{workflow_name}' missing from manifest");
+        anyhow::bail!(
+            "module '{module_name}' for workflow '{workflow_name}' missing from manifest"
+        );
     }
     Ok(())
 }
