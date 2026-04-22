@@ -230,6 +230,7 @@ mod tests {
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             workflow: "demo/LiveChat@1".into(),
+            workflow_hash: None,
             key: None,
             cell_mode: false,
         };

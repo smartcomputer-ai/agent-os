@@ -202,9 +202,9 @@ struct WorkspaceAnnotationsSetReceipt {
 }
 
 fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let workflow = fixtures::workflow_module_from_target(
+    let module = fixtures::workflow_module_from_target(
         store,
-        "sys/Workspace@1",
+        "sys/workspace_wasm@1",
         "workspace.wasm",
         Some("sys/WorkspaceName@1"),
         "sys/WorkspaceHistory@1",
@@ -212,10 +212,31 @@ fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     );
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("sys/WorkspaceCommit@1"),
-        module: workflow.name.clone(),
+        workflow: "sys/Workspace@1".into(),
         key_field: Some("workspace".into()),
     }];
-    fixtures::build_loaded_manifest(vec![workflow], routing)
+    let mut loaded = fixtures::build_loaded_manifest(vec![module], routing);
+
+    loaded.workflows.remove("sys/workspace_wasm@1");
+    loaded
+        .manifest
+        .workflows
+        .retain(|workflow| workflow.name.as_str() != "sys/workspace_wasm@1");
+
+    let workflow = aos_air_types::builtins::find_builtin_workflow("sys/Workspace@1")
+        .expect("built-in workspace workflow")
+        .workflow
+        .clone();
+    let workflow_hash =
+        aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defworkflow(workflow.clone()))
+            .expect("hash workspace workflow");
+    loaded.manifest.workflows.push(aos_air_types::NamedRef {
+        name: workflow.name.clone(),
+        hash: aos_air_types::HashRef::new(workflow_hash.to_hex()).expect("workflow hash ref"),
+    });
+    loaded.workflows.insert(workflow.name.clone(), workflow);
+
+    loaded
 }
 
 fn commit_event(workspace: &str, root_hash: &str, expected_head: Option<u64>) -> Vec<u8> {
