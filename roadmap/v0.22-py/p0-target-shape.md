@@ -14,6 +14,10 @@ AIR v2 replaces AIR v1. v0.22 does not carry an AIR v1 compatibility mode, schem
 or manifest migration layer. Once this lands, manifests and nodes that declare `air_version = "1"`
 should be rejected rather than translated.
 
+AIR v2 v0.22 has no public capability/policy authority model.
+workflow.effects_emitted is only a structural effect allowlist.
+Worlds running untrusted workflow code or sensitive effects must rely on node-local runtime policy until authority returns.
+
 ## Public Surface
 
 AIR v2 root forms:
@@ -57,8 +61,8 @@ Target replacement:
 ```json
 {
   "$defs": {
-    "DefKind": {
-      "title": "AIR definition kind",
+    "RootKind": {
+      "title": "AIR root document kind",
       "type": "string",
       "enum": [
         "defschema",
@@ -67,10 +71,23 @@ Target replacement:
         "defsecret",
         "manifest"
       ]
+    },
+    "DefKind": {
+      "title": "AIR definition kind",
+      "type": "string",
+      "enum": [
+        "defschema",
+        "defmodule",
+        "defop",
+        "defsecret"
+      ]
     }
   }
 }
 ```
+
+`RootKind` is for top-level AIR document dispatch. `DefKind` is only for catalog definitions and
+must be used by patch operations that add, replace, remove, or reference manifest definition lists.
 
 `EffectKind` remains an open semantic string:
 
@@ -173,10 +190,6 @@ Target complete schema:
       "properties": {
         "kind": { "const": "workspace_root" },
         "root_hash": { "$ref": "common.schema.json#/$defs/Hash" },
-        "workspace": {
-          "type": "string",
-          "minLength": 1
-        },
         "path": {
           "type": "string",
           "minLength": 1
@@ -199,6 +212,7 @@ runtime.kind restricts which artifact kinds are valid.
 wasm supports only compiled wasm_module artifacts in v0.22.
 python supports python_bundle and workspace_root artifacts in v0.22.
 workspace_root artifacts must be pinned by root_hash; updating code means writing a new workspace root and replacing the defmodule.
+workspace_root.path is an optional subpath within the pinned tree; omitted means the tree root.
 Builtins use the versioned module name as identity because there are no CAS bytes.
 Python target/platform is bundle metadata, not AIR metadata.
 ```
@@ -268,7 +282,7 @@ Target complete schema:
           "default": "strict"
         }
       },
-      "required": ["state", "event"],
+      "required": ["state", "event", "effects_emitted"],
       "additionalProperties": false
     },
     "EffectOp": {
@@ -318,6 +332,10 @@ effects. A workflow must list the effect op in `workflow.effects_emitted[]`; tha
 structural authority check. System, governance, and owner-internal operations remain implementation
 paths, not public effect emitters in AIR v2.
 
+`workflow.effects_emitted` is required in canonical AIR. Workflows that emit no effects must set
+`"effects_emitted": []`. Authoring sugar may allow omission only if the loader materializes the
+empty array before canonical hashing/CBOR.
+
 `effect.execution_class` is removed because dispatch class is runtime implementation metadata. The
 node resolves the execution path from the effect op implementation and the active runtime registry,
 not from a public schema field and not from semantic kind prefixes.
@@ -325,6 +343,13 @@ not from a public schema field and not from semantic kind prefixes.
 `workflow.key_schema` replaces v1 `defmodule.key_schema`. In v1, `defmodule` carried both the
 artifact and the workflow ABI. In AIR v2, `defmodule` is only the runtime/artifact declaration, so
 keyedness belongs to the workflow op whose state cells are being addressed.
+
+`workflow.event` is the single input schema for a workflow op. AIR v2 does not add a parallel
+`workflow.events[]` list. A routing subscription event is deliverable when it exactly equals the
+target workflow op's `workflow.event`, or when `workflow.event` is a variant whose arm is a ref to
+the subscription event schema. In the variant-arm case, runtime delivery wraps the incoming event as
+that variant arm before invoking the workflow. Routable workflow event variants must use named
+schema refs for arms so subscription matching is unambiguous.
 
 `routing.subscriptions[].key_field` remains route-local event extraction. Semantic validation must
 require `key_field` when the target workflow op has `workflow.key_schema`, reject it when the target
@@ -339,6 +364,43 @@ the same runtime/op-kind pair.
 the exported function name to invoke; for Python modules it is the import path plus callable name; for
 builtins it is the built-in dispatcher key. The value `"workflow"` is not special. A single
 content-addressed WASM module can export many workflow ops, each with a different `defop.impl.entrypoint`.
+
+## `defsecret.schema.json`
+
+Target complete schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v2/defsecret.schema.json",
+  "title": "AIR v2 defsecret",
+  "type": "object",
+  "properties": {
+    "$kind": { "const": "defsecret" },
+    "name": { "$ref": "common.schema.json#/$defs/Name" },
+    "binding_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque node-local resolver binding ID, such as env:SLACK_BOT_TOKEN."
+    },
+    "expected_digest": {
+      "$ref": "common.schema.json#/$defs/Hash",
+      "description": "Optional hash of resolved secret plaintext for drift detection."
+    }
+  },
+  "required": ["$kind", "name", "binding_id"],
+  "additionalProperties": false
+}
+```
+
+Secret values remain outside AIR. `defsecret.binding_id` names a node-local resolver binding, and
+`expected_digest` remains optional.
+
+AIR v2 v0.22 does not add `allowed_ops` or another per-secret op ACL. Secret access follows the
+same public structural path as effect access: a workflow must be allowed to emit an effect op through
+`workflow.effects_emitted[]`, that effect op's params schema must admit a `SecretRef`, and the
+referenced secret must be present in `manifest.secrets`. The resolver then injects the secret for
+execution. Stronger per-secret policy remains node-local/runtime policy for v0.22.
 
 ## Examples
 
@@ -429,7 +491,6 @@ These examples are illustrative only. The sections above define the actual schem
     "artifact": {
       "kind": "workspace_root",
       "root_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      "workspace": "acme-order",
       "path": "python/order"
     }
   }
@@ -470,7 +531,6 @@ These examples are illustrative only. The sections above define the actual schem
     "artifact": {
       "kind": "workspace_root",
       "root_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "workspace": "acme-order",
       "path": "python/order"
     }
   }
@@ -588,6 +648,8 @@ plus a manifest ref update.
 workflow ops and may fan out one event to multiple workflows. The old `routing.inboxes` lane was a
 direct source-to-workflow route for messages that skipped the domain-event bus. AIR v2 removes it;
 external ingress should first become a typed domain event and then route through subscriptions.
+Routing subscriptions do not participate in receipt continuation delivery; continuations route by
+recorded origin identity.
 
 Removed from `Manifest`:
 
@@ -615,8 +677,8 @@ There is no AIR v2 compatibility schema for `defeffect`.
 
 ## `patch.schema.json`
 
-Patch documents should accept `defop` through `common.schema.json#/$defs/DefKind`. The schema does
-not need op-specific patch operations.
+Patch documents should accept `defop` through the narrower
+`common.schema.json#/$defs/DefKind`. The schema does not need op-specific patch operations.
 
 Patch document format should move to version `"2"` because the operation surface changes with AIR
 v2. AIR v2 does not keep patch compatibility with v1 patch documents.
@@ -666,8 +728,9 @@ Target field-level changes:
 Patch operation semantics:
 
 ```text
-add_def / replace_def / remove_def accept defschema, defmodule, defop, and defsecret.
-set_manifest_refs updates manifest.schemas, manifest.modules, manifest.ops, or manifest.secrets.
+add_def / replace_def / remove_def accept only DefKind: defschema, defmodule, defop, and defsecret.
+set_manifest_refs accepts only DefKind and updates manifest.schemas, manifest.modules,
+manifest.ops, or manifest.secrets.
 set_routing_subscriptions replaces routing.subscriptions and uses RoutingSubscription.op.
 ```
 
@@ -709,23 +772,30 @@ JSON Schema covers structure only. Semantic validation still needs:
 1. Every manifest schema ref resolves to a `defschema` or built-in schema.
 2. Every manifest module ref resolves to a `defmodule`.
 3. Every manifest op ref resolves to a `defop`.
-4. Every op implementation references an active module.
-5. Every workflow op schema ref exists.
-6. Every effect op params and receipt schema ref exists.
-7. Every routing subscription references an active workflow op.
-8. Every workflow `effects_emitted[]` entry references an active effect op.
-9. Workflow key-field validation uses the target op's `workflow.key_schema`, not the referenced module.
-10. Effect semantic kind duplicates are allowed only if the runtime has a deterministic dispatch rule by op identity. Recommendation: allow duplicates because op identity is canonical.
-11. The referenced module runtime kind must support the op kind.
-12. Effect execution path must resolve from the referenced module runtime and op implementation.
-13. Artifact kind compatibility is enforced by the `defmodule` schema: `wasm` accepts `wasm_module`; `python` accepts `python_bundle` or `workspace_root`; `builtin` has no artifact.
-14. `wasm_module.hash` must identify compiled WASM bytes.
-15. `python_bundle.root_hash` and `workspace_root.root_hash` must identify a workspace/tree root that the Python runner can hydrate.
-16. Python artifact metadata must satisfy the declared `runtime.python` version and provide a compatible target for the runner host.
+4. Every manifest secret ref resolves to a `defsecret`.
+5. Every op implementation references an active module.
+6. Every workflow op schema ref exists.
+7. Every effect op params and receipt schema ref exists.
+8. Every routing subscription references an active workflow op.
+9. Every routing subscription event schema must be deliverable to the target workflow op's `workflow.event`: exact match, or a ref arm of a variant workflow event schema.
+10. Routable workflow event variant arms must be named schema refs and must not contain duplicate refs.
+11. Every workflow `effects_emitted[]` entry references an active effect op.
+12. Workflow key-field validation uses the target op's `workflow.key_schema`, not the referenced module.
+13. Effect semantic kind duplicates are allowed only if the runtime has a deterministic dispatch rule by op identity. Recommendation: allow duplicates because op identity is canonical.
+14. The referenced module runtime kind must support the op kind.
+15. Effect execution path must resolve from the referenced module runtime and op implementation.
+16. Artifact kind compatibility is enforced by the `defmodule` schema: `wasm` accepts `wasm_module`; `python` accepts `python_bundle` or `workspace_root`; `builtin` has no artifact.
+17. `wasm_module.hash` must identify compiled WASM bytes.
+18. `python_bundle.root_hash` and `workspace_root.root_hash` must identify a workspace/tree root that the Python runner can hydrate.
+19. Python artifact metadata must satisfy the declared `runtime.python` version and provide a compatible target for the runner host.
+20. Secret refs in effect params are admitted by the effect op params schema and resolved through manifest `defsecret` declarations; v0.22 has no public per-secret op ACL.
 
 ## Open Schema Decisions
 
 - Whether `manifest.routing` should be required. Current target keeps it optional.
+- Whether a later authority phase should add `defsecret.allowed_ops` or another per-secret
+  resolver ACL. v0.22 intentionally defers this and relies on effect-op admission plus params
+  schema shape.
 
 ## Done When
 
