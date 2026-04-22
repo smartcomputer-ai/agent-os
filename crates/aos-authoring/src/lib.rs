@@ -2,6 +2,7 @@
 
 pub mod build;
 pub mod bundle;
+pub mod generated;
 pub mod local;
 pub mod manifest_loader;
 pub mod sync;
@@ -15,10 +16,12 @@ pub use build::{
     resolve_sys_module_wasm_hash,
 };
 pub use bundle::{WorldBundle, build_patch_document, load_air_bundle};
+pub use generated::{GENERATED_AIR_DIR, write_generated_air_nodes};
 pub use local::{local_kernel_config, local_state_paths, reset_local_runtime_state};
 pub use manifest_loader::{
     LoadedAssets, ZERO_HASH_SENTINEL, load_from_assets, load_from_assets_with_defs,
     load_from_assets_with_imports, load_from_assets_with_imports_and_defs,
+    parse_air_nodes_from_str,
 };
 pub use sync::{
     ResolvedAirImport, ResolvedAirSources, ResolvedSecretValue, SyncConfig,

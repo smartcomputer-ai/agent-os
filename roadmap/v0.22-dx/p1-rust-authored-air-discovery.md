@@ -61,8 +61,8 @@ Serde shape is useful, but AIR has stronger identity and typing rules. The deriv
 should require explicit annotations for cases that cannot be inferred safely:
 
 1. schema names,
-2. external schema refs,
-3. `time`, `duration`, `hash`, and `uuid` semantics,
+2. external schema refs such as `#[aos(schema_ref = "...")]`,
+3. `time`, `duration`, `hash`, and `uuid` semantics such as `#[aos(air_type = "time")]`,
 4. newtype schema representation,
 5. variant tagging,
 6. workflow key schema,
@@ -141,7 +141,7 @@ Crate placement:
 
 ```text
 crates/aos-air-macros       derive/attribute procedural macros; compile-time only
-crates/aos-wasm-sdk         re-export macros and own no_std workflow ABI helpers
+crates/aos-wasm-sdk         re-export macros behind an opt-in feature and own no_std workflow ABI helpers
 crates/aos-authoring        generated metadata discovery, AIR assembly, Cargo discovery
 ```
 
@@ -161,9 +161,9 @@ Initial derive surface:
 #[derive(Serialize, Deserialize, AirSchema)]
 #[aos(schema = "demo/TaskSubmitted@1")]
 pub struct TaskSubmitted {
-    #[aos(ref = "aos.agent/SessionId@1")]
+    #[aos(schema_ref = "aos.agent/SessionId@1")]
     pub task_id: SessionId,
-    #[aos(type = "time")]
+    #[aos(air_type = "time")]
     pub observed_at_ns: u64,
     pub task: String,
 }

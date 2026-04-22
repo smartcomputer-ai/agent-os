@@ -10,7 +10,17 @@ pub use shared_effects::*;
 pub use workflow_effects::*;
 pub use workflows::*;
 
+#[cfg(feature = "air-macros")]
+pub use aos_air_macros::AirSchema;
 pub use serde_cbor::Value;
+
+/// Metadata emitted by Rust-authored AIR schema derives.
+///
+/// The derive macro only emits static metadata. Host-side authoring tools are responsible for
+/// materializing this JSON under `air/generated/` and feeding it through the normal AIR loader.
+pub trait AirSchemaExport {
+    const AIR_SCHEMA_JSON: &'static str;
+}
 
 use alloc::alloc::{Layout, alloc};
 use core::slice;

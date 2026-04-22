@@ -201,6 +201,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "aos-air-macros"
+version = "0.1.0"
+dependencies = [
+ "aos-air-types",
+ "aos-wasm-sdk",
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "syn",
+]
+
+[[package]]
 name = "aos-air-types"
 version = "0.1.0"
 dependencies = [
@@ -552,6 +564,7 @@ dependencies = [
 name = "aos-wasm-sdk"
 version = "0.1.0"
 dependencies = [
+ "aos-air-macros",
  "aos-air-types",
  "aos-effect-types",
  "aos-effects",

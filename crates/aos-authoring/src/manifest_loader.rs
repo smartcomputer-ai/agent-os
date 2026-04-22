@@ -414,6 +414,15 @@ fn collect_json_files(dir: &Path) -> Result<Vec<PathBuf>> {
 
 fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
     let data = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    parse_air_nodes_from_str(&data)
+        .with_context(|| format!("parse AIR nodes from {}", path.display()))
+}
+
+/// Parse generated or authored AIR JSON into AIR nodes.
+///
+/// This is the shared entry point for host-side Rust AIR generation. Generated files under
+/// `air/generated/` should use the same authoring normalization path as hand-authored AIR.
+pub fn parse_air_nodes_from_str(data: &str) -> Result<Vec<AirNode>> {
     let trimmed = data.trim_start();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -435,4 +444,30 @@ fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
         nodes.push(node);
     }
     Ok(nodes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aos_air_types::{TypeExpr, TypePrimitive};
+
+    #[test]
+    fn parse_air_nodes_from_str_accepts_generated_defschema_json() {
+        let nodes = parse_air_nodes_from_str(
+            r#"{"$kind":"defschema","name":"demo/Generated@1","type":{"record":{"task":{"text":{}}}}}"#,
+        )
+        .expect("parse generated AIR");
+
+        let [AirNode::Defschema(schema)] = nodes.as_slice() else {
+            panic!("expected one defschema node");
+        };
+        assert_eq!(schema.name, "demo/Generated@1");
+        let TypeExpr::Record(record) = &schema.ty else {
+            panic!("expected record schema");
+        };
+        assert!(matches!(
+            record.record.get("task"),
+            Some(TypeExpr::Primitive(TypePrimitive::Text(_)))
+        ));
+    }
 }
