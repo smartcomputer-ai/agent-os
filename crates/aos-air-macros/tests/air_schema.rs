@@ -2,12 +2,12 @@ use aos_air_types::{AirNode, ModuleRuntime, TypeExpr, TypePrimitive};
 use aos_wasm_sdk::{AirSchema, AirSchemaExport, AirWorkflowExport};
 
 aos_wasm_sdk::aos_air_exports! {
-    const TEST_SCHEMA_AIR_NODES_JSON = [TaskSubmitted, Composite];
+    const TEST_SCHEMA_AIR_NODES_JSON = [TaskSubmitted, Composite, DemoEvent];
 }
 
 aos_wasm_sdk::aos_air_exports! {
     const TEST_ALL_AIR_NODES_JSON = {
-        schemas: [TaskSubmitted, Composite],
+        schemas: [TaskSubmitted, Composite, DemoEvent],
         workflows: [CounterWorkflow],
     };
 }
@@ -25,13 +25,28 @@ struct TaskSubmitted {
 struct Composite {
     #[aos(schema_ref = "demo/TaskSubmitted@1")]
     parent: String,
+    #[aos(schema_ref = "demo/TaskSubmitted@1")]
+    optional_parent: Option<TaskSubmitted>,
     #[aos(air_type = "time")]
     observed_at_ns: u64,
+    #[aos(air_type = "hash")]
+    output_ref: Option<String>,
     labels: Vec<String>,
     retry_count: Option<u64>,
 }
 
-#[aos_air_macros::aos_workflow(
+#[derive(AirSchema)]
+#[aos(schema = "demo/Event@1")]
+#[allow(dead_code)]
+enum DemoEvent {
+    Created,
+    #[aos(schema_ref = "demo/TaskSubmitted@1")]
+    Submitted(TaskSubmitted),
+    #[aos(schema_ref = "demo/TaskSubmitted@1")]
+    ExternalNoop,
+}
+
+#[aos_wasm_sdk::air_workflow(
     name = "demo/Counter@1",
     module = "demo/Counter_wasm@1",
     state = "demo/CounterState@1",
@@ -75,8 +90,16 @@ fn derive_air_schema_supports_first_record_subset() {
         Some(TypeExpr::Ref(_))
     ));
     assert!(matches!(
+        record.record.get("optional_parent"),
+        Some(TypeExpr::Option(_))
+    ));
+    assert!(matches!(
         record.record.get("observed_at_ns"),
         Some(TypeExpr::Primitive(TypePrimitive::Time(_)))
+    ));
+    assert!(matches!(
+        record.record.get("output_ref"),
+        Some(TypeExpr::Option(_))
     ));
     assert!(matches!(
         record.record.get("labels"),
@@ -89,10 +112,35 @@ fn derive_air_schema_supports_first_record_subset() {
 }
 
 #[test]
+fn derive_air_schema_supports_unit_and_ref_variants() {
+    let node: AirNode =
+        serde_json::from_str(DemoEvent::AIR_SCHEMA_JSON).expect("parse generated AIR");
+    let AirNode::Defschema(schema) = node else {
+        panic!("expected defschema");
+    };
+    let TypeExpr::Variant(variant) = schema.ty else {
+        panic!("expected variant schema");
+    };
+    assert!(matches!(
+        variant.variant.get("Created"),
+        Some(TypeExpr::Primitive(TypePrimitive::Unit(_)))
+    ));
+    assert!(matches!(
+        variant.variant.get("Submitted"),
+        Some(TypeExpr::Ref(_))
+    ));
+    assert!(matches!(
+        variant.variant.get("ExternalNoop"),
+        Some(TypeExpr::Ref(_))
+    ));
+}
+
+#[test]
 fn aos_air_exports_collects_generated_json_constants() {
-    assert_eq!(TEST_SCHEMA_AIR_NODES_JSON.len(), 2);
+    assert_eq!(TEST_SCHEMA_AIR_NODES_JSON.len(), 3);
     assert!(TEST_SCHEMA_AIR_NODES_JSON[0].contains(r#""name":"demo/TaskSubmitted@1""#));
     assert!(TEST_SCHEMA_AIR_NODES_JSON[1].contains(r#""name":"demo/Composite@1""#));
+    assert!(TEST_SCHEMA_AIR_NODES_JSON[2].contains(r#""name":"demo/Event@1""#));
 }
 
 #[test]
@@ -131,9 +179,10 @@ fn aos_workflow_emits_parseable_defworkflow() {
 
 #[test]
 fn aos_air_exports_collects_schema_and_workflow_json_constants() {
-    assert_eq!(TEST_ALL_AIR_NODES_JSON.len(), 4);
+    assert_eq!(TEST_ALL_AIR_NODES_JSON.len(), 5);
     assert!(TEST_ALL_AIR_NODES_JSON[0].contains(r#""name":"demo/TaskSubmitted@1""#));
     assert!(TEST_ALL_AIR_NODES_JSON[1].contains(r#""name":"demo/Composite@1""#));
-    assert!(TEST_ALL_AIR_NODES_JSON[2].contains(r#""name":"demo/Counter_wasm@1""#));
-    assert!(TEST_ALL_AIR_NODES_JSON[3].contains(r#""name":"demo/Counter@1""#));
+    assert!(TEST_ALL_AIR_NODES_JSON[2].contains(r#""name":"demo/Event@1""#));
+    assert!(TEST_ALL_AIR_NODES_JSON[3].contains(r#""name":"demo/Counter_wasm@1""#));
+    assert!(TEST_ALL_AIR_NODES_JSON[4].contains(r#""name":"demo/Counter@1""#));
 }

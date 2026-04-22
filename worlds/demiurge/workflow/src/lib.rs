@@ -16,7 +16,8 @@ use aos_agent::{
 };
 use aos_effects::builtins::{BlobPutReceipt, HostSessionOpenReceipt};
 use aos_wasm_sdk::{
-    BlobPutParams, EffectReceiptEnvelope, ReduceError, Value, Workflow, WorkflowCtx, aos_workflow,
+    AirSchema, BlobPutParams, EffectReceiptEnvelope, ReduceError, Value, Workflow, WorkflowCtx,
+    aos_workflow,
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,10 +35,12 @@ const DEFAULT_MAX_TOKENS: u64 = 4096;
 const EFFECT_HOST_SESSION_OPEN: &str = "sys/host.session.open@1";
 const EFFECT_BLOB_PUT: &str = "sys/blob.put@1";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "demiurge/TaskConfig@1")]
 pub struct TaskConfig {
     pub provider: Option<String>,
     pub model: Option<String>,
+    #[aos(schema_ref = "aos.agent/ReasoningEffort@1")]
     pub reasoning_effort: Option<aos_agent::ReasoningEffort>,
     pub max_tokens: Option<u64>,
     pub tool_profile: Option<String>,
@@ -48,16 +51,21 @@ pub struct TaskConfig {
     pub session_ttl_ns: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "demiurge/TaskSubmitted@1")]
 pub struct TaskSubmitted {
+    #[aos(schema_ref = "aos.agent/SessionId@1")]
     pub task_id: SessionId,
+    #[aos(air_type = "time")]
     pub observed_at_ns: u64,
     pub workdir: String,
     pub task: String,
+    #[aos(schema_ref = "demiurge/TaskConfig@1")]
     pub config: Option<TaskConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "demiurge/TaskStatus@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum TaskStatus {
     #[default]
@@ -69,13 +77,15 @@ pub enum TaskStatus {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "demiurge/TaskFailure@1")]
 pub struct TaskFailure {
     pub code: String,
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, AirSchema)]
+#[aos(schema = "demiurge/PendingStage@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum PendingStage {
     AwaitBlobPut,
@@ -83,47 +93,175 @@ pub enum PendingStage {
     AwaitRunCompletion,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "demiurge/TaskFinished@1")]
 pub struct TaskFinished {
+    #[aos(schema_ref = "aos.agent/SessionId@1")]
     pub task_id: SessionId,
+    #[aos(air_type = "time")]
     pub observed_at_ns: u64,
+    #[aos(schema_ref = "demiurge/TaskStatus@1")]
     pub status: TaskStatus,
+    #[aos(schema_ref = "demiurge/TaskFailure@1")]
     pub failure: Option<TaskFailure>,
+    #[aos(schema_ref = "aos.agent/RunId@1")]
     pub run_id: Option<RunId>,
+    #[aos(air_type = "hash")]
     pub output_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "demiurge/State@1")]
 pub struct DemiurgeState {
+    #[aos(schema_ref = "aos.agent/SessionId@1")]
     pub task_id: SessionId,
+    #[aos(schema_ref = "demiurge/TaskStatus@1")]
     pub status: TaskStatus,
     pub workdir: Option<String>,
     pub task: Option<String>,
+    #[aos(schema_ref = "demiurge/TaskConfig@1")]
     pub config: Option<TaskConfig>,
+    #[aos(air_type = "hash")]
     pub input_ref: Option<String>,
+    #[aos(air_type = "hash")]
     pub output_ref: Option<String>,
     pub host_session_id: Option<String>,
+    #[aos(schema_ref = "demiurge/PendingStage@1")]
     pub pending_stage: Option<PendingStage>,
     pub next_observed_at_ns: u64,
     pub finished: bool,
+    #[aos(schema_ref = "demiurge/TaskFailure@1")]
     pub failure: Option<TaskFailure>,
+    #[aos(air_type = "time")]
     pub last_updated_at_ns: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "demiurge/WorkflowEvent@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum DemiurgeWorkflowEvent {
+    #[aos(schema_ref = "demiurge/TaskSubmitted@1")]
     TaskSubmitted(TaskSubmitted),
+    #[aos(schema_ref = "aos.agent/SessionLifecycleChanged@1")]
     SessionLifecycleChanged(SessionLifecycleChanged),
+    #[aos(schema_ref = "sys/EffectReceiptEnvelope@1")]
     Receipt(EffectReceiptEnvelope),
+    #[aos(schema_ref = "sys/EffectReceiptRejected@1")]
     ReceiptRejected(EffectReceiptRejected),
+    #[aos(schema_ref = "sys/EffectStreamFrame@1")]
     StreamFrame(aos_agent::EffectStreamFrameEnvelope),
     #[default]
+    #[aos(schema_ref = "aos.agent/SessionNoop@1")]
     Noop,
 }
 
 #[derive(Default)]
+#[aos_wasm_sdk::air_workflow(
+    name = "demiurge/Demiurge@1",
+    module = "demiurge/Demiurge_wasm@1",
+    state = "demiurge/State@1",
+    event = "demiurge/WorkflowEvent@1",
+    context = "sys/WorkflowContext@1",
+    key_schema = "aos.agent/SessionId@1",
+    effects = ["sys/blob.put@1", "sys/host.session.open@1"]
+)]
 struct Demiurge;
+
+aos_wasm_sdk::aos_air_secret! {
+    struct OpenAiApiSecret {
+        name: "llm/openai_api@1",
+        binding_id: "llm/openai_api",
+    }
+}
+
+aos_wasm_sdk::aos_air_secret! {
+    struct AnthropicApiSecret {
+        name: "llm/anthropic_api@1",
+        binding_id: "llm/anthropic_api",
+    }
+}
+
+aos_wasm_sdk::aos_air_world! {
+    pub fn aos_air_nodes() {
+        air_version: "2",
+        schemas: [
+            TaskConfig,
+            TaskSubmitted,
+            TaskStatus,
+            TaskFailure,
+            PendingStage,
+            TaskFinished,
+            DemiurgeState,
+            DemiurgeWorkflowEvent,
+        ],
+        workflows: [Demiurge],
+        secrets: [
+            OpenAiApiSecret,
+            AnthropicApiSecret,
+        ],
+        import_schemas: [
+            "aos.agent/SessionId@1",
+            "aos.agent/RunId@1",
+            "aos.agent/ToolBatchId@1",
+            "aos.agent/ToolCallStatus@1",
+            "aos.agent/ToolExecutor@1",
+            "aos.agent/ToolAvailabilityRule@1",
+            "aos.agent/ToolParallelismHint@1",
+            "aos.agent/ToolSpec@1",
+            "aos.agent/ToolMapper@1",
+            "aos.agent/HostSessionStatus@1",
+            "aos.agent/ToolRuntimeContext@1",
+            "aos.agent/EffectiveTool@1",
+            "aos.agent/EffectiveToolSet@1",
+            "aos.agent/ToolCallObserved@1",
+            "aos.agent/ToolCallLlmResult@1",
+            "aos.agent/PlannedToolCall@1",
+            "aos.agent/ToolExecutionPlan@1",
+            "aos.agent/ToolBatchPlan@1",
+            "aos.agent/ActiveToolBatch@1",
+            "aos.agent/ToolOverrideScope@1",
+            "aos.agent/ReasoningEffort@1",
+            "aos.agent/SessionConfig@1",
+            "aos.agent/RunConfig@1",
+            "aos.agent/SessionLifecycle@1",
+            "aos.agent/HostCommand@1",
+            "aos.agent/SessionIngressKind@1",
+            "aos.agent/SessionIngress@1",
+            "aos.agent/SessionLifecycleChanged@1",
+            "aos.agent/PendingBlobPutKind@1",
+            "aos.agent/PendingBlobPut@1",
+            "aos.agent/PendingBlobGetKind@1",
+            "aos.agent/PendingBlobGet@1",
+            "aos.agent/PendingFollowUpTurn@1",
+            "aos.agent/SessionState@1",
+            "aos.agent/SessionNoop@1",
+            "aos.agent/SessionWorkflowEvent@1",
+        ],
+        import_modules: [
+            "aos.agent/SessionWorkflow_wasm@1",
+        ],
+        import_workflows: [
+            "aos.agent/SessionWorkflow@1",
+        ],
+        routing: [
+            {
+                event_schema: TaskSubmitted,
+                workflow: Demiurge,
+                key_field: "task_id",
+            },
+            {
+                event: "aos.agent/SessionLifecycleChanged@1",
+                workflow: Demiurge,
+                key_field: "session_id",
+            },
+            {
+                event: "aos.agent/SessionIngress@1",
+                workflow_name: "aos.agent/SessionWorkflow@1",
+                key_field: "session_id",
+            },
+        ],
+    }
+}
 
 impl Workflow for Demiurge {
     type State = DemiurgeState;
