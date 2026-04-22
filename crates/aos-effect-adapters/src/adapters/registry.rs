@@ -38,11 +38,14 @@ impl AdapterRegistry {
     }
 
     pub fn register_route(&mut self, route_id: impl Into<String>, adapter_kind: &str) -> bool {
-        if !self.adapters.contains_key(adapter_kind) {
+        let adapter_kind = if self.adapters.contains_key(adapter_kind) {
+            adapter_kind.to_string()
+        } else if let Some(resolved_kind) = self.routes.get(adapter_kind) {
+            resolved_kind.clone()
+        } else {
             return false;
-        }
-        self.routes
-            .insert(route_id.into(), adapter_kind.to_string());
+        };
+        self.routes.insert(route_id.into(), adapter_kind);
         true
     }
 
@@ -213,6 +216,25 @@ mod tests {
         assert!(
             rx.recv().await.is_none(),
             "panic should close update channel"
+        );
+    }
+
+    #[test]
+    fn register_route_accepts_existing_route_alias_target() {
+        let mut registry = AdapterRegistry::new();
+        registry.register(Box::new(MismatchedHashAdapter));
+
+        assert!(registry.register_route("legacy.llm", "mismatched"));
+        assert!(registry.register_route("profile.llm", "legacy.llm"));
+
+        let mappings = registry.route_mappings();
+        assert_eq!(
+            mappings.get("legacy.llm").map(String::as_str),
+            Some("mismatched")
+        );
+        assert_eq!(
+            mappings.get("profile.llm").map(String::as_str),
+            Some("mismatched")
         );
     }
 }

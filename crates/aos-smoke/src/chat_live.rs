@@ -407,7 +407,10 @@ fn load_text_blob<S: aos_kernel::Store>(store: &S, reference: &str) -> Result<St
 fn print_live_diagnostics(host: &mut ExampleHost) -> Result<()> {
     println!("   diagnostics: missing run result/output_ref");
     if let Ok(state) = host.read_state::<Value>() {
-        println!("   diagnostics: workflow state {}", preview(&state.to_string()));
+        println!(
+            "   diagnostics: workflow state {}",
+            preview(&state.to_string())
+        );
     }
     let q = host.quiescence_status();
     println!(

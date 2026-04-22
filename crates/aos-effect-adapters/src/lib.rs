@@ -12,6 +12,7 @@ use adapters::stub::StubHttpAdapter;
 use adapters::stub::{
     StubLlmAdapter, StubTimerAdapter, StubVaultPutAdapter, StubVaultRotateAdapter,
 };
+use aos_effects::effect_ops;
 use aos_kernel::Store;
 use config::EffectAdapterConfig;
 
@@ -88,6 +89,8 @@ pub fn default_registry<S: Store + 'static>(
         registry.register(Box::new(StubLlmAdapter));
     }
 
+    register_builtin_route_aliases(&mut registry);
+
     for (route_id, provider) in &config.adapter_routes {
         if !registry.register_route(route_id.as_str(), provider.adapter_kind.as_str()) {
             log::warn!(
@@ -99,4 +102,67 @@ pub fn default_registry<S: Store + 'static>(
     }
 
     registry
+}
+
+fn register_builtin_route_aliases(registry: &mut AdapterRegistry) {
+    for (entrypoint, canonical) in [
+        ("http.request", effect_ops::HTTP_REQUEST),
+        ("blob.put", effect_ops::BLOB_PUT),
+        ("blob.get", effect_ops::BLOB_GET),
+        ("timer.set", effect_ops::TIMER_SET),
+        ("portal.send", effect_ops::PORTAL_SEND),
+        ("host.session.open", effect_ops::HOST_SESSION_OPEN),
+        ("host.exec", effect_ops::HOST_EXEC),
+        ("host.session.signal", effect_ops::HOST_SESSION_SIGNAL),
+        ("host.fs.read_file", effect_ops::HOST_FS_READ_FILE),
+        ("host.fs.write_file", effect_ops::HOST_FS_WRITE_FILE),
+        ("host.fs.edit_file", effect_ops::HOST_FS_EDIT_FILE),
+        ("host.fs.apply_patch", effect_ops::HOST_FS_APPLY_PATCH),
+        ("host.fs.grep", effect_ops::HOST_FS_GREP),
+        ("host.fs.glob", effect_ops::HOST_FS_GLOB),
+        ("host.fs.stat", effect_ops::HOST_FS_STAT),
+        ("host.fs.exists", effect_ops::HOST_FS_EXISTS),
+        ("host.fs.list_dir", effect_ops::HOST_FS_LIST_DIR),
+        ("llm.generate", effect_ops::LLM_GENERATE),
+        ("vault.put", effect_ops::VAULT_PUT),
+        ("vault.rotate", effect_ops::VAULT_ROTATE),
+    ] {
+        register_route_alias_pair(registry, entrypoint, canonical);
+    }
+}
+
+fn register_route_alias_pair(registry: &mut AdapterRegistry, entrypoint: &str, canonical: &str) {
+    let entrypoint_known = registry.has_route(entrypoint);
+    let canonical_known = registry.has_route(canonical);
+    if canonical_known {
+        let _ = registry.register_route(entrypoint, canonical);
+    }
+    if entrypoint_known {
+        let _ = registry.register_route(canonical, entrypoint);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use aos_kernel::MemStore;
+
+    use super::*;
+
+    #[test]
+    fn default_registry_exposes_builtin_entrypoint_and_canonical_routes() {
+        let store = Arc::new(MemStore::default());
+        let mut config = EffectAdapterConfig::default();
+        config.llm = None;
+
+        let registry = default_registry(store, &config);
+
+        assert!(registry.has_route("llm.generate"));
+        assert!(registry.has_route(effect_ops::LLM_GENERATE));
+        assert!(registry.has_route("llm.default"));
+        assert!(registry.has_route("host.exec"));
+        assert!(registry.has_route(effect_ops::HOST_EXEC));
+        assert!(registry.has_route("host.exec.default"));
+    }
 }

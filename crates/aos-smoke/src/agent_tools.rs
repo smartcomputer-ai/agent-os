@@ -328,23 +328,43 @@ impl AgentToolsScript {
             effect_ops::BLOB_PUT => self.handle_blob_put(store, intent),
             effect_ops::BLOB_GET => self.handle_blob_get(store, intent),
             effect_ops::LLM_GENERATE => self.handle_llm_generate(store, intent),
-            TOOL_SESSION_OPEN => self.handle_host_session_open(intent),
-            TOOL_FS_WRITE => self.handle_host_fs_write(intent),
-            TOOL_FS_EXISTS => self.handle_host_fs_exists(intent),
-            TOOL_FS_READ => self.handle_host_fs_read(intent),
-            TOOL_FS_LIST => self.handle_host_fs_list(intent),
-            TOOL_EXEC => self.handle_host_exec(intent),
-            TOOL_INTROSPECT_MANIFEST => self.handle_introspect_manifest(intent),
-            TOOL_INTROSPECT_WORKFLOW_STATE => self.handle_introspect_workflow_state(intent),
-            TOOL_INTROSPECT_LIST_CELLS => self.handle_introspect_list_cells(intent),
-            TOOL_WORKSPACE_RESOLVE => self.handle_workspace_resolve(intent),
-            TOOL_WORKSPACE_EMPTY_ROOT => self.handle_workspace_empty_root(intent),
-            TOOL_WORKSPACE_LIST => self.handle_workspace_list(intent),
-            TOOL_WORKSPACE_READ_REF => self.handle_workspace_read_ref(intent),
-            TOOL_WORKSPACE_READ_BYTES => self.handle_workspace_read_bytes(intent),
-            TOOL_WORKSPACE_WRITE_BYTES => self.handle_workspace_write_bytes(intent),
-            TOOL_WORKSPACE_WRITE_REF => self.handle_workspace_write_ref(intent),
-            TOOL_WORKSPACE_DIFF => self.handle_workspace_diff(intent),
+            effect_ops::HOST_SESSION_OPEN | TOOL_SESSION_OPEN => {
+                self.handle_host_session_open(intent)
+            }
+            effect_ops::HOST_FS_WRITE_FILE | TOOL_FS_WRITE => self.handle_host_fs_write(intent),
+            effect_ops::HOST_FS_EXISTS | TOOL_FS_EXISTS => self.handle_host_fs_exists(intent),
+            effect_ops::HOST_FS_READ_FILE | TOOL_FS_READ => self.handle_host_fs_read(intent),
+            effect_ops::HOST_FS_LIST_DIR | TOOL_FS_LIST => self.handle_host_fs_list(intent),
+            effect_ops::HOST_EXEC | TOOL_EXEC => self.handle_host_exec(intent),
+            effect_ops::INTROSPECT_MANIFEST | TOOL_INTROSPECT_MANIFEST => {
+                self.handle_introspect_manifest(intent)
+            }
+            effect_ops::INTROSPECT_WORKFLOW_STATE | TOOL_INTROSPECT_WORKFLOW_STATE => {
+                self.handle_introspect_workflow_state(intent)
+            }
+            effect_ops::INTROSPECT_LIST_CELLS | TOOL_INTROSPECT_LIST_CELLS => {
+                self.handle_introspect_list_cells(intent)
+            }
+            effect_ops::WORKSPACE_RESOLVE | TOOL_WORKSPACE_RESOLVE => {
+                self.handle_workspace_resolve(intent)
+            }
+            effect_ops::WORKSPACE_EMPTY_ROOT | TOOL_WORKSPACE_EMPTY_ROOT => {
+                self.handle_workspace_empty_root(intent)
+            }
+            effect_ops::WORKSPACE_LIST | TOOL_WORKSPACE_LIST => self.handle_workspace_list(intent),
+            effect_ops::WORKSPACE_READ_REF | TOOL_WORKSPACE_READ_REF => {
+                self.handle_workspace_read_ref(intent)
+            }
+            effect_ops::WORKSPACE_READ_BYTES | TOOL_WORKSPACE_READ_BYTES => {
+                self.handle_workspace_read_bytes(intent)
+            }
+            effect_ops::WORKSPACE_WRITE_BYTES | TOOL_WORKSPACE_WRITE_BYTES => {
+                self.handle_workspace_write_bytes(intent)
+            }
+            effect_ops::WORKSPACE_WRITE_REF | TOOL_WORKSPACE_WRITE_REF => {
+                self.handle_workspace_write_ref(intent)
+            }
+            effect_ops::WORKSPACE_DIFF | TOOL_WORKSPACE_DIFF => self.handle_workspace_diff(intent),
             other => bail!("unexpected effect in agent-tools smoke: {other}"),
         }
     }
