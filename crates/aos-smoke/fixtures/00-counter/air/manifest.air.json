@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/CounterPc@1"
@@ -20,16 +20,20 @@
   ],
   "modules": [
     {
-      "name": "demo/CounterSM@1"
+      "name": "demo/CounterSM_wasm@1"
     }
   ],
-  "effects": [],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/CounterEvent@1",
-        "module": "demo/CounterSM@1"
+        "op": "demo/CounterSM@1"
       }
     ]
-  }
+  },
+  "ops": [
+    {
+      "name": "demo/CounterSM@1"
+    }
+  ]
 }

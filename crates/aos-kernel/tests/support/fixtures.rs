@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
-    DefEffect, DefModule, DefSchema, EmptyObject, HashRef, Manifest, ModuleAbi, ModuleKind, Name,
-    NamedRef, OriginScope, Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive,
-    TypePrimitiveText, TypeRecord, catalog::EffectCatalog,
+    DefModule, DefOp, DefSchema, EmptyObject, HashRef, Manifest, ModuleRuntime, Name, NamedRef,
+    OpImpl, OpKind, Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText,
+    TypeRecord, WasmArtifact, WorkflowDeterminism, WorkflowOp, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
@@ -31,6 +31,39 @@ pub const START_SCHEMA: &str = "com.acme/Start@1";
 
 /// Built-in timer fired schema.
 pub const SYS_TIMER_FIRED: &str = "sys/TimerFired@1";
+
+#[derive(Debug, Clone)]
+pub struct ModuleAbi {
+    pub workflow: Option<WorkflowAbi>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkflowAbi {
+    pub state: SchemaRef,
+    pub event: SchemaRef,
+    pub context: Option<SchemaRef>,
+    pub annotations: Option<SchemaRef>,
+    pub effects_emitted: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TestModule {
+    pub name: Name,
+    pub module: DefModule,
+    pub key_schema: Option<SchemaRef>,
+    pub abi: ModuleAbi,
+}
+
+impl From<DefModule> for TestModule {
+    fn from(module: DefModule) -> Self {
+        Self {
+            name: module.name.clone(),
+            module,
+            key_schema: None,
+            abi: ModuleAbi { workflow: None },
+        }
+    }
+}
 
 /// Returns a schema reference for reuse in manifests and workflow fixtures.
 pub fn schema(name: &str) -> SchemaRef {
@@ -93,14 +126,17 @@ pub fn insert_test_schemas(loaded: &mut LoadedManifest, schemas: Vec<DefSchema>)
 
 /// Builds a `LoadedManifest` from workflow/pure modules and routing subscriptions.
 pub fn build_loaded_manifest(
-    mut modules: Vec<DefModule>,
+    modules: Vec<impl Into<TestModule>>,
     routing_events: Vec<RoutingEvent>,
 ) -> LoadedManifest {
+    let modules: Vec<TestModule> = modules.into_iter().map(Into::into).collect();
+    let ops: Vec<DefOp> = modules.iter().filter_map(test_module_workflow_op).collect();
+
     let module_refs: Vec<NamedRef> = modules
         .iter()
         .map(|module| {
             let def_hash =
-                aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defmodule(module.clone()))
+                aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defmodule(module.module.clone()))
                     .expect("hash defmodule");
             NamedRef {
                 name: module.name.clone(),
@@ -114,47 +150,98 @@ pub fn build_loaded_manifest(
     } else {
         Some(Routing {
             subscriptions: routing_events,
-            inboxes: vec![],
         })
     };
+
+    let mut op_refs: Vec<NamedRef> = ops
+        .iter()
+        .map(|op| {
+            let def_hash = aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defop(op.clone()))
+                .expect("hash defop");
+            NamedRef {
+                name: op.name.clone(),
+                hash: HashRef::new(def_hash.to_hex()).expect("hash ref"),
+            }
+        })
+        .collect();
+    op_refs.extend(
+        aos_air_types::builtins::builtin_ops()
+            .iter()
+            .map(|op| NamedRef {
+                name: op.op.name.clone(),
+                hash: op.hash_ref.clone(),
+            }),
+    );
 
     let manifest = Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: module_refs,
-        effects: aos_air_types::builtins::builtin_effects()
-            .iter()
-            .map(|e| NamedRef {
-                name: e.effect.name.clone(),
-                hash: e.hash_ref.clone(),
-            })
-            .collect(),
-        effect_bindings: vec![],
+        ops: op_refs,
         secrets: vec![],
         routing,
     };
 
     let modules_map: HashMap<Name, DefModule> = modules
-        .drain(..)
-        .map(|module| (module.name.clone(), module))
+        .iter()
+        .map(|module| (module.name.clone(), module.module.clone()))
         .collect();
 
-    let effects_map: HashMap<Name, DefEffect> = aos_air_types::builtins::builtin_effects()
-        .iter()
-        .map(|e| (e.effect.name.clone(), e.effect.clone()))
+    let ops_map: HashMap<Name, DefOp> = ops
+        .into_iter()
+        .chain(
+            aos_air_types::builtins::builtin_ops()
+                .iter()
+                .map(|op| op.op.clone()),
+        )
+        .map(|op| (op.name.clone(), op))
         .collect();
-    let effect_catalog = EffectCatalog::from_defs(effects_map.values().cloned());
+    let effect_catalog = EffectCatalog::from_defs(ops_map.values().cloned());
 
     let mut loaded = LoadedManifest {
         manifest,
         secrets: Vec::new(),
         modules: modules_map,
-        effects: effects_map,
+        ops: ops_map,
         schemas: HashMap::new(),
         effect_catalog,
     };
     ensure_placeholder_schemas(&mut loaded);
     loaded
+}
+
+fn test_module_workflow_op(module: &TestModule) -> Option<DefOp> {
+    let workflow = module.abi.workflow.as_ref()?;
+    Some(DefOp {
+        name: module.name.clone(),
+        op_kind: OpKind::Workflow,
+        workflow: Some(WorkflowOp {
+            state: workflow.state.clone(),
+            event: workflow.event.clone(),
+            context: workflow.context.clone(),
+            annotations: workflow.annotations.clone(),
+            key_schema: module.key_schema.clone(),
+            effects_emitted: workflow
+                .effects_emitted
+                .iter()
+                .map(|effect| canonical_effect_op_name(effect))
+                .collect(),
+            determinism: WorkflowDeterminism::Strict,
+        }),
+        effect: None,
+        implementation: OpImpl {
+            module: module.name.clone(),
+            entrypoint: "step".into(),
+        },
+    })
+}
+
+fn canonical_effect_op_name(name: &str) -> String {
+    if name.starts_with("sys/") {
+        name.to_string()
+    } else {
+        format!("sys/{name}@1")
+    }
 }
 
 fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
@@ -179,8 +266,8 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
             required.insert(event.event.as_str().to_string());
         }
     }
-    for module in loaded.modules.values() {
-        if let Some(workflow) = module.abi.workflow.as_ref() {
+    for op in loaded.ops.values() {
+        if let Some(workflow) = op.workflow.as_ref() {
             required.insert(workflow.state.as_str().to_string());
             required.insert(workflow.event.as_str().to_string());
             if let Some(event_schema) = schema_type(workflow.event.as_str(), loaded) {
@@ -203,9 +290,9 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
                     required.insert(receipt_schema.as_str().to_string());
                 }
             }
-        }
-        if let Some(key_schema) = &module.key_schema {
-            required.insert(key_schema.as_str().to_string());
+            if let Some(key_schema) = &workflow.key_schema {
+                required.insert(key_schema.as_str().to_string());
+            }
         }
     }
 
@@ -259,7 +346,7 @@ pub fn stub_workflow_module<S: Store + ?Sized>(
     store: &Arc<S>,
     name: impl Into<String>,
     output: &WorkflowOutput,
-) -> DefModule {
+) -> TestModule {
     let output_bytes = output.encode().expect("encode workflow output");
     let data_literal = output_bytes
         .iter()
@@ -290,15 +377,19 @@ pub fn stub_workflow_module<S: Store + ?Sized>(
     let wasm_hash = store.put_blob(&wasm_bytes).expect("store wasm");
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
 
-    DefModule {
-        name: name.into(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: wasm_hash_ref,
-        key_schema: None,
-        abi: ModuleAbi {
-            workflow: None,
-            pure: None,
+    let name = name.into();
+    TestModule {
+        name: name.clone(),
+        module: DefModule {
+            name,
+            runtime: ModuleRuntime::Wasm {
+                artifact: WasmArtifact::WasmModule {
+                    hash: wasm_hash_ref,
+                },
+            },
         },
+        key_schema: None,
+        abi: ModuleAbi { workflow: None },
     }
 }
 
@@ -310,7 +401,7 @@ pub fn stub_pure_module<S: Store + ?Sized>(
     output: &PureOutput,
     input_schema: &str,
     output_schema: &str,
-) -> DefModule {
+) -> TestModule {
     let output_bytes = output.encode().expect("encode pure output");
     let data_literal = output_bytes
         .iter()
@@ -341,19 +432,20 @@ pub fn stub_pure_module<S: Store + ?Sized>(
     let wasm_hash = store.put_blob(&wasm_bytes).expect("store wasm");
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
 
-    DefModule {
-        name: name.into(),
-        module_kind: ModuleKind::Pure,
-        wasm_hash: wasm_hash_ref,
-        key_schema: None,
-        abi: ModuleAbi {
-            workflow: None,
-            pure: Some(aos_air_types::PureAbi {
-                input: schema(input_schema),
-                output: schema(output_schema),
-                context: Some(schema("sys/PureContext@1")),
-            }),
+    let name = name.into();
+    let _ = (input_schema, output_schema);
+    TestModule {
+        name: name.clone(),
+        module: DefModule {
+            name,
+            runtime: ModuleRuntime::Wasm {
+                artifact: WasmArtifact::WasmModule {
+                    hash: wasm_hash_ref,
+                },
+            },
         },
+        key_schema: None,
+        abi: ModuleAbi { workflow: None },
     }
 }
 
@@ -368,7 +460,7 @@ pub fn workflow_module_from_target(
     key_schema: Option<&str>,
     state_schema: &str,
     event_schema: &str,
-) -> DefModule {
+) -> TestModule {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = manifest_dir
         .join("../../target/wasm32-unknown-unknown/debug")
@@ -386,20 +478,26 @@ pub fn workflow_module_from_target(
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
     store.put_blob(&bytes).expect("store wasm blob");
 
-    DefModule {
+    let module = DefModule {
         name: name.to_string(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: wasm_hash_ref,
+        runtime: ModuleRuntime::Wasm {
+            artifact: WasmArtifact::WasmModule {
+                hash: wasm_hash_ref,
+            },
+        },
+    };
+    TestModule {
+        name: name.to_string(),
+        module,
         key_schema: key_schema.map(schema),
         abi: ModuleAbi {
-            workflow: Some(aos_air_types::WorkflowAbi {
+            workflow: Some(WorkflowAbi {
                 state: schema(state_schema),
                 event: schema(event_schema),
                 context: Some(schema("sys/WorkflowContext@1")),
                 annotations: None,
                 effects_emitted: vec![],
             }),
-            pure: None,
         },
     }
 }
@@ -412,7 +510,7 @@ pub fn pure_module_from_target(
     wasm_file: &str,
     input_schema: &str,
     output_schema: &str,
-) -> DefModule {
+) -> TestModule {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = manifest_dir
         .join("../../target/wasm32-unknown-unknown/debug")
@@ -430,19 +528,19 @@ pub fn pure_module_from_target(
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
     store.put_blob(&bytes).expect("store wasm blob");
 
-    DefModule {
+    let _ = (input_schema, output_schema);
+    TestModule {
         name: name.to_string(),
-        module_kind: ModuleKind::Pure,
-        wasm_hash: wasm_hash_ref,
-        key_schema: None,
-        abi: ModuleAbi {
-            workflow: None,
-            pure: Some(aos_air_types::PureAbi {
-                input: schema(input_schema),
-                output: schema(output_schema),
-                context: Some(schema("sys/PureContext@1")),
-            }),
+        module: DefModule {
+            name: name.to_string(),
+            runtime: ModuleRuntime::Wasm {
+                artifact: WasmArtifact::WasmModule {
+                    hash: wasm_hash_ref,
+                },
+            },
         },
+        key_schema: None,
+        abi: ModuleAbi { workflow: None },
     }
 }
 
@@ -451,7 +549,7 @@ pub fn stub_event_emitting_workflow(
     store: &Arc<TestStore>,
     name: impl Into<String>,
     events: Vec<DomainEvent>,
-) -> DefModule {
+) -> TestModule {
     let output = WorkflowOutput {
         state: None,
         domain_events: events,
@@ -510,7 +608,7 @@ fn expr_value_to_cbor(value: &ExprValue) -> serde_cbor::Value {
 pub fn routing_event(schema_name: &str, workflow: &str) -> RoutingEvent {
     RoutingEvent {
         event: schema(schema_name),
-        module: workflow.to_string(),
+        op: workflow.to_string(),
         key_field: None,
     }
 }
@@ -519,12 +617,12 @@ pub fn routing_event(schema_name: &str, workflow: &str) -> RoutingEvent {
 ///
 /// This does not mutate a manifest; it just returns the recommended routes so tests can opt in.
 pub fn recommended_receipt_routes<'a>(
-    modules: impl IntoIterator<Item = &'a DefModule>,
+    modules: impl IntoIterator<Item = &'a TestModule>,
 ) -> Vec<RoutingEvent> {
     let catalog = EffectCatalog::from_defs(
-        aos_air_types::builtins::builtin_effects()
+        aos_air_types::builtins::builtin_ops()
             .iter()
-            .map(|e| e.effect.clone()),
+            .map(|op| op.op.clone()),
     );
     let mut routes = Vec::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -534,12 +632,10 @@ pub fn recommended_receipt_routes<'a>(
             continue;
         };
         for effect in &workflow.effects_emitted {
-            let Some(entry) = catalog.get(effect) else {
+            let effect = canonical_effect_op_name(effect);
+            let Some(entry) = catalog.get(&effect) else {
                 continue;
             };
-            if entry.origin_scope != OriginScope::Workflow {
-                continue;
-            }
             let schema_name = entry.receipt_schema.as_str();
             let key = (schema_name.to_string(), module.name.clone());
             if seen.insert(key) {

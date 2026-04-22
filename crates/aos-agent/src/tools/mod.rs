@@ -53,21 +53,25 @@ pub fn effect_kind_for_mapper(mapper: ToolMapper) -> ToolEffectKind {
 
 pub fn mapper_for_effect_kind(effect_kind: &str) -> Option<ToolMapper> {
     match effect_kind {
-        "host.session.open" => Some(ToolMapper::HostSessionOpen),
-        "host.exec" => Some(ToolMapper::HostExec),
-        "host.session.signal" => Some(ToolMapper::HostSessionSignal),
-        "host.fs.read_file" => Some(ToolMapper::HostFsReadFile),
-        "host.fs.write_file" => Some(ToolMapper::HostFsWriteFile),
-        "host.fs.edit_file" => Some(ToolMapper::HostFsEditFile),
-        "host.fs.apply_patch" => Some(ToolMapper::HostFsApplyPatch),
-        "host.fs.grep" => Some(ToolMapper::HostFsGrep),
-        "host.fs.glob" => Some(ToolMapper::HostFsGlob),
-        "host.fs.stat" => Some(ToolMapper::HostFsStat),
-        "host.fs.exists" => Some(ToolMapper::HostFsExists),
-        "host.fs.list_dir" => Some(ToolMapper::HostFsListDir),
-        "introspect.manifest" => Some(ToolMapper::InspectWorld),
-        "introspect.workflow_state" => Some(ToolMapper::InspectWorkflow),
-        "introspect.list_cells" => Some(ToolMapper::InspectWorkflow),
+        "sys/host.session.open@1" | "host.session.open" => Some(ToolMapper::HostSessionOpen),
+        "sys/host.exec@1" | "host.exec" => Some(ToolMapper::HostExec),
+        "sys/host.session.signal@1" | "host.session.signal" => Some(ToolMapper::HostSessionSignal),
+        "sys/host.fs.read_file@1" | "host.fs.read_file" => Some(ToolMapper::HostFsReadFile),
+        "sys/host.fs.write_file@1" | "host.fs.write_file" => Some(ToolMapper::HostFsWriteFile),
+        "sys/host.fs.edit_file@1" | "host.fs.edit_file" => Some(ToolMapper::HostFsEditFile),
+        "sys/host.fs.apply_patch@1" | "host.fs.apply_patch" => Some(ToolMapper::HostFsApplyPatch),
+        "sys/host.fs.grep@1" | "host.fs.grep" => Some(ToolMapper::HostFsGrep),
+        "sys/host.fs.glob@1" | "host.fs.glob" => Some(ToolMapper::HostFsGlob),
+        "sys/host.fs.stat@1" | "host.fs.stat" => Some(ToolMapper::HostFsStat),
+        "sys/host.fs.exists@1" | "host.fs.exists" => Some(ToolMapper::HostFsExists),
+        "sys/host.fs.list_dir@1" | "host.fs.list_dir" => Some(ToolMapper::HostFsListDir),
+        "sys/introspect.manifest@1" | "introspect.manifest" => Some(ToolMapper::InspectWorld),
+        "sys/introspect.workflow_state@1" | "introspect.workflow_state" => {
+            Some(ToolMapper::InspectWorkflow)
+        }
+        "sys/introspect.list_cells@1" | "introspect.list_cells" => {
+            Some(ToolMapper::InspectWorkflow)
+        }
         _ => None,
     }
 }

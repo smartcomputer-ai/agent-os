@@ -443,7 +443,7 @@ fn handle_standalone_host_session_open_receipt(
     envelope: &EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<bool, SessionReduceError> {
-    if envelope.effect_kind != "host.session.open" {
+    if envelope.effect_op != "sys/host.session.open@1" {
         return Ok(false);
     }
 
@@ -511,9 +511,14 @@ fn rejected_as_error_envelope(rejected: &EffectReceiptRejected) -> EffectReceipt
 
     EffectReceiptEnvelope {
         origin_module_id: rejected.origin_module_id.clone(),
+        origin_workflow_op_hash: rejected.origin_workflow_op_hash.clone(),
         origin_instance_key: rejected.origin_instance_key.clone(),
         intent_id: rejected.intent_id.clone(),
-        effect_kind: rejected.effect_kind.clone(),
+        effect_op: rejected.effect_op.clone(),
+        effect_op_hash: rejected.effect_op_hash.clone(),
+        executor_module: rejected.executor_module.clone(),
+        executor_module_hash: rejected.executor_module_hash.clone(),
+        executor_entrypoint: rejected.executor_entrypoint.clone(),
         params_hash: rejected.params_hash.clone(),
         issuer_ref: rejected.issuer_ref.clone(),
         receipt_payload: serde_cbor::to_vec(&payload).unwrap_or_default(),
@@ -538,11 +543,11 @@ fn on_receipt_envelope(
     }
 
     if let Some(matched) = state.pending_effects.settle(envelope.into()) {
-        match matched.pending.effect_kind.as_str() {
-            "host.session.open" => {
+        match matched.pending.effect_op.as_str() {
+            "sys/host.session.open@1" => {
                 let _ = handle_standalone_host_session_open_receipt(state, envelope, out)?;
             }
-            "llm.generate" => handle_llm_generate_receipt(state, envelope, out)?,
+            "sys/llm.generate@1" => handle_llm_generate_receipt(state, envelope, out)?,
             _ => {}
         }
         recompute_in_flight_effects(state);
@@ -575,11 +580,11 @@ fn on_receipt_rejected(
     }
 
     if let Some(matched) = state.pending_effects.settle(rejected.into()) {
-        match matched.pending.effect_kind.as_str() {
-            "host.session.open" => {
+        match matched.pending.effect_op.as_str() {
+            "sys/host.session.open@1" => {
                 let _ = handle_standalone_host_session_open_receipt(state, &envelope, out)?;
             }
-            "llm.generate" => fail_run(state)?,
+            "sys/llm.generate@1" => fail_run(state)?,
             _ => {}
         }
         recompute_in_flight_effects(state);
@@ -800,7 +805,7 @@ fn should_auto_open_host_session(state: &SessionState) -> bool {
     }
     !state
         .pending_effects
-        .contains_effect_kind("host.session.open")
+        .contains_effect_op("sys/host.session.open@1")
 }
 
 fn emit_auto_host_session_open(
@@ -818,7 +823,7 @@ fn emit_auto_host_session_open(
         params_json: serde_json::to_string(&params.params_json).unwrap_or_else(|_| "{}".into()),
         pending: super::begin_pending_effect(
             state,
-            "host.session.open",
+            "sys/host.session.open@1",
             &params.params_json,
             Some("host".into()),
             None,
@@ -1125,9 +1130,14 @@ mod tests {
     ) -> SessionWorkflowEvent {
         SessionWorkflowEvent::Receipt(aos_wasm_sdk::EffectReceiptEnvelope {
             origin_module_id: "aos.agent/SessionWorkflow@1".into(),
+            origin_workflow_op_hash: None,
             origin_instance_key: None,
             intent_id: fake_hash('i'),
-            effect_kind: effect_kind.into(),
+            effect_op: effect_kind.into(),
+            effect_op_hash: None,
+            executor_module: None,
+            executor_module_hash: None,
+            executor_entrypoint: None,
             params_hash,
             issuer_ref,
             receipt_payload: serde_cbor::to_vec(payload).expect("encode payload"),
@@ -1170,7 +1180,7 @@ mod tests {
         assert!(matches!(
             out.effects.first(),
             Some(SessionEffectCommand::ToolEffect { pending, .. })
-                if pending.effect_kind == "host.session.open"
+                if pending.effect_op == "sys/host.session.open@1"
         ));
         assert_eq!(state.pending_effects.len(), 1);
         assert!(state.pending_blob_puts.is_empty());
@@ -1326,7 +1336,7 @@ mod tests {
                 &mut state,
                 &receipt_event(
                     2 + idx as u64,
-                    "blob.put",
+                    "sys/blob.put@1",
                     Some(hash.clone()),
                     "ok",
                     &BlobPutReceipt {
@@ -1378,7 +1388,7 @@ mod tests {
                 &mut state,
                 &receipt_event(
                     2 + idx as u64,
-                    "blob.put",
+                    "sys/blob.put@1",
                     Some(hash.clone()),
                     "ok",
                     &BlobPutReceipt {
@@ -1406,7 +1416,7 @@ mod tests {
             &mut state,
             &receipt_event_with_issuer_ref(
                 3,
-                "llm.generate",
+                "sys/llm.generate@1",
                 Some(fake_hash('z')),
                 Some(issuer_ref),
                 "ok",
@@ -1477,7 +1487,7 @@ mod tests {
                 &mut state,
                 &receipt_event(
                     2 + idx as u64,
-                    "blob.put",
+                    "sys/blob.put@1",
                     Some(hash.clone()),
                     "ok",
                     &BlobPutReceipt {
@@ -1500,7 +1510,7 @@ mod tests {
             &mut state,
             &receipt_event(
                 3,
-                "llm.generate",
+                "sys/llm.generate@1",
                 Some(llm_params_hash),
                 "ok",
                 &LlmGenerateReceipt {
@@ -1546,7 +1556,7 @@ mod tests {
             &mut state,
             &receipt_event(
                 4,
-                "blob.get",
+                "sys/blob.get@1",
                 Some(output_blob_get_hash),
                 "ok",
                 &BlobGetReceipt {
@@ -1575,7 +1585,7 @@ mod tests {
             &mut state,
             &receipt_event(
                 5,
-                "blob.get",
+                "sys/blob.get@1",
                 Some(calls_blob_get_hash),
                 "ok",
                 &BlobGetReceipt {
@@ -1598,7 +1608,7 @@ mod tests {
             &mut state,
             &receipt_event(
                 6,
-                "blob.get",
+                "sys/blob.get@1",
                 Some(args_blob_get_hash),
                 "ok",
                 &BlobGetReceipt {
@@ -1625,7 +1635,7 @@ mod tests {
             &mut state,
             &receipt_event_with_issuer_ref(
                 7,
-                "host.exec",
+                "sys/host.exec@1",
                 Some(tool_effect_hash),
                 tool_effect_issuer_ref,
                 "ok",
@@ -1657,7 +1667,7 @@ mod tests {
                 &mut state,
                 &receipt_event(
                     8 + idx as u64,
-                    "blob.put",
+                    "sys/blob.put@1",
                     Some(hash.clone()),
                     "ok",
                     &BlobPutReceipt {
@@ -1711,7 +1721,7 @@ mod tests {
                 &mut state,
                 &receipt_event(
                     2 + idx as u64,
-                    "blob.put",
+                    "sys/blob.put@1",
                     Some(hash.clone()),
                     "ok",
                     &BlobPutReceipt {
@@ -1735,7 +1745,7 @@ mod tests {
             &mut state,
             &receipt_event(
                 3,
-                "llm.generate",
+                "sys/llm.generate@1",
                 Some(llm_params_hash),
                 "ok",
                 &LlmGenerateReceipt {
@@ -1786,7 +1796,7 @@ mod tests {
             &mut state,
             &receipt_event(
                 4,
-                "blob.get",
+                "sys/blob.get@1",
                 Some(output_blob_get_hash),
                 "ok",
                 &BlobGetReceipt {
@@ -1887,7 +1897,7 @@ mod tests {
             &mut state,
             &receipt_event_with_issuer_ref(
                 2,
-                "workspace.resolve",
+                "sys/workspace.resolve@1",
                 Some(resolve_hash),
                 resolve_issuer_ref,
                 "ok",
@@ -1918,7 +1928,7 @@ mod tests {
             &mut state,
             &receipt_event_with_issuer_ref(
                 3,
-                "workspace.empty_root",
+                "sys/workspace.empty_root@1",
                 Some(empty_root_hash),
                 empty_root_issuer_ref,
                 "ok",
@@ -1944,7 +1954,7 @@ mod tests {
             &mut state,
             &receipt_event_with_issuer_ref(
                 4,
-                "blob.put",
+                "sys/blob.put@1",
                 Some(blob_put_hash),
                 blob_put_issuer_ref,
                 "ok",
@@ -1974,7 +1984,7 @@ mod tests {
             &mut state,
             &receipt_event_with_issuer_ref(
                 5,
-                "workspace.write_ref",
+                "sys/workspace.write_ref@1",
                 Some(write_ref_hash_1),
                 write_ref_issuer_ref_1,
                 "ok",
@@ -2003,7 +2013,7 @@ mod tests {
             &mut state,
             &receipt_event_with_issuer_ref(
                 6,
-                "workspace.write_ref",
+                "sys/workspace.write_ref@1",
                 Some(write_ref_hash_2),
                 write_ref_issuer_ref_2,
                 "ok",
@@ -2150,7 +2160,7 @@ mod tests {
             &mut state,
             &receipt_event(
                 2,
-                "blob.get",
+                "sys/blob.get@1",
                 Some(commit_args_hash),
                 "ok",
                 &BlobGetReceipt {
@@ -2193,7 +2203,7 @@ mod tests {
             &mut state,
             &receipt_event(
                 3,
-                "blob.get",
+                "sys/blob.get@1",
                 Some(diff_args_hash),
                 "ok",
                 &BlobGetReceipt {

@@ -1,16 +1,32 @@
-{
-  "$kind": "defmodule",
-  "name": "demo/RetrySM@1",
-  "module_kind": "workflow",
-  "abi": {
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/RetrySM_wasm@1",
+    "runtime": {
+      "kind": "wasm",
+      "artifact": {
+        "kind": "wasm_module",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  },
+  {
+    "$kind": "defop",
+    "name": "demo/RetrySM@1",
+    "op_kind": "workflow",
     "workflow": {
       "state": "demo/RetryState@1",
       "event": "demo/RetryEvent@1",
-      "annotations": "sys/BytesOrSecretRef@1",
+      "context": "sys/WorkflowContext@1",
       "effects_emitted": [
-        "timer.set",
-        "http.request"
-      ]
+        "sys/timer.set@1",
+        "sys/http.request@1"
+      ],
+      "annotations": "sys/BytesOrSecretRef@1"
+    },
+    "impl": {
+      "module": "demo/RetrySM_wasm@1",
+      "entrypoint": "step"
     }
   }
-}
+]

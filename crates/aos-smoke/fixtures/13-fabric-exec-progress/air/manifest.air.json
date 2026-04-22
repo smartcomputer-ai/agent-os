@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/FabricExecProgressPc@1"
@@ -32,26 +32,23 @@
   ],
   "modules": [
     {
-      "name": "demo/FabricExecProgress@1"
-    }
-  ],
-  "effects": [
-    {
-      "name": "sys/host.exec@1"
-    }
-  ],
-  "effect_bindings": [
-    {
-      "kind": "host.exec",
-      "adapter_id": "host.exec.fabric"
+      "name": "demo/FabricExecProgress_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/FabricExecProgressEvent@1",
-        "module": "demo/FabricExecProgress@1"
+        "op": "demo/FabricExecProgress@1"
       }
     ]
-  }
+  },
+  "ops": [
+    {
+      "name": "sys/host.exec@1"
+    },
+    {
+      "name": "demo/FabricExecProgress@1"
+    }
+  ]
 }

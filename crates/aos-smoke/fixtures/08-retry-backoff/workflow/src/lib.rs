@@ -10,8 +10,8 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const HTTP_REQUEST_EFFECT: &str = "http.request";
-const TIMER_SET_EFFECT: &str = "timer.set";
+const HTTP_REQUEST_EFFECT: &str = "sys/http.request@1";
+const TIMER_SET_EFFECT: &str = "sys/timer.set@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RetryState {
@@ -136,8 +136,8 @@ fn handle_receipt(
     ctx: &mut WorkflowCtx<RetryState, ()>,
     envelope: EffectReceiptEnvelope,
 ) -> Result<(), ReduceError> {
-    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
-        if envelope.effect_kind == TIMER_SET_EFFECT && matches!(ctx.state.pc, Pc::Backoff) {
+    if envelope.effect_op != HTTP_REQUEST_EFFECT {
+        if envelope.effect_op == TIMER_SET_EFFECT && matches!(ctx.state.pc, Pc::Backoff) {
             let receipt: TimerSetReceipt = envelope
                 .decode_receipt_payload()
                 .map_err(|_| ReduceError::new("invalid timer.set receipt payload"))?;

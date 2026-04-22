@@ -1,6 +1,7 @@
 # P2: Kernel Runtime Op Identity Cut
 
-Status: implemented for core runtime crates; fixture/test-common convergence remains deferred to P3.
+Status: implemented for core runtime crates and migrated fixture/test-common paths. Remaining
+repo-wide convergence is tracked in P3.
 
 ## Goal
 
@@ -92,12 +93,14 @@ Note: since this is a bigger refactor, it is acceptable to have modules breaking
   and adapter start context now carry effect op name/hash and executor metadata.
 - [x] Receipt and stream built-in envelope schemas include v2 op identity fields.
 - [x] Kernel unit tests and affected AIR/effects/wasm-sdk suites pass under the op model.
-- [ ] Migrate old AIR fixture/test-common batches under `crates/aos-node/tests/**`,
+- [x] Migrate old AIR fixture/test-common batches under `crates/aos-node/tests/**`,
   `crates/aos-kernel/tests/**`, `crates/aos-smoke/fixtures/**`, and `crates/aos-agent/air/**`.
-  This remains deferred per the instruction to hold off on fixtures and other AIR batches.
-- [ ] Rename/remove stale node compatibility names that still say `strict_effect_bindings`.
-  Production dispatch no longer reads `manifest.effect_bindings`, but these diagnostics/config
-  labels are still transitional.
+  Node test helpers, kernel fixture builders, smoke fixtures, and agent AIR manifests now use
+  workflow/effect ops and split workflow op identity from runtime module identity.
+- [x] Rename/remove stale node compatibility names that still say `strict_effect_bindings`.
+  Production dispatch no longer reads `manifest.effect_bindings`; runtime config now uses
+  `strict_op_routes`. The old `AOS_STRICT_EFFECT_BINDINGS` env var remains only as a compatibility
+  alias.
 
 ## Runtime Invariants
 

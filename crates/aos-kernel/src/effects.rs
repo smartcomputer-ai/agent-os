@@ -156,6 +156,11 @@ impl EffectManager {
         params_cbor: Vec<u8>,
         idempotency_key: [u8; 32],
     ) -> Result<EffectIntent, KernelError> {
+        let fallback_op = if op_identity.is_none() {
+            Some(self.effect_op_for_runtime(&runtime_kind)?)
+        } else {
+            None
+        };
         let canonical_params = if let Some(identity) = op_identity.as_ref() {
             self.ensure_effect_op_known(&identity.op_name)?;
             self.canonicalize_effect_op_params(
@@ -165,13 +170,8 @@ impl EffectManager {
                 params_cbor,
             )?
         } else {
-            self.ensure_effect_known(&runtime_kind)?;
-            self.canonicalize_effect_op_params(
-                &source,
-                runtime_kind.as_str(),
-                &runtime_kind,
-                params_cbor,
-            )?
+            let effect_op = fallback_op.as_deref().expect("fallback op resolved");
+            self.canonicalize_effect_op_params(&source, effect_op, &runtime_kind, params_cbor)?
         };
         let intent = if let Some(identity) = op_identity {
             EffectIntent::from_raw_params_with_op(
@@ -185,10 +185,42 @@ impl EffectManager {
                 idempotency_key,
             )
         } else {
-            EffectIntent::from_raw_params(runtime_kind, canonical_params, idempotency_key)
+            EffectIntent::from_raw_params_with_op(
+                fallback_op.expect("fallback op resolved"),
+                None,
+                None,
+                None,
+                None,
+                runtime_kind,
+                canonical_params,
+                idempotency_key,
+            )
         }
         .map_err(|err| KernelError::EffectManager(err.to_string()))?;
         Ok(intent)
+    }
+
+    fn effect_op_for_runtime(&self, runtime_kind: &EffectKind) -> Result<String, KernelError> {
+        if self
+            .effect_catalog
+            .params_schema(runtime_kind.as_str())
+            .is_some()
+        {
+            return Ok(runtime_kind.as_str().to_string());
+        }
+        let sys_name = format!("sys/{}@1", runtime_kind.as_str());
+        if self.effect_catalog.params_schema(&sys_name).is_some() {
+            return Ok(sys_name);
+        }
+        if let Some(entry) = self
+            .effect_catalog
+            .get_by_impl_entrypoint(runtime_kind.as_str())
+        {
+            return Ok(entry.op.clone());
+        }
+        Err(KernelError::UnsupportedEffectKind(
+            runtime_kind.as_str().into(),
+        ))
     }
 
     fn ensure_effect_known(&self, runtime_kind: &EffectKind) -> Result<(), KernelError> {

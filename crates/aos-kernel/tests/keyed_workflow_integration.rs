@@ -11,7 +11,7 @@ use aos_kernel::journal::Journal;
 use aos_kernel::journal::{JournalKind, OwnedJournalEntry};
 use aos_kernel::snapshot::KernelSnapshot;
 use aos_wasm_abi::WorkflowOutput;
-use helpers::fixtures::{self, TestStore};
+use helpers::fixtures::{self, TestStore, WorkflowAbi};
 
 /// Full-path integration for keyed workflows:
 /// - routes keyed events,
@@ -35,7 +35,7 @@ async fn keyed_workflow_integration_flow() {
             },
         );
         workflow.key_schema = Some(fixtures::schema("com.acme/Key@1"));
-        workflow.abi.workflow = Some(aos_air_types::WorkflowAbi {
+        workflow.abi.workflow = Some(WorkflowAbi {
             state: fixtures::schema("com.acme/State@1"),
             event: fixtures::schema("com.acme/Event@1"),
             context: Some(fixtures::schema("sys/WorkflowContext@1")),
@@ -45,7 +45,7 @@ async fn keyed_workflow_integration_flow() {
 
         let routing = vec![aos_air_types::RoutingEvent {
             event: fixtures::schema("com.acme/Event@1"),
-            module: workflow.name.clone(),
+            op: workflow.name.clone(),
             key_field: Some("id".into()),
         }];
 
@@ -68,6 +68,7 @@ async fn keyed_workflow_integration_flow() {
     };
 
     let manifest = build_manifest();
+    let manifest_replay = manifest.clone();
     let mut kernel = Kernel::from_loaded_manifest(store.clone(), manifest, Journal::new()).unwrap();
 
     // Two keyed events.
@@ -111,7 +112,6 @@ async fn keyed_workflow_integration_flow() {
     let journal = Journal::from_entries(&entries).unwrap();
 
     // Rehydrate a fresh kernel from snapshot + shared store.
-    let manifest_replay = build_manifest();
     let mut kernel_replay =
         Kernel::from_loaded_manifest(store.clone(), manifest_replay, journal).unwrap();
     kernel_replay.tick_until_idle().unwrap();

@@ -1,7 +1,7 @@
-use aos_air_types::{DefSchema, TypeExpr, TypeRecord, WorkflowAbi};
+use aos_air_types::{DefSchema, TypeExpr, TypeRecord};
 use aos_kernel::error::KernelError;
 use aos_wasm_abi::{DomainEvent, WorkflowOutput};
-use helpers::fixtures::{self, START_SCHEMA, TestWorld};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld, WorkflowAbi};
 use indexmap::IndexMap;
 
 #[path = "support/helpers.rs"]

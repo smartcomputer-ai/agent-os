@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/SafeUpgradePc@1"
@@ -23,20 +23,23 @@
   ],
   "modules": [
     {
-      "name": "demo/SafeUpgrade@1"
+      "name": "demo/SafeUpgrade_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/SafeUpgradeEvent@1",
-        "module": "demo/SafeUpgrade@1"
+        "op": "demo/SafeUpgrade@1"
       }
     ]
   },
-  "effects": [
+  "ops": [
     {
       "name": "sys/http.request@1"
+    },
+    {
+      "name": "demo/SafeUpgrade@1"
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/PerfCellKey@1"
@@ -14,17 +14,21 @@
   ],
   "modules": [
     {
-      "name": "demo/PerfCounter@1"
+      "name": "demo/PerfCounter_wasm@1"
     }
   ],
-  "effects": [],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/PerfEvent@1",
-        "module": "demo/PerfCounter@1",
-        "key_field": "cell"
+        "key_field": "cell",
+        "op": "demo/PerfCounter@1"
       }
     ]
-  }
+  },
+  "ops": [
+    {
+      "name": "demo/PerfCounter@1"
+    }
+  ]
 }

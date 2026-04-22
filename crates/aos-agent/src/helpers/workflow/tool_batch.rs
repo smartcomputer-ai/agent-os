@@ -810,22 +810,26 @@ fn emit_workspace_blob_put_in_batch(
         .pending_effects
         .begin(
             call_id.clone(),
-            "blob.put",
+            "sys/blob.put@1",
             &params,
             Some("blob".into()),
             emitted_at_ns,
         )
         .unwrap_or_else(|_| {
-            let fallback =
-                PendingEffect::from_params("blob.put", &params, Some("blob".into()), emitted_at_ns)
-                    .unwrap_or_else(|_| {
-                        PendingEffect::new(
-                            "blob.put",
-                            String::new(),
-                            Some("blob".into()),
-                            emitted_at_ns,
-                        )
-                    });
+            let fallback = PendingEffect::from_params(
+                "sys/blob.put@1",
+                &params,
+                Some("blob".into()),
+                emitted_at_ns,
+            )
+            .unwrap_or_else(|_| {
+                PendingEffect::new(
+                    "sys/blob.put@1",
+                    String::new(),
+                    Some("blob".into()),
+                    emitted_at_ns,
+                )
+            });
             batch
                 .pending_effects
                 .insert(call_id.clone(), fallback.clone());

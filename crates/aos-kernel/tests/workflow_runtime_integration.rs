@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use aos_air_types::{
-    DefModule, DefSchema, HashRef, ModuleAbi, ModuleKind, TypeExpr, TypeRecord, TypeRef,
-    TypeVariant, WorkflowAbi,
+    DefModule, DefSchema, HashRef, ModuleRuntime, TypeExpr, TypeRecord, TypeRef, TypeVariant,
+    WasmArtifact,
 };
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, HttpRequestParams,
@@ -13,7 +13,9 @@ use aos_kernel::Store;
 use aos_kernel::error::KernelError;
 use aos_kernel::snapshot::WorkflowStatusSnapshot;
 use aos_wasm_abi::{DomainEvent, WorkflowEffect, WorkflowOutput};
-use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld, effect_params_text, fake_hash};
+use helpers::fixtures::{
+    self, START_SCHEMA, TestStore, TestWorld, WorkflowAbi, effect_params_text, fake_hash,
+};
 use indexmap::IndexMap;
 use wat::parse_str;
 
@@ -79,7 +81,7 @@ fn workflow_effects_share_outbox_without_interference() {
             state: Some(vec![0xA1]),
             domain_events: vec![],
             effects: vec![WorkflowEffect::new(
-                aos_effects::EffectKind::TIMER_SET,
+                "sys/timer.set@1",
                 serde_cbor::to_vec(&TimerSetParams {
                     deliver_at_ns: 5,
                     key: Some("shared".into()),
@@ -104,7 +106,7 @@ fn workflow_effects_share_outbox_without_interference() {
             state: Some(vec![0xB2]),
             domain_events: vec![],
             effects: vec![WorkflowEffect::with_cap_slot(
-                aos_effects::EffectKind::HTTP_REQUEST,
+                "sys/http.request@1",
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
                     url: "https://example.com/shared".into(),
@@ -245,7 +247,7 @@ fn blob_put_receipt_routes_event_to_handler() {
             state: None,
             domain_events: vec![],
             effects: vec![WorkflowEffect::with_cap_slot(
-                aos_effects::EffectKind::BLOB_PUT,
+                "sys/blob.put@1",
                 serde_cbor::to_vec(&BlobPutParams {
                     bytes: Vec::new(),
                     blob_ref: None,
@@ -367,7 +369,7 @@ fn blob_get_receipt_routes_event_to_handler() {
             state: None,
             domain_events: vec![],
             effects: vec![WorkflowEffect::with_cap_slot(
-                aos_effects::EffectKind::BLOB_GET,
+                "sys/blob.get@1",
                 serde_cbor::to_vec(&BlobGetParams {
                     blob_ref: fake_hash(0x10),
                 })
@@ -484,7 +486,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
         state: Some(vec![0x10]),
         domain_events: vec![],
         effects: vec![WorkflowEffect::with_cap_slot(
-            aos_effects::EffectKind::HTTP_REQUEST,
+            "sys/http.request@1",
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
                 url: "https://example.com/first".into(),
@@ -500,7 +502,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
         state: Some(vec![0x11]),
         domain_events: vec![],
         effects: vec![WorkflowEffect::with_cap_slot(
-            aos_effects::EffectKind::HTTP_REQUEST,
+            "sys/http.request@1",
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
                 url: "https://example.com/after-receipt".into(),
@@ -533,7 +535,7 @@ fn workflow_receipt_and_event_progression_emit_followups_in_order() {
             state: Some(vec![0x12]),
             domain_events: vec![],
             effects: vec![WorkflowEffect::with_cap_slot(
-                aos_effects::EffectKind::HTTP_REQUEST,
+                "sys/http.request@1",
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
                     url: "https://example.com/after-event".into(),
@@ -678,7 +680,7 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
             state: Some(vec![0x21]),
             domain_events: vec![],
             effects: vec![WorkflowEffect::with_cap_slot(
-                aos_effects::EffectKind::HTTP_REQUEST,
+                "sys/http.request@1",
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
                     url: "https://example.com/ready".into(),
@@ -706,7 +708,7 @@ fn workflow_event_routing_only_matches_subscribed_schema() {
             state: Some(vec![0x22]),
             domain_events: vec![],
             effects: vec![WorkflowEffect::with_cap_slot(
-                aos_effects::EffectKind::HTTP_REQUEST,
+                "sys/http.request@1",
                 serde_cbor::to_vec(&HttpRequestParams {
                     method: "GET".into(),
                     url: "https://example.com/other".into(),
@@ -796,7 +798,7 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
         state: Some(vec![0x31]),
         domain_events: vec![],
         effects: vec![WorkflowEffect::with_cap_slot(
-            aos_effects::EffectKind::HTTP_REQUEST,
+            "sys/http.request@1",
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
                 url: "https://example.com/keyed".into(),
@@ -965,7 +967,7 @@ fn keyed_workflow_receipt_routing_is_instance_isolated() {
 
 fn build_loaded_manifest_with_http_enforcer(
     _store: &Arc<TestStore>,
-    modules: Vec<DefModule>,
+    modules: Vec<fixtures::TestModule>,
     routing: Vec<aos_air_types::RoutingEvent>,
 ) -> aos_kernel::manifest::LoadedManifest {
     fixtures::build_loaded_manifest(modules, routing)
@@ -976,7 +978,7 @@ fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
         state: Some(vec![0x01]),
         domain_events: vec![],
         effects: vec![WorkflowEffect::with_cap_slot(
-            aos_effects::EffectKind::HTTP_REQUEST,
+            "sys/http.request@1",
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
                 url: "https://example.com/workflow".into(),
@@ -1080,7 +1082,7 @@ fn timer_receipt_workflow_manifest(store: &Arc<TestStore>) -> aos_kernel::manife
         state: Some(vec![0x01]),
         domain_events: vec![],
         effects: vec![WorkflowEffect::new(
-            aos_effects::EffectKind::TIMER_SET,
+            "sys/timer.set@1",
             serde_cbor::to_vec(&TimerSetParams {
                 deliver_at_ns: 10,
                 key: Some("retry".into()),
@@ -1154,7 +1156,8 @@ fn sequenced_workflow_module<S: Store + ?Sized>(
     name: impl Into<String>,
     first: &WorkflowOutput,
     then: &WorkflowOutput,
-) -> DefModule {
+) -> fixtures::TestModule {
+    let name = name.into();
     let first_bytes = first.encode().expect("encode first workflow output");
     let then_bytes = then.encode().expect("encode second workflow output");
     let first_literal = first_bytes
@@ -1291,14 +1294,17 @@ fn sequenced_workflow_module<S: Store + ?Sized>(
     let wasm_bytes = parse_str(&wat).expect("compile sequenced workflow wat");
     let wasm_hash = store.put_blob(&wasm_bytes).expect("store workflow wasm");
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
-    DefModule {
-        name: name.into(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: wasm_hash_ref,
-        key_schema: None,
-        abi: ModuleAbi {
-            workflow: None,
-            pure: None,
+    fixtures::TestModule {
+        name: name.clone(),
+        module: DefModule {
+            name,
+            runtime: ModuleRuntime::Wasm {
+                artifact: WasmArtifact::WasmModule {
+                    hash: wasm_hash_ref,
+                },
+            },
         },
+        key_schema: None,
+        abi: fixtures::ModuleAbi { workflow: None },
     }
 }

@@ -1,17 +1,31 @@
 [
   {
     "$kind": "defmodule",
-    "name": "demo/LlmSummarizer@1",
-    "module_kind": "workflow",
-    "abi": {
-      "workflow": {
-        "state": "demo/LlmSummarizerState@1",
-        "event": "demo/LlmSummarizerEvent@1",
-        "effects_emitted": [
-          "http.request",
-          "llm.generate"
-        ]
+    "name": "demo/LlmSummarizer_wasm@1",
+    "runtime": {
+      "kind": "wasm",
+      "artifact": {
+        "kind": "wasm_module",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       }
+    }
+  },
+  {
+    "$kind": "defop",
+    "name": "demo/LlmSummarizer@1",
+    "op_kind": "workflow",
+    "workflow": {
+      "state": "demo/LlmSummarizerState@1",
+      "event": "demo/LlmSummarizerEvent@1",
+      "context": "sys/WorkflowContext@1",
+      "effects_emitted": [
+        "sys/http.request@1",
+        "sys/llm.generate@1"
+      ]
+    },
+    "impl": {
+      "module": "demo/LlmSummarizer_wasm@1",
+      "entrypoint": "step"
     }
   }
 ]

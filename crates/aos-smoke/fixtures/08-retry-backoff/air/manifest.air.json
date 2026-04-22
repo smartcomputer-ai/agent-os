@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/StartWork@1"
@@ -29,23 +29,26 @@
   ],
   "modules": [
     {
-      "name": "demo/RetrySM@1"
-    }
-  ],
-  "effects": [
-    {
-      "name": "sys/http.request@1"
-    },
-    {
-      "name": "sys/timer.set@1"
+      "name": "demo/RetrySM_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/RetryEvent@1",
-        "module": "demo/RetrySM@1"
+        "op": "demo/RetrySM@1"
       }
     ]
-  }
+  },
+  "ops": [
+    {
+      "name": "sys/http.request@1"
+    },
+    {
+      "name": "sys/timer.set@1"
+    },
+    {
+      "name": "demo/RetrySM@1"
+    }
+  ]
 }

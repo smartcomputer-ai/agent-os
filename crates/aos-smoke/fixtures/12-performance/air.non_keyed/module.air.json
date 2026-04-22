@@ -1,14 +1,28 @@
 [
   {
     "$kind": "defmodule",
-    "name": "demo/PerfCounter@1",
-    "module_kind": "workflow",
-    "abi": {
-      "workflow": {
-        "state": "demo/PerfState@1",
-        "event": "demo/PerfEvent@1",
-        "effects_emitted": []
+    "name": "demo/PerfCounter_wasm@1",
+    "runtime": {
+      "kind": "wasm",
+      "artifact": {
+        "kind": "wasm_module",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       }
+    }
+  },
+  {
+    "$kind": "defop",
+    "name": "demo/PerfCounter@1",
+    "op_kind": "workflow",
+    "workflow": {
+      "state": "demo/PerfState@1",
+      "event": "demo/PerfEvent@1",
+      "context": "sys/WorkflowContext@1",
+      "effects_emitted": []
+    },
+    "impl": {
+      "module": "demo/PerfCounter_wasm@1",
+      "entrypoint": "step"
     }
   }
 ]

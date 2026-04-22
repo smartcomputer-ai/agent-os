@@ -1,6 +1,6 @@
 use aos_air_types::{
-    DefModule, DefSchema, HashRef, ModuleAbi, ModuleKind, TypeExpr, TypeRecord, TypeRef,
-    TypeVariant, WorkflowAbi,
+    DefModule, DefSchema, HashRef, ModuleRuntime, TypeExpr, TypeRecord, TypeRef, TypeVariant,
+    WasmArtifact,
 };
 use aos_effects::builtins::{BlobPutParams, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
@@ -12,7 +12,7 @@ use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use std::sync::Arc;
 use wat::parse_str;
 
-use helpers::fixtures::{self, START_SCHEMA, TestWorld};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld, WorkflowAbi};
 
 #[path = "support/helpers.rs"]
 mod helpers;
@@ -22,6 +22,7 @@ use helpers::{simple_state_manifest, timer_manifest};
 fn workflow_timer_snapshot_resumes_on_receipt() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     world
@@ -40,7 +41,7 @@ fn workflow_timer_snapshot_resumes_on_receipt() {
 
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        timer_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
@@ -72,6 +73,7 @@ fn workflow_timer_snapshot_resumes_on_receipt() {
 fn workflow_snapshot_preserves_effect_queue() {
     let store = fixtures::new_mem_store();
     let manifest = workflow_resume_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let start_event = serde_json::json!({
@@ -88,7 +90,7 @@ fn workflow_snapshot_preserves_effect_queue() {
 
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        workflow_resume_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
@@ -101,6 +103,7 @@ fn workflow_snapshot_preserves_effect_queue() {
 fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
     let store = fixtures::new_mem_store();
     let manifest = workflow_resume_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let start_event = serde_json::json!({
@@ -125,7 +128,7 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
 
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        workflow_resume_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
@@ -164,6 +167,7 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
 fn workflow_authorized_effect_snapshot_replay_has_no_cap_decisions() {
     let store = fixtures::new_mem_store();
     let manifest = workflow_resume_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let start_event = serde_json::json!({
@@ -179,7 +183,7 @@ fn workflow_authorized_effect_snapshot_replay_has_no_cap_decisions() {
     let entries = world.kernel.dump_journal().unwrap();
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        workflow_resume_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
@@ -192,6 +196,7 @@ fn workflow_authorized_effect_snapshot_replay_has_no_cap_decisions() {
 fn snapshot_replay_restores_state() {
     let store = fixtures::new_mem_store();
     let manifest = simple_state_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
     world
         .submit_event_result(START_SCHEMA, &fixtures::start_event("simple"))
@@ -205,7 +210,7 @@ fn snapshot_replay_restores_state() {
 
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        simple_state_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
@@ -220,6 +225,7 @@ fn snapshot_replay_restores_state() {
 fn snapshot_creation_quiesces_runtime() {
     let store = fixtures::new_mem_store();
     let manifest = simple_state_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     world
@@ -230,7 +236,7 @@ fn snapshot_creation_quiesces_runtime() {
 
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        simple_state_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
@@ -245,6 +251,7 @@ fn snapshot_creation_quiesces_runtime() {
 fn workflow_manifest_records_restore_queued_intent_without_policy_reevaluation() {
     let store = fixtures::new_mem_store();
     let manifest = workflow_resume_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let start_event = serde_json::json!({
@@ -261,7 +268,7 @@ fn workflow_manifest_records_restore_queued_intent_without_policy_reevaluation()
 
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        workflow_resume_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&entries).unwrap(),
     )
     .unwrap();
@@ -305,7 +312,7 @@ fn workflow_resume_manifest(
         state: Some(vec![0x51]),
         domain_events: vec![],
         effects: vec![WorkflowEffect::new(
-            aos_effects::EffectKind::TIMER_SET,
+            "sys/timer.set@1",
             serde_cbor::to_vec(&TimerSetParams {
                 deliver_at_ns: 5,
                 key: Some("resume".into()),
@@ -318,7 +325,7 @@ fn workflow_resume_manifest(
         state: Some(vec![0x52]),
         domain_events: vec![],
         effects: vec![WorkflowEffect::with_cap_slot(
-            aos_effects::EffectKind::BLOB_PUT,
+            "sys/blob.put@1",
             serde_cbor::to_vec(&BlobPutParams {
                 bytes: b"resumed".to_vec(),
                 blob_ref: None,
@@ -392,7 +399,8 @@ fn sequenced_workflow_module<S: Store + ?Sized>(
     name: impl Into<String>,
     first: &WorkflowOutput,
     then: &WorkflowOutput,
-) -> DefModule {
+) -> fixtures::TestModule {
+    let name = name.into();
     let first_bytes = first.encode().expect("encode first workflow output");
     let then_bytes = then.encode().expect("encode second workflow output");
     let first_literal = first_bytes
@@ -527,14 +535,17 @@ fn sequenced_workflow_module<S: Store + ?Sized>(
     let wasm_bytes = parse_str(&wat).expect("compile sequenced workflow wat");
     let wasm_hash = store.put_blob(&wasm_bytes).expect("store workflow wasm");
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
-    DefModule {
-        name: name.into(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: wasm_hash_ref,
-        key_schema: None,
-        abi: ModuleAbi {
-            workflow: None,
-            pure: None,
+    fixtures::TestModule {
+        name: name.clone(),
+        module: DefModule {
+            name,
+            runtime: ModuleRuntime::Wasm {
+                artifact: WasmArtifact::WasmModule {
+                    hash: wasm_hash_ref,
+                },
+            },
         },
+        key_schema: None,
+        abi: fixtures::ModuleAbi { workflow: None },
     }
 }

@@ -140,7 +140,7 @@ fn build_effect_manager(
         schemas.insert(schema.name.clone(), schema.ty.clone());
     }
     let schema_index = Arc::new(SchemaIndex::new(schemas));
-    let effect_catalog = Arc::new(EffectCatalog::from_defs(loaded.effects.values().cloned()));
+    let effect_catalog = Arc::new(EffectCatalog::from_defs(loaded.ops.values().cloned()));
     let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
         GovernanceParamPreprocessor::new(store.clone(), loaded.manifest.clone()),
     ));
@@ -186,7 +186,7 @@ fn patch_doc_add_schema(base_manifest_hash: String, name: &str) -> serde_json::V
     };
     let node = serde_json::to_value(AirNode::Defschema(schema)).expect("serialize defschema node");
     serde_json::json!({
-        "version": "1",
+        "version": "2",
         "base_manifest_hash": base_manifest_hash,
         "patches": [
             {

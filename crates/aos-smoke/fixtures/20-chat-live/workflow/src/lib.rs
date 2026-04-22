@@ -14,7 +14,7 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const LLM_GENERATE_EFFECT: &str = "llm.generate";
+const LLM_GENERATE_EFFECT: &str = "sys/llm.generate@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LiveState {
@@ -169,7 +169,7 @@ fn on_receipt(
     ctx: &mut WorkflowCtx<LiveState, ()>,
     envelope: EffectReceiptEnvelope,
 ) -> Result<(), ReduceError> {
-    if envelope.effect_kind != LLM_GENERATE_EFFECT {
+    if envelope.effect_op != LLM_GENERATE_EFFECT {
         return Ok(());
     }
 

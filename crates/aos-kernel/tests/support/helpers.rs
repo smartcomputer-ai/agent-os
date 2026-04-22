@@ -6,14 +6,14 @@
 
 use aos_air_types::{
     DefSchema, EmptyObject, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText,
-    TypeRecord, TypeRef, TypeVariant, WorkflowAbi,
+    TypeRecord, TypeRef, TypeVariant,
 };
 use aos_effects::builtins::TimerSetParams;
 #[path = "fixtures.rs"]
 pub mod fixtures;
 
 use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
-use fixtures::{START_SCHEMA, TestStore, zero_hash};
+use fixtures::{START_SCHEMA, TestStore, WorkflowAbi, zero_hash};
 use indexmap::IndexMap;
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         state: Some(vec![0x01]),
         domain_events: vec![],
         effects: vec![WorkflowEffect::new(
-            aos_effects::EffectKind::TIMER_SET,
+            "sys/timer.set@1",
             serde_cbor::to_vec(&TimerSetParams {
                 deliver_at_ns: 5,
                 key: Some("retry".into()),

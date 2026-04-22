@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 
 use aos_air_types::catalog::EffectCatalog;
-use aos_air_types::{CURRENT_AIR_VERSION, Manifest, SecretDecl, SecretEntry};
+use aos_air_types::{CURRENT_AIR_VERSION, DefSecret, HashRef, Manifest, NamedRef};
 use aos_cbor::Hash;
 use aos_effects::builtins::LlmGenerateParams;
 use aos_kernel::MemStore;
@@ -43,9 +43,8 @@ fn secret_param_cbor(alias: &str, version: u64) -> Vec<u8> {
 }
 
 fn catalog_with_secret() -> SecretCatalog {
-    let decl = SecretDecl {
-        alias: "llm/api".into(),
-        version: 1,
+    let decl = DefSecret {
+        name: "llm/api@1".into(),
         binding_id: "env:LLM_API_KEY".into(),
         expected_digest: None,
     };
@@ -102,27 +101,31 @@ fn empty_manifest() -> Manifest {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![],
-        effects: vec![],
-        effect_bindings: vec![],
+        ops: vec![],
         secrets: vec![],
         routing: None,
     }
 }
 
 fn loaded_manifest_with_secret(binding_id: &str) -> LoadedManifest {
-    let secret = SecretDecl {
-        alias: "llm/api".into(),
-        version: 1,
+    let secret = DefSecret {
+        name: "llm/api@1".into(),
         binding_id: binding_id.into(),
         expected_digest: None,
     };
     let mut manifest = empty_manifest();
-    manifest.secrets.push(SecretEntry::Decl(secret.clone()));
+    manifest.secrets.push(NamedRef {
+        name: secret.name.clone(),
+        hash: HashRef::new(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .expect("zero hash"),
+    });
     LoadedManifest {
         manifest,
         secrets: vec![secret],
         modules: HashMap::new(),
-        effects: HashMap::new(),
+        ops: HashMap::new(),
         schemas: HashMap::new(),
         effect_catalog: EffectCatalog::new(),
     }
@@ -209,9 +212,8 @@ fn expected_digest_mismatch_fails() {
     // expected digest for "token123"
     let expected =
         aos_air_types::HashRef::new(aos_cbor::Hash::of_bytes(b"token123").to_hex()).unwrap();
-    let decl = SecretDecl {
-        alias: "llm/api".into(),
-        version: 1,
+    let decl = DefSecret {
+        name: "llm/api@1".into(),
         binding_id: "env:LLM_API_KEY".into(),
         expected_digest: Some(expected),
     };

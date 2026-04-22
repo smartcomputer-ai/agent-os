@@ -215,7 +215,7 @@ impl ExampleHost {
                     store.clone(),
                     &host_config.adapters,
                     &loaded,
-                    host_config.world.strict_effect_bindings,
+                    host_config.world.strict_op_routes,
                     tx,
                 )
                 .context("build example host effect runtime")?;
@@ -541,7 +541,10 @@ impl ExampleHost {
     }
 
     fn classify_effect_intent(&self, intent: &aos_effects::EffectIntent) -> EffectExecutionClass {
-        aos_node::classify_effect_kind(intent.kind.as_str())
+        self.effect_runtime
+            .as_ref()
+            .map(|runtime| runtime.classify_intent(intent))
+            .unwrap_or_else(|| aos_node::classify_effect_op_identity(intent))
     }
 
     fn dispatch_external_intent(&mut self, intent: aos_effects::EffectIntent) -> Result<usize> {
@@ -666,9 +669,17 @@ fn patch_module_hash(
     workflow_name: &str,
     wasm_hash: &HashRef,
 ) -> Result<()> {
-    let patched = patch_modules(loaded, wasm_hash, |name, _| name == workflow_name);
+    let module_name = loaded
+        .ops
+        .get(workflow_name)
+        .map(|op| op.implementation.module.as_str())
+        .unwrap_or(workflow_name)
+        .to_string();
+    let patched = patch_modules(loaded, wasm_hash, |name, _| name == module_name);
     if patched == 0 {
-        anyhow::bail!("module '{workflow_name}' missing from manifest");
+        anyhow::bail!(
+            "module '{module_name}' for workflow '{workflow_name}' missing from manifest"
+        );
     }
     Ok(())
 }

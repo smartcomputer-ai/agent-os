@@ -1,6 +1,5 @@
 use aos_air_types::{
-    DefModule, HashRef, ModuleAbi, ModuleKind, TypeExpr, TypeRecord, TypeRef, TypeVariant,
-    WorkflowAbi,
+    DefModule, HashRef, ModuleRuntime, TypeExpr, TypeRecord, TypeRef, TypeVariant, WasmArtifact,
 };
 use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
@@ -12,7 +11,7 @@ use aos_wasm_abi::{DomainEvent, WorkflowEffect, WorkflowOutput};
 use std::sync::Arc;
 use wat::parse_str;
 
-use helpers::fixtures::{self, START_SCHEMA, TestWorld};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld, WorkflowAbi};
 
 #[path = "support/helpers.rs"]
 mod helpers;
@@ -22,6 +21,7 @@ use helpers::timer_manifest;
 fn workflow_timer_receipt_replays_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
     world
         .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
@@ -56,7 +56,7 @@ fn workflow_timer_receipt_replays_from_journal() {
 
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        timer_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
@@ -73,6 +73,7 @@ fn workflow_timer_receipt_replays_from_journal() {
 fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = no_plan_workflow_manifest(&store);
+    let replay_manifest = manifest.clone();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let start_event = serde_json::json!({
@@ -146,7 +147,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     let journal_entries = world.kernel.dump_journal().unwrap();
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        no_plan_workflow_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
@@ -168,8 +169,9 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
 #[test]
 fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
     let store = fixtures::new_mem_store();
-    let mut world =
-        TestWorld::with_store(store.clone(), no_plan_workflow_manifest(&store)).unwrap();
+    let manifest = no_plan_workflow_manifest(&store);
+    let replay_manifest = manifest.clone();
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
     let start_event = serde_json::json!({
         "$tag": "Start",
         "$value": fixtures::start_event("replay-once")
@@ -218,7 +220,7 @@ fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
 
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        no_plan_workflow_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
@@ -382,9 +384,10 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
 #[test]
 fn workflow_replay_restores_waiting_state_across_restarts() {
     let store = fixtures::new_mem_store();
+    let manifest = no_plan_workflow_manifest(&store);
+    let replay_manifest = manifest.clone();
     let journal_entries = {
-        let mut world =
-            TestWorld::with_store(store.clone(), no_plan_workflow_manifest(&store)).unwrap();
+        let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
         let start_event = serde_json::json!({
             "$tag": "Start",
             "$value": fixtures::start_event("wf-journal")
@@ -399,7 +402,7 @@ fn workflow_replay_restores_waiting_state_across_restarts() {
 
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        no_plan_workflow_manifest(&store),
+        replay_manifest,
         Journal::from_entries(&journal_entries).unwrap(),
     )
     .unwrap();
@@ -434,7 +437,7 @@ fn no_plan_workflow_manifest_impl(
         domain_events: vec![],
         effects: vec![
             WorkflowEffect::new(
-                aos_effects::EffectKind::TIMER_SET,
+                "sys/timer.set@1",
                 serde_cbor::to_vec(&TimerSetParams {
                     deliver_at_ns: 42,
                     key: Some("wf".into()),
@@ -442,7 +445,7 @@ fn no_plan_workflow_manifest_impl(
                 .unwrap(),
             ),
             WorkflowEffect::with_cap_slot(
-                aos_effects::EffectKind::BLOB_PUT,
+                "sys/blob.put@1",
                 serde_cbor::to_vec(&BlobPutParams {
                     bytes: b"workflow".to_vec(),
                     blob_ref: None,
@@ -562,7 +565,8 @@ fn sequenced_workflow_module<S: Store + ?Sized>(
     name: impl Into<String>,
     first: &WorkflowOutput,
     then: &WorkflowOutput,
-) -> DefModule {
+) -> fixtures::TestModule {
+    let name = name.into();
     let first_bytes = first.encode().expect("encode first workflow output");
     let then_bytes = then.encode().expect("encode second workflow output");
     let first_literal = first_bytes
@@ -697,14 +701,17 @@ fn sequenced_workflow_module<S: Store + ?Sized>(
     let wasm_bytes = parse_str(&wat).expect("compile sequenced workflow wat");
     let wasm_hash = store.put_blob(&wasm_bytes).expect("store workflow wasm");
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
-    DefModule {
-        name: name.into(),
-        module_kind: ModuleKind::Workflow,
-        wasm_hash: wasm_hash_ref,
-        key_schema: None,
-        abi: ModuleAbi {
-            workflow: None,
-            pure: None,
+    fixtures::TestModule {
+        name: name.clone(),
+        module: DefModule {
+            name,
+            runtime: ModuleRuntime::Wasm {
+                artifact: WasmArtifact::WasmModule {
+                    hash: wasm_hash_ref,
+                },
+            },
         },
+        key_schema: None,
+        abi: fixtures::ModuleAbi { workflow: None },
     }
 }

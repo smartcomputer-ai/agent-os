@@ -1,14 +1,30 @@
-{
-  "$kind": "defmodule",
-  "name": "demo/LiveChat@1",
-  "module_kind": "workflow",
-  "abi": {
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/LiveChat_wasm@1",
+    "runtime": {
+      "kind": "wasm",
+      "artifact": {
+        "kind": "wasm_module",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  },
+  {
+    "$kind": "defop",
+    "name": "demo/LiveChat@1",
+    "op_kind": "workflow",
     "workflow": {
       "state": "demo/LiveState@1",
       "event": "demo/LiveEvent@1",
+      "context": "sys/WorkflowContext@1",
       "effects_emitted": [
-        "llm.generate"
+        "sys/llm.generate@1"
       ]
+    },
+    "impl": {
+      "module": "demo/LiveChat_wasm@1",
+      "entrypoint": "step"
     }
   }
-}
+]

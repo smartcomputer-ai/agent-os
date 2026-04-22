@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/ChainPhase@1"
@@ -29,20 +29,23 @@
   ],
   "modules": [
     {
-      "name": "demo/ChainComp@1"
+      "name": "demo/ChainComp_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/ChainEvent@1",
-        "module": "demo/ChainComp@1"
+        "op": "demo/ChainComp@1"
       }
     ]
   },
-  "effects": [
+  "ops": [
     {
       "name": "sys/http.request@1"
+    },
+    {
+      "name": "demo/ChainComp@1"
     }
   ]
 }

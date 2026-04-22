@@ -523,11 +523,11 @@ fn sys_module_spec(name: &str) -> Option<&'static SysModuleSpec> {
 
 const SYS_MODULES: &[SysModuleSpec] = &[
     SysModuleSpec {
-        name: "sys/Workspace@1",
+        name: "sys/workspace_wasm@1",
         bin: "workspace",
     },
     SysModuleSpec {
-        name: "sys/HttpPublish@1",
+        name: "sys/http_publish_wasm@1",
         bin: "http_publish",
     },
 ];
@@ -823,8 +823,8 @@ mod tests {
             WorkflowBuildProfile::Debug,
         )?;
 
-        assert!(loaded.modules.contains_key("demo/TimerSM@1"));
-        let module = loaded.modules.get("demo/TimerSM@1").unwrap();
+        assert!(loaded.modules.contains_key("demo/TimerSM_wasm@1"));
+        let module = loaded.modules.get("demo/TimerSM_wasm@1").unwrap();
         assert_ne!(
             crate::util::wasm_module_hash(module)
                 .expect("workflow wasm hash")

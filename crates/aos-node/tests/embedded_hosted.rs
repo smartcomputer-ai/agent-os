@@ -253,7 +253,7 @@ async fn embedded_fabric_exec_progress_is_admitted_through_runtime_and_kernel() 
         assert_eq!(stream_record.adapter_id, "host.exec.fabric");
         assert_eq!(stream_record.origin_module_id, "demo/FabricExecProgress@1");
         assert_eq!(stream_record.origin_instance_key, None);
-        assert_eq!(stream_record.effect_kind, "host.exec");
+        assert_eq!(stream_record.effect_op, "sys/host.exec@1");
         assert_eq!(stream_record.seq, 1);
         assert_eq!(stream_record.frame_kind, "host.exec.progress");
         let progress: HostExecProgressFrame =

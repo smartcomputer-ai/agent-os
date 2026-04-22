@@ -63,11 +63,11 @@ pub fn map_receipt(tool_name: &str, status: &str, payload: &[u8]) -> ToolMappedR
             "snapshot_hash": receipt.meta.snapshot_hash.map(|hash| hash.to_string()),
             "schema_count": manifest.schemas.len(),
             "module_count": manifest.modules.len(),
-            "effect_count": manifest.effects.len(),
+            "effect_count": manifest.ops.len(),
             "has_routing": manifest.routing.is_some(),
         },
         "modules": section(&manifest_json, "modules", json!([])),
-        "effects": section(&manifest_json, "effects", json!([])),
+        "effects": section(&manifest_json, "ops", json!([])),
         "routing": section(
             &manifest_json,
             "routing",
@@ -128,11 +128,10 @@ mod tests {
     fn map_receipt_shapes_manifest_summary() {
         let receipt = IntrospectManifestReceipt {
             manifest: serde_cbor::to_vec(&Manifest {
-                air_version: "1".into(),
+                air_version: "2".into(),
                 schemas: vec![],
                 modules: vec![],
-                effects: vec![],
-                effect_bindings: vec![],
+                ops: vec![],
                 secrets: vec![],
                 routing: None,
             })

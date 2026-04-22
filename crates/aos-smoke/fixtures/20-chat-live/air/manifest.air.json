@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/RunOutput@1"
@@ -38,7 +38,7 @@
   ],
   "modules": [
     {
-      "name": "demo/LiveChat@1"
+      "name": "demo/LiveChat_wasm@1"
     }
   ],
   "secrets": [
@@ -53,14 +53,16 @@
     "subscriptions": [
       {
         "event": "demo/LiveEvent@1",
-        "module": "demo/LiveChat@1"
+        "op": "demo/LiveChat@1"
       }
-    ],
-    "inboxes": []
+    ]
   },
-  "effects": [
+  "ops": [
     {
       "name": "sys/llm.generate@1"
+    },
+    {
+      "name": "demo/LiveChat@1"
     }
   ]
 }

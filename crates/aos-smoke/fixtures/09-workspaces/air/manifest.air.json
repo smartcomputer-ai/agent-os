@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/WorkspaceSummary@1"
@@ -74,33 +74,33 @@
   ],
   "modules": [
     {
-      "name": "demo/WorkspaceDemo@1"
+      "name": "demo/WorkspaceDemo_wasm@1"
     },
     {
-      "name": "sys/Workspace@1"
+      "name": "sys/workspace_wasm@1"
     },
     {
-      "name": "sys/HttpPublish@1"
+      "name": "sys/http_publish_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/WorkspaceEvent@1",
-        "module": "demo/WorkspaceDemo@1"
+        "op": "demo/WorkspaceDemo@1"
       },
       {
         "event": "sys/WorkspaceCommit@1",
-        "module": "sys/Workspace@1",
-        "key_field": "workspace"
+        "key_field": "workspace",
+        "op": "sys/Workspace@1"
       },
       {
         "event": "sys/HttpPublishSet@1",
-        "module": "sys/HttpPublish@1"
+        "op": "sys/HttpPublish@1"
       }
     ]
   },
-  "effects": [
+  "ops": [
     {
       "name": "sys/workspace.resolve@1"
     },
@@ -115,6 +115,15 @@
     },
     {
       "name": "sys/workspace.diff@1"
+    },
+    {
+      "name": "demo/WorkspaceDemo@1"
+    },
+    {
+      "name": "sys/Workspace@1"
+    },
+    {
+      "name": "sys/HttpPublish@1"
     }
   ]
 }

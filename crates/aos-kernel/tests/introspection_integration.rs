@@ -2,7 +2,7 @@
 
 #[path = "support/helpers.rs"]
 mod helpers;
-use helpers::fixtures;
+use helpers::fixtures::{self, WorkflowAbi};
 
 use aos_effects::{EffectKind, IntentBuilder, ReceiptStatus};
 use aos_kernel::StateReader;
@@ -23,7 +23,7 @@ fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
             ann: None,
         },
     );
-    workflow.abi.workflow = Some(aos_air_types::WorkflowAbi {
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/StoreState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
         context: Some(fixtures::schema("sys/WorkflowContext@1")),

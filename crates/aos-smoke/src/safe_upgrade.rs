@@ -252,12 +252,16 @@ fn load_upgrade_patch(example_root: &Path, host: &ExampleHost) -> Result<Manifes
         .put_blob(&wasm_bytes)
         .context("store v2 workflow wasm blob")?;
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash v2 workflow wasm")?;
-    let patched = patch_modules(&mut loaded, &wasm_hash_ref, |name, _| {
-        name == WORKFLOW_NAME_V2
-    });
+    let module_name = loaded
+        .ops
+        .get(WORKFLOW_NAME_V2)
+        .map(|op| op.implementation.module.as_str())
+        .unwrap_or(WORKFLOW_NAME_V2)
+        .to_string();
+    let patched = patch_modules(&mut loaded, &wasm_hash_ref, |name, _| name == module_name);
     if patched == 0 {
         return Err(anyhow!(
-            "module '{WORKFLOW_NAME_V2}' missing from v2 manifest"
+            "module '{module_name}' for workflow '{WORKFLOW_NAME_V2}' missing from v2 manifest"
         ));
     }
 

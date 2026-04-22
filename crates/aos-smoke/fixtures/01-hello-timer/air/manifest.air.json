@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "demo/TimerPc@1"
@@ -26,20 +26,23 @@
   ],
   "modules": [
     {
-      "name": "demo/TimerSM@1"
-    }
-  ],
-  "effects": [
-    {
-      "name": "sys/timer.set@1"
+      "name": "demo/TimerSM_wasm@1"
     }
   ],
   "routing": {
     "subscriptions": [
       {
         "event": "demo/TimerEvent@1",
-        "module": "demo/TimerSM@1"
+        "op": "demo/TimerSM@1"
       }
     ]
-  }
+  },
+  "ops": [
+    {
+      "name": "sys/timer.set@1"
+    },
+    {
+      "name": "demo/TimerSM@1"
+    }
+  ]
 }

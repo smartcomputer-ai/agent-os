@@ -1,6 +1,6 @@
 {
   "$kind": "manifest",
-  "air_version": "1",
+  "air_version": "2",
   "schemas": [
     {
       "name": "aos.agent/SessionId@1"
@@ -107,16 +107,30 @@
   ],
   "modules": [
     {
-      "name": "aos.agent/SessionWorkflow@1"
+      "name": "aos.agent/SessionWorkflow_wasm@1"
     },
     {
       "name": "aos.agent/SessionEventEcho@1"
     },
     {
-      "name": "sys/Workspace@1"
+      "name": "sys/workspace_wasm@1"
     }
   ],
-  "effects": [
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "aos.agent/SessionIngress@1",
+        "key_field": "session_id",
+        "op": "aos.agent/SessionWorkflow@1"
+      },
+      {
+        "event": "sys/WorkspaceCommit@1",
+        "key_field": "workspace",
+        "op": "sys/Workspace@1"
+      }
+    ]
+  },
+  "ops": [
     {
       "name": "sys/blob.put@1"
     },
@@ -197,21 +211,12 @@
     },
     {
       "name": "sys/workspace.diff@1"
+    },
+    {
+      "name": "aos.agent/SessionWorkflow@1"
+    },
+    {
+      "name": "sys/Workspace@1"
     }
-  ],
-  "routing": {
-    "subscriptions": [
-      {
-        "event": "aos.agent/SessionIngress@1",
-        "module": "aos.agent/SessionWorkflow@1",
-        "key_field": "session_id"
-      },
-      {
-        "event": "sys/WorkspaceCommit@1",
-        "module": "sys/Workspace@1",
-        "key_field": "workspace"
-      }
-    ],
-    "inboxes": []
-  }
+  ]
 }

@@ -9,7 +9,7 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const HTTP_REQUEST_EFFECT: &str = "http.request";
+const HTTP_REQUEST_EFFECT: &str = "sys/http.request@1";
 const FOLLOW_URL: &str = "https://example.com/follow.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -115,7 +115,7 @@ fn handle_receipt(
     if ctx.state.pending_request.is_none() {
         return Ok(());
     }
-    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
+    if envelope.effect_op != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
 

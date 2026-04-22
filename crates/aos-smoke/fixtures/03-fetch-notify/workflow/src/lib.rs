@@ -11,7 +11,7 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const HTTP_REQUEST_EFFECT: &str = "http.request";
+const HTTP_REQUEST_EFFECT: &str = "sys/http.request@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct FetchState {
@@ -131,7 +131,7 @@ fn handle_receipt(
     if ctx.state.pending_request.is_none() {
         return Ok(());
     }
-    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
+    if envelope.effect_op != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
 
@@ -212,7 +212,7 @@ mod tests {
             origin_instance_key: None,
             intent_id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                 .into(),
-            effect_kind: "http.request".into(),
+            effect_op: "sys/http.request@1".into(),
             params_hash: None,
             issuer_ref: None,
             receipt_payload: serde_cbor::to_vec(&receipt_payload).expect("payload"),

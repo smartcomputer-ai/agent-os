@@ -1295,7 +1295,7 @@ mod tests {
         .expect("write defs");
         std::fs::write(
             import_root.join("manifest.air.json"),
-            r#"{"$kind":"manifest","air_version":"v1","schemas":[],"modules":[],"plans":[],"effects":[],"secrets":[],"triggers":[]}"#,
+            r#"{"$kind":"manifest","air_version":"2","schemas":[],"modules":[],"ops":[],"secrets":[]}"#,
         )
         .expect("write manifest");
 

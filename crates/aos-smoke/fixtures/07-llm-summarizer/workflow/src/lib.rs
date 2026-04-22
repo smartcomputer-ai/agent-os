@@ -9,8 +9,8 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const HTTP_REQUEST_EFFECT: &str = "http.request";
-const LLM_GENERATE_EFFECT: &str = "llm.generate";
+const HTTP_REQUEST_EFFECT: &str = "sys/http.request@1";
+const LLM_GENERATE_EFFECT: &str = "sys/llm.generate@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct SummarizerState {
@@ -181,7 +181,7 @@ fn handle_receipt(
     if ctx.state.pending_request.is_none() {
         return Ok(());
     }
-    match envelope.effect_kind.as_str() {
+    match envelope.effect_op.as_str() {
         HTTP_REQUEST_EFFECT if matches!(ctx.state.pc, SummarizerPc::Fetching) => {
             let receipt: HttpRequestReceipt = envelope
                 .decode_receipt_payload()

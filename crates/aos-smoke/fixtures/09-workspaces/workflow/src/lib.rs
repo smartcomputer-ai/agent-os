@@ -9,11 +9,11 @@ use aos_wasm_sdk::{
 };
 use serde::{Deserialize, Serialize};
 
-const WORKSPACE_RESOLVE_EFFECT: &str = "workspace.resolve";
-const WORKSPACE_EMPTY_ROOT_EFFECT: &str = "workspace.empty_root";
-const WORKSPACE_WRITE_BYTES_EFFECT: &str = "workspace.write_bytes";
-const WORKSPACE_LIST_EFFECT: &str = "workspace.list";
-const WORKSPACE_DIFF_EFFECT: &str = "workspace.diff";
+const WORKSPACE_RESOLVE_EFFECT: &str = "sys/workspace.resolve@1";
+const WORKSPACE_EMPTY_ROOT_EFFECT: &str = "sys/workspace.empty_root@1";
+const WORKSPACE_WRITE_BYTES_EFFECT: &str = "sys/workspace.write_bytes@1";
+const WORKSPACE_LIST_EFFECT: &str = "sys/workspace.list@1";
+const WORKSPACE_DIFF_EFFECT: &str = "sys/workspace.diff@1";
 const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 
 aos_workflow!(WorkspaceDemo);
@@ -201,7 +201,7 @@ fn handle_receipt(
     let Some(step) = ctx.state.active_step.clone() else {
         return Ok(());
     };
-    if envelope.effect_kind != effect_kind_for_step(&step) {
+    if envelope.effect_op != effect_op_for_step(&step) {
         return Ok(());
     }
 
@@ -488,7 +488,7 @@ fn finalize_active_workspace(
     Ok(())
 }
 
-fn effect_kind_for_step(step: &WorkspaceStep) -> &'static str {
+fn effect_op_for_step(step: &WorkspaceStep) -> &'static str {
     match step {
         WorkspaceStep::Resolving => WORKSPACE_RESOLVE_EFFECT,
         WorkspaceStep::CreatingEmptyRoot => WORKSPACE_EMPTY_ROOT_EFFECT,

@@ -51,7 +51,7 @@ impl SessionEffectCommand {
         match self {
             Self::LlmGenerate { params, pending } => {
                 ctx.effects().emit_raw_with_issuer_ref(
-                    "llm.generate",
+                    "sys/llm.generate@1",
                     &params,
                     pending.cap_slot.as_deref(),
                     pending.issuer_ref.as_deref(),
@@ -73,7 +73,7 @@ impl SessionEffectCommand {
             }
             Self::BlobPut { params, pending } => {
                 ctx.effects().emit_raw_with_issuer_ref(
-                    "blob.put",
+                    "sys/blob.put@1",
                     &params,
                     pending.cap_slot.as_deref(),
                     pending.issuer_ref.as_deref(),
@@ -81,7 +81,7 @@ impl SessionEffectCommand {
             }
             Self::BlobGet { params, pending } => {
                 ctx.effects().emit_raw_with_issuer_ref(
-                    "blob.get",
+                    "sys/blob.get@1",
                     &params,
                     pending.cap_slot.as_deref(),
                     pending.issuer_ref.as_deref(),
@@ -175,7 +175,8 @@ pub fn request_llm(
     }
     let params = materialize_llm_generate_params_with_prompt_refs(&run_config, request.step)
         .map_err(map_llm_mapping_error)?;
-    let pending = begin_pending_effect(state, "llm.generate", &params, request.cap_slot, None);
+    let pending =
+        begin_pending_effect(state, "sys/llm.generate@1", &params, request.cap_slot, None);
     out.effects.push(SessionEffectCommand::LlmGenerate {
         params: params.clone(),
         pending: pending.clone(),

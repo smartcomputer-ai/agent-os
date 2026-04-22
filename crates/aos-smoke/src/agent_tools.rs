@@ -1345,11 +1345,10 @@ fn smoke_read_meta() -> Result<ReadMeta> {
 
 fn smoke_manifest() -> Manifest {
     Manifest {
-        air_version: "1".into(),
+        air_version: aos_air_types::CURRENT_AIR_VERSION.into(),
         schemas: vec![],
         modules: vec![],
-        effects: vec![],
-        effect_bindings: vec![],
+        ops: vec![],
         secrets: vec![],
         routing: None,
     }
