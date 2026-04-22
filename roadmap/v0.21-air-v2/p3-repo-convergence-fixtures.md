@@ -42,13 +42,13 @@ exercise the op-centered runtime.
   - HTTP demos
   - Fabric demos
   - agent demos
-- [ ] Update CLI and query rendering:
+- [x] Update CLI and query rendering:
   - list/show `defop`
   - show workflow op and effect op counts
   - remove effect binding output
   - route summaries name target ops
   - governance summaries report `defop` changes
-- [ ] Update specs to match the canonical target:
+- [x] Update specs to match the canonical target:
   - `spec/03-air.md`
   - `spec/04-workflows.md`
   - `spec/05-effects.md`
@@ -88,10 +88,38 @@ exercise the op-centered runtime.
   smoke examples run end to end.
 - [x] Active smoke/agent manifest fixtures no longer contain `manifest.effects`,
   `manifest.effect_bindings`, `routing.module`, or `routing.inboxes`.
-- [ ] Repo-wide naming cleanup remains: some internal structs/tests still use transitional names such
-  as `effect_kind`, and durable receipt records still carry `adapter_id` where that is still part of
+- [x] CLI/query rendering cut completed for active world defs/state paths and agent inspect-world
+  output:
+  - `aos world defs` help now names `op`/`secret` instead of removed cap/effect/policy kinds.
+  - `aos world state ls` enumerates workflow ops instead of workflow modules.
+  - bundle upload sends `DefOp` nodes and resolves WASM hashes from v2 module runtime artifacts.
+  - agent inspect-world reports `op_count`/`ops` and no longer emits `effects` or
+    `effect_bindings`.
+- [x] Final CLI/query rendering items are complete:
+  - `/v1/worlds/{world}/manifest` includes an op-centered summary with total ops, workflow op
+    count, effect op count, and route summaries keyed by target `op`.
+  - `aos world patch` and `aos world gov propose --patch-file <json>` include a patch summary that
+    reports `defop` changes and routing targets by `op`.
+  - Focused tests cover manifest op counts, routing summaries, and patch `defop` change summaries.
+- [x] Scoped active-surface sweep is clean for `effect_bindings`, `manifest.effects`,
+  `routing.module`, `routing.inboxes`, `defeffect`, `effect_kind`, `effect kind`, and
+  `strict_effect_bindings` across CLI/node/agent/smoke/authoring paths touched by this cut.
+- [x] Spec cleanup completed:
+  - `spec/03-air.md` now describes AIR v2 root forms, `defop`, `manifest.ops`, op-based routing,
+    effect op identity, v2 patch operations, and op-centered journal records.
+  - `spec/04-workflows.md` now describes workflow ops, `workflow.effects_emitted`, keyed workflow
+    routing by `routing.subscriptions[].op`, and op-based receipt continuation routing.
+  - `spec/05-effects.md` now describes effect ops, op-based intent hashing/admission, executor
+    identity, and durable open-work semantics.
+  - `spec/01-overview.md`, `spec/02-architecture.md`, and `spec/README.md` were aligned to AIR v2
+    terminology.
+  - Active JSON Schemas and built-in defs were validated as JSON; the built-in defs shelf is clean
+    for `effect_kind`, `defeffect`, `manifest.effects`, `effect_bindings`, `routing.module`, and
+    `routing.inboxes`.
+- [ ] Repo-wide naming cleanup remains: older roadmap notes, compatibility crates, SDK-local
+  pending-effect fields, and some durable receipt types/tests still use transitional terms or
+  compatibility fields; durable receipt records still carry `adapter_id` where that is still part of
   the current effect receipt type.
-- [ ] Spec and CLI/query rendering cleanup remain.
 - [x] Verification completed for this convergence slice:
   - `cargo build -p aos-sys --target wasm32-unknown-unknown`
   - `cargo run -p aos-smoke -- all`
@@ -101,6 +129,19 @@ exercise the op-centered runtime.
   - `cargo test -p aos-kernel --tests`
   - `cargo test -p aos-node --tests --no-run`
   - `cargo test -p aos-smoke --no-run`
+- [x] Verification completed for the CLI/query rendering cut:
+  - `cargo test -p aos-cli`
+  - `cargo test -p aos-kernel governance_effects::tests::patch_summary_reports_defop_changes_and_routing_subscription_section`
+  - `cargo test -p aos-node manifest_summary_counts_workflow_and_effect_ops_and_routes_by_op`
+  - `cargo test -p aos-node --tests --no-run`
+  - `cargo test -p aos-agent`
+  - `cargo run -p aos-smoke -- all`
+  - `cargo run -p aos-smoke -- agent-tools`
+- [x] Verification completed for the spec cleanup cut:
+  - `jq empty` over `spec/schemas/*.json` and `spec/defs/*.json`
+  - stale-term sweep over active specs and `spec/schemas`; remaining active-spec hits are explicit
+    removed/no-compatibility notes in `spec/03-air.md`
+  - stale-term sweep over `spec/defs`
 
 ## Repository Sweep Targets
 

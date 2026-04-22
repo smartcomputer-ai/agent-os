@@ -99,8 +99,7 @@ Note: since this is a bigger refactor, it is acceptable to have modules breaking
   workflow/effect ops and split workflow op identity from runtime module identity.
 - [x] Rename/remove stale node compatibility names that still say `strict_effect_bindings`.
   Production dispatch no longer reads `manifest.effect_bindings`; runtime config now uses
-  `strict_op_routes`. The old `AOS_STRICT_EFFECT_BINDINGS` env var remains only as a compatibility
-  alias.
+  `strict_op_routes`.
 
 ## Runtime Invariants
 

@@ -1,6 +1,6 @@
 use super::{build_receipt, failed_receipt};
 use crate::contracts::{ToolCallStatus, ToolMapper};
-use crate::tools::types::{ToolEffectKind, ToolMappedReceipt, ToolRuntimeDelta};
+use crate::tools::types::{ToolEffectOp, ToolMappedReceipt, ToolRuntimeDelta};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -22,7 +22,7 @@ const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 #[derive(Debug)]
 pub enum WorkspaceAction {
     Emit {
-        effect_kind: ToolEffectKind,
+        effect_op: ToolEffectOp,
         cap_slot: &'static str,
         params_json: Value,
         state_json: String,
@@ -638,13 +638,13 @@ fn advance_state(
 ) -> Result<WorkspaceAction, crate::tools::types::ToolMappingError> {
     match state {
         WorkspaceState::ListWorkspaces => emit(
-            ToolEffectKind::IntrospectListCells,
+            ToolEffectOp::IntrospectListCells,
             "query",
             json!({ "workflow": WORKSPACE_WORKFLOW_NAME }),
             WorkspaceState::ListWorkspaces,
         ),
         WorkspaceState::InspectResolve { workspace, version } => emit(
-            ToolEffectKind::WorkspaceResolve,
+            ToolEffectOp::WorkspaceResolve,
             "workspace",
             resolve_params(workspace.as_str(), version),
             WorkspaceState::InspectResolve { workspace, version },
@@ -656,7 +656,7 @@ fn advance_state(
             scope,
             limit,
         } => emit(
-            ToolEffectKind::WorkspaceResolve,
+            ToolEffectOp::WorkspaceResolve,
             "workspace",
             resolve_params(workspace.as_str(), version),
             WorkspaceState::ListResolve {
@@ -673,7 +673,7 @@ fn advance_state(
             scope,
             limit,
         } => emit(
-            ToolEffectKind::WorkspaceList,
+            ToolEffectOp::WorkspaceList,
             "workspace",
             json!({
                 "root_hash": resolved.root_hash,
@@ -695,7 +695,7 @@ fn advance_state(
             path,
             range,
         } => emit(
-            ToolEffectKind::WorkspaceResolve,
+            ToolEffectOp::WorkspaceResolve,
             "workspace",
             resolve_params(workspace.as_str(), version),
             WorkspaceState::ReadResolve {
@@ -710,7 +710,7 @@ fn advance_state(
             path,
             range,
         } => emit(
-            ToolEffectKind::WorkspaceReadRef,
+            ToolEffectOp::WorkspaceReadRef,
             "workspace",
             json!({
                 "root_hash": resolved.root_hash,
@@ -728,7 +728,7 @@ fn advance_state(
             range,
             entry,
         } => emit(
-            ToolEffectKind::WorkspaceReadBytes,
+            ToolEffectOp::WorkspaceReadBytes,
             "workspace",
             json!({
                 "root_hash": resolved.root_hash,
@@ -747,7 +747,7 @@ fn advance_state(
             version,
             operations,
         } => emit(
-            ToolEffectKind::WorkspaceResolve,
+            ToolEffectOp::WorkspaceResolve,
             "workspace",
             resolve_params(workspace.as_str(), version),
             WorkspaceState::ApplyResolve {
@@ -760,7 +760,7 @@ fn advance_state(
             workspace,
             operations,
         } => emit(
-            ToolEffectKind::WorkspaceEmptyRoot,
+            ToolEffectOp::WorkspaceEmptyRoot,
             "workspace",
             json!({ "workspace": workspace }),
             WorkspaceState::ApplyEmptyRoot {
@@ -793,10 +793,10 @@ fn advance_state(
                 let op = operations[next_index].clone();
                 match apply_effect_for_op(current_root_hash.as_str(), &op)? {
                     ApplyEffect::Effect {
-                        effect_kind,
+                        effect_op,
                         params_json,
                     } => emit(
-                        effect_kind,
+                        effect_op,
                         "workspace",
                         params_json,
                         WorkspaceState::ApplyRun {
@@ -840,7 +840,7 @@ fn advance_state(
             mode,
             blob_hash,
         } => emit(
-            ToolEffectKind::WorkspaceWriteRef,
+            ToolEffectOp::WorkspaceWriteRef,
             "workspace",
             json!({
                 "root_hash": current_root_hash,
@@ -884,7 +884,7 @@ fn advance_state(
                     )
                 })?;
                 emit(
-                    ToolEffectKind::WorkspaceResolve,
+                    ToolEffectOp::WorkspaceResolve,
                     "workspace",
                     resolve_params(workspace.as_str(), left.version),
                     WorkspaceState::DiffResolveLeft {
@@ -922,7 +922,7 @@ fn advance_state(
                     )
                 })?;
                 emit(
-                    ToolEffectKind::WorkspaceResolve,
+                    ToolEffectOp::WorkspaceResolve,
                     "workspace",
                     resolve_params(workspace.as_str(), right.version),
                     WorkspaceState::DiffResolveRight {
@@ -938,7 +938,7 @@ fn advance_state(
             right,
             prefix,
         } => emit(
-            ToolEffectKind::WorkspaceDiff,
+            ToolEffectOp::WorkspaceDiff,
             "workspace",
             json!({
                 "root_a": left.root_hash,
@@ -1527,7 +1527,7 @@ fn resolve_ref_receipt(
 
 enum ApplyEffect {
     Effect {
-        effect_kind: ToolEffectKind,
+        effect_op: ToolEffectOp,
         params_json: Value,
     },
     BlobPut {
@@ -1543,7 +1543,7 @@ fn apply_effect_for_op(
 ) -> Result<ApplyEffect, crate::tools::types::ToolMappingError> {
     match op.op.as_str() {
         "remove" => Ok(ApplyEffect::Effect {
-            effect_kind: ToolEffectKind::WorkspaceRemove,
+            effect_op: ToolEffectOp::WorkspaceRemove,
             params_json: json!({
                 "root_hash": current_root_hash,
                 "path": op.path,
@@ -1572,7 +1572,7 @@ fn apply_effect_for_op(
             }
             if let Some(blob_hash) = op.blob_hash.as_ref() {
                 return Ok(ApplyEffect::Effect {
-                    effect_kind: ToolEffectKind::WorkspaceWriteRef,
+                    effect_op: ToolEffectOp::WorkspaceWriteRef,
                     params_json: json!({
                         "root_hash": current_root_hash,
                         "path": op.path,
@@ -1676,7 +1676,7 @@ fn parse_args<T: for<'de> Deserialize<'de>>(
 }
 
 fn emit(
-    effect_kind: ToolEffectKind,
+    effect_op: ToolEffectOp,
     cap_slot: &'static str,
     params_json: Value,
     state: WorkspaceState,
@@ -1687,7 +1687,7 @@ fn emit(
         ))
     })?;
     Ok(WorkspaceAction::Emit {
-        effect_kind,
+        effect_op,
         cap_slot,
         params_json,
         state_json,

@@ -177,7 +177,7 @@ fn drive_retry_flow<S: Store + 'static>(kernel: &mut Kernel<S>) -> Result<()> {
                     })?;
                     kernel.tick_until_idle()?;
                 }
-                other => return Err(anyhow!("unexpected effect kind {other}")),
+                other => return Err(anyhow!("unexpected effect op {other}")),
             }
         }
         safety += 1;

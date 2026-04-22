@@ -1,7 +1,7 @@
 use super::{build_receipt, failed_receipt, optional_string, parse_json_object, require_string};
 use crate::contracts::ToolCallStatus;
 use crate::tools::types::{
-    ToolEffectKind, ToolMappedArgs, ToolMappedReceipt, ToolMappingError, ToolRuntimeDelta,
+    ToolEffectOp, ToolMappedArgs, ToolMappedReceipt, ToolMappingError, ToolRuntimeDelta,
 };
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -25,13 +25,13 @@ pub fn map_args(arguments_json: &str) -> Result<ToolMappedArgs, ToolMappingError
             if let Some(key) = decode_cell_key(&args)? {
                 out.insert("key".into(), bytes_json(&key));
             }
-            Ok(ToolMappedArgs::with_effect_kind(
-                ToolEffectKind::IntrospectWorkflowState,
+            Ok(ToolMappedArgs::with_effect_op(
+                ToolEffectOp::IntrospectWorkflowState,
                 Value::Object(out),
             ))
         }
-        "cells" => Ok(ToolMappedArgs::with_effect_kind(
-            ToolEffectKind::IntrospectListCells,
+        "cells" => Ok(ToolMappedArgs::with_effect_op(
+            ToolEffectOp::IntrospectListCells,
             json!({
                 "workflow": workflow
             }),
@@ -276,12 +276,9 @@ mod tests {
     use aos_effect_types::HashRef;
 
     #[test]
-    fn cells_view_overrides_effect_kind() {
+    fn cells_view_overrides_effect_op() {
         let mapped = map_args(r#"{"workflow":"demo/Flow@1","view":"cells"}"#).expect("map args");
-        assert_eq!(
-            mapped.effect_kind,
-            Some(ToolEffectKind::IntrospectListCells)
-        );
+        assert_eq!(mapped.effect_op, Some(ToolEffectOp::IntrospectListCells));
         assert_eq!(mapped.params_json["workflow"], "demo/Flow@1");
     }
 

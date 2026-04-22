@@ -69,6 +69,18 @@ impl EffectKind {
         Self::new(Self::LLM_GENERATE)
     }
 
+    pub fn host_session_open() -> Self {
+        Self::new(Self::HOST_SESSION_OPEN)
+    }
+
+    pub fn host_exec() -> Self {
+        Self::new(Self::HOST_EXEC)
+    }
+
+    pub fn host_session_signal() -> Self {
+        Self::new(Self::HOST_SESSION_SIGNAL)
+    }
+
     pub fn workspace_resolve() -> Self {
         Self::new(Self::WORKSPACE_RESOLVE)
     }

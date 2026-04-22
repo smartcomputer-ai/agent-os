@@ -5,7 +5,7 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(tag = "$tag", content = "$value")]
-pub enum ToolEffectKind {
+pub enum ToolEffectOp {
     HostSessionOpen,
     HostExec,
     HostSessionSignal,
@@ -32,7 +32,7 @@ pub enum ToolEffectKind {
     WorkspaceDiff,
 }
 
-impl ToolEffectKind {
+impl ToolEffectOp {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::HostSessionOpen => "sys/host.session.open@1",
@@ -66,21 +66,21 @@ impl ToolEffectKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolMappedArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_kind: Option<ToolEffectKind>,
+    pub effect_op: Option<ToolEffectOp>,
     pub params_json: Value,
 }
 
 impl ToolMappedArgs {
     pub fn params(params_json: Value) -> Self {
         Self {
-            effect_kind: None,
+            effect_op: None,
             params_json,
         }
     }
 
-    pub fn with_effect_kind(effect_kind: ToolEffectKind, params_json: Value) -> Self {
+    pub fn with_effect_op(effect_op: ToolEffectOp, params_json: Value) -> Self {
         Self {
-            effect_kind: Some(effect_kind),
+            effect_op: Some(effect_op),
             params_json,
         }
     }
@@ -158,29 +158,29 @@ impl ToolMappingError {
     }
 }
 
-pub fn mapper_effect_kind(mapper: ToolMapper) -> ToolEffectKind {
+pub fn mapper_effect_op(mapper: ToolMapper) -> ToolEffectOp {
     match mapper {
-        ToolMapper::HostSessionOpen => ToolEffectKind::HostSessionOpen,
-        ToolMapper::HostExec => ToolEffectKind::HostExec,
-        ToolMapper::HostSessionSignal => ToolEffectKind::HostSessionSignal,
-        ToolMapper::HostFsReadFile => ToolEffectKind::HostFsReadFile,
-        ToolMapper::HostFsWriteFile => ToolEffectKind::HostFsWriteFile,
-        ToolMapper::HostFsEditFile => ToolEffectKind::HostFsEditFile,
-        ToolMapper::HostFsApplyPatch => ToolEffectKind::HostFsApplyPatch,
-        ToolMapper::HostFsGrep => ToolEffectKind::HostFsGrep,
-        ToolMapper::HostFsGlob => ToolEffectKind::HostFsGlob,
-        ToolMapper::HostFsStat => ToolEffectKind::HostFsStat,
-        ToolMapper::HostFsExists => ToolEffectKind::HostFsExists,
-        ToolMapper::HostFsListDir => ToolEffectKind::HostFsListDir,
-        ToolMapper::InspectWorld => ToolEffectKind::IntrospectManifest,
-        ToolMapper::InspectWorkflow => ToolEffectKind::IntrospectWorkflowState,
-        ToolMapper::WorkspaceInspect => ToolEffectKind::WorkspaceResolve,
-        ToolMapper::WorkspaceList => ToolEffectKind::WorkspaceList,
-        ToolMapper::WorkspaceRead => ToolEffectKind::WorkspaceReadRef,
-        ToolMapper::WorkspaceApply => ToolEffectKind::WorkspaceWriteBytes,
-        ToolMapper::WorkspaceDiff => ToolEffectKind::WorkspaceDiff,
+        ToolMapper::HostSessionOpen => ToolEffectOp::HostSessionOpen,
+        ToolMapper::HostExec => ToolEffectOp::HostExec,
+        ToolMapper::HostSessionSignal => ToolEffectOp::HostSessionSignal,
+        ToolMapper::HostFsReadFile => ToolEffectOp::HostFsReadFile,
+        ToolMapper::HostFsWriteFile => ToolEffectOp::HostFsWriteFile,
+        ToolMapper::HostFsEditFile => ToolEffectOp::HostFsEditFile,
+        ToolMapper::HostFsApplyPatch => ToolEffectOp::HostFsApplyPatch,
+        ToolMapper::HostFsGrep => ToolEffectOp::HostFsGrep,
+        ToolMapper::HostFsGlob => ToolEffectOp::HostFsGlob,
+        ToolMapper::HostFsStat => ToolEffectOp::HostFsStat,
+        ToolMapper::HostFsExists => ToolEffectOp::HostFsExists,
+        ToolMapper::HostFsListDir => ToolEffectOp::HostFsListDir,
+        ToolMapper::InspectWorld => ToolEffectOp::IntrospectManifest,
+        ToolMapper::InspectWorkflow => ToolEffectOp::IntrospectWorkflowState,
+        ToolMapper::WorkspaceInspect => ToolEffectOp::WorkspaceResolve,
+        ToolMapper::WorkspaceList => ToolEffectOp::WorkspaceList,
+        ToolMapper::WorkspaceRead => ToolEffectOp::WorkspaceReadRef,
+        ToolMapper::WorkspaceApply => ToolEffectOp::WorkspaceWriteBytes,
+        ToolMapper::WorkspaceDiff => ToolEffectOp::WorkspaceDiff,
         ToolMapper::WorkspaceCommit => {
-            panic!("workspace commit does not map to an effect kind")
+            panic!("workspace commit does not map to an effect op")
         }
     }
 }

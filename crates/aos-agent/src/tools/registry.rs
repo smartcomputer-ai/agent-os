@@ -109,7 +109,7 @@ fn host_tool(
         args_schema_json: args_schema_json.to_string(),
         mapper,
         executor: ToolExecutor::Effect {
-            effect_kind: tool_id.to_string(),
+            effect_op: tool_id.to_string(),
             cap_slot: Some("host".into()),
         },
         availability_rules: if requires_host_session {
@@ -146,7 +146,7 @@ fn effect_tool(
         args_schema_json: args_schema_json.to_string(),
         mapper,
         executor: ToolExecutor::Effect {
-            effect_kind: tool_id.to_string(),
+            effect_op: tool_id.to_string(),
             cap_slot: Some(cap_slot.into()),
         },
         availability_rules: vec![ToolAvailabilityRule::Always],
@@ -305,7 +305,7 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
         effect_tool(
             "introspect.manifest",
             "inspect_world",
-            "Inspect world summary, modules, effects, routing, and manifest metadata.",
+            "Inspect world summary, modules, ops, routing, and manifest metadata.",
             r#"{"type":"object","additionalProperties":false,"properties":{}}"#,
             ToolMapper::InspectWorld,
             "query",

@@ -258,7 +258,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         "unexpected execution grouping: {:?}",
         batch.plan.execution_plan.groups
     );
-    let expected_kinds = BTreeSet::from([
+    let expected_ops = BTreeSet::from([
         TOOL_FS_WRITE.to_string(),
         TOOL_FS_EXISTS.to_string(),
         TOOL_FS_READ.to_string(),
@@ -276,9 +276,9 @@ pub fn run(example_root: &Path) -> Result<()> {
         TOOL_WORKSPACE_DIFF.to_string(),
     ]);
     ensure!(
-        script.seen_tool_effect_kinds == expected_kinds,
-        "unexpected seen tool kinds: {:?}",
-        script.seen_tool_effect_kinds
+        script.seen_tool_effect_ops == expected_ops,
+        "unexpected seen tool ops: {:?}",
+        script.seen_tool_effect_ops
     );
     ensure!(
         script.llm_turn == 2,
@@ -299,9 +299,9 @@ pub fn run(example_root: &Path) -> Result<()> {
     );
 
     println!(
-        "   tool flow validated: llm_turns={} kinds={}",
+        "   tool flow validated: llm_turns={} ops={}",
         script.llm_turn,
-        script.seen_tool_effect_kinds.len()
+        script.seen_tool_effect_ops.len()
     );
 
     let key = host.single_keyed_cell_key()?;
@@ -313,7 +313,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 #[derive(Debug, Default)]
 struct AgentToolsScript {
     llm_turn: u64,
-    seen_tool_effect_kinds: BTreeSet<String>,
+    seen_tool_effect_ops: BTreeSet<String>,
     opened_session_id: Option<String>,
     workspace_write_ref_calls: u64,
 }
@@ -345,7 +345,7 @@ impl AgentToolsScript {
             TOOL_WORKSPACE_WRITE_BYTES => self.handle_workspace_write_bytes(intent),
             TOOL_WORKSPACE_WRITE_REF => self.handle_workspace_write_ref(intent),
             TOOL_WORKSPACE_DIFF => self.handle_workspace_diff(intent),
-            other => bail!("unexpected effect kind in agent-tools smoke: {other}"),
+            other => bail!("unexpected effect op in agent-tools smoke: {other}"),
         }
     }
 
@@ -453,7 +453,7 @@ impl AgentToolsScript {
         let _params: HostSessionOpenParams = serde_cbor::from_slice(&intent.params_cbor)
             .context("decode host.session.open params")?;
 
-        self.seen_tool_effect_kinds.insert(TOOL_SESSION_OPEN.into());
+        self.seen_tool_effect_ops.insert(TOOL_SESSION_OPEN.into());
         self.opened_session_id = Some(SCRIPTED_SESSION_ID.into());
 
         ok_receipt(
@@ -486,7 +486,7 @@ impl AgentToolsScript {
             "host.fs.write_file params missing content field"
         );
 
-        self.seen_tool_effect_kinds.insert(TOOL_FS_WRITE.into());
+        self.seen_tool_effect_ops.insert(TOOL_FS_WRITE.into());
         ok_receipt(
             intent,
             &HostFsWriteFileReceipt {
@@ -512,7 +512,7 @@ impl AgentToolsScript {
             path
         );
 
-        self.seen_tool_effect_kinds.insert(TOOL_FS_EXISTS.into());
+        self.seen_tool_effect_ops.insert(TOOL_FS_EXISTS.into());
         ok_receipt(
             intent,
             &HostFsExistsReceipt {
@@ -536,7 +536,7 @@ impl AgentToolsScript {
             path
         );
 
-        self.seen_tool_effect_kinds.insert(TOOL_FS_READ.into());
+        self.seen_tool_effect_ops.insert(TOOL_FS_READ.into());
         ok_receipt(
             intent,
             &json!({
@@ -565,7 +565,7 @@ impl AgentToolsScript {
             path
         );
 
-        self.seen_tool_effect_kinds.insert(TOOL_FS_LIST.into());
+        self.seen_tool_effect_ops.insert(TOOL_FS_LIST.into());
         ok_receipt(
             intent,
             &HostFsListDirReceipt {
@@ -603,7 +603,7 @@ impl AgentToolsScript {
             argv
         );
 
-        self.seen_tool_effect_kinds.insert(TOOL_EXEC.into());
+        self.seen_tool_effect_ops.insert(TOOL_EXEC.into());
         ok_receipt(
             intent,
             &HostExecReceipt {
@@ -633,7 +633,7 @@ impl AgentToolsScript {
             params.consistency
         );
 
-        self.seen_tool_effect_kinds
+        self.seen_tool_effect_ops
             .insert(TOOL_INTROSPECT_MANIFEST.into());
         ok_receipt(
             intent,
@@ -665,7 +665,7 @@ impl AgentToolsScript {
             params.key
         );
 
-        self.seen_tool_effect_kinds
+        self.seen_tool_effect_ops
             .insert(TOOL_INTROSPECT_WORKFLOW_STATE.into());
         ok_receipt(
             intent,
@@ -684,7 +684,7 @@ impl AgentToolsScript {
         let params: IntrospectListCellsParams = serde_cbor::from_slice(&intent.params_cbor)
             .context("decode introspect.list_cells params")?;
         if params.workflow == WORKFLOW_NAME {
-            self.seen_tool_effect_kinds
+            self.seen_tool_effect_ops
                 .insert(TOOL_INTROSPECT_LIST_CELLS.into());
             return ok_receipt(
                 intent,
@@ -709,7 +709,7 @@ impl AgentToolsScript {
             params.workflow
         );
 
-        self.seen_tool_effect_kinds
+        self.seen_tool_effect_ops
             .insert(TOOL_INTROSPECT_LIST_CELLS.into());
         ok_receipt(
             intent,
@@ -737,7 +737,7 @@ impl AgentToolsScript {
     fn handle_workspace_resolve(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
         let params: WorkspaceResolveParams = serde_cbor::from_slice(&intent.params_cbor)
             .context("decode workspace.resolve params")?;
-        self.seen_tool_effect_kinds
+        self.seen_tool_effect_ops
             .insert(TOOL_WORKSPACE_RESOLVE.into());
         let receipt = match params.workspace.as_str() {
             WORKSPACE_ALPHA => WorkspaceResolveReceipt {
@@ -771,7 +771,7 @@ impl AgentToolsScript {
             "expected empty_root for draft, got {}",
             params.workspace
         );
-        self.seen_tool_effect_kinds
+        self.seen_tool_effect_ops
             .insert(TOOL_WORKSPACE_EMPTY_ROOT.into());
         ok_receipt(
             intent,
@@ -796,8 +796,7 @@ impl AgentToolsScript {
             "expected workspace.list path docs, got {:?}",
             params.path
         );
-        self.seen_tool_effect_kinds
-            .insert(TOOL_WORKSPACE_LIST.into());
+        self.seen_tool_effect_ops.insert(TOOL_WORKSPACE_LIST.into());
         ok_receipt(
             intent,
             &WorkspaceListReceipt {
@@ -831,7 +830,7 @@ impl AgentToolsScript {
             WORKSPACE_FILE_PATH,
             params.path
         );
-        self.seen_tool_effect_kinds
+        self.seen_tool_effect_ops
             .insert(TOOL_WORKSPACE_READ_REF.into());
         ok_receipt(
             intent,
@@ -862,7 +861,7 @@ impl AgentToolsScript {
             WORKSPACE_FILE_PATH,
             params.path
         );
-        self.seen_tool_effect_kinds
+        self.seen_tool_effect_ops
             .insert(TOOL_WORKSPACE_READ_BYTES.into());
         ok_receipt(
             intent,
@@ -885,7 +884,7 @@ impl AgentToolsScript {
             "expected workspace.write_bytes path draft.txt, got {}",
             params.path
         );
-        self.seen_tool_effect_kinds
+        self.seen_tool_effect_ops
             .insert(TOOL_WORKSPACE_WRITE_BYTES.into());
         ok_receipt(
             intent,
@@ -902,7 +901,7 @@ impl AgentToolsScript {
     fn handle_workspace_write_ref(&mut self, intent: EffectIntent) -> Result<EffectReceipt> {
         let params: WorkspaceWriteRefParams = serde_cbor::from_slice(&intent.params_cbor)
             .context("decode workspace.write_ref params")?;
-        self.seen_tool_effect_kinds
+        self.seen_tool_effect_ops
             .insert(TOOL_WORKSPACE_WRITE_REF.into());
         self.workspace_write_ref_calls = self.workspace_write_ref_calls.saturating_add(1);
 
@@ -974,8 +973,7 @@ impl AgentToolsScript {
             BETA_ROOT_HASH,
             params.root_b
         );
-        self.seen_tool_effect_kinds
-            .insert(TOOL_WORKSPACE_DIFF.into());
+        self.seen_tool_effect_ops.insert(TOOL_WORKSPACE_DIFF.into());
         ok_receipt(
             intent,
             &WorkspaceDiffReceipt {

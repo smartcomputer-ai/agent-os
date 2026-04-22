@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
-use aos_air_types::{AirNode, DefSecret, Manifest, ModuleKind, SecretEntry};
+use aos_air_types::{AirNode, DefSecret, Manifest, OpKind};
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effect_types::{
     GovApplyReceipt, GovApproveParams, GovApproveReceipt, GovDecision, GovPatchInput,
@@ -133,7 +133,7 @@ enum WorldDefsCommand {
 
 #[derive(Args, Debug)]
 struct WorldDefsListArgs {
-    /// Comma-separated def kinds to include: `schema`, `module`, `cap`, `effect`, or `policy`.
+    /// Comma-separated def kinds to include: `schema`, `module`, `op`, or `secret`.
     #[arg(long)]
     kinds: Option<String>,
     /// Filter def names by prefix.
@@ -143,7 +143,7 @@ struct WorldDefsListArgs {
 
 #[derive(Args, Debug)]
 struct WorldDefsGetArgs {
-    /// Def kind: `schema`, `module`, `cap`, `effect`, or `policy`.
+    /// Def kind: `schema`, `module`, `op`, or `secret`.
     kind: String,
     /// Def name to fetch.
     name: String,
@@ -158,7 +158,7 @@ struct WorldStateArgs {
 
 #[derive(Subcommand, Debug)]
 enum WorldStateCommand {
-    /// List workflow modules that expose state in the current world.
+    /// List workflow ops that expose state in the current world.
     Ls,
     /// Read one workflow state value by key.
     Get(WorldStateGetArgs),
@@ -422,7 +422,7 @@ struct WorldTraceSummaryArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Compare the local authored bundle against the selected node world's current manifest, build a governance patch document, submit governance propose, and optionally chain shadow, approve, and apply. Use this for manifest-level changes such as defs, modules, routing, effects, and secrets."
+    long_about = "Compare the local authored bundle against the selected node world's current manifest, build a governance patch document, submit governance propose, and optionally chain shadow, approve, and apply. Use this for manifest-level changes such as defs, modules, routing, ops, and secrets."
 )]
 struct WorldPatchArgs {
     /// Local world root to build and diff against the node manifest.
@@ -878,21 +878,21 @@ async fn handle_state(
             )
             .context("decode manifest response")?;
             let mut workflows = Vec::new();
-            for module in manifest.manifest.modules {
-                let kind = encode_path_segment("module");
-                let name = encode_path_segment(module.name.as_str());
+            for op in manifest.manifest.ops {
+                let kind = encode_path_segment("op");
+                let name = encode_path_segment(op.name.as_str());
                 let def: DefEnvelope = serde_json::from_value(
                     client
                         .get_json(&format!("/v1/worlds/{world}/defs/{kind}/{name}"), &[])
                         .await?,
                 )
-                .with_context(|| format!("decode module def {}", module.name.as_str()))?;
+                .with_context(|| format!("decode op def {}", op.name.as_str()))?;
                 if matches!(
                     def.def,
-                    AirNode::Defmodule(ref module_def)
-                        if matches!(module_def.module_kind, ModuleKind::Workflow)
+                    AirNode::Defop(ref op_def)
+                        if matches!(op_def.op_kind, OpKind::Workflow)
                 ) {
-                    workflows.push(module.name.to_string());
+                    workflows.push(op.name.to_string());
                 }
             }
             workflows.sort();
@@ -988,9 +988,11 @@ async fn handle_gov(
         WorldGovCommand::Propose(args) => {
             let bytes = fs::read(&args.patch_file)
                 .with_context(|| format!("read {}", args.patch_file.display()))?;
+            let mut patch_summary = None;
             let params = if args.patch_file.extension().and_then(|ext| ext.to_str()) == Some("json")
             {
                 let patch: Value = serde_json::from_slice(&bytes).context("parse patch json")?;
+                patch_summary = Some(summarize_patch_document_value(&patch));
                 let patch_hash = upload_patch_json(client, &world, &patch).await?;
                 GovProposeParams {
                     patch: GovPatchInput::PatchBlobRef {
@@ -1014,12 +1016,15 @@ async fn handle_gov(
                 }
             };
             let body = serde_json::to_value(&params).context("encode governance propose body")?;
-            let data = client
+            let mut data = client
                 .post_json(
                     &format!("/v1/worlds/{world}/governance/propose"),
                     &merge_actor(args.actor, body),
                 )
                 .await?;
+            if let Some(summary) = patch_summary {
+                insert_json_field(&mut data, "patch_summary", summary);
+            }
             print_success(output, data, None, vec![])
         }
         WorldGovCommand::Shadow(args) => {
@@ -1197,11 +1202,12 @@ async fn handle_patch(
     let uploaded = upload_bundle(client, &store, &bundle, warnings, Some(&dirs)).await?;
     print_verbose(output, "building governance patch document");
     let patch = build_patch(&remote, &bundle)?;
+    let patch_summary = summarize_patch_document_value(&patch);
     let patch_hash = upload_patch_json(client, &world, &patch).await?;
     print_verbose(output, "submitting governance propose command");
     let propose_body = serde_json::to_value(&GovProposeParams {
         patch: GovPatchInput::PatchBlobRef {
-            blob_ref: HashRef::new(patch_hash).context("build patch hash ref")?,
+            blob_ref: HashRef::new(patch_hash.clone()).context("build patch hash ref")?,
             format: "patch_doc_json".into(),
         },
         summary: None,
@@ -1217,6 +1223,8 @@ async fn handle_patch(
         .await?;
     let mut result = json!({
         "manifest_hash": uploaded.manifest_hash,
+        "patch_hash": patch_hash,
+        "patch_summary": patch_summary,
         "propose": propose.clone(),
     });
     let should_chain = args.shadow || args.approve || args.apply;
@@ -1391,24 +1399,189 @@ fn declared_secret_binding_ids(manifest: &Manifest, secret_defs: &[DefSecret]) -
         .collect();
     let mut binding_ids = BTreeSet::new();
     for secret in &manifest.secrets {
-        match secret {
-            SecretEntry::Decl(secret) => {
-                let binding_id = secret.binding_id.trim();
-                if !binding_id.is_empty() {
-                    binding_ids.insert(binding_id.to_string());
-                }
-            }
-            SecretEntry::Ref(secret) => {
-                if let Some(binding_id) = defs_by_name.get(secret.name.as_str()) {
-                    let binding_id = binding_id.trim();
-                    if !binding_id.is_empty() {
-                        binding_ids.insert(binding_id.to_string());
-                    }
-                }
+        if let Some(binding_id) = defs_by_name.get(secret.name.as_str()) {
+            let binding_id = binding_id.trim();
+            if !binding_id.is_empty() {
+                binding_ids.insert(binding_id.to_string());
             }
         }
     }
     binding_ids.into_iter().collect()
+}
+
+fn summarize_patch_document_value(patch: &Value) -> Value {
+    let patches = patch
+        .get("patches")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut ops = BTreeSet::new();
+    let mut def_changes = Vec::new();
+    let mut manifest_ref_changes = Vec::new();
+    let mut routes = Vec::new();
+
+    for patch_op in patches {
+        let Some(object) = patch_op.as_object() else {
+            continue;
+        };
+        if let Some(add_def) = object.get("add_def") {
+            ops.insert("add_def".to_string());
+            if let Some(change) = def_change_summary(add_def, "added") {
+                def_changes.push(change);
+            }
+        }
+        if let Some(replace_def) = object.get("replace_def") {
+            ops.insert("replace_def".to_string());
+            if let Some(change) = def_change_summary(replace_def, "changed") {
+                def_changes.push(change);
+            }
+        }
+        if let Some(remove_def) = object.get("remove_def") {
+            ops.insert("remove_def".to_string());
+            if let Some(change) = def_change_summary(remove_def, "removed") {
+                def_changes.push(change);
+            }
+        }
+        if let Some(set_refs) = object.get("set_manifest_refs") {
+            ops.insert("set_manifest_refs".to_string());
+            manifest_ref_changes.extend(manifest_ref_change_summaries(set_refs));
+        }
+        if let Some(set_routes) = object.get("set_routing_subscriptions") {
+            ops.insert("set_routing_subscriptions".to_string());
+            routes = route_summaries(set_routes);
+        }
+    }
+
+    def_changes.sort_by_key(summary_sort_key);
+    manifest_ref_changes.sort_by_key(summary_sort_key);
+    routes.sort_by_key(route_summary_sort_key);
+
+    json!({
+        "ops": ops.into_iter().collect::<Vec<_>>(),
+        "def_changes": def_changes,
+        "manifest_ref_changes": manifest_ref_changes,
+        "routing_subscription_count": routes.len(),
+        "routes": routes,
+    })
+}
+
+fn def_change_summary(value: &Value, action: &str) -> Option<Value> {
+    let kind = value.get("kind").and_then(Value::as_str)?.to_string();
+    let name = value
+        .get("name")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            value
+                .get("node")
+                .and_then(|node| node.get("name"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| {
+            value
+                .get("new_node")
+                .and_then(|node| node.get("name"))
+                .and_then(Value::as_str)
+        })?
+        .to_string();
+    Some(json!({
+        "kind": kind,
+        "name": name,
+        "action": action,
+    }))
+}
+
+fn manifest_ref_change_summaries(set_refs: &Value) -> Vec<Value> {
+    let mut changes = Vec::new();
+    for add in set_refs
+        .get("add")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(change) = manifest_ref_change_summary(add, "added") {
+            changes.push(change);
+        }
+    }
+    for remove in set_refs
+        .get("remove")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(change) = manifest_ref_change_summary(remove, "removed") {
+            changes.push(change);
+        }
+    }
+    changes
+}
+
+fn manifest_ref_change_summary(value: &Value, action: &str) -> Option<Value> {
+    Some(json!({
+        "kind": value.get("kind").and_then(Value::as_str)?,
+        "name": value.get("name").and_then(Value::as_str)?,
+        "action": action,
+    }))
+}
+
+fn route_summaries(set_routes: &Value) -> Vec<Value> {
+    set_routes
+        .get("subscriptions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|route| {
+            let event = route.get("event").and_then(Value::as_str)?;
+            let op = route.get("op").and_then(Value::as_str)?;
+            let mut summary = serde_json::Map::new();
+            summary.insert("event".into(), Value::String(event.to_string()));
+            summary.insert("op".into(), Value::String(op.to_string()));
+            if let Some(key_field) = route.get("key_field").and_then(Value::as_str) {
+                summary.insert("key_field".into(), Value::String(key_field.to_string()));
+            }
+            Some(Value::Object(summary))
+        })
+        .collect()
+}
+
+fn summary_sort_key(value: &Value) -> (String, String, String) {
+    (
+        value
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        value
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
+fn route_summary_sort_key(value: &Value) -> (String, String) {
+    (
+        value
+            .get("event")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        value
+            .get("op")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
+fn insert_json_field(value: &mut Value, key: &str, field: Value) {
+    if let Value::Object(map) = value {
+        map.insert(key.to_string(), field);
+    }
 }
 
 fn merge_actor(actor: Option<String>, body: Value) -> Value {
@@ -1696,12 +1869,13 @@ mod tests {
     use super::{
         WorldCreateArgs, WorldStateGetArgs, created_world_id, declared_secret_binding_ids,
         encode_state_key_query, parse_secret_binding_records, should_default_local_root,
+        summarize_patch_document_value,
     };
-    use aos_air_types::{DefSecret, HashRef, Manifest, NamedRef, SecretEntry};
+    use aos_air_types::{DefSecret, HashRef, Manifest, NamedRef};
     use aos_node::{SecretBindingSourceKind, SecretBindingStatus};
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
 
@@ -1833,32 +2007,32 @@ mod tests {
     #[test]
     fn declared_secret_binding_ids_resolves_refs_and_deduplicates() {
         let manifest = Manifest {
-            air_version: "v1".into(),
+            air_version: "2".into(),
             schemas: Vec::new(),
             modules: Vec::new(),
-            effects: Vec::new(),
-            effect_bindings: Vec::new(),
+            ops: Vec::new(),
             secrets: vec![
-                SecretEntry::Ref(NamedRef {
+                NamedRef {
                     name: "llm/openai_api@1".into(),
                     hash: HashRef::new(
                         "sha256:1111111111111111111111111111111111111111111111111111111111111111",
                     )
                     .expect("hash"),
-                }),
-                SecretEntry::Decl(aos_air_types::SecretDecl {
-                    alias: "anthropic".into(),
-                    version: 1,
-                    binding_id: "llm/anthropic_api".into(),
-                    expected_digest: None,
-                }),
-                SecretEntry::Ref(NamedRef {
+                },
+                NamedRef {
+                    name: "llm/anthropic_api@1".into(),
+                    hash: HashRef::new(
+                        "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                    )
+                    .expect("hash"),
+                },
+                NamedRef {
                     name: "llm/openai_api@1".into(),
                     hash: HashRef::new(
                         "sha256:2222222222222222222222222222222222222222222222222222222222222222",
                     )
                     .expect("hash"),
-                }),
+                },
             ],
             routing: None,
         };
@@ -1915,5 +2089,70 @@ mod tests {
         ));
         assert!(matches!(records[0].status, SecretBindingStatus::Active));
         assert!(matches!(records[1].status, SecretBindingStatus::Disabled));
+    }
+
+    #[test]
+    fn patch_document_summary_reports_defop_changes_and_route_targets() {
+        let patch = json!({
+            "version": "2",
+            "base_manifest_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "patches": [
+                {
+                    "add_def": {
+                        "kind": "defop",
+                        "node": {
+                            "$kind": "defop",
+                            "name": "demo/workflow@1",
+                            "op_kind": "workflow",
+                            "workflow": {
+                                "state": "demo/State@1",
+                                "event": "demo/Event@1",
+                                "effects_emitted": []
+                            },
+                            "impl": {
+                                "module": "demo/workflow_wasm@1",
+                                "entrypoint": "workflow:handle"
+                            }
+                        }
+                    }
+                },
+                {
+                    "set_routing_subscriptions": {
+                        "pre_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "subscriptions": [
+                            {
+                                "event": "demo/Event@1",
+                                "op": "demo/workflow@1",
+                                "key_field": "tenant_id"
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let summary = summarize_patch_document_value(&patch);
+        assert_eq!(
+            summary.get("ops").and_then(Value::as_array).expect("ops"),
+            &vec![json!("add_def"), json!("set_routing_subscriptions"),]
+        );
+        assert_eq!(
+            summary
+                .get("def_changes")
+                .and_then(Value::as_array)
+                .and_then(|changes| changes.first())
+                .and_then(|change| change.get("kind"))
+                .and_then(Value::as_str),
+            Some("defop")
+        );
+        assert_eq!(
+            summary
+                .get("routes")
+                .and_then(Value::as_array)
+                .and_then(|routes| routes.first())
+                .and_then(|route| route.get("op"))
+                .and_then(Value::as_str),
+            Some("demo/workflow@1")
+        );
     }
 }

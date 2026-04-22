@@ -4,7 +4,7 @@ use crate::contracts::{
     default_tool_profiles, default_tool_registry,
 };
 use crate::helpers::workflow::SessionReduceError;
-use crate::{helpers::llm::LlmMappingError, tools::ToolEffectKind};
+use crate::{helpers::llm::LlmMappingError, tools::ToolEffectOp};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -23,7 +23,7 @@ pub enum SessionEffectCommand {
         pending: PendingEffect,
     },
     ToolEffect {
-        kind: ToolEffectKind,
+        kind: ToolEffectOp,
         params_json: String,
         pending: PendingEffect,
     },
@@ -316,14 +316,14 @@ pub fn spawn_or_handoff_session(
 
 pub fn begin_pending_effect<T: serde::Serialize>(
     state: &mut SessionState,
-    effect_kind: &'static str,
+    effect_op: &'static str,
     params: &T,
     cap_slot: Option<String>,
     issuer_ref: Option<String>,
 ) -> PendingEffect {
-    let issuer_ref = issuer_ref.or_else(|| Some(synthesize_pending_issuer_ref(state, effect_kind)));
+    let issuer_ref = issuer_ref.or_else(|| Some(synthesize_pending_issuer_ref(state, effect_op)));
     match state.pending_effects.begin_with_issuer_ref(
-        effect_kind,
+        effect_op,
         params,
         cap_slot.clone(),
         state.updated_at,
@@ -331,19 +331,18 @@ pub fn begin_pending_effect<T: serde::Serialize>(
     ) {
         Ok(pending) => pending,
         Err(_) => {
-            let pending =
-                PendingEffect::new(effect_kind, String::new(), cap_slot, state.updated_at)
-                    .with_issuer_ref_opt(issuer_ref);
+            let pending = PendingEffect::new(effect_op, String::new(), cap_slot, state.updated_at)
+                .with_issuer_ref_opt(issuer_ref);
             state.pending_effects.insert(pending.clone());
             pending
         }
     }
 }
 
-fn synthesize_pending_issuer_ref(state: &SessionState, effect_kind: &str) -> String {
+fn synthesize_pending_issuer_ref(state: &SessionState, effect_op: &str) -> String {
     let mut ordinal = state.pending_effects.len();
     loop {
-        let candidate = format!("session:{effect_kind}:{}:{ordinal}", state.updated_at);
+        let candidate = format!("session:{effect_op}:{}:{ordinal}", state.updated_at);
         if state
             .pending_effects
             .values()

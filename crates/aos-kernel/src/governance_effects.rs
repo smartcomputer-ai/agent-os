@@ -647,3 +647,74 @@ fn change_rank(action: GovChangeAction) -> u8 {
         GovChangeAction::Removed => 2,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{GovChangeAction, build_patch_summary};
+    use crate::governance::ManifestPatch;
+    use aos_air_types::{HashRef, Manifest, NamedRef, Routing, RoutingSubscription, SchemaRef};
+
+    fn hash_ref(byte: char) -> HashRef {
+        HashRef::new(format!("sha256:{}", byte.to_string().repeat(64))).expect("hash ref")
+    }
+
+    fn named_ref(name: &str, byte: char) -> NamedRef {
+        NamedRef {
+            name: name.into(),
+            hash: hash_ref(byte),
+        }
+    }
+
+    fn empty_manifest() -> Manifest {
+        Manifest {
+            air_version: "2".into(),
+            schemas: Vec::new(),
+            modules: Vec::new(),
+            ops: Vec::new(),
+            secrets: Vec::new(),
+            routing: None,
+        }
+    }
+
+    #[test]
+    fn patch_summary_reports_defop_changes_and_routing_subscription_section() {
+        let base = empty_manifest();
+        let patch = ManifestPatch {
+            manifest: Manifest {
+                ops: vec![named_ref("demo/workflow@1", '1')],
+                routing: Some(Routing {
+                    subscriptions: vec![RoutingSubscription {
+                        event: SchemaRef::new("demo/Event@1").expect("schema ref"),
+                        op: "demo/workflow@1".into(),
+                        key_field: Some("tenant_id".into()),
+                    }],
+                }),
+                ..empty_manifest()
+            },
+            nodes: Vec::new(),
+        };
+        let patch_hash = hash_ref('9');
+
+        let summary = build_patch_summary(&base, &patch, None, &patch_hash).expect("build summary");
+
+        assert_eq!(
+            summary.ops,
+            vec![
+                "add_def".to_string(),
+                "set_manifest_refs".to_string(),
+                "set_routing_subscriptions".to_string()
+            ]
+        );
+        assert_eq!(summary.def_changes.len(), 1);
+        assert_eq!(summary.def_changes[0].kind, "defop");
+        assert_eq!(summary.def_changes[0].name, "demo/workflow@1");
+        assert_eq!(summary.def_changes[0].action, GovChangeAction::Added);
+        assert_eq!(
+            summary.manifest_sections,
+            vec![
+                "manifest_refs".to_string(),
+                "routing_subscriptions".to_string()
+            ]
+        );
+    }
+}

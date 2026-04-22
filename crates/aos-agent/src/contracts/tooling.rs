@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "$tag", content = "$value")]
 pub enum ToolExecutor {
     Effect {
-        effect_kind: String,
+        effect_op: String,
         cap_slot: Option<String>,
     },
     DomainEvent {

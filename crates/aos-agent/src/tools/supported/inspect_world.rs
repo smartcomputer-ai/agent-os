@@ -63,20 +63,18 @@ pub fn map_receipt(tool_name: &str, status: &str, payload: &[u8]) -> ToolMappedR
             "snapshot_hash": receipt.meta.snapshot_hash.map(|hash| hash.to_string()),
             "schema_count": manifest.schemas.len(),
             "module_count": manifest.modules.len(),
-            "effect_count": manifest.ops.len(),
+            "op_count": manifest.ops.len(),
             "has_routing": manifest.routing.is_some(),
         },
         "modules": section(&manifest_json, "modules", json!([])),
-        "effects": section(&manifest_json, "ops", json!([])),
+        "ops": section(&manifest_json, "ops", json!([])),
         "routing": section(
             &manifest_json,
             "routing",
             json!({
                 "subscriptions": [],
-                "inboxes": [],
             }),
         ),
-        "effect_bindings": section(&manifest_json, "effect_bindings", json!([])),
     });
 
     build_receipt(
@@ -120,7 +118,7 @@ mod tests {
     #[test]
     fn map_args_uses_head_consistency() {
         let mapped = map_args("{}").expect("map args");
-        assert_eq!(mapped.effect_kind, None);
+        assert_eq!(mapped.effect_op, None);
         assert_eq!(mapped.params_json["consistency"], "head");
     }
 

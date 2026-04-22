@@ -32,6 +32,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
+const WORKFLOW_MODULE_NAME: &str = "aos.agent/SessionWorkflow_wasm@1";
 const DIRECT_EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
 const EVAL_ASSETS_ROOT: &str = "crates/aos-agent-eval/fixtures/eval-world/air";
 const CASES_ROOT: &str = "crates/aos-agent-eval/cases";
@@ -147,7 +148,7 @@ impl EvalInvocation {
         let sdk_air_root = workspace_root().join(SDK_AIR_ROOT);
         let import_roots = vec![sdk_air_root];
         let module_patches = vec![EvalModulePatch {
-            module_name: WORKFLOW_NAME,
+            module_name: WORKFLOW_MODULE_NAME,
             build: EvalModuleBuild::CargoBin {
                 package: SDK_WASM_PACKAGE,
                 bin: SDK_WASM_BIN,

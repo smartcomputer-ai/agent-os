@@ -10,7 +10,7 @@ use crate::contracts::{
     ToolOverrideScope, ToolSpec, default_tool_profile_for_provider,
 };
 use crate::tools::{
-    ToolEffectKind, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
+    ToolEffectOp, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
 };
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
@@ -819,7 +819,7 @@ fn emit_auto_host_session_open(
     )
     .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
     out.effects.push(SessionEffectCommand::ToolEffect {
-        kind: ToolEffectKind::HostSessionOpen,
+        kind: ToolEffectOp::HostSessionOpen,
         params_json: serde_json::to_string(&params.params_json).unwrap_or_else(|_| "{}".into()),
         pending: super::begin_pending_effect(
             state,
@@ -1105,14 +1105,14 @@ mod tests {
 
     fn receipt_event<T: serde::Serialize>(
         emitted_at_seq: u64,
-        effect_kind: &str,
+        effect_op: &str,
         params_hash: Option<String>,
         status: &str,
         payload: &T,
     ) -> SessionWorkflowEvent {
         receipt_event_with_issuer_ref(
             emitted_at_seq,
-            effect_kind,
+            effect_op,
             params_hash,
             None,
             status,
@@ -1122,7 +1122,7 @@ mod tests {
 
     fn receipt_event_with_issuer_ref<T: serde::Serialize>(
         emitted_at_seq: u64,
-        effect_kind: &str,
+        effect_op: &str,
         params_hash: Option<String>,
         issuer_ref: Option<String>,
         status: &str,
@@ -1133,7 +1133,7 @@ mod tests {
             origin_workflow_op_hash: None,
             origin_instance_key: None,
             intent_id: fake_hash('i'),
-            effect_op: effect_kind.into(),
+            effect_op: effect_op.into(),
             effect_op_hash: None,
             executor_module: None,
             executor_module_hash: None,
@@ -1885,7 +1885,7 @@ mod tests {
             .iter()
             .find_map(|effect| match effect {
                 SessionEffectCommand::ToolEffect { kind, pending, .. }
-                    if *kind == ToolEffectKind::WorkspaceResolve =>
+                    if *kind == ToolEffectOp::WorkspaceResolve =>
                 {
                     Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
                 }
@@ -1916,7 +1916,7 @@ mod tests {
             .iter()
             .find_map(|effect| match effect {
                 SessionEffectCommand::ToolEffect { kind, pending, .. }
-                    if *kind == ToolEffectKind::WorkspaceEmptyRoot =>
+                    if *kind == ToolEffectOp::WorkspaceEmptyRoot =>
                 {
                     Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
                 }
@@ -1972,7 +1972,7 @@ mod tests {
             .iter()
             .find_map(|effect| match effect {
                 SessionEffectCommand::ToolEffect { kind, pending, .. }
-                    if *kind == ToolEffectKind::WorkspaceWriteRef =>
+                    if *kind == ToolEffectOp::WorkspaceWriteRef =>
                 {
                     Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
                 }
@@ -2001,7 +2001,7 @@ mod tests {
             .iter()
             .find_map(|effect| match effect {
                 SessionEffectCommand::ToolEffect { kind, pending, .. }
-                    if *kind == ToolEffectKind::WorkspaceWriteRef =>
+                    if *kind == ToolEffectOp::WorkspaceWriteRef =>
                 {
                     Some((pending.params_hash.clone(), pending.issuer_ref.clone()))
                 }
@@ -2091,7 +2091,7 @@ mod tests {
         assert!(
             out.effects
                 .iter()
-                .any(|effect| matches!(effect, SessionEffectCommand::ToolEffect { kind, .. } if *kind == ToolEffectKind::WorkspaceDiff)),
+                .any(|effect| matches!(effect, SessionEffectCommand::ToolEffect { kind, .. } if *kind == ToolEffectOp::WorkspaceDiff)),
             "expected workspace.diff effect after immediate commit group"
         );
     }
@@ -2187,7 +2187,7 @@ mod tests {
         assert!(
             !out.effects.iter().any(|effect| matches!(
                 effect,
-                SessionEffectCommand::ToolEffect { kind, .. } if *kind == ToolEffectKind::HostExec
+                SessionEffectCommand::ToolEffect { kind, .. } if *kind == ToolEffectOp::HostExec
             )),
             "did not expect shell execution before diff args resolve"
         );
@@ -2222,7 +2222,7 @@ mod tests {
         assert!(
             out.effects.iter().any(|effect| matches!(
                 effect,
-                SessionEffectCommand::ToolEffect { kind, .. } if *kind == ToolEffectKind::WorkspaceDiff
+                SessionEffectCommand::ToolEffect { kind, .. } if *kind == ToolEffectOp::WorkspaceDiff
             )),
             "expected workspace.diff effect after diff args resolve"
         );

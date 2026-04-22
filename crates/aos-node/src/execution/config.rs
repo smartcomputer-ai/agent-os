@@ -30,9 +30,7 @@ impl WorldConfig {
         Self::from_env_values(
             fallback_module_cache_dir,
             std::env::var("AOS_MODULE_CACHE_DIR").ok(),
-            std::env::var("AOS_STRICT_OP_ROUTES")
-                .ok()
-                .or_else(|| std::env::var("AOS_STRICT_EFFECT_BINDINGS").ok()),
+            std::env::var("AOS_STRICT_OP_ROUTES").ok(),
             std::env::var("AOS_CELL_CACHE_SIZE").ok(),
             std::env::var("AOS_NODE_REPLAY_SEED_HEIGHT").ok(),
         )

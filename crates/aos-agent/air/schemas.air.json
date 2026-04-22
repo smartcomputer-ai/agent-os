@@ -73,7 +73,7 @@
       "variant": {
         "Effect": {
           "record": {
-            "effect_kind": { "text": {} },
+            "effect_op": { "text": {} },
             "cap_slot": { "option": { "text": {} } }
           }
         },

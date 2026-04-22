@@ -334,7 +334,6 @@ pub struct DomainEventIngress {
 pub struct ReceiptIngress {
     #[serde(with = "serde_bytes")]
     pub intent_hash: Vec<u8>,
-    #[serde(alias = "effect_kind")]
     pub effect_op: String,
     pub adapter_id: String,
     pub status: ReceiptStatus,

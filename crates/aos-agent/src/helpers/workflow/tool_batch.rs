@@ -15,7 +15,7 @@ use crate::contracts::{
 use crate::helpers::{SessionEffectCommand, SessionReduceOutput, allocate_tool_batch_id};
 use crate::tools::supported::workspace::{self, WorkspaceAction};
 use crate::tools::{
-    ToolEffectKind, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
+    ToolEffectOp, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
 };
 
 use super::blob_effects::enqueue_blob_get;
@@ -331,11 +331,11 @@ pub(super) fn advance_tool_batch(
                 continue;
             }
 
-            let (executor_effect_kind, cap_slot) = match &planned.executor {
+            let (executor_effect_op, cap_slot) = match &planned.executor {
                 ToolExecutor::Effect {
-                    effect_kind,
+                    effect_op,
                     cap_slot,
-                } => (effect_kind.clone(), cap_slot.clone()),
+                } => (effect_op.clone(), cap_slot.clone()),
                 ToolExecutor::HostLoop { .. } => unreachable!(),
                 ToolExecutor::DomainEvent { schema } => {
                     fail_tool_call(
@@ -377,20 +377,20 @@ pub(super) fn advance_tool_batch(
                     continue;
                 }
             };
-            let kind = if let Some(kind) = mapped_args.effect_kind {
+            let kind = if let Some(kind) = mapped_args.effect_op {
                 kind
             } else if let Some(mapper) =
-                crate::tools::mapper_for_effect_kind(executor_effect_kind.as_str())
+                crate::tools::mapper_for_effect_op(executor_effect_op.as_str())
             {
-                crate::tools::effect_kind_for_mapper(mapper)
+                crate::tools::effect_op_for_mapper(mapper)
             } else {
                 fail_tool_call(
                     &mut batch,
                     &call_id,
                     "executor_unsupported",
                     format!(
-                        "unsupported effect kind for wasm emit_raw: {}",
-                        executor_effect_kind
+                        "unsupported effect op for wasm emit_raw: {}",
+                        executor_effect_op
                     ),
                 );
                 continue;
@@ -445,7 +445,7 @@ pub(super) fn advance_tool_batch(
 fn insert_fallback_pending_tool_effect(
     batch: &mut ActiveToolBatch,
     call_id: &String,
-    kind: ToolEffectKind,
+    kind: ToolEffectOp,
     cap_slot: Option<String>,
     emitted_at_ns: u64,
 ) -> PendingEffect {
@@ -503,7 +503,7 @@ pub(super) fn settle_tool_batch_receipt(
                 envelope.receipt_payload.as_slice(),
             ) {
                 WorkspaceAction::Emit {
-                    effect_kind,
+                    effect_op,
                     cap_slot,
                     params_json,
                     state_json,
@@ -513,7 +513,7 @@ pub(super) fn settle_tool_batch_receipt(
                         &tool_batch_id,
                         &call_id,
                         &planned,
-                        effect_kind,
+                        effect_op,
                         cap_slot,
                         params_json,
                         state_json,
@@ -613,7 +613,7 @@ fn advance_workspace_tool_call(
             Ok(false)
         }
         WorkspaceAction::Emit {
-            effect_kind,
+            effect_op,
             cap_slot,
             params_json,
             state_json,
@@ -621,7 +621,7 @@ fn advance_workspace_tool_call(
             batch,
             call_id,
             planned,
-            effect_kind,
+            effect_op,
             cap_slot,
             params_json,
             state_json,
@@ -670,7 +670,7 @@ fn emit_workspace_action(
     tool_batch_id: &crate::contracts::ToolBatchId,
     call_id: &String,
     planned: &PlannedToolCall,
-    effect_kind: ToolEffectKind,
+    effect_op: ToolEffectOp,
     cap_slot: &'static str,
     params_json: serde_json::Value,
     state_json: String,
@@ -683,7 +683,7 @@ fn emit_workspace_action(
             batch,
             call_id,
             planned,
-            effect_kind,
+            effect_op,
             cap_slot,
             params_json,
             state_json,
@@ -724,7 +724,7 @@ fn emit_workspace_action_in_batch(
     batch: &mut ActiveToolBatch,
     call_id: &String,
     planned: &PlannedToolCall,
-    effect_kind: ToolEffectKind,
+    effect_op: ToolEffectOp,
     cap_slot: &'static str,
     params_json: serde_json::Value,
     state_json: String,
@@ -741,12 +741,12 @@ fn emit_workspace_action_in_batch(
             output_json: state_json,
         },
     );
-    let issuer_ref = workspace_substep_issuer_ref(call_id, effect_kind.as_str(), &params_json);
+    let issuer_ref = workspace_substep_issuer_ref(call_id, effect_op.as_str(), &params_json);
     let pending = batch
         .pending_effects
         .begin_with_issuer_ref(
             call_id.clone(),
-            effect_kind.as_str(),
+            effect_op.as_str(),
             &params_json,
             Some(cap_slot.into()),
             emitted_at_ns,
@@ -754,7 +754,7 @@ fn emit_workspace_action_in_batch(
         )
         .unwrap_or_else(|_| {
             let fallback = PendingEffect::from_params_with_issuer_ref(
-                effect_kind.as_str(),
+                effect_op.as_str(),
                 &params_json,
                 Some(cap_slot.into()),
                 emitted_at_ns,
@@ -762,7 +762,7 @@ fn emit_workspace_action_in_batch(
             )
             .unwrap_or_else(|_| {
                 PendingEffect::new(
-                    effect_kind.as_str(),
+                    effect_op.as_str(),
                     String::new(),
                     Some(cap_slot.into()),
                     emitted_at_ns,
@@ -775,7 +775,7 @@ fn emit_workspace_action_in_batch(
         });
     set_tool_call_status(batch, call_id, ToolCallStatus::Pending);
     out.effects.push(SessionEffectCommand::ToolEffect {
-        kind: effect_kind,
+        kind: effect_op,
         params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
         pending,
     });
@@ -843,10 +843,10 @@ fn emit_workspace_blob_put_in_batch(
 
 fn workspace_substep_issuer_ref<T: serde::Serialize>(
     call_id: &str,
-    effect_kind: &str,
+    effect_op: &str,
     params: &T,
 ) -> String {
-    format!("{call_id}:{effect_kind}:{}", hash_cbor(params))
+    format!("{call_id}:{effect_op}:{}", hash_cbor(params))
 }
 
 fn apply_mapped_tool_receipt(
