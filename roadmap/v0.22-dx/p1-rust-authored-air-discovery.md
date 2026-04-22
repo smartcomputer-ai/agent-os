@@ -93,6 +93,32 @@ The exact fields can change during implementation, but the metadata should answe
 3. which build target provides workflow WASM modules,
 4. what lock identity protects imported defs.
 
+### 4) Proc macros emit metadata; host-side generation writes AIR files
+
+Procedural macros should not write files. They should emit Rust metadata constants or registrations.
+
+The first extraction contract is:
+
+```text
+Rust source + proc macros
+  -> generated Rust metadata constants/registrations
+  -> host-side `aos air generate` or authoring helper
+  -> materialized AIR JSON under air/generated/
+  -> normal AIR loader path
+```
+
+This keeps the compile-time macro crate pure and makes filesystem writes, package discovery,
+diagnostics, CI checks, and deterministic output ordering ordinary host-side authoring concerns.
+
+For P1, generated AIR should be written to:
+
+```text
+air/generated/
+```
+
+The loader should treat that directory as a normal AIR source and merge it with hand-authored AIR
+when both are present.
+
 ## Non-Goals
 
 - Do not remove hand-authored AIR support.
@@ -213,25 +239,23 @@ AirSource::GeneratedRustPackage(package metadata)
 Implementation should:
 
 1. collect hand-authored AIR nodes from directories exactly as today,
-2. invoke or read generated Rust AIR for packages that expose it,
+2. materialize Rust-generated AIR to `air/generated/` through a host-side generator,
 3. merge all defs before manifest ref patching,
 4. preserve the current duplicate-name behavior,
 5. keep imported manifests ignored when they come from import roots,
 6. produce the same `WorldBundle` shape as the current build path.
 
-Generated AIR can first be materialized to:
+Generated AIR should be stable and inspectable. The first version should write JSON files under
+`air/generated/`, for example:
 
 ```text
-.aos/generated/air/
+air/generated/schemas.air.json
+air/generated/module.air.json
+air/generated/manifest.air.json
 ```
 
-or:
-
-```text
-target/aos/air/
-```
-
-The final location matters less than having a stable loader contract and an inspectable output.
+If later versions need cache-only generation, they can add a `target/aos/air/` mode without changing
+the logical AIR source contract.
 
 ## Phase 1D: Cargo Package Discovery
 
