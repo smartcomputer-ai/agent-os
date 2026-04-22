@@ -5,8 +5,7 @@
     "runtime": {
       "kind": "wasm",
       "artifact": {
-        "kind": "wasm_module",
-        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        "kind": "wasm_module"
       }
     }
   },
@@ -57,8 +56,7 @@
     "runtime": {
       "kind": "wasm",
       "artifact": {
-        "kind": "wasm_module",
-        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        "kind": "wasm_module"
       }
     }
   }

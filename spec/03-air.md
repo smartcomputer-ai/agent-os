@@ -24,7 +24,8 @@ Built-in catalogs:
 - `spec/defs/builtin-schemas-sdk.air.json`
 - `spec/defs/builtin-schemas-host.air.json`
 - `spec/defs/builtin-modules.air.json`
-- `spec/defs/builtin-ops.air.json` (built-in workflows and effects)
+- `spec/defs/builtin-workflows.air.json`
+- `spec/defs/builtin-effects.air.json`
 
 The JSON Schemas validate structure. Semantic validation checks name/hash resolution,
 workflow/effect implementation compatibility, routing compatibility, workflow effect allowlists,
@@ -179,8 +180,7 @@ effect contracts.
   "runtime": {
     "kind": "wasm",
     "artifact": {
-      "kind": "wasm_module",
-      "hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      "kind": "wasm_module"
     }
   }
 }
@@ -191,6 +191,10 @@ Supported runtime kinds:
 - `wasm`: deterministic workflow modules compiled to a `wasm_module` artifact.
 - `python`: future Python runtime support, using `python_bundle` or `workspace_root` artifacts.
 - `builtin`: kernel/node supplied built-ins without CAS bytes.
+
+For authored `wasm_module` artifacts, `hash` may be omitted. Loaders treat the missing hash as a
+compile-time placeholder and replace it with the compiled WASM blob hash before runtime boot or
+manifest persistence.
 
 `sys/*` module names are reserved. External manifests may reference built-in `sys/*` modules but
 may not define or patch them.
@@ -285,8 +289,12 @@ Built-in modules live in `spec/defs/builtin-modules.air.json`, including:
 - `sys/workspace_wasm@1`
 - `sys/http_publish_wasm@1`
 
-Built-in workflows and effects currently live together in `spec/defs/builtin-ops.air.json`,
-including workflows such as `sys/Workspace@1` and effects such as:
+Built-in workflows live in `spec/defs/builtin-workflows.air.json`, including:
+
+- `sys/Workspace@1`
+- `sys/HttpPublish@1`
+
+Built-in effects live in `spec/defs/builtin-effects.air.json`, including:
 
 - `sys/http.request@1`
 - `sys/blob.put@1`

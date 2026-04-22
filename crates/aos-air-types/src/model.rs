@@ -443,7 +443,15 @@ pub enum ModuleRuntime {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WasmArtifact {
-    WasmModule { hash: HashRef },
+    WasmModule {
+        #[serde(default = "placeholder_wasm_hash")]
+        hash: HashRef,
+    },
+}
+
+fn placeholder_wasm_hash() -> HashRef {
+    HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
+        .expect("valid placeholder wasm hash")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -184,7 +184,7 @@ Target complete schema:
         "kind": { "const": "wasm_module" },
         "hash": { "$ref": "common.schema.json#/$defs/Hash" }
       },
-      "required": ["kind", "hash"],
+      "required": ["kind"],
       "additionalProperties": false
     },
     "PythonBundleArtifact": {
@@ -782,7 +782,8 @@ JSON Schema covers structure only. Semantic validation still needs:
 15. Effect execution path must resolve from the referenced module runtime and effect implementation.
 16. Effect intent identity, continuation routing, receipt binding, and audit metadata must use effect definition identity, not removed v1 effect-kind strings.
 17. Artifact kind compatibility is enforced by the `defmodule` schema: `wasm` accepts `wasm_module`; `python` accepts `python_bundle` or `workspace_root`; `builtin` has no artifact.
-18. `wasm_module.hash` must identify compiled WASM bytes.
+18. `wasm_module.hash` identifies compiled WASM bytes when present; authored AIR may omit it as a
+    compile-time placeholder that is patched before runtime boot or manifest persistence.
 19. `python_bundle.root_hash` and `workspace_root.root_hash` must identify a workspace/tree root that the Python runner can hydrate.
 20. Python artifact metadata must satisfy the declared `runtime.python` version and provide a compatible target for the runner host.
 21. Secret refs in effect params are admitted by the effect params schema and resolved through manifest `defsecret` declarations; v0.22 has no public per-secret op ACL.

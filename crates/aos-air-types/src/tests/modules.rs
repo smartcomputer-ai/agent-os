@@ -26,6 +26,32 @@ fn parses_wasm_module_runtime() {
 }
 
 #[test]
+fn parses_wasm_module_runtime_without_hash_as_placeholder() {
+    let module_json = json!({
+        "$kind": "defmodule",
+        "name": "com.acme/order_wasm@1",
+        "runtime": {
+            "kind": "wasm",
+            "artifact": {
+                "kind": "wasm_module"
+            }
+        }
+    });
+    assert_json_schema(crate::schemas::DEFMODULE, &module_json);
+    let module: DefModule = serde_json::from_value(module_json).expect("parse module");
+    let ModuleRuntime::Wasm {
+        artifact: crate::WasmArtifact::WasmModule { hash },
+    } = module.runtime
+    else {
+        panic!("expected wasm module");
+    };
+    assert_eq!(
+        hash.as_str(),
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    );
+}
+
+#[test]
 fn parses_builtin_module_runtime() {
     let module_json = json!({
         "$kind": "defmodule",

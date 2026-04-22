@@ -60,9 +60,12 @@
       "type": "object",
       "properties": {
         "kind": { "const": "wasm_module" },
-        "hash": { "$ref": "common.schema.json#/$defs/Hash" }
+        "hash": {
+          "$ref": "common.schema.json#/$defs/Hash",
+          "description": "Optional in authored AIR. When omitted, loaders use the placeholder wasm hash until the compiled module hash is supplied."
+        }
       },
-      "required": ["kind", "hash"],
+      "required": ["kind"],
       "additionalProperties": false
     },
     "PythonBundleArtifact": {

@@ -1,0 +1,27 @@
+[
+  {
+    "$kind": "defworkflow",
+    "name": "sys/Workspace@1",
+    "state": "sys/WorkspaceHistory@1",
+    "event": "sys/WorkspaceCommit@1",
+    "context": "sys/WorkflowContext@1",
+    "key_schema": "sys/WorkspaceName@1",
+    "effects_emitted": [],
+    "impl": {
+      "module": "sys/workspace_wasm@1",
+      "entrypoint": "step"
+    }
+  },
+  {
+    "$kind": "defworkflow",
+    "name": "sys/HttpPublish@1",
+    "state": "sys/HttpPublishRegistry@1",
+    "event": "sys/HttpPublishSet@1",
+    "context": "sys/WorkflowContext@1",
+    "effects_emitted": [],
+    "impl": {
+      "module": "sys/http_publish_wasm@1",
+      "entrypoint": "step"
+    }
+  }
+]

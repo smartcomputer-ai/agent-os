@@ -128,11 +128,10 @@ describe the world's application surface, not repeat the whole system catalog.
   - built-in workflows use `$kind = "defworkflow"`
   - built-in effects use `$kind = "defeffect"`
   - implementation refs use `impl.module` and `impl.entrypoint`
-- [x] Decide whether to split `builtin-ops.air.json` into clearer files:
+- [x] Split `builtin-ops.air.json` into clearer files:
   - `builtin-workflows.air.json`
   - `builtin-effects.air.json`
-  - or keep one file temporarily if it reduces churn during P1
-  - P1 keeps the existing filename temporarily to reduce churn.
+  - P1 kept the existing filename temporarily to reduce churn; the P2 cleanup split it.
 - [x] Ensure no active built-in definition uses `defop` or `op_kind`.
 - [x] Ensure built-in manifests or examples omit redundant `sys/*` refs where practical.
 - [x] Keep external `sys/*` definitions rejected.

@@ -4,7 +4,7 @@ use aos_cbor::Hash;
 use once_cell::sync::Lazy;
 use serde_json;
 
-use crate::{AirNode, DefEffect, DefModule, DefSchema, DefWorkflow, HashRef};
+use crate::{DefEffect, DefModule, DefSchema, DefWorkflow, HashRef};
 
 static BUILTIN_SCHEMAS_RAW: &str = include_str!("../../../spec/defs/builtin-schemas.air.json");
 static BUILTIN_SCHEMAS_SDK_RAW: &str =
@@ -12,7 +12,8 @@ static BUILTIN_SCHEMAS_SDK_RAW: &str =
 static BUILTIN_SCHEMAS_HOST_RAW: &str =
     include_str!("../../../spec/defs/builtin-schemas-host.air.json");
 static BUILTIN_MODULES_RAW: &str = include_str!("../../../spec/defs/builtin-modules.air.json");
-static BUILTIN_WORKFLOW_EFFECTS_RAW: &str = include_str!("../../../spec/defs/builtin-ops.air.json");
+static BUILTIN_WORKFLOWS_RAW: &str = include_str!("../../../spec/defs/builtin-workflows.air.json");
+static BUILTIN_EFFECTS_RAW: &str = include_str!("../../../spec/defs/builtin-effects.air.json");
 
 #[derive(Debug)]
 pub struct BuiltinSchema {
@@ -72,13 +73,9 @@ static BUILTIN_SCHEMAS: Lazy<Vec<BuiltinSchema>> = Lazy::new(|| {
 });
 
 static BUILTIN_WORKFLOWS: Lazy<Vec<BuiltinWorkflow>> = Lazy::new(|| {
-    let defs: Vec<AirNode> = serde_json::from_str(BUILTIN_WORKFLOW_EFFECTS_RAW)
-        .expect("spec/defs/builtin-ops.air.json must parse");
+    let defs: Vec<DefWorkflow> = serde_json::from_str(BUILTIN_WORKFLOWS_RAW)
+        .expect("spec/defs/builtin-workflows.air.json must parse");
     defs.into_iter()
-        .filter_map(|node| match node {
-            AirNode::Defworkflow(workflow) => Some(workflow),
-            _ => None,
-        })
         .map(|workflow| {
             let hash = Hash::of_cbor(&workflow).expect("canonical hash");
             let hash_ref = HashRef::new(hash.to_hex()).expect("valid hash");
@@ -92,13 +89,9 @@ static BUILTIN_WORKFLOWS: Lazy<Vec<BuiltinWorkflow>> = Lazy::new(|| {
 });
 
 static BUILTIN_EFFECTS: Lazy<Vec<BuiltinEffect>> = Lazy::new(|| {
-    let defs: Vec<AirNode> = serde_json::from_str(BUILTIN_WORKFLOW_EFFECTS_RAW)
-        .expect("spec/defs/builtin-ops.air.json must parse");
+    let defs: Vec<DefEffect> = serde_json::from_str(BUILTIN_EFFECTS_RAW)
+        .expect("spec/defs/builtin-effects.air.json must parse");
     defs.into_iter()
-        .filter_map(|node| match node {
-            AirNode::Defeffect(effect) => Some(effect),
-            _ => None,
-        })
         .map(|effect| {
             let hash = Hash::of_cbor(&effect).expect("canonical hash");
             let hash_ref = HashRef::new(hash.to_hex()).expect("valid hash");
