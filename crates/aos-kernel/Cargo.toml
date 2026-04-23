@@ -11,6 +11,7 @@ e2e-tests = []
 [dependencies]
 aos-air-types.workspace = true
 aos-air-exec.workspace = true
+aos-effect-types.workspace = true
 aos-effects.workspace = true
 aos-wasm.workspace = true
 aos-wasm-abi.workspace = true

@@ -1,0 +1,13 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demiurge/Demiurge_wasm@1",
+    "runtime": {
+      "kind": "wasm",
+      "artifact": {
+        "kind": "wasm_module",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  }
+]

@@ -195,7 +195,6 @@ impl ExampleHost {
             &mut assets.loaded,
             store.as_ref(),
             cfg.example_root,
-            &paths,
             None,
             None,
         )?;

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -6,15 +6,69 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
     AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, HashRef, Manifest, Name,
-    NamedRef, builtins,
+    NamedRef, TypeExpr, builtins,
 };
 use aos_cbor::Hash;
 use aos_kernel::{LoadedManifest, ManifestLoader, Store};
 use serde_json::Value;
 use walkdir::WalkDir;
 
+use crate::generated::{GENERATED_AIR_DIR, write_generated_air_from_cargo_export};
+
 pub const ZERO_HASH_SENTINEL: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
+#[derive(Debug, Clone)]
+pub enum AirSource {
+    /// AIR JSON already present on disk.
+    Directory {
+        path: PathBuf,
+        allow_manifest: bool,
+        include_root: bool,
+    },
+    /// A Rust-authored package that must run its export binary before loading AIR JSON.
+    GeneratedRustPackage {
+        package_root: PathBuf,
+        manifest_path: PathBuf,
+        package_name: Option<String>,
+        bin_name: Option<String>,
+        allow_manifest: bool,
+    },
+}
+
+impl AirSource {
+    pub fn local_directory(path: impl Into<PathBuf>) -> Self {
+        Self::Directory {
+            path: path.into(),
+            allow_manifest: true,
+            include_root: false,
+        }
+    }
+
+    pub fn imported_directory(path: impl Into<PathBuf>) -> Self {
+        Self::Directory {
+            path: path.into(),
+            allow_manifest: false,
+            include_root: true,
+        }
+    }
+
+    pub fn generated_rust_package(
+        package_root: impl Into<PathBuf>,
+        manifest_path: impl Into<PathBuf>,
+        package_name: Option<String>,
+        bin_name: Option<String>,
+        allow_manifest: bool,
+    ) -> Self {
+        Self::GeneratedRustPackage {
+            package_root: package_root.into(),
+            manifest_path: manifest_path.into(),
+            package_name,
+            bin_name,
+            allow_manifest,
+        }
+    }
+}
 
 pub struct LoadedAssets {
     pub loaded: LoadedManifest,
@@ -51,6 +105,28 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
     asset_root: &Path,
     import_roots: &[PathBuf],
 ) -> Result<Option<LoadedAssets>> {
+    let mut sources = Vec::with_capacity(import_roots.len() + 1);
+    sources.push(AirSource::local_directory(asset_root));
+    sources.extend(
+        import_roots
+            .iter()
+            .cloned()
+            .map(AirSource::imported_directory),
+    );
+    load_from_air_sources_with_defs(store, &sources)
+}
+
+pub fn load_from_air_sources<S: Store + 'static>(
+    store: Arc<S>,
+    sources: &[AirSource],
+) -> Result<Option<LoadedManifest>> {
+    Ok(load_from_air_sources_with_defs(store, sources)?.map(|assets| assets.loaded))
+}
+
+pub fn load_from_air_sources_with_defs<S: Store + 'static>(
+    store: Arc<S>,
+    sources: &[AirSource],
+) -> Result<Option<LoadedAssets>> {
     let mut manifest: Option<Manifest> = None;
     let mut schemas: Vec<DefSchema> = Vec::new();
     let mut modules: Vec<DefModule> = Vec::new();
@@ -58,19 +134,7 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
     let mut workflows: Vec<DefWorkflow> = Vec::new();
     let mut effects: Vec<DefEffect> = Vec::new();
 
-    let mut roots = Vec::with_capacity(import_roots.len() + 1);
-    roots.push(AssetRoot {
-        path: asset_root.to_path_buf(),
-        allow_manifest: true,
-        include_root: false,
-    });
-    roots.extend(import_roots.iter().cloned().map(|path| AssetRoot {
-        path,
-        allow_manifest: false,
-        include_root: true,
-    }));
-
-    for root in roots {
+    for root in prepare_air_sources(sources)? {
         for dir_path in asset_search_dirs(&root.path, root.include_root)? {
             for path in collect_json_files(&dir_path)? {
                 let nodes = parse_air_nodes(&path)
@@ -105,6 +169,7 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
         None => return Ok(None),
     };
 
+    expand_manifest_schema_closure(&mut manifest, &schemas, &workflows, &effects)?;
     secrets.sort_by(|a, b| a.name.cmp(&b.name));
     let hashes = write_nodes(
         store.as_ref(),
@@ -119,6 +184,48 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
     let loaded = ManifestLoader::load_from_manifest(store.as_ref(), &manifest)
         .context("load manifest after authoring asset patching")?;
     Ok(Some(LoadedAssets { loaded, secrets }))
+}
+
+fn prepare_air_sources(sources: &[AirSource]) -> Result<Vec<AssetRoot>> {
+    sources
+        .iter()
+        .map(|source| match source {
+            AirSource::Directory {
+                path,
+                allow_manifest,
+                include_root,
+            } => Ok(AssetRoot {
+                path: path.clone(),
+                allow_manifest: *allow_manifest,
+                include_root: *include_root,
+            }),
+            AirSource::GeneratedRustPackage {
+                package_root,
+                manifest_path,
+                package_name,
+                bin_name,
+                allow_manifest,
+            } => {
+                write_generated_air_from_cargo_export(
+                    package_root,
+                    manifest_path,
+                    package_name.as_deref(),
+                    bin_name.as_deref(),
+                )
+                .with_context(|| {
+                    format!(
+                        "materialize generated AIR for package source {}",
+                        package_root.display()
+                    )
+                })?;
+                Ok(AssetRoot {
+                    path: package_root.join(GENERATED_AIR_DIR),
+                    allow_manifest: *allow_manifest,
+                    include_root: true,
+                })
+            }
+        })
+        .collect()
 }
 
 fn write_nodes<S: Store + ?Sized>(
@@ -235,6 +342,138 @@ fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result
     patch_named_refs("workflow", &mut manifest.workflows, &hashes.workflows)?;
     patch_named_refs("effect", &mut manifest.effects, &hashes.effects)?;
     patch_named_refs("secret", &mut manifest.secrets, &hashes.secrets)?;
+    Ok(())
+}
+
+fn expand_manifest_schema_closure(
+    manifest: &mut Manifest,
+    schemas: &[DefSchema],
+    workflows: &[DefWorkflow],
+    effects: &[DefEffect],
+) -> Result<()> {
+    let schema_defs: HashMap<&str, &TypeExpr> = schemas
+        .iter()
+        .map(|schema| (schema.name.as_str(), &schema.ty))
+        .collect();
+    let workflow_defs: HashMap<&str, &DefWorkflow> = workflows
+        .iter()
+        .map(|workflow| (workflow.name.as_str(), workflow))
+        .collect();
+    let effect_defs: HashMap<&str, &DefEffect> = effects
+        .iter()
+        .map(|effect| (effect.name.as_str(), effect))
+        .collect();
+
+    let mut active = manifest
+        .schemas
+        .iter()
+        .map(|reference| reference.name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut queue = Vec::new();
+
+    for reference in &manifest.schemas {
+        queue.push(reference.name.clone());
+    }
+    let workflow_names = manifest
+        .workflows
+        .iter()
+        .map(|reference| reference.name.clone())
+        .collect::<Vec<_>>();
+    for workflow_name in workflow_names {
+        let Some(workflow) = workflow_defs.get(workflow_name.as_str()) else {
+            continue;
+        };
+        require_manifest_schema(manifest, &mut active, &mut queue, workflow.state.as_str())?;
+        require_manifest_schema(manifest, &mut active, &mut queue, workflow.event.as_str())?;
+        if let Some(schema) = &workflow.context {
+            require_manifest_schema(manifest, &mut active, &mut queue, schema.as_str())?;
+        }
+        if let Some(schema) = &workflow.annotations {
+            require_manifest_schema(manifest, &mut active, &mut queue, schema.as_str())?;
+        }
+        if let Some(schema) = &workflow.key_schema {
+            require_manifest_schema(manifest, &mut active, &mut queue, schema.as_str())?;
+        }
+    }
+    let effect_names = manifest
+        .effects
+        .iter()
+        .map(|reference| reference.name.clone())
+        .collect::<Vec<_>>();
+    for effect_name in effect_names {
+        let Some(effect) = effect_defs.get(effect_name.as_str()) else {
+            continue;
+        };
+        require_manifest_schema(manifest, &mut active, &mut queue, effect.params.as_str())?;
+        require_manifest_schema(manifest, &mut active, &mut queue, effect.receipt.as_str())?;
+    }
+    if let Some(routing) = manifest.routing.clone() {
+        for route in routing.subscriptions {
+            require_manifest_schema(manifest, &mut active, &mut queue, route.event.as_str())?;
+        }
+    }
+
+    let mut visited = BTreeSet::new();
+    while let Some(schema_name) = queue.pop() {
+        if builtins::find_builtin_schema(schema_name.as_str()).is_some() {
+            continue;
+        }
+        if !visited.insert(schema_name.clone()) {
+            continue;
+        }
+        let Some(schema) = schema_defs.get(schema_name.as_str()) else {
+            bail!("manifest references unknown schema '{}'", schema_name);
+        };
+        collect_type_schema_refs(schema, &mut |name| {
+            require_manifest_schema(manifest, &mut active, &mut queue, name)
+        })?;
+    }
+
+    Ok(())
+}
+
+fn require_manifest_schema(
+    manifest: &mut Manifest,
+    active: &mut BTreeSet<Name>,
+    queue: &mut Vec<Name>,
+    schema_name: &str,
+) -> Result<()> {
+    if builtins::find_builtin_schema(schema_name).is_some() {
+        return Ok(());
+    }
+    let schema_name = schema_name.to_string();
+    if active.insert(schema_name.clone()) {
+        manifest.schemas.push(NamedRef {
+            name: schema_name.clone(),
+            hash: HashRef::new(ZERO_HASH_SENTINEL)?,
+        });
+        queue.push(schema_name);
+    }
+    Ok(())
+}
+
+fn collect_type_schema_refs(
+    ty: &TypeExpr,
+    require: &mut impl FnMut(&str) -> Result<()>,
+) -> Result<()> {
+    match ty {
+        TypeExpr::Primitive(_) => {}
+        TypeExpr::Record(record) => {
+            for field in record.record.values() {
+                collect_type_schema_refs(field, require)?;
+            }
+        }
+        TypeExpr::Variant(variant) => {
+            for arm in variant.variant.values() {
+                collect_type_schema_refs(arm, require)?;
+            }
+        }
+        TypeExpr::List(list) => collect_type_schema_refs(&list.list, require)?,
+        TypeExpr::Set(set) => collect_type_schema_refs(&set.set, require)?,
+        TypeExpr::Map(map) => collect_type_schema_refs(&map.map.value, require)?,
+        TypeExpr::Option(option) => collect_type_schema_refs(&option.option, require)?,
+        TypeExpr::Ref(reference) => require(reference.reference.as_str())?,
+    }
     Ok(())
 }
 
@@ -414,6 +653,15 @@ fn collect_json_files(dir: &Path) -> Result<Vec<PathBuf>> {
 
 fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
     let data = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    parse_air_nodes_from_str(&data)
+        .with_context(|| format!("parse AIR nodes from {}", path.display()))
+}
+
+/// Parse generated or authored AIR JSON into AIR nodes.
+///
+/// This is the shared entry point for host-side Rust AIR generation. Generated files under
+/// `air/generated/` should use the same authoring normalization path as hand-authored AIR.
+pub fn parse_air_nodes_from_str(data: &str) -> Result<Vec<AirNode>> {
     let trimmed = data.trim_start();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -435,4 +683,142 @@ fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
         nodes.push(node);
     }
     Ok(nodes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generated::write_generated_air_nodes;
+    use aos_air_types::{TypeExpr, TypePrimitive};
+    use aos_kernel::MemStore;
+    use std::sync::Arc;
+
+    #[test]
+    fn parse_air_nodes_from_str_accepts_generated_defschema_json() {
+        let nodes = parse_air_nodes_from_str(
+            r#"{"$kind":"defschema","name":"demo/Generated@1","type":{"record":{"task":{"text":{}}}}}"#,
+        )
+        .expect("parse generated AIR");
+
+        let [AirNode::Defschema(schema)] = nodes.as_slice() else {
+            panic!("expected one defschema node");
+        };
+        assert_eq!(schema.name, "demo/Generated@1");
+        let TypeExpr::Record(record) = &schema.ty else {
+            panic!("expected record schema");
+        };
+        assert!(matches!(
+            record.record.get("task"),
+            Some(TypeExpr::Primitive(TypePrimitive::Text(_)))
+        ));
+    }
+
+    #[test]
+    fn load_from_air_sources_allows_identical_generated_and_authored_defs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let authored = temp.path().join("air");
+        fs::create_dir_all(&authored).expect("mkdir authored");
+        let schema = r#"{"$kind":"defschema","name":"demo/Shared@1","type":{"record":{"task":{"text":{}}}}}"#;
+        fs::write(authored.join("schemas.air.json"), format!("[{schema}]"))
+            .expect("write authored schema");
+        fs::write(
+            authored.join("manifest.air.json"),
+            r#"{"$kind":"manifest","air_version":"2","schemas":[{"name":"demo/Shared@1"}],"modules":[],"workflows":[],"effects":[],"secrets":[]}"#,
+        )
+        .expect("write manifest");
+        write_generated_air_nodes(temp.path(), &[schema]).expect("write generated");
+
+        let loaded = load_from_air_sources_with_defs(
+            Arc::new(MemStore::new()),
+            &[
+                AirSource::local_directory(&authored),
+                AirSource::Directory {
+                    path: temp.path().join(GENERATED_AIR_DIR),
+                    allow_manifest: false,
+                    include_root: false,
+                },
+            ],
+        )
+        .expect("identical defs should be accepted");
+
+        assert!(loaded.is_some());
+    }
+
+    #[test]
+    fn load_from_air_sources_expands_manifest_schema_closure() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let authored = temp.path().join("air");
+        fs::create_dir_all(&authored).expect("mkdir authored");
+        fs::write(
+            authored.join("schemas.air.json"),
+            r#"[
+              {"$kind":"defschema","name":"demo/Outer@1","type":{"record":{"inner":{"ref":"demo/Inner@1"}}}},
+              {"$kind":"defschema","name":"demo/Inner@1","type":{"record":{"name":{"text":{}}}}}
+            ]"#,
+        )
+        .expect("write schemas");
+        fs::write(
+            authored.join("manifest.air.json"),
+            r#"{"$kind":"manifest","air_version":"2","schemas":[{"name":"demo/Outer@1"}],"modules":[],"workflows":[],"effects":[],"secrets":[]}"#,
+        )
+        .expect("write manifest");
+
+        let loaded = load_from_air_sources_with_defs(
+            Arc::new(MemStore::new()),
+            &[AirSource::local_directory(&authored)],
+        )
+        .expect("load manifest")
+        .expect("loaded assets");
+
+        let schema_names = loaded
+            .loaded
+            .manifest
+            .schemas
+            .iter()
+            .map(|reference| reference.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(schema_names.contains(&"demo/Outer@1"));
+        assert!(schema_names.contains(&"demo/Inner@1"));
+    }
+
+    #[test]
+    fn load_from_air_sources_rejects_conflicting_generated_and_authored_defs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let authored = temp.path().join("air");
+        fs::create_dir_all(&authored).expect("mkdir authored");
+        fs::write(
+            authored.join("schemas.air.json"),
+            r#"[{"$kind":"defschema","name":"demo/Shared@1","type":{"record":{"task":{"text":{}}}}}]"#,
+        )
+        .expect("write authored schema");
+        fs::write(
+            authored.join("manifest.air.json"),
+            r#"{"$kind":"manifest","air_version":"2","schemas":[{"name":"demo/Shared@1"}],"modules":[],"workflows":[],"effects":[],"secrets":[]}"#,
+        )
+        .expect("write manifest");
+        write_generated_air_nodes(
+            temp.path(),
+            &[r#"{"$kind":"defschema","name":"demo/Shared@1","type":{"record":{"task":{"nat":{}}}}}"#],
+        )
+        .expect("write generated");
+
+        let err = match load_from_air_sources_with_defs(
+            Arc::new(MemStore::new()),
+            &[
+                AirSource::local_directory(&authored),
+                AirSource::Directory {
+                    path: temp.path().join(GENERATED_AIR_DIR),
+                    allow_manifest: false,
+                    include_root: false,
+                },
+            ],
+        ) {
+            Ok(_) => panic!("conflicting defs should be rejected"),
+            Err(err) => err,
+        };
+
+        let message = err.to_string();
+        assert!(message.contains("duplicate defschema 'demo/Shared@1'"));
+        assert!(message.contains("conflicting definitions"));
+    }
 }

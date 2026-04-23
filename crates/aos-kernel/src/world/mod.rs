@@ -8,8 +8,9 @@ use uuid::Uuid;
 
 use crate::Store;
 use aos_air_types::{
-    AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, Manifest, Name, TypeExpr,
-    TypePrimitive, builtins, schema_index::SchemaIndex, value_normalize::normalize_cbor_by_name,
+    AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, Manifest, ModuleRuntime,
+    Name, PythonArtifact, TypeExpr, TypePrimitive, builtins, schema_index::SchemaIndex,
+    value_normalize::normalize_cbor_by_name,
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectReceipt, EffectStreamFrame, effect_ops};
@@ -1016,9 +1017,16 @@ impl<S: Store + 'static> Kernel<S> {
             .ok_or_else(|| KernelError::WorkflowNotFound(workflow.implementation.module.clone()))
     }
 
-    fn workflow_wasm_hash(&self, workflow_name: &str) -> Result<String, KernelError> {
+    fn workflow_module_version(&self, workflow_name: &str) -> Result<String, KernelError> {
         let module_def = self.workflow_module_def(workflow_name)?;
-        wasm_hash_string(workflow_name, module_def)
+        match &module_def.runtime {
+            ModuleRuntime::Wasm { .. } => wasm_hash_string(workflow_name, module_def),
+            ModuleRuntime::Builtin {} => self.module_hash(module_def),
+            ModuleRuntime::Python { artifact, .. } => match artifact {
+                PythonArtifact::PythonBundle { root_hash }
+                | PythonArtifact::WorkspaceRoot { root_hash, .. } => Ok(root_hash.to_string()),
+            },
+        }
     }
 
     fn workflow_hash(&self, workflow: &DefWorkflow) -> Result<String, KernelError> {

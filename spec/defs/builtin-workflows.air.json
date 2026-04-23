@@ -8,19 +8,7 @@
     "key_schema": "sys/WorkspaceName@1",
     "effects_emitted": [],
     "impl": {
-      "module": "sys/workspace_wasm@1",
-      "entrypoint": "step"
-    }
-  },
-  {
-    "$kind": "defworkflow",
-    "name": "sys/HttpPublish@1",
-    "state": "sys/HttpPublishRegistry@1",
-    "event": "sys/HttpPublishSet@1",
-    "context": "sys/WorkflowContext@1",
-    "effects_emitted": [],
-    "impl": {
-      "module": "sys/http_publish_wasm@1",
+      "module": "sys/builtin_workspaces@1",
       "entrypoint": "step"
     }
   }

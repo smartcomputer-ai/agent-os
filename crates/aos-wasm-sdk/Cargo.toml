@@ -6,9 +6,11 @@ publish.workspace = true
 
 [features]
 default = []
+air-macros = ["dep:aos-air-macros"]
 std = []
 
 [dependencies]
+aos-air-macros = { workspace = true, optional = true }
 aos-effect-types.workspace = true
 aos-wasm-abi.workspace = true
 serde.workspace = true

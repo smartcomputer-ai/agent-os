@@ -86,7 +86,8 @@ Shadow reports bounded observed effects/in-flight state and ledger deltas. Prima
 - Backend seams: `aos-node/src/model/backends.rs` defines journal, checkpoint, world inventory, and blob contracts; implementations live under `aos-node/src/infra/`.
 - Control surface: `aos-node/src/control/` serves hot active-world reads and direct acceptance. Do not rebuild projection/materializer paths for default reads.
 - Module build/cache: workflows compiled via `aos-wasm-build`, cached under `.aos/cache/{modules|wasmtime}`.
-- Workspace sync uses `aos.sync.json` plus `aos push`/`aos pull`; filesystem names are segment-encoded with `~`-hex when needed.
+- Rust-authored AIR uses SDK derives plus `aos_wasm_sdk::aos_air_world!`; check generated package AIR with `aos air check` when `air/generated/` is committed.
+- Workspace sync uses optional `aos.world.json` workspace entries plus `aos push`/`aos pull`; filesystem names are segment-encoded with `~`-hex when needed.
 
 ## Project Structure (Rust workspace, edition 2024)
 
@@ -106,7 +107,6 @@ Crates keep deterministic core small and effectful code at the edges:
 - `aos-node` — Unified node library: worker runtime, hot control facade, direct HTTP/control acceptance, async effect runtime, replay/checkpoints, SQLite/Kafka journal backends, blobstore, vault, and node startup config.
 - `aos-cli` — Primary `aos` binary: CLI parsing, profiles, workspace commands, authoring flows, control client, and `aos node` orchestration.
 - `aos-authoring` — Authored-world build/upload/sync helpers, manifest loading, module placeholder resolution, and local state utilities.
-- `aos-sys` — Shared `no_std` types for built-in system workflows such as `sys/Workspace@1` and `sys/HttpPublish@1`.
 - `aos-llm` — Shared LLM client/provider abstraction used by adapters and agent tooling.
 - `aos-agent` — `aos.agent/*` contract types, helper reducers, and workflow binaries for agent sessions.
 - `aos-agent-eval` — Prompt/tool eval runner for agent session workflows.
