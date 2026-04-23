@@ -352,7 +352,7 @@ mod tests {
             .iter()
             .map(|m| m.module.name.as_str())
             .collect();
-        for name in ["sys/builtin_effects@1", "sys/workspace_wasm@1"] {
+        for name in ["sys/builtin_effects@1", "sys/builtin_workspaces@1"] {
             assert!(names.contains(&name));
         }
     }

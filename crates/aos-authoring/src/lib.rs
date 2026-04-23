@@ -16,7 +16,6 @@ pub use build::{
     build_bundle_from_local_world_with_profile_and_report, build_loaded_manifest_from_air_sources,
     build_loaded_manifest_from_authored_paths, compile_workflow,
     materialize_discovered_cargo_modules, resolve_placeholder_modules,
-    resolve_sys_module_wasm_hash,
 };
 pub use bundle::{WorldBundle, build_patch_document, load_air_bundle};
 pub use generated::{

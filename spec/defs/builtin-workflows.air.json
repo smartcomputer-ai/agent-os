@@ -8,7 +8,7 @@
     "key_schema": "sys/WorkspaceName@1",
     "effects_emitted": [],
     "impl": {
-      "module": "sys/workspace_wasm@1",
+      "module": "sys/builtin_workspaces@1",
       "entrypoint": "step"
     }
   }

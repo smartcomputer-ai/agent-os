@@ -1,8 +1,6 @@
 //! Integration tests for the Workspace workflow and internal workspace effects.
 //!
-//! These tests load the actual workflow WASM built in `crates/aos-sys` from
-//! `target/wasm32-unknown-unknown/debug/workspace.wasm`. Build it first with:
-//! `cargo build -p aos-sys --target wasm32-unknown-unknown`.
+//! These tests exercise the kernel builtin `sys/Workspace@1` workflow.
 
 #[path = "../tests/support/helpers.rs"]
 mod helpers;
@@ -201,27 +199,13 @@ struct WorkspaceAnnotationsSetReceipt {
     annotations_hash: String,
 }
 
-fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let module = fixtures::workflow_module_from_target(
-        store,
-        "sys/workspace_wasm@1",
-        "workspace.wasm",
-        Some("sys/WorkspaceName@1"),
-        "sys/WorkspaceHistory@1",
-        "sys/WorkspaceCommit@1",
-    );
+fn build_workspace_manifest(_store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("sys/WorkspaceCommit@1"),
         workflow: "sys/Workspace@1".into(),
         key_field: Some("workspace".into()),
     }];
-    let mut loaded = fixtures::build_loaded_manifest(vec![module], routing);
-
-    loaded.workflows.remove("sys/workspace_wasm@1");
-    loaded
-        .manifest
-        .workflows
-        .retain(|workflow| workflow.name.as_str() != "sys/workspace_wasm@1");
+    let mut loaded = fixtures::build_loaded_manifest(Vec::<fixtures::TestModule>::new(), routing);
 
     let workflow = aos_air_types::builtins::find_builtin_workflow("sys/Workspace@1")
         .expect("built-in workspace workflow")

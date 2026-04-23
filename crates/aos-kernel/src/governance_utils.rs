@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn normalize_patch_manifest_refs_keeps_builtin_module_hash() {
         let original_hash = format!("sha256:{}", "1".repeat(64));
-        assert!(builtins::find_builtin_module("sys/workspace_wasm@1").is_some());
+        assert!(builtins::find_builtin_module("sys/builtin_workspaces@1").is_some());
 
         let mut patch = ManifestPatch {
             manifest: Manifest {

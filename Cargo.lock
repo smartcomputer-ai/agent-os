@@ -277,7 +277,6 @@ dependencies = [
  "aos-effect-types",
  "aos-kernel",
  "aos-node",
- "aos-sys",
  "assert_cmd",
  "axum",
  "base64 0.22.1",
@@ -385,6 +384,7 @@ dependencies = [
  "aos-air-exec",
  "aos-air-types",
  "aos-cbor",
+ "aos-effect-types",
  "aos-effects",
  "aos-wasm",
  "aos-wasm-abi",
@@ -484,7 +484,6 @@ dependencies = [
  "aos-effects",
  "aos-kernel",
  "aos-node",
- "aos-sys",
  "aos-wasm-abi",
  "aos-wasm-build",
  "aos-wasm-sdk",
@@ -506,19 +505,6 @@ dependencies = [
  "tokio",
  "uuid",
  "walkdir",
-]
-
-[[package]]
-name = "aos-sys"
-version = "0.1.0"
-dependencies = [
- "aos-wasm-abi",
- "aos-wasm-sdk",
- "hex",
- "serde",
- "serde_bytes",
- "serde_cbor",
- "sha2",
 ]
 
 [[package]]

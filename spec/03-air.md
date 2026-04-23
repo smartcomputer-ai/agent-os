@@ -286,7 +286,7 @@ Built-in schemas live in `spec/defs/builtin-schemas*.air.json`.
 Built-in modules live in `spec/defs/builtin-modules.air.json`, including:
 
 - `sys/builtin_effects@1`
-- `sys/workspace_wasm@1`
+- `sys/builtin_workspaces@1`
 
 Built-in workflows live in `spec/defs/builtin-workflows.air.json`, including:
 

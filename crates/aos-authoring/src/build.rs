@@ -275,7 +275,6 @@ fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
         &mut loaded,
         store,
         world_root,
-        paths,
         compiled.as_ref().map(|value| &value.hash),
         None,
     )?;
@@ -325,7 +324,6 @@ pub fn build_loaded_manifest_from_authored_paths(
         &mut loaded,
         &store,
         module_root,
-        &paths,
         compiled.as_ref().map(|value| &value.hash),
         None,
     )?;
@@ -367,7 +365,6 @@ pub fn build_loaded_manifest_from_air_sources(
         &mut loaded,
         &store,
         scratch_root,
-        &paths,
         compiled.as_ref().map(|value| &value.hash),
         None,
     )?;
@@ -378,9 +375,8 @@ pub fn build_loaded_manifest_from_air_sources(
 /// Resolve placeholder module hashes in a loaded manifest.
 ///
 /// Resolution order:
-/// 1) Known system modules from workspace build artifacts (fallback: sys-module cache)
-/// 2) `modules/` directory in the world root (content-addressed wasm files)
-/// 3) Compiled workflow hash (if provided) when exactly one non-sys placeholder remains
+/// 1) `modules/` directory in the world root (content-addressed wasm files)
+/// 2) Compiled workflow hash (if provided) when exactly one placeholder remains
 ///
 /// If `specific_module` is provided, that module is patched with the compiled hash
 /// (and must currently be a placeholder).
@@ -388,7 +384,6 @@ pub fn resolve_placeholder_modules(
     loaded: &mut LoadedManifest,
     store: &impl Store,
     world_root: &Path,
-    paths: &LocalStatePaths,
     compiled_hash: Option<&HashRef>,
     specific_module: Option<&str>,
 ) -> Result<usize> {
@@ -416,24 +411,10 @@ pub fn resolve_placeholder_modules(
         }
     }
 
-    let mut unresolved_non_sys: Vec<String> = Vec::new();
-    let mut unresolved_sys: Vec<String> = Vec::new();
+    let mut unresolved: Vec<String> = Vec::new();
 
     for (name, module) in loaded.modules.iter_mut() {
         if !is_placeholder_hash(module) {
-            continue;
-        }
-        if let Some(spec) = sys_module_spec(name.as_str()) {
-            match resolve_sys_module(store, paths, world_root, spec)? {
-                Some(hash) => {
-                    if set_module_wasm_hash(module, hash) {
-                        patched += 1;
-                    }
-                }
-                None => {
-                    unresolved_sys.push(name.to_string());
-                }
-            }
             continue;
         }
         if let Some(hash) = resolve_from_world_modules(store, world_root, name.as_str())? {
@@ -442,13 +423,13 @@ pub fn resolve_placeholder_modules(
             }
             continue;
         }
-        unresolved_non_sys.push(name.to_string());
+        unresolved.push(name.to_string());
     }
 
-    if !unresolved_non_sys.is_empty() {
+    if !unresolved.is_empty() {
         if let Some(hash) = compiled_hash {
-            if unresolved_non_sys.len() == 1 {
-                let target = unresolved_non_sys.remove(0);
+            if unresolved.len() == 1 {
+                let target = unresolved.remove(0);
                 if let Some(module) = loaded.modules.get_mut(target.as_str()) {
                     if set_module_wasm_hash(module, hash.clone()) {
                         patched += 1;
@@ -458,20 +439,15 @@ pub fn resolve_placeholder_modules(
         }
     }
 
-    let mut still_missing: Vec<String> = Vec::new();
-    still_missing.extend(unresolved_non_sys);
-    still_missing.extend(unresolved_sys);
-
-    if !still_missing.is_empty() {
+    if !unresolved.is_empty() {
         let mut msg = String::from("unresolved module wasm hashes:\n");
-        for name in &still_missing {
+        for name in &unresolved {
             msg.push_str(&format!("  - {name}\n"));
         }
         msg.push_str("\nResolution hints:\n");
         msg.push_str(
             "  - add content-addressed wasm to <world>/modules/<name>@<ver>-<hash>.wasm\n",
         );
-        msg.push_str("  - build system modules with `cargo build -p aos-sys --target wasm32-unknown-unknown`\n");
         if compiled_hash.is_none() {
             msg.push_str("  - or provide a workflow/ to compile local modules\n");
         }
@@ -506,15 +482,6 @@ fn resolve_from_world_modules(
     module_name: &str,
 ) -> Result<Option<HashRef>> {
     let modules_dir = world_root.join("modules");
-    resolve_from_modules_dir(store, &modules_dir, module_name)
-}
-
-fn resolve_from_sys_cache(
-    store: &impl Store,
-    paths: &LocalStatePaths,
-    module_name: &str,
-) -> Result<Option<HashRef>> {
-    let modules_dir = sys_cache_dir(paths);
     resolve_from_modules_dir(store, &modules_dir, module_name)
 }
 
@@ -589,79 +556,6 @@ fn resolve_from_modules_dir(
         .context("create hash ref")
 }
 
-struct SysModuleSpec {
-    name: &'static str,
-    bin: &'static str,
-}
-
-fn sys_module_spec(name: &str) -> Option<&'static SysModuleSpec> {
-    SYS_MODULES.iter().find(|spec| spec.name == name)
-}
-
-const SYS_MODULES: &[SysModuleSpec] = &[SysModuleSpec {
-    name: "sys/workspace_wasm@1",
-    bin: "workspace",
-}];
-
-fn resolve_sys_module(
-    store: &impl Store,
-    paths: &LocalStatePaths,
-    world_root: &Path,
-    spec: &SysModuleSpec,
-) -> Result<Option<HashRef>> {
-    let target_dir = resolve_target_dir();
-    let profiles = ["debug", "release"];
-    for profile in profiles {
-        let path = target_dir
-            .join("wasm32-unknown-unknown")
-            .join(profile)
-            .join(format!("{}.wasm", spec.bin));
-        if path.exists() {
-            let bytes =
-                fs::read(&path).with_context(|| format!("read system wasm {}", path.display()))?;
-            let hash = Hash::of_bytes(&bytes).to_hex();
-            let stored = store.put_blob(&bytes).context("store system wasm blob")?;
-            let hash_ref = HashRef::new(stored.to_hex()).context("create hash ref")?;
-            if hash_ref.as_str() != hash {
-                anyhow::bail!(
-                    "system wasm hash mismatch for '{}': computed {hash}, stored {}",
-                    spec.name,
-                    hash_ref.as_str()
-                );
-            }
-            persist_module_file(&sys_cache_dir(paths), spec.name, hash_ref.as_str(), &bytes)?;
-            if should_copy_sys_modules() {
-                persist_module_file(
-                    &world_root.join("modules"),
-                    spec.name,
-                    hash_ref.as_str(),
-                    &bytes,
-                )?;
-            }
-            return Ok(Some(hash_ref));
-        }
-    }
-
-    resolve_from_sys_cache(store, paths, spec.name)
-}
-
-pub fn resolve_sys_module_wasm_hash(
-    store: &impl Store,
-    paths: &LocalStatePaths,
-    world_root: &Path,
-    module_name: &str,
-) -> Result<HashRef> {
-    let Some(spec) = sys_module_spec(module_name) else {
-        anyhow::bail!("unknown system module '{module_name}'");
-    };
-    if let Some(hash) = resolve_sys_module(store, paths, world_root, spec)? {
-        return Ok(hash);
-    }
-    anyhow::bail!(
-        "system wasm for '{module_name}' not found; build with `cargo build -p aos-sys --target wasm32-unknown-unknown`"
-    );
-}
-
 fn persist_module_file(
     modules_dir: &Path,
     module_name: &str,
@@ -719,31 +613,6 @@ fn remove_stale_module_files(modules_dir: &Path, module_name: &str, keep_hash: &
         fs::remove_file(path).with_context(|| format!("remove stale module {}", path.display()))?;
     }
     Ok(())
-}
-
-fn sys_cache_dir(paths: &LocalStatePaths) -> PathBuf {
-    paths.cache_root().join("sys-modules")
-}
-
-fn should_copy_sys_modules() -> bool {
-    match std::env::var("AOS_SYS_MODULES_COPY") {
-        Ok(val) => {
-            let val = val.to_lowercase();
-            !(val.is_empty() || val == "0" || val == "false" || val == "no")
-        }
-        Err(_) => false,
-    }
-}
-
-fn resolve_target_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR") {
-        let mut path = PathBuf::from(dir);
-        if path.is_relative() {
-            path = workspace_root().join(path);
-        }
-        return path;
-    }
-    workspace_root().join("target")
 }
 
 fn build_cargo_wasm_bin(
@@ -844,14 +713,6 @@ fn camel_to_snake(input: &str) -> String {
         }
     }
     out
-}
-
-fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("workspace root")
-        .to_path_buf()
 }
 
 fn normalize_hash_str(input: &str) -> Option<String> {

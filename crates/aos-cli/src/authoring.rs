@@ -12,8 +12,8 @@ use aos_authoring::{
     default_world_module_dir, load_all_world_secret_values, load_world_config,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
+use aos_effect_types::{HashRef as EffectHashRef, WorkspaceCommit, WorkspaceCommitMeta};
 use aos_kernel::Store;
-use aos_sys::{WorkspaceCommit, WorkspaceCommitMeta};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
@@ -525,7 +525,7 @@ pub async fn sync_workspace_push(
         workspace: parsed.workspace,
         expected_head: resolved.head,
         meta: WorkspaceCommitMeta {
-            root_hash: new_root.clone(),
+            root_hash: EffectHashRef::new(new_root.clone()).context("workspace root hash")?,
             owner: resolve_owner(),
             created_at: now_ns(),
         },

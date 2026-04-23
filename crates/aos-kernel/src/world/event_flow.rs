@@ -418,7 +418,7 @@ impl<S: Store + 'static> Kernel<S> {
         };
         let key_hash = Hash::of_bytes(&key_bytes);
         let state_for_workflow = output.state.clone();
-        let module_version = self.workflow_wasm_hash(&workflow_name).ok();
+        let module_version = self.workflow_module_version(&workflow_name).ok();
         match output.state {
             Some(state) => {
                 let state_hash = Hash::of_bytes(&state);
@@ -554,7 +554,7 @@ impl<S: Store + 'static> Kernel<S> {
                     effect.issuer_ref.clone(),
                     intent.intent_hash,
                     emitted_at_seq,
-                    self.workflow_wasm_hash(&workflow_name).ok(),
+                    self.workflow_module_version(&workflow_name).ok(),
                 )
                 .with_effect_identity(
                     workflow_hash,

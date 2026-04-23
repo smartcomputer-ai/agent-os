@@ -29,18 +29,5 @@
       }
     ]
   },
-  "workspaces": [
-    {
-      "ref": "workflow",
-      "dir": ".",
-      "ignore": [
-        "target/",
-        ".git/",
-        ".aos/",
-        "air/",
-        "modules/",
-        ".env"
-      ]
-    }
-  ]
+  "workspaces": [ ]
 }

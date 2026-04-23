@@ -11,7 +11,6 @@ aos-air-types.workspace = true
 aos-cbor.workspace = true
 aos-kernel.workspace = true
 aos-node.workspace = true
-aos-sys.workspace = true
 
 anyhow.workspace = true
 base64.workspace = true

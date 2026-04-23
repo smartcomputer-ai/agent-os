@@ -18,7 +18,6 @@ members = [
   "crates/aos-cli",
   "crates/aos-wasm-sdk",
   "crates/aos-wasm-build",
-  "crates/aos-sys",
   "crates/aos-smoke",
   "crates/aos-agent-eval",
   "crates/fabric-protocol",
@@ -51,7 +50,6 @@ aos-effects = { path = "crates/aos-effects" }
 aos-kernel = { path = "crates/aos-kernel" }
 aos-llm = { path = "crates/aos-llm" }
 aos-node = { path = "crates/aos-node" }
-aos-sys = { path = "crates/aos-sys" }
 aos-wasm = { path = "crates/aos-wasm" }
 aos-wasm-abi = { path = "crates/aos-wasm-abi" }
 aos-wasm-build = { path = "crates/aos-wasm-build" }
