@@ -16,3 +16,4 @@ syn.workspace = true
 [dev-dependencies]
 aos-air-types.workspace = true
 aos-wasm-sdk = { workspace = true, features = ["air-macros"] }
+tempfile.workspace = true

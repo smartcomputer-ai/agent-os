@@ -555,7 +555,10 @@ pub fn parse_air_nodes_from_str(data: &str) -> Result<Vec<AirNode>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::generated::write_generated_air_nodes;
     use aos_air_types::{TypeExpr, TypePrimitive};
+    use aos_kernel::MemStore;
+    use std::sync::Arc;
 
     #[test]
     fn parse_air_nodes_from_str_accepts_generated_defschema_json() {
@@ -575,5 +578,77 @@ mod tests {
             record.record.get("task"),
             Some(TypeExpr::Primitive(TypePrimitive::Text(_)))
         ));
+    }
+
+    #[test]
+    fn load_from_air_sources_allows_identical_generated_and_authored_defs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let authored = temp.path().join("air");
+        fs::create_dir_all(&authored).expect("mkdir authored");
+        let schema = r#"{"$kind":"defschema","name":"demo/Shared@1","type":{"record":{"task":{"text":{}}}}}"#;
+        fs::write(authored.join("schemas.air.json"), format!("[{schema}]"))
+            .expect("write authored schema");
+        fs::write(
+            authored.join("manifest.air.json"),
+            r#"{"$kind":"manifest","air_version":"2","schemas":[{"name":"demo/Shared@1"}],"modules":[],"workflows":[],"effects":[],"secrets":[]}"#,
+        )
+        .expect("write manifest");
+        write_generated_air_nodes(temp.path(), &[schema]).expect("write generated");
+
+        let loaded = load_from_air_sources_with_defs(
+            Arc::new(MemStore::new()),
+            &[
+                AirSource::local_directory(&authored),
+                AirSource::Directory {
+                    path: temp.path().join(GENERATED_AIR_DIR),
+                    allow_manifest: false,
+                    include_root: false,
+                },
+            ],
+        )
+        .expect("identical defs should be accepted");
+
+        assert!(loaded.is_some());
+    }
+
+    #[test]
+    fn load_from_air_sources_rejects_conflicting_generated_and_authored_defs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let authored = temp.path().join("air");
+        fs::create_dir_all(&authored).expect("mkdir authored");
+        fs::write(
+            authored.join("schemas.air.json"),
+            r#"[{"$kind":"defschema","name":"demo/Shared@1","type":{"record":{"task":{"text":{}}}}}]"#,
+        )
+        .expect("write authored schema");
+        fs::write(
+            authored.join("manifest.air.json"),
+            r#"{"$kind":"manifest","air_version":"2","schemas":[{"name":"demo/Shared@1"}],"modules":[],"workflows":[],"effects":[],"secrets":[]}"#,
+        )
+        .expect("write manifest");
+        write_generated_air_nodes(
+            temp.path(),
+            &[r#"{"$kind":"defschema","name":"demo/Shared@1","type":{"record":{"task":{"nat":{}}}}}"#],
+        )
+        .expect("write generated");
+
+        let err = match load_from_air_sources_with_defs(
+            Arc::new(MemStore::new()),
+            &[
+                AirSource::local_directory(&authored),
+                AirSource::Directory {
+                    path: temp.path().join(GENERATED_AIR_DIR),
+                    allow_manifest: false,
+                    include_root: false,
+                },
+            ],
+        ) {
+            Ok(_) => panic!("conflicting defs should be rejected"),
+            Err(err) => err,
+        };
+
+        let message = err.to_string();
+        assert!(message.contains("duplicate defschema 'demo/Shared@1'"));
+        assert!(message.contains("conflicting definitions"));
     }
 }

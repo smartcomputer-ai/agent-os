@@ -1,6 +1,6 @@
 # P1: Rust-Authored AIR And Package Discovery
 
-Status: partially implemented.
+Status: implemented for the current v0.22 DX slice.
 
 Completed so far:
 
@@ -12,12 +12,15 @@ Completed so far:
 5. `aos-authoring` resolves AIR from local directories, local Rust export binaries, and direct
    Cargo dependencies with `[package.metadata.aos]`.
 6. Sync-file AIR imports are removed from the normal authoring path.
+7. Macro diagnostics have compile-fail coverage for missing schema names and bad primitive
+   overrides.
+8. Generated and hand-authored AIR collisions are covered for both identical and conflicting defs.
+9. The P1 target crates plus CLI and smoke crate tests pass.
 
-Still open:
+Follow-up polish:
 
-1. broader diagnostics that point back to Rust annotations,
-2. additional generated/hand-authored conflict tests,
-3. broader fixture and smoke coverage before calling P1 fully closed.
+1. continue improving source-span diagnostics when new macro cases are added,
+2. add more fixture coverage as new Rust-authored AIR features land.
 
 ## Goal
 
@@ -409,7 +412,7 @@ Current implementation note:
 
 ## Testing
 
-Status: partially implemented.
+Status: implemented for the current target set.
 
 Add focused tests before migrating large worlds:
 
@@ -433,7 +436,7 @@ Add CLI tests once the command surface exists.
 
 ## Exit Criteria
 
-Status: mostly met by `aos-agent` and Demiurge, pending broader smoke coverage.
+Status: met for the current v0.22 DX slice.
 
 P1 is complete when:
 
