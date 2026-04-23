@@ -287,12 +287,10 @@ Built-in modules live in `spec/defs/builtin-modules.air.json`, including:
 
 - `sys/builtin_effects@1`
 - `sys/workspace_wasm@1`
-- `sys/http_publish_wasm@1`
 
 Built-in workflows live in `spec/defs/builtin-workflows.air.json`, including:
 
 - `sys/Workspace@1`
-- `sys/HttpPublish@1`
 
 Built-in effects live in `spec/defs/builtin-effects.air.json`, including:
 

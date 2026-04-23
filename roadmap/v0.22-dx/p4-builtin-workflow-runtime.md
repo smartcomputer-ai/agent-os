@@ -1,5 +1,18 @@
 # P4: Builtin Workflow Runtime
 
+Status: in progress.
+
+Completed so far:
+
+1. `crates/aos-kernel/src/workflow.rs` has been refactored into
+   `crates/aos-kernel/src/workflow/{mod.rs,wasm.rs,builtin.rs}`.
+2. `WorkflowRegistry` now dispatches by `defmodule.runtime.kind` while preserving the existing
+   kernel-facing API and WASM execution path.
+3. `sys/HttpPublish@1` has been removed from builtin AIR because the workspace HTTP surface no
+   longer exists.
+
+Remaining work starts at builtin reducer implementation in `workflow/builtin.rs`.
+
 ## Goal
 
 Add a kernel-owned builtin workflow runtime alongside the existing WASM workflow runtime.
@@ -7,11 +20,12 @@ Add a kernel-owned builtin workflow runtime alongside the existing WASM workflow
 Primary outcome:
 
 1. `defmodule.runtime.kind = "builtin"` can back `defworkflow` execution.
-2. `sys/Workspace@1` and `sys/HttpPublish@1` run as kernel builtins instead of `aos-sys`
-   WASM binaries.
+2. `sys/Workspace@1` runs as a kernel builtin instead of an `aos-sys` WASM binary.
 3. Authoring no longer needs to discover, build, cache, or patch system workflow WASM modules.
 4. The `aos-sys` crate can be removed after its shared payload structs move to an existing
    contract crate.
+5. The retired `sys/HttpPublish@1` workflow, schemas, fixture routes, and `aos-sys`
+   `http_publish` binary are removed instead of migrated.
 
 This is a P4 item, not P5 cleanup, because it changes the workflow execution boundary and removes
 the current system-WASM build dependency from normal authoring and runtime tests.
@@ -36,7 +50,7 @@ However workflow execution is still WASM-only:
 3. `crates/aos-kernel/src/module_runtime.rs` exposes only WASM hash helpers for workflow module
    versioning.
 4. `spec/defs/builtin-workflows.air.json` points `sys/Workspace@1` at
-   `sys/workspace_wasm@1` and `sys/HttpPublish@1` at `sys/http_publish_wasm@1`.
+   `sys/workspace_wasm@1`.
 5. `crates/aos-authoring/src/build.rs` has special system module resolution that looks for built
    `aos-sys` WASM files and emits "build `aos-sys`" recovery hints.
 
@@ -44,7 +58,9 @@ The system workflow logic is small and deterministic today:
 
 1. `crates/aos-sys/src/bin/workspace.rs` validates the workspace name, checks keyed routing,
    enforces `expected_head`, increments `latest`, and inserts commit metadata.
-2. `crates/aos-sys/src/bin/http_publish.rs` inserts or removes publish rules in a map.
+
+`sys/HttpPublish@1` is retired. The workspace HTTP publish surface no longer exists, so P4 should
+delete that workflow and its schemas instead of migrating them to the builtin runtime.
 
 ## Target Shape
 
@@ -159,7 +175,6 @@ pub(crate) fn invoke_builtin_workflow(
 Initial supported selectors:
 
 1. `("sys/workspace_builtin@1", "step")`
-2. `("sys/http_publish_builtin@1", "step")`
 
 Each builtin should:
 
@@ -186,10 +201,6 @@ Add missing types:
 2. `WorkspaceCommitMeta`
 3. `WorkspaceHistory`
 4. `WorkspaceCommit`
-5. `WorkspaceRef`
-6. `HttpPublishRule`
-7. `HttpPublishRegistry`
-8. `HttpPublishSet`
 
 Then update current users:
 
@@ -211,14 +222,6 @@ Change `spec/defs/builtin-modules.air.json`:
 }
 ```
 
-```json
-{
-  "$kind": "defmodule",
-  "name": "sys/http_publish_builtin@1",
-  "runtime": { "kind": "builtin" }
-}
-```
-
 Change `spec/defs/builtin-workflows.air.json`:
 
 ```json
@@ -228,14 +231,11 @@ Change `spec/defs/builtin-workflows.air.json`:
 }
 ```
 
-```json
-"impl": {
-  "module": "sys/http_publish_builtin@1",
-  "entrypoint": "step"
-}
-```
+Remove `sys/HttpPublish@1`, `sys/http_publish_wasm@1`, and the `sys/HttpPublish*` schema family.
+The workspace HTTP publish surface no longer exists, so there is no replacement builtin workflow.
 
-The workflow names, event schemas, state schemas, key schema, and effect allowlists stay unchanged.
+The `sys/Workspace@1` workflow name, event schema, state schema, key schema, and effect allowlist
+stay unchanged.
 
 ### 6. Generalize Workflow Module Versioning
 
@@ -274,7 +274,8 @@ Once all users have moved to `aos-effect-types` and builtin reducers live in the
 2. remove it from workspace members and workspace dependencies,
 3. remove `aos-cli` / `aos-smoke` dependency entries,
 4. remove tests that build `aos-sys` WASM,
-5. update docs that mention building system workflow WASM.
+5. update docs that mention building system workflow WASM,
+6. remove the already-retired `http_publish` binary and any stale `sys/HttpPublish*` references.
 
 This removal can be the final commit of P4 or a small P5 follow-up if the runtime migration is
 large enough on its own.
@@ -288,25 +289,22 @@ Minimum test coverage:
    - `expected_head` mismatch fails,
    - invalid workspace name fails,
    - keyed route key must match event workspace.
-2. Unit tests for builtin `sys/HttpPublish@1`:
-   - setting a rule inserts/overwrites,
-   - setting `rule = None` removes.
-3. Kernel integration test where a manifest routes `sys/WorkspaceCommit@1` to
+2. Kernel integration test where a manifest routes `sys/WorkspaceCommit@1` to
    `sys/Workspace@1` and no system WASM blob exists.
-4. Replay test for builtin workflow state:
+3. Replay test for builtin workflow state:
    - submit workspace commit,
    - snapshot or record journal,
    - replay from genesis,
    - assert byte-identical state/snapshot.
-5. Authoring/build test proving builtin modules do not require placeholder WASM patching.
-6. Existing workspace CLI/control tests continue to pass without building `aos-sys`.
-7. Final smoke test with `crates/aos-smoke/fixtures/09-workspaces` to prove the workspace fixture
-   runs through builtin `sys/Workspace@1` and `sys/HttpPublish@1`.
+4. Authoring/build test proving builtin modules do not require placeholder WASM patching.
+5. Existing workspace CLI/control tests continue to pass without building `aos-sys`.
+6. Final smoke test with `crates/aos-smoke/fixtures/09-workspaces` to prove the workspace fixture
+   runs through builtin `sys/Workspace@1` without `sys/HttpPublish@1`.
 
 ## Acceptance Criteria
 
-1. A world can use `sys/Workspace@1` and `sys/HttpPublish@1` without any `aos-sys` WASM artifacts
-   in `target/`, `.aos/cache/sys-modules`, or `<world>/modules`.
+1. A world can use `sys/Workspace@1` without any `aos-sys` WASM artifacts in `target/`,
+   `.aos/cache/sys-modules`, or `<world>/modules`.
 2. `cargo build -p aos-sys --target wasm32-unknown-unknown` is no longer required by normal tests,
    fixtures, or authoring flows.
 3. `defmodule.runtime.kind = "builtin"` is accepted for workflow execution and rejects unknown
@@ -315,6 +313,8 @@ Minimum test coverage:
 5. Snapshot/replay behavior remains deterministic for both WASM and builtin workflows.
 6. The `aos-sys` crate is removed or has a short explicit follow-up with no runtime dependency.
 7. `crates/aos-smoke/fixtures/09-workspaces` passes as the final end-to-end smoke check.
+8. No builtin AIR, smoke fixture, or authoring path references `sys/HttpPublish@1` or
+   `sys/http_publish_wasm@1`.
 
 ## Non-Goals
 

@@ -294,10 +294,6 @@ mod tests {
         assert!(names.contains(&"sys/GovActionRequested@1"));
         // Workspace
         assert!(names.contains(&"sys/WorkspaceName@1"));
-        assert!(names.contains(&"sys/WorkspaceRef@1"));
-        assert!(names.contains(&"sys/HttpPublishRule@1"));
-        assert!(names.contains(&"sys/HttpPublishRegistry@1"));
-        assert!(names.contains(&"sys/HttpPublishSet@1"));
         assert!(names.contains(&"sys/WorkspaceCommitMeta@1"));
         assert!(names.contains(&"sys/WorkspaceHistory@1"));
         assert!(names.contains(&"sys/WorkspaceCommit@1"));
@@ -356,11 +352,7 @@ mod tests {
             .iter()
             .map(|m| m.module.name.as_str())
             .collect();
-        for name in [
-            "sys/builtin_effects@1",
-            "sys/workspace_wasm@1",
-            "sys/http_publish_wasm@1",
-        ] {
+        for name in ["sys/builtin_effects@1", "sys/workspace_wasm@1"] {
             assert!(names.contains(&name));
         }
     }
@@ -371,7 +363,7 @@ mod tests {
             .iter()
             .map(|workflow| workflow.workflow.name.as_str())
             .collect();
-        for name in ["sys/Workspace@1", "sys/HttpPublish@1"] {
+        for name in ["sys/Workspace@1"] {
             assert!(workflow_names.contains(&name));
         }
 

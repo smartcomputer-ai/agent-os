@@ -11,10 +11,6 @@ path = "src/lib.rs"
 name = "workspace"
 path = "src/bin/workspace.rs"
 
-[[bin]]
-name = "http_publish"
-path = "src/bin/http_publish.rs"
-
 [dependencies]
 aos-wasm-sdk.workspace = true
 aos-wasm-abi.workspace = true

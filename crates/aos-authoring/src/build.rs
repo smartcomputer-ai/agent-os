@@ -598,16 +598,10 @@ fn sys_module_spec(name: &str) -> Option<&'static SysModuleSpec> {
     SYS_MODULES.iter().find(|spec| spec.name == name)
 }
 
-const SYS_MODULES: &[SysModuleSpec] = &[
-    SysModuleSpec {
-        name: "sys/workspace_wasm@1",
-        bin: "workspace",
-    },
-    SysModuleSpec {
-        name: "sys/http_publish_wasm@1",
-        bin: "http_publish",
-    },
-];
+const SYS_MODULES: &[SysModuleSpec] = &[SysModuleSpec {
+    name: "sys/workspace_wasm@1",
+    bin: "workspace",
+}];
 
 fn resolve_sys_module(
     store: &impl Store,

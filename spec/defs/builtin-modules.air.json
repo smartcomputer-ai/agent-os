@@ -15,15 +15,5 @@
         "kind": "wasm_module"
       }
     }
-  },
-  {
-    "$kind": "defmodule",
-    "name": "sys/http_publish_wasm@1",
-    "runtime": {
-      "kind": "wasm",
-      "artifact": {
-        "kind": "wasm_module"
-      }
-    }
   }
 ]
