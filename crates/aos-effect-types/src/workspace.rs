@@ -8,6 +8,28 @@ use crate::serde_helpers;
 
 pub type WorkspaceAnnotations = BTreeMap<String, HashRef>;
 pub type WorkspaceAnnotationsPatch = BTreeMap<String, Option<HashRef>>;
+pub type WorkspaceVersion = u64;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceCommitMeta {
+    pub root_hash: HashRef,
+    pub owner: String,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct WorkspaceHistory {
+    pub latest: WorkspaceVersion,
+    pub versions: BTreeMap<WorkspaceVersion, WorkspaceCommitMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceCommit {
+    pub workspace: String,
+    #[serde(default)]
+    pub expected_head: Option<WorkspaceVersion>,
+    pub meta: WorkspaceCommitMeta,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceResolveParams {

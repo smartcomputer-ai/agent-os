@@ -106,8 +106,7 @@ Completed AOS schema and runtime changes:
 - `crates/aos-effect-types/src/host.rs` supports `HostTarget::Local` and
   `HostTarget::Sandbox`.
 - `spec/defs/builtin-schemas-host.air.json` includes the `sandbox` HostTarget variant.
-- `crates/aos-sys/src/bin/cap_enforce_host.rs` only understands local host targets, but
-  full host capability policy is explicitly deferred out of P3.
+- Full host capability policy for sandbox targets is explicitly deferred out of P3.
 - adapter startup receives effect-origin metadata for workflow-origin async effects and normalizes
   stream-frame identity before kernel admission.
 - the host adapter implementation is split into local, Fabric, shared, output, path, state, and

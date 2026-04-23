@@ -1,0 +1,447 @@
+# P1: Rust-Authored AIR And Package Discovery
+
+Status: implemented for the current v0.22 DX slice.
+
+Completed so far:
+
+1. `crates/aos-air-macros` provides `AirSchema`, `AirType`, and `#[aos_workflow(...)]`.
+2. `aos-wasm-sdk` re-exports the macro surface and provides `aos_air_world!` /
+   `aos_air_exports!` collection helpers.
+3. `aos air generate` materializes Rust-authored AIR under `air/generated/`.
+4. `aos air check` compares checked-in `air/generated/` against freshly generated output.
+5. `aos-authoring` resolves AIR from local directories, local Rust export binaries, and direct
+   Cargo dependencies with `[package.metadata.aos]`.
+6. Sync-file AIR imports are removed from the normal authoring path.
+7. Macro diagnostics have compile-fail coverage for missing schema names and bad primitive
+   overrides.
+8. Generated and hand-authored AIR collisions are covered for both identical and conflicting defs.
+9. The P1 target crates plus CLI and smoke crate tests pass.
+
+Follow-up polish:
+
+1. continue improving source-span diagnostics when new macro cases are added,
+2. add more fixture coverage as new Rust-authored AIR features land.
+
+## Goal
+
+Add a Rust-first authoring lane for AIR definitions without removing the hand-authored AIR directory
+lane.
+
+Primary outcome:
+
+1. Rust workflow crates can generate `defschema`, `defmodule`, `defworkflow`, routing, and manifest
+   refs from Rust code and attributes.
+2. `aos-authoring` can discover AIR from both authored JSON directories and generated Rust package
+   metadata.
+3. Cargo packages such as `aos-agent` can export reusable AIR without every consumer hand-writing
+   import config.
+
+The kernel should continue to consume only canonical AIR. Rust authoring is sugar that produces the
+same `AirNode`s the current loader already knows how to store, hash, validate, bundle, and upload.
+
+## Design Stance
+
+### 0) Choose procedural macros for the primary Rust DX
+
+The primary Rust authoring surface should use procedural macros.
+
+That gives the intended developer experience:
+
+```text
+write normal Rust structs/enums/workflows
+add focused AOS attributes where AIR needs explicit identity or semantics
+let the compiler generate AIR metadata
+```
+
+This deliberately accepts one small proc-macro crate as the cost of avoiding duplicated schema
+field lists and hand-maintained Rust/AIR drift.
+
+### 1) Generated AIR is a peer source, not a hidden runtime path
+
+The active authoring model becomes:
+
+```text
+AIR source =
+  hand-authored AIR directory
+  generated Rust-authored package/world
+```
+
+Both sources produce `AirNode`s. After that point, the existing path remains authoritative:
+
+```text
+AirNode -> CAS -> manifest ref patching -> semantic validation -> loaded manifest -> kernel
+```
+
+Generated AIR should be inspectable. The CLI should be able to print or materialize generated AIR
+for debugging and CI diffs.
+
+### 2) Rust annotations should be explicit where AIR and serde differ
+
+Serde shape is useful, but AIR has stronger identity and typing rules. The derive/macro surface
+should require explicit annotations for cases that cannot be inferred safely:
+
+1. schema names,
+2. external schema refs such as `#[aos(schema_ref = "...")]`,
+3. `time`, `duration`, `hash`, and `uuid` semantics such as `#[aos(air_type = "time")]`,
+4. newtype schema representation,
+5. variant tagging,
+6. workflow key schema,
+7. emitted effects,
+8. routing key fields.
+
+Unsupported Rust shapes should fail during generation with actionable diagnostics instead of
+silently producing loose AIR.
+
+### 3) Package discovery should be metadata-driven
+
+Reusable crates should advertise AIR exports through Cargo metadata, not through each downstream
+world's local config.
+
+Illustrative shape:
+
+```toml
+[package.metadata.aos]
+air = "generated"
+air_dir = ".aos/generated/air"
+exports = true
+```
+
+The exact fields can change during implementation, but the metadata should answer:
+
+1. does this package export AIR,
+2. where the generated or checked-in AIR can be found,
+3. which build target provides workflow WASM modules,
+4. what defs identity should be reported for review.
+
+Sync-file AIR imports were a transitional mechanism and should be removed rather than carried
+through a backwards-compatibility phase. See `p3-world-config-and-air-discovery.md` for the optional
+`aos.world.json` direction and the decision to defer AIR lock files.
+
+### 4) Proc macros emit metadata; host-side generation writes AIR files
+
+Procedural macros should not write files. They should emit Rust metadata constants or registrations.
+
+The first extraction contract is:
+
+```text
+Rust source + proc macros
+  -> generated Rust metadata constants/registrations
+  -> package-local `aos_air_exports!` collection
+  -> host-side `aos air generate` or authoring helper
+  -> materialized AIR JSON under air/generated/
+  -> normal AIR loader path
+```
+
+This keeps the compile-time macro crate pure and makes filesystem writes, package discovery,
+diagnostics, CI checks, and deterministic output ordering ordinary host-side authoring concerns.
+
+For P1, generated AIR should be written to:
+
+```text
+air/generated/
+```
+
+The loader should treat that directory as a normal AIR source and merge it with hand-authored AIR
+when both are present.
+
+## Non-Goals
+
+- Do not remove hand-authored AIR support.
+- Do not migrate every smoke fixture.
+- Do not redesign AIR v2 root forms.
+- Do not add Python workflow or Python effect execution.
+- Do not implement custom Rust/WASI effects in this phase.
+- Do not make the kernel understand Rust metadata directly.
+
+## Phase 1A: Rust Schema Generation
+
+Status: implemented for the current Rust-authored subset.
+
+Add a Rust AIR schema generation surface using procedural macros.
+
+Rust requires derive and attribute procedural macros to live in a `proc-macro` crate, so P1 should
+add exactly one new crate for this purpose. The crate should stay thin: parse Rust syntax, validate
+the supported authoring shape, and emit metadata/glue code. It should not become the authoring
+loader or AIR model owner.
+
+Crate placement:
+
+```text
+crates/aos-air-macros       derive/attribute procedural macros; compile-time only
+crates/aos-wasm-sdk         re-export macros behind an opt-in feature and own no_std workflow ABI helpers
+crates/aos-authoring        generated metadata discovery, AIR assembly, Cargo discovery
+```
+
+Avoid making `aos-air-types` depend on proc-macro infrastructure. It should remain the AIR data
+model and validation crate, not the authoring frontend.
+
+Do not add a second support crate in P1. If shared helper code becomes necessary, prefer existing
+crates first:
+
+1. pure AIR data types stay in `aos-air-types`,
+2. workflow/runtime-side helpers stay in `aos-wasm-sdk`,
+3. std-side generation and loading helpers stay in `aos-authoring`.
+
+Initial derive surface:
+
+```rust
+#[derive(Serialize, Deserialize, AirSchema)]
+#[aos(schema = "demo/TaskSubmitted@1")]
+pub struct TaskSubmitted {
+    #[aos(schema_ref = "aos.agent/SessionId@1")]
+    pub task_id: SessionId,
+    #[aos(air_type = "time")]
+    pub observed_at_ns: u64,
+    pub task: String,
+}
+```
+
+Initial package-local export surface:
+
+```rust
+aos_wasm_sdk::aos_air_exports! {
+    pub const AOS_AIR_NODES_JSON = {
+        schemas: [
+            TaskSubmitted,
+            OtherSchema,
+        ],
+        workflows: [
+            CounterWorkflow,
+        ],
+    };
+}
+```
+
+Initial host-side materialization surface:
+
+```rust
+aos_authoring::write_generated_air_nodes(world_root, AOS_AIR_NODES_JSON)?;
+```
+
+Package-local export binaries can use the same constants without linking `aos-authoring`:
+
+```rust
+fn main() {
+    print!("{}", aos_wasm_sdk::air_exports_json(AOS_AIR_NODES_JSON));
+}
+```
+
+Host-side tooling can then pass the captured stdout to:
+
+```rust
+aos_authoring::write_generated_air_export_json(world_root, &stdout)?;
+```
+
+The first CLI surface is the same bridge:
+
+```text
+aos air generate --world-root <world-root> \
+  --manifest-path <Cargo.toml> \
+  --bin aos-air-export
+```
+
+Supported first subset:
+
+1. structs with named fields -> `record`,
+2. serde-tagged enums -> `variant`,
+3. `String` -> `text`,
+4. `bool` -> `bool`,
+5. `u64` -> `nat`,
+6. `i64` -> `int`,
+7. `Vec<T>` -> `list<T>`,
+8. `Option<T>` -> `option<T>`,
+9. `BTreeMap<String, T>` -> `map<text, T>`,
+10. explicit `#[aos(schema_ref = "...")]` for external or reused schemas.
+
+Required checks:
+
+1. every generated schema has a stable AIR name,
+2. duplicate schema names with different generated types fail,
+3. unsupported field types fail,
+4. generated schemas round-trip through `aos-air-types` JSON and canonical CBOR.
+
+## Phase 1B: Rust Workflow Metadata
+
+Status: implemented for module/workflow metadata and emitted effects; route/manifest assembly is
+owned by `aos_wasm_sdk::aos_air_world!`.
+
+Extend the workflow macro surface so the same Rust declaration that exports the WASM ABI also emits
+AIR workflow metadata.
+
+Illustrative shape:
+
+```rust
+#[aos_workflow(
+    name = "demo/Counter@1",
+    module = "demo/Counter_wasm@1",
+    entrypoint = "step",
+    state = "demo/CounterState@1",
+    event = "demo/CounterEvent@1",
+    context = "sys/WorkflowContext@1",
+    key_schema = "demo/CounterId@1",
+    effects = ["sys/timer.set@1"],
+    routes = [
+        { event = "demo/CounterEvent@1", key_field = "counter_id" }
+    ]
+)]
+#[derive(Default)]
+struct Counter;
+```
+
+Generated definitions:
+
+1. `defmodule` for the WASM artifact with placeholder hash,
+2. `defworkflow` with state/event/context/key/effect allowlist,
+3. manifest refs for local schemas/modules/workflows/effects/secrets,
+4. routing subscriptions for domain ingress.
+
+The existing `aos_workflow!(Ty)` macro can remain as a low-level ABI-only escape hatch. The new
+surface should be the Rust-authored AIR path.
+
+The first implementation slice can leave route/manifest generation out of the macro and emit only
+`defmodule` plus `defworkflow` JSON metadata. That proves the workflow export contract while keeping
+manifest patching and generated file materialization in `aos-authoring`.
+
+## Phase 1C: Generated AIR Materialization And Loader Integration
+
+Status: implemented.
+
+Add an `AirSource` layer inside `aos-authoring` so callers no longer assume that all local defs live
+under one `air/` directory.
+
+Target shape:
+
+```text
+AirSource::Directory(path)
+AirSource::GeneratedRustPackage(package metadata)
+```
+
+Implementation should:
+
+1. collect hand-authored AIR nodes from directories exactly as today,
+2. materialize Rust-generated AIR to `air/generated/` through a host-side generator,
+3. merge all defs before manifest ref patching,
+4. preserve the current duplicate-name behavior,
+5. keep imported manifests ignored when they come from import roots,
+6. produce the same `WorldBundle` shape as the current build path.
+
+Generated AIR should be stable and inspectable. The first version should write JSON files under
+`air/generated/`, for example:
+
+```text
+air/generated/schemas.air.json
+air/generated/module.air.json
+air/generated/manifest.air.json
+```
+
+If later versions need cache-only generation, they can add a `target/aos/air/` mode without changing
+the logical AIR source contract.
+
+## Phase 1D: Cargo Package Discovery
+
+Status: implemented for direct Cargo dependencies that opt in with `[package.metadata.aos]`.
+
+Teach `aos-authoring` to discover AOS-exporting packages through `cargo metadata`.
+
+Old explicit consumer shape to remove:
+
+```json
+{
+  "air": {
+    "imports": [
+      {
+        "cargo": {
+          "package": "aos-agent",
+          "air_dir": "air"
+        }
+      }
+    ]
+  }
+}
+```
+
+Target consumer shape:
+
+```text
+depend on aos-agent in Cargo.toml
+run aos build/push
+authoring discovers aos-agent AIR exports automatically
+```
+
+Discovery rules:
+
+1. inspect direct dependencies of the local workflow package first,
+2. only import packages that opt in through `package.metadata.aos`,
+3. support both checked-in AIR directories and generated AIR outputs,
+4. compute a defs hash from imported definitions,
+5. expose discovered package identities and defs hashes in build/check output.
+
+Sync-file AIR imports should be removed from the normal authoring path. Non-Cargo import roots and
+fixture-specific import behavior should use explicit CLI/test-harness overrides instead. New
+Rust-authored examples should use Cargo dependency discovery plus the config direction in
+`p3-world-config-and-air-discovery.md`.
+
+## Phase 1E: Developer Commands And CI Hooks
+
+Status: implemented for deterministic generate/check; source-span diagnostics remain future polish.
+
+Add CLI surfaces that make Rust-generated AIR visible.
+
+Recommended commands:
+
+```text
+aos air generate --world-root <world-root> --manifest-path <Cargo.toml> --bin aos-air-export
+aos air check --world-root <world-root> --manifest-path <Cargo.toml> --bin aos-air-export
+```
+
+Required behavior:
+
+1. generation is deterministic,
+2. `check` fails if checked-in generated AIR is stale,
+3. diagnostics point to Rust source annotations where practical,
+4. output can be diffed as ordinary AIR JSON.
+
+Current implementation note:
+
+- `aos_wasm_sdk::aos_air_world!` owns manifest assembly from typed schema/workflow lists, so
+  packages do not maintain a second manifest reference list by hand.
+- `aos air check` regenerates AIR in a temporary root and compares it with checked-in
+  `air/generated/*.air.json`.
+- `aos-agent` uses generated-only package AIR; most smoke fixtures remain hand-authored AIR
+  coverage.
+
+## Testing
+
+Status: implemented for the current target set.
+
+Add focused tests before migrating large worlds:
+
+1. derive one record schema,
+2. derive one variant schema with refs,
+3. generate one workflow/module/manifest/routing set,
+4. merge generated AIR with hand-authored AIR,
+5. auto-discover one Cargo dependency export,
+6. support explicit CLI/test-harness import overrides for non-Cargo fixtures,
+7. reject duplicate generated/hand-authored definitions with different hashes.
+
+The first green target should be:
+
+```text
+cargo test -p aos-air-types
+cargo test -p aos-authoring
+cargo test -p aos-wasm-sdk
+```
+
+Add CLI tests once the command surface exists.
+
+## Exit Criteria
+
+Status: met for the current v0.22 DX slice.
+
+P1 is complete when:
+
+1. a small Rust-authored fixture can build a valid world bundle with no local `air/*.json`,
+2. a package can export AIR through Cargo metadata,
+3. another workflow crate can discover that package's AIR without manual sync import wiring,
+4. hand-authored smoke fixtures still build through the existing AIR directory path,
+5. generated AIR can be materialized and checked for inspection/CI.

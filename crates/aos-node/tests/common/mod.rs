@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Once, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -577,10 +576,7 @@ fn prepare_workspace_manifest() -> PreparedManifest {
         builtin_schema_ref("sys/WorkspaceDiffChange@1"),
         builtin_schema_ref("sys/WorkspaceDiffReceipt@1"),
     ]);
-    let mut module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
-    let (workspace_module_ref, workspace_module_blobs) = authored_builtin_module("sys/Workspace@1");
-    blobs.extend(workspace_module_blobs);
-    module_refs.push(workspace_module_ref);
+    let module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
     let workflow_refs = store_defs(&mut blobs, workflows.into_iter().map(AirNode::Defworkflow));
 
     let manifest = Manifest {
@@ -921,70 +917,6 @@ fn patch_fixture_workflow_manifest(dst: &Path) {
     let cargo_text = fs::read_to_string(&cargo_toml).expect("read copied workflow Cargo.toml");
     let cargo_text = cargo_text.replace("../../../../", &format!("{}/", crates_root.display()));
     fs::write(cargo_toml, cargo_text).expect("patch copied workflow Cargo.toml");
-}
-
-fn authored_builtin_module(name: &str) -> (NamedRef, Vec<Vec<u8>>) {
-    let builtin = builtins::find_builtin_module(name).expect("builtin module");
-    let mut module = builtin.module.clone();
-    let wasm_bytes = builtin_module_wasm_bytes(name);
-    let wasm_hash = Hash::of_bytes(&wasm_bytes).to_hex();
-    module.runtime = ModuleRuntime::Wasm {
-        artifact: WasmArtifact::WasmModule {
-            hash: HashRef::new(wasm_hash).expect("builtin module wasm hash ref"),
-        },
-    };
-    let module_bytes =
-        to_canonical_cbor(&AirNode::Defmodule(module.clone())).expect("encode builtin module");
-    let module_hash = Hash::of_bytes(&module_bytes);
-    (
-        NamedRef {
-            name: module.name,
-            hash: HashRef::new(module_hash.to_hex()).expect("builtin module hash ref"),
-        },
-        vec![wasm_bytes, module_bytes],
-    )
-}
-
-fn builtin_module_wasm_bytes(name: &str) -> Vec<u8> {
-    let bin = match name {
-        "sys/Workspace@1" => "workspace",
-        other => panic!("unsupported builtin test module {other}"),
-    };
-    let wasm_path = workspace_target_dir()
-        .join("wasm32-unknown-unknown/debug")
-        .join(format!("{bin}.wasm"));
-    if !wasm_path.exists() {
-        let status = Command::new("cargo")
-            .current_dir(repo_root())
-            .args([
-                "build",
-                "-p",
-                "aos-sys",
-                "--target",
-                "wasm32-unknown-unknown",
-                "--bin",
-                bin,
-            ])
-            .status()
-            .expect("build builtin test module");
-        assert!(
-            status.success(),
-            "building builtin test module {bin} failed with {status}"
-        );
-    }
-    fs::read(&wasm_path)
-        .unwrap_or_else(|err| panic!("read builtin module wasm {}: {err}", wasm_path.display()))
-}
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("repo root")
-}
-
-fn workspace_target_dir() -> PathBuf {
-    repo_root().join("target")
 }
 
 fn fixture_copy_signature(src: &Path) -> String {

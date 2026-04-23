@@ -1,4 +1,5 @@
 use aos_air_types::{DefSchema, TypeExpr, TypeRecord};
+use aos_effect_types::{HashRef, WorkspaceCommit, WorkspaceCommitMeta, WorkspaceHistory};
 use aos_kernel::error::KernelError;
 use aos_wasm_abi::{DomainEvent, WorkflowOutput};
 use helpers::fixtures::{self, START_SCHEMA, TestWorld, WorkflowAbi};
@@ -114,4 +115,43 @@ fn raised_events_are_routed_to_workflows() {
         world.kernel.workflow_state("com.acme/RaisedConsumer@1"),
         Some(vec![0xEE])
     );
+}
+
+#[test]
+fn builtin_workspace_workflow_updates_keyed_state_without_wasm() {
+    let store = fixtures::new_mem_store();
+    let loaded = fixtures::build_loaded_manifest(
+        Vec::<fixtures::TestModule>::new(),
+        vec![aos_air_types::RoutingEvent {
+            event: fixtures::schema("sys/WorkspaceCommit@1"),
+            workflow: "sys/Workspace@1".into(),
+            key_field: Some("workspace".into()),
+        }],
+    );
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    let event = WorkspaceCommit {
+        workspace: "main".into(),
+        expected_head: None,
+        meta: WorkspaceCommitMeta {
+            root_hash: HashRef::new(format!("sha256:{}", "a".repeat(64))).unwrap(),
+            owner: "tester".into(),
+            created_at: 1234,
+        },
+    };
+
+    world
+        .kernel
+        .submit_domain_event_result("sys/WorkspaceCommit@1", serde_cbor::to_vec(&event).unwrap())
+        .expect("submit workspace commit");
+    world.kernel.tick_until_idle().unwrap();
+
+    let key = aos_cbor::to_canonical_cbor(&"main".to_string()).unwrap();
+    let bytes = world
+        .kernel
+        .workflow_state_bytes("sys/Workspace@1", Some(&key))
+        .unwrap()
+        .expect("workspace state");
+    let state: WorkspaceHistory = serde_cbor::from_slice(&bytes).unwrap();
+    assert_eq!(state.latest, 1);
+    assert_eq!(state.versions.get(&1).unwrap().owner, "tester");
 }

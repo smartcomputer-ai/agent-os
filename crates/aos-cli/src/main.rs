@@ -103,4 +103,42 @@ mod tests {
         assert_eq!(cli.global.universe, None);
         assert_eq!(cli.global.world, None);
     }
+
+    #[test]
+    fn air_generate_parse_accepts_export_binary_options() {
+        let cli = Cli::try_parse_from([
+            "aos",
+            "air",
+            "generate",
+            "--world-root",
+            "worlds/demo",
+            "--manifest-path",
+            "worlds/demo/workflow/Cargo.toml",
+            "--package",
+            "demo-workflow",
+            "--bin",
+            "export-air",
+        ])
+        .expect("parse air generate");
+        assert!(matches!(cli.command, Command::Air(_)));
+    }
+
+    #[test]
+    fn air_check_parse_accepts_export_binary_options() {
+        let cli = Cli::try_parse_from([
+            "aos",
+            "air",
+            "check",
+            "--world-root",
+            "crates/aos-agent",
+            "--manifest-path",
+            "Cargo.toml",
+            "--package",
+            "aos-agent",
+            "--bin",
+            "aos-air-export",
+        ])
+        .expect("parse air check");
+        assert!(matches!(cli.command, Command::Air(_)));
+    }
 }

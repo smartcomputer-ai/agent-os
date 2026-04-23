@@ -183,6 +183,11 @@ pub fn build_loaded_manifest(
     let modules_map: HashMap<Name, DefModule> = modules
         .iter()
         .map(|module| (module.name.clone(), module.module.clone()))
+        .chain(
+            aos_air_types::builtins::builtin_modules()
+                .iter()
+                .map(|module| (module.module.name.clone(), module.module.clone())),
+        )
         .collect();
 
     let workflows_map: HashMap<Name, DefWorkflow> = workflows
@@ -465,7 +470,7 @@ pub fn workflow_module_from_target(
 
     if !path.exists() {
         panic!(
-            "missing {} — build it first with `cargo build -p aos-sys --target wasm32-unknown-unknown`",
+            "missing {} — build the test workflow module for wasm32-unknown-unknown first",
             path.display()
         );
     }
@@ -515,7 +520,7 @@ pub fn pure_module_from_target(
 
     if !path.exists() {
         panic!(
-            "missing {} — build it first with `cargo build -p aos-sys --target wasm32-unknown-unknown`",
+            "missing {} — build the test pure module for wasm32-unknown-unknown first",
             path.display()
         );
     }

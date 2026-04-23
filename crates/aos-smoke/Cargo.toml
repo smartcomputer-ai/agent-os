@@ -13,7 +13,6 @@ aos-cbor.workspace = true
 aos-effect-types.workspace = true
 aos-kernel.workspace = true
 aos-node.workspace = true
-aos-sys.workspace = true
 aos-air-exec.workspace = true
 aos-wasm-abi.workspace = true
 aos-wasm-sdk.workspace = true

@@ -11,11 +11,15 @@ path = "src/lib.rs"
 name = "session_workflow"
 path = "src/bin/session_workflow.rs"
 
+[[bin]]
+name = "aos-air-export"
+path = "src/bin/aos-air-export.rs"
+
 [dependencies]
 aos-air-types.workspace = true
 aos-effect-types.workspace = true
 aos-effects.workspace = true
-aos-wasm-sdk.workspace = true
+aos-wasm-sdk = { workspace = true, features = ["air-macros"] }
 aos-wasm-abi.workspace = true
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 serde.workspace = true
@@ -23,3 +27,13 @@ serde_bytes.workspace = true
 serde_cbor.workspace = true
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.10", default-features = false }
+
+[dev-dependencies]
+aos-authoring.workspace = true
+tempfile.workspace = true
+
+[package.metadata.aos]
+air = "generated"
+air_dir = "air"
+exports = true
+export_bin = "aos-air-export"

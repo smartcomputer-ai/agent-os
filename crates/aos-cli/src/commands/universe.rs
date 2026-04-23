@@ -42,7 +42,7 @@ enum UniverseSecretCommand {
     Binding(UniverseSecretBindingArgs),
     /// Manage secret versions for a binding.
     Version(UniverseSecretVersionArgs),
-    /// Sync secret bindings and values from `aos.sync.json`.
+    /// Sync secret bindings and values from `aos.world.json`.
     Sync(UniverseSecretSyncArgs),
 }
 
@@ -135,7 +135,7 @@ struct UniverseSecretSyncArgs {
     #[arg(long)]
     local_root: Option<PathBuf>,
     #[arg(long)]
-    map: Option<PathBuf>,
+    config: Option<PathBuf>,
     #[arg(long)]
     actor: Option<String>,
 }
@@ -162,7 +162,7 @@ pub(crate) async fn handle(
                         &client,
                         universe_id,
                         args.local_root.as_deref(),
-                        args.map.as_deref(),
+                        args.config.as_deref(),
                         args.actor.as_deref(),
                     )
                     .await?;

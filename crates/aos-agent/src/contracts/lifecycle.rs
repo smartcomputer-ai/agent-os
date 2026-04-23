@@ -1,6 +1,8 @@
+use aos_wasm_sdk::AirSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SessionLifecycle@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum SessionLifecycle {
     #[default]
