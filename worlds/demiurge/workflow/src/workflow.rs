@@ -32,7 +32,6 @@ const EFFECT_BLOB_PUT: &str = "sys/blob.put@1";
 pub struct TaskConfig {
     pub provider: Option<String>,
     pub model: Option<String>,
-    #[aos(schema_ref = ReasoningEffort)]
     pub reasoning_effort: Option<ReasoningEffort>,
     pub max_tokens: Option<u64>,
     pub tool_profile: Option<String>,
@@ -46,7 +45,6 @@ pub struct TaskConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
 #[aos(schema = "demiurge/TaskSubmitted@1")]
 pub struct TaskSubmitted {
-    #[aos(schema_ref = SessionId)]
     pub task_id: SessionId,
     #[aos(air_type = "time")]
     pub observed_at_ns: u64,
@@ -87,13 +85,11 @@ pub enum PendingStage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
 #[aos(schema = "demiurge/TaskFinished@1")]
 pub struct TaskFinished {
-    #[aos(schema_ref = SessionId)]
     pub task_id: SessionId,
     #[aos(air_type = "time")]
     pub observed_at_ns: u64,
     pub status: TaskStatus,
     pub failure: Option<TaskFailure>,
-    #[aos(schema_ref = RunId)]
     pub run_id: Option<RunId>,
     #[aos(air_type = "hash")]
     pub output_ref: Option<String>,
@@ -126,7 +122,6 @@ pub struct DemiurgeState {
 #[serde(tag = "$tag", content = "$value")]
 pub enum DemiurgeWorkflowEvent {
     TaskSubmitted(TaskSubmitted),
-    #[aos(schema_ref = SessionLifecycleChanged)]
     SessionLifecycleChanged(SessionLifecycleChanged),
     Receipt(EffectReceiptEnvelope),
     ReceiptRejected(EffectReceiptRejected),
