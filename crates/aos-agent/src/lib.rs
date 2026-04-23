@@ -12,5 +12,9 @@ pub mod contracts;
 pub mod helpers;
 #[doc(hidden)]
 pub mod tools;
+mod workflow;
+mod world;
 
 pub use contracts::*;
+pub use workflow::SessionWorkflow;
+pub use world::aos_air_nodes;

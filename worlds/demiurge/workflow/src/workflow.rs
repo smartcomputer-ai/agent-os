@@ -139,11 +139,14 @@ pub enum DemiurgeWorkflowEvent {
 #[aos_wasm_sdk::air_workflow(
     name = "demiurge/Demiurge@1",
     module = "demiurge/Demiurge_wasm@1",
-    state = "demiurge/State@1",
-    event = "demiurge/WorkflowEvent@1",
-    context = "sys/WorkflowContext@1",
-    key_schema = "aos.agent/SessionId@1",
-    effects = ["sys/blob.put@1", "sys/host.session.open@1"]
+    state = DemiurgeState,
+    event = DemiurgeWorkflowEvent,
+    context = aos_wasm_sdk::WorkflowContext,
+    key_schema = SessionId,
+    effects = [
+        aos_wasm_sdk::BlobPutParams,
+        aos_wasm_sdk::HostSessionOpenParams,
+    ]
 )]
 pub struct Demiurge;
 

@@ -5,15 +5,17 @@ use super::{
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use aos_wasm_sdk::{EffectContinuationRef, EffectReceiptEnvelope};
+use aos_wasm_sdk::{AirSchema, EffectContinuationRef, EffectReceiptEnvelope};
 use serde::{Deserialize, Serialize};
 
 pub use aos_wasm_sdk::{EffectReceiptRejected, EffectStreamFrameEnvelope};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SessionIngressKind@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum SessionIngressKind {
     RunRequested {
+        #[aos(air_type = "hash")]
         input_ref: String,
         run_overrides: Option<SessionConfig>,
     },
@@ -45,28 +47,35 @@ pub enum SessionIngressKind {
         reason: Option<String>,
     },
     #[default]
+    #[aos(schema_ref = "aos.agent/SessionNoop@1")]
     Noop,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SessionIngress@1")]
 pub struct SessionIngress {
     pub session_id: SessionId,
+    #[aos(air_type = "time")]
     pub observed_at_ns: u64,
     pub ingress: SessionIngressKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SessionLifecycleChanged@1")]
 pub struct SessionLifecycleChanged {
     pub session_id: SessionId,
+    #[aos(air_type = "time")]
     pub observed_at_ns: u64,
     pub from: SessionLifecycle,
     pub to: SessionLifecycle,
     pub run_id: Option<RunId>,
+    #[aos(air_type = "hash")]
     pub output_ref: Option<String>,
     pub in_flight_effects: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SessionWorkflowEvent@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum SessionWorkflowEvent {
     Ingress(SessionIngress),
@@ -74,8 +83,13 @@ pub enum SessionWorkflowEvent {
     ReceiptRejected(EffectReceiptRejected),
     StreamFrame(EffectStreamFrameEnvelope),
     #[default]
+    #[aos(schema_ref = "aos.agent/SessionNoop@1")]
     Noop,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SessionNoop@1")]
+pub struct SessionNoop;
 
 impl SessionWorkflowEvent {
     pub fn continuation(&self) -> Option<EffectContinuationRef<'_>> {

@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
     Attribute, Data, DeriveInput, Expr, Fields, Lit, LitStr, Meta, PathArguments, Token, Type,
-    Variant, parse_macro_input, punctuated::Punctuated, spanned::Spanned,
+    TypePath, Variant, parse_macro_input, punctuated::Punctuated, spanned::Spanned,
 };
 
 #[proc_macro_derive(AirSchema, attributes(aos))]
@@ -29,7 +29,8 @@ fn aos_workflow_impl(
     let config = WorkflowConfig::parse(args)?;
     let ident = input.ident.clone();
     let module_json = defmodule_json(&config.module);
-    let workflow_json = defworkflow_json(&config);
+    let workflow_json = defworkflow_json(&config).unwrap_or_default();
+    let workflow_json_expr = defworkflow_json_expr(&config, ident.span());
     let module_name_lit = LitStr::new(&config.module, ident.span());
     let workflow_name_lit = LitStr::new(&config.name, ident.span());
     let module_lit = LitStr::new(&module_json, ident.span());
@@ -43,38 +44,56 @@ fn aos_workflow_impl(
             const AIR_WORKFLOW_NAME: &'static str = #workflow_name_lit;
             const AIR_MODULE_JSON: &'static str = #module_lit;
             const AIR_WORKFLOW_JSON: &'static str = #workflow_lit;
+
+            fn air_workflow_json() -> ::aos_wasm_sdk::__aos_export::String {
+                #workflow_json_expr
+            }
         }
     })
 }
 
 fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
-    let schema_name = parse_schema_name(&input.attrs)?
+    let attrs = parse_type_attrs(&input.attrs, "AirSchema")?;
+    let schema_name = attrs
+        .schema
         .ok_or_else(|| syn::Error::new(input.ident.span(), "missing #[aos(schema = \"...\")]"))?;
     let generated_schema = match &input.data {
         Data::Struct(data) => {
-            let fields = match &data.fields {
-                Fields::Named(fields) => fields,
-                other => {
+            if let Some(override_value) = attrs.override_value {
+                let Some(ty_json) = type_override_json(override_value, input.ident.span())? else {
                     return Err(syn::Error::new(
-                        other.span(),
-                        "AirSchema only supports structs with named fields in this phase",
+                        input.ident.span(),
+                        "expected AIR type override",
                     ));
+                };
+                generated_defschema_type(&schema_name, ty_json, input.ident.span())
+            } else {
+                match &data.fields {
+                    Fields::Named(fields) => {
+                        let field_entries = named_field_entries(&fields.named)?;
+                        generated_defschema_record(&schema_name, &field_entries, input.ident.span())
+                    }
+                    Fields::Unit => generated_defschema_type(
+                        &schema_name,
+                        generated_static_json(primitive_json("unit"), input.ident.span()),
+                        input.ident.span(),
+                    ),
+                    Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                        let field = fields.unnamed.first().expect("one unnamed field");
+                        generated_defschema_type(
+                            &schema_name,
+                            type_json_with_override(&field.ty, parse_type_override(&field.attrs)?)?,
+                            input.ident.span(),
+                        )
+                    }
+                    other => {
+                        return Err(syn::Error::new(
+                            other.span(),
+                            "AirSchema supports named structs, unit structs, or one-field tuple structs",
+                        ));
+                    }
                 }
-            };
-
-            let mut field_entries = Vec::new();
-            for field in &fields.named {
-                let ident = field
-                    .ident
-                    .as_ref()
-                    .ok_or_else(|| syn::Error::new(field.span(), "expected named field"))?;
-                let name = ident.to_string();
-                let override_value = parse_type_override(&field.attrs)?;
-                let ty_json = type_json_with_override(&field.ty, override_value)?;
-                field_entries.push((name, ty_json));
             }
-
-            generated_defschema_record(&schema_name, &field_entries, input.ident.span())
         }
         Data::Enum(data) => {
             let mut variant_entries = Vec::new();
@@ -113,15 +132,15 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
     })
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct WorkflowConfig {
     name: String,
     module: String,
-    state: String,
-    event: String,
-    context: Option<String>,
-    key_schema: Option<String>,
-    effects: Vec<String>,
+    state: Option<WorkflowSchemaRef>,
+    event: Option<WorkflowSchemaRef>,
+    context: Option<WorkflowSchemaRef>,
+    key_schema: Option<WorkflowSchemaRef>,
+    effects: Vec<WorkflowEffectRef>,
     entrypoint: String,
 }
 
@@ -144,14 +163,16 @@ impl WorkflowConfig {
             match key.as_str() {
                 "name" => config.name = expr_string(&name_value.value, key.as_str())?,
                 "module" => config.module = expr_string(&name_value.value, key.as_str())?,
-                "state" => config.state = expr_string(&name_value.value, key.as_str())?,
-                "event" => config.event = expr_string(&name_value.value, key.as_str())?,
-                "context" => config.context = Some(expr_string(&name_value.value, key.as_str())?),
+                "state" => config.state = Some(expr_schema_ref(&name_value.value, key.as_str())?),
+                "event" => config.event = Some(expr_schema_ref(&name_value.value, key.as_str())?),
+                "context" => {
+                    config.context = Some(expr_schema_ref(&name_value.value, key.as_str())?)
+                }
                 "key_schema" => {
-                    config.key_schema = Some(expr_string(&name_value.value, key.as_str())?)
+                    config.key_schema = Some(expr_schema_ref(&name_value.value, key.as_str())?)
                 }
                 "entrypoint" => config.entrypoint = expr_string(&name_value.value, key.as_str())?,
-                "effects" => config.effects = expr_string_array(&name_value.value, key.as_str())?,
+                "effects" => config.effects = expr_effect_array(&name_value.value, key.as_str())?,
                 _ => {
                     return Err(syn::Error::new(
                         name_value.path.span(),
@@ -162,8 +183,18 @@ impl WorkflowConfig {
         }
         config.require("name", &config.name)?;
         config.require("module", &config.module)?;
-        config.require("state", &config.state)?;
-        config.require("event", &config.event)?;
+        if config.state.is_none() {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "missing required aos_workflow option 'state'",
+            ));
+        }
+        if config.event.is_none() {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "missing required aos_workflow option 'event'",
+            ));
+        }
         Ok(config)
     }
 
@@ -195,34 +226,134 @@ fn expr_string(expr: &Expr, key: &str) -> syn::Result<String> {
     Ok(value.value())
 }
 
-fn expr_string_array(expr: &Expr, key: &str) -> syn::Result<Vec<String>> {
+#[derive(Clone)]
+enum WorkflowSchemaRef {
+    Literal(String),
+    Type(Type),
+}
+
+#[derive(Clone)]
+enum WorkflowEffectRef {
+    Literal(String),
+    Type(Type),
+}
+
+impl WorkflowSchemaRef {
+    fn literal(&self) -> Option<&str> {
+        match self {
+            Self::Literal(value) => Some(value),
+            Self::Type(_) => None,
+        }
+    }
+}
+
+impl WorkflowEffectRef {
+    fn literal(&self) -> Option<&str> {
+        match self {
+            Self::Literal(value) => Some(value),
+            Self::Type(_) => None,
+        }
+    }
+}
+
+fn expr_schema_ref(expr: &Expr, key: &str) -> syn::Result<WorkflowSchemaRef> {
+    if let Some(value) = expr_literal_string(expr) {
+        return Ok(WorkflowSchemaRef::Literal(value));
+    }
+    expr_type_path(expr, key).map(WorkflowSchemaRef::Type)
+}
+
+fn expr_effect_ref(expr: &Expr, key: &str) -> syn::Result<WorkflowEffectRef> {
+    if let Some(value) = expr_literal_string(expr) {
+        return Ok(WorkflowEffectRef::Literal(value));
+    }
+    expr_type_path(expr, key).map(WorkflowEffectRef::Type)
+}
+
+fn expr_literal_string(expr: &Expr) -> Option<String> {
+    let Expr::Lit(expr_lit) = expr else {
+        return None;
+    };
+    let Lit::Str(value) = &expr_lit.lit else {
+        return None;
+    };
+    Some(value.value())
+}
+
+fn expr_type_path(expr: &Expr, key: &str) -> syn::Result<Type> {
+    let Expr::Path(expr_path) = expr else {
+        return Err(syn::Error::new(
+            expr.span(),
+            format!("aos_workflow option '{key}' must be a string literal or type path"),
+        ));
+    };
+    if expr_path.qself.is_some() {
+        return Err(syn::Error::new(
+            expr.span(),
+            format!("aos_workflow option '{key}' does not support qualified self paths"),
+        ));
+    }
+    Ok(Type::Path(TypePath {
+        qself: None,
+        path: expr_path.path.clone(),
+    }))
+}
+
+fn expr_effect_array(expr: &Expr, key: &str) -> syn::Result<Vec<WorkflowEffectRef>> {
     let Expr::Array(array) = expr else {
         return Err(syn::Error::new(
             expr.span(),
-            format!("aos_workflow option '{key}' must be an array of string literals"),
+            format!(
+                "aos_workflow option '{key}' must be an array of string literals or type paths"
+            ),
         ));
     };
     let mut values = Vec::new();
     for elem in &array.elems {
-        values.push(expr_string(elem, key)?);
+        values.push(expr_effect_ref(elem, key)?);
     }
     Ok(values)
 }
 
-fn parse_schema_name(attrs: &[Attribute]) -> syn::Result<Option<String>> {
-    let mut schema = None;
+struct AosTypeAttrs {
+    schema: Option<String>,
+    override_value: Option<FieldOverride>,
+}
+
+fn parse_type_attrs(attrs: &[Attribute], owner: &str) -> syn::Result<AosTypeAttrs> {
+    let mut parsed = AosTypeAttrs {
+        schema: None,
+        override_value: None,
+    };
     for attr in attrs.iter().filter(|attr| attr.path().is_ident("aos")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("schema") {
                 let value: LitStr = meta.value()?.parse()?;
-                schema = Some(value.value());
+                parsed.schema = Some(value.value());
+                Ok(())
+            } else if meta.path.is_ident("schema_ref") {
+                ensure_no_override_option(&parsed.override_value, &meta)?;
+                let value: LitStr = meta.value()?.parse()?;
+                parsed.override_value = Some(FieldOverride::SchemaRef(value.value()));
+                Ok(())
+            } else if meta.path.is_ident("air_type") {
+                ensure_no_override_option(&parsed.override_value, &meta)?;
+                let value: LitStr = meta.value()?.parse()?;
+                parsed.override_value = Some(FieldOverride::Primitive(value.value()));
+                Ok(())
+            } else if meta.path.is_ident("type_json") {
+                ensure_no_override_option(&parsed.override_value, &meta)?;
+                let value: LitStr = meta.value()?.parse()?;
+                parsed.override_value = Some(FieldOverride::RawJson(value.value()));
                 Ok(())
             } else {
-                Err(meta.error("unsupported #[aos(...)] option for AirSchema"))
+                Err(meta.error(format!(
+                    "supported #[aos(...)] options for {owner} are schema, schema_ref, air_type, and type_json"
+                )))
             }
         })?;
     }
-    Ok(schema)
+    Ok(parsed)
 }
 
 #[derive(Debug, Clone)]
@@ -230,6 +361,7 @@ enum FieldOverride {
     None,
     SchemaRef(String),
     Primitive(String),
+    RawJson(String),
 }
 
 struct GeneratedJson {
@@ -251,8 +383,13 @@ fn parse_type_override(attrs: &[Attribute]) -> syn::Result<FieldOverride> {
                 let value: LitStr = meta.value()?.parse()?;
                 override_value = FieldOverride::Primitive(value.value());
                 Ok(())
+            } else if meta.path.is_ident("type_json") {
+                ensure_no_override(&override_value, &meta)?;
+                let value: LitStr = meta.value()?.parse()?;
+                override_value = FieldOverride::RawJson(value.value());
+                Ok(())
             } else {
-                Err(meta.error("supported field options are schema_ref and air_type"))
+                Err(meta.error("supported field options are schema_ref, air_type, and type_json"))
             }
         })?;
     }
@@ -262,21 +399,53 @@ fn parse_type_override(attrs: &[Attribute]) -> syn::Result<FieldOverride> {
 fn variant_json_entry(variant: &Variant) -> syn::Result<(String, GeneratedJson)> {
     let override_value = parse_type_override(&variant.attrs)?;
     let name = variant.ident.to_string();
-    let ty_json = match &variant.fields {
-        Fields::Unit => type_override_json(override_value, variant.span())?
-            .unwrap_or_else(|| generated_static_json(primitive_json("unit"), variant.span())),
-        Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-            let field = fields.unnamed.first().expect("one unnamed field");
-            type_json_with_override(&field.ty, override_value)?
+    let ty_json = if let Some(override_json) =
+        type_override_json(override_value.clone(), variant.span())?
+    {
+        match &variant.fields {
+            Fields::Unit => override_json,
+            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                let field = fields.unnamed.first().expect("one unnamed field");
+                wrap_generated_json_for_outer_type(&field.ty, override_json)
+            }
+            _ => override_json,
         }
-        other => {
-            return Err(syn::Error::new(
-                other.span(),
-                "AirSchema enum variants support unit variants or single-field tuple variants",
-            ));
+    } else {
+        match &variant.fields {
+            Fields::Unit => generated_static_json(primitive_json("unit"), variant.span()),
+            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                let field = fields.unnamed.first().expect("one unnamed field");
+                type_json_with_override(&field.ty, parse_type_override(&field.attrs)?)?
+            }
+            Fields::Named(fields) => {
+                generated_record_type(&named_field_entries(&fields.named)?, variant.span())
+            }
+            other => {
+                return Err(syn::Error::new(
+                    other.span(),
+                    "AirSchema enum variants support unit, one-field tuple, or named-field variants",
+                ));
+            }
         }
     };
     Ok((name, ty_json))
+}
+
+fn named_field_entries(
+    fields: &Punctuated<syn::Field, Token![,]>,
+) -> syn::Result<Vec<(String, GeneratedJson)>> {
+    let mut field_entries = Vec::new();
+    for field in fields {
+        let ident = field
+            .ident
+            .as_ref()
+            .ok_or_else(|| syn::Error::new(field.span(), "expected named field"))?;
+        let name = ident.to_string();
+        let override_value = parse_type_override(&field.attrs)?;
+        let ty_json = type_json_with_override(&field.ty, override_value)?;
+        field_entries.push((name, ty_json));
+    }
+    Ok(field_entries)
 }
 
 fn ensure_no_override(
@@ -284,6 +453,17 @@ fn ensure_no_override(
     meta: &syn::meta::ParseNestedMeta<'_>,
 ) -> syn::Result<()> {
     if matches!(current, FieldOverride::None) {
+        Ok(())
+    } else {
+        Err(meta.error("field already has an AIR type override"))
+    }
+}
+
+fn ensure_no_override_option(
+    current: &Option<FieldOverride>,
+    meta: &syn::meta::ParseNestedMeta<'_>,
+) -> syn::Result<()> {
+    if current.is_none() {
         Ok(())
     } else {
         Err(meta.error("field already has an AIR type override"))
@@ -347,6 +527,7 @@ fn type_override_json(
             })?,
             span,
         ))),
+        FieldOverride::RawJson(json) => Ok(Some(generated_static_json(json, span))),
         FieldOverride::None => Ok(None),
     }
 }
@@ -359,8 +540,26 @@ fn wrap_generated_json_for_outer_type(ty: &Type, base: GeneratedJson) -> Generat
         return base;
     };
     match segment.ident.to_string().as_str() {
-        "Option" => wrap_generated_json("option", base, ty.span()),
-        "Vec" => wrap_generated_json("list", base, ty.span()),
+        "Option" => {
+            let Ok(inner) = single_generic_type(&segment.arguments, ty.span(), "Option") else {
+                return wrap_generated_json("option", base, ty.span());
+            };
+            wrap_generated_json(
+                "option",
+                wrap_generated_json_for_outer_type(inner, base),
+                ty.span(),
+            )
+        }
+        "Vec" => {
+            let Ok(inner) = single_generic_type(&segment.arguments, ty.span(), "Vec") else {
+                return wrap_generated_json("list", base, ty.span());
+            };
+            wrap_generated_json(
+                "list",
+                wrap_generated_json_for_outer_type(inner, base),
+                ty.span(),
+            )
+        }
         _ => base,
     }
 }
@@ -424,6 +623,73 @@ fn map_generated_json(value: GeneratedJson, span: proc_macro2::Span) -> Generate
             let mut out = ::aos_wasm_sdk::__aos_export::String::from(#prefix);
             out.push_str(&value);
             out.push_str("}}");
+            out
+        }},
+    }
+}
+
+fn generated_record_type(
+    fields: &[(String, GeneratedJson)],
+    span: proc_macro2::Span,
+) -> GeneratedJson {
+    let static_fields: Option<Vec<(String, String)>> = fields
+        .iter()
+        .map(|(field, ty)| {
+            ty.static_json
+                .as_ref()
+                .map(|json| (field.clone(), json.clone()))
+        })
+        .collect();
+    let static_json = static_fields
+        .as_ref()
+        .map(|fields| record_type_json(fields));
+
+    let field_chunks = fields.iter().enumerate().map(|(idx, (field, ty))| {
+        let comma = idx > 0;
+        let field_lit = LitStr::new(field, span);
+        let ty_expr = ty.expr.clone();
+        quote! {
+            if #comma {
+                out.push(',');
+            }
+            ::aos_wasm_sdk::push_air_json_string(&mut out, #field_lit);
+            out.push(':');
+            let field_ty = #ty_expr;
+            out.push_str(&field_ty);
+        }
+    });
+
+    GeneratedJson {
+        static_json,
+        expr: quote! {{
+            let mut out = ::aos_wasm_sdk::__aos_export::String::from(r#"{"record":{"#);
+            #(#field_chunks)*
+            out.push_str("}}");
+            out
+        }},
+    }
+}
+
+fn generated_defschema_type(
+    schema_name: &str,
+    ty: GeneratedJson,
+    span: proc_macro2::Span,
+) -> GeneratedJson {
+    let static_json = ty
+        .static_json
+        .as_ref()
+        .map(|ty_json| defschema_type_json(schema_name, ty_json));
+    let schema_name_lit = LitStr::new(schema_name, span);
+    let ty_expr = ty.expr;
+    GeneratedJson {
+        static_json,
+        expr: quote! {{
+            let mut out = ::aos_wasm_sdk::__aos_export::String::from(r#"{"$kind":"defschema","name":"#);
+            ::aos_wasm_sdk::push_air_json_string(&mut out, #schema_name_lit);
+            out.push_str(r#","type":"#);
+            let ty = #ty_expr;
+            out.push_str(&ty);
+            out.push('}');
             out
         }},
     }
@@ -600,7 +866,12 @@ fn is_string_type(ty: &Type) -> bool {
 
 fn defschema_record_json(schema_name: &str, fields: &[(String, String)]) -> String {
     let name = json_string(schema_name);
-    let mut out = format!(r#"{{"$kind":"defschema","name":{name},"type":{{"record":{{"#);
+    let record = record_type_json(fields);
+    format!(r#"{{"$kind":"defschema","name":{name},"type":{record}}}"#)
+}
+
+fn record_type_json(fields: &[(String, String)]) -> String {
+    let mut out = String::from(r#"{"record":{"#);
     for (idx, (field, ty)) in fields.iter().enumerate() {
         if idx > 0 {
             out.push(',');
@@ -611,6 +882,11 @@ fn defschema_record_json(schema_name: &str, fields: &[(String, String)]) -> Stri
     }
     out.push_str("}}}");
     out
+}
+
+fn defschema_type_json(schema_name: &str, ty: &str) -> String {
+    let name = json_string(schema_name);
+    format!(r#"{{"$kind":"defschema","name":{name},"type":{ty}}}"#)
 }
 
 fn defschema_variant_json(schema_name: &str, variants: &[(String, String)]) -> String {
@@ -635,29 +911,125 @@ fn defmodule_json(module_name: &str) -> String {
     )
 }
 
-fn defworkflow_json(config: &WorkflowConfig) -> String {
+fn defworkflow_json(config: &WorkflowConfig) -> Option<String> {
+    let state = config.state.as_ref()?.literal()?;
+    let event = config.event.as_ref()?.literal()?;
+    let context = match &config.context {
+        Some(context) => Some(context.literal()?),
+        None => None,
+    };
+    let key_schema = match &config.key_schema {
+        Some(key_schema) => Some(key_schema.literal()?),
+        None => None,
+    };
+    let effects: Option<Vec<String>> = config
+        .effects
+        .iter()
+        .map(|effect| effect.literal().map(ToOwned::to_owned))
+        .collect();
+    let effects = effects?;
     let mut out = format!(
         r#"{{"$kind":"defworkflow","name":{},"state":{},"event":{}"#,
         json_string(&config.name),
-        json_string(&config.state),
-        json_string(&config.event)
+        json_string(state),
+        json_string(event)
     );
-    if let Some(context) = &config.context {
+    if let Some(context) = context {
         out.push_str(r#","context":"#);
         out.push_str(&json_string(context));
     }
-    if let Some(key_schema) = &config.key_schema {
+    if let Some(key_schema) = key_schema {
         out.push_str(r#","key_schema":"#);
         out.push_str(&json_string(key_schema));
     }
     out.push_str(r#","effects_emitted":"#);
-    out.push_str(&json_string_array(&config.effects));
+    out.push_str(&json_string_array(&effects));
     out.push_str(r#","impl":{"module":"#);
     out.push_str(&json_string(&config.module));
     out.push_str(r#","entrypoint":"#);
     out.push_str(&json_string(&config.entrypoint));
     out.push_str("}}");
-    out
+    Some(out)
+}
+
+fn defworkflow_json_expr(
+    config: &WorkflowConfig,
+    span: proc_macro2::Span,
+) -> proc_macro2::TokenStream {
+    let name_lit = LitStr::new(&config.name, span);
+    let module_lit = LitStr::new(&config.module, span);
+    let entrypoint_lit = LitStr::new(&config.entrypoint, span);
+    let state_expr = schema_ref_name_expr(config.state.as_ref().expect("state"));
+    let event_expr = schema_ref_name_expr(config.event.as_ref().expect("event"));
+    let context_chunk = config.context.as_ref().map(|context| {
+        let context_expr = schema_ref_name_expr(context);
+        quote! {
+            out.push_str(r#","context":"#);
+            ::aos_wasm_sdk::push_air_json_string(&mut out, #context_expr);
+        }
+    });
+    let key_schema_chunk = config.key_schema.as_ref().map(|key_schema| {
+        let key_schema_expr = schema_ref_name_expr(key_schema);
+        quote! {
+            out.push_str(r#","key_schema":"#);
+            ::aos_wasm_sdk::push_air_json_string(&mut out, #key_schema_expr);
+        }
+    });
+    let effect_chunks = config.effects.iter().enumerate().map(|(idx, effect)| {
+        let comma = idx > 0;
+        let effect_expr = effect_ref_name_expr(effect);
+        quote! {
+            if #comma {
+                out.push(',');
+            }
+            ::aos_wasm_sdk::push_air_json_string(&mut out, #effect_expr);
+        }
+    });
+
+    quote! {{
+        let mut out = ::aos_wasm_sdk::__aos_export::String::from(
+            r#"{"$kind":"defworkflow","name":"#,
+        );
+        ::aos_wasm_sdk::push_air_json_string(&mut out, #name_lit);
+        out.push_str(r#","state":"#);
+        ::aos_wasm_sdk::push_air_json_string(&mut out, #state_expr);
+        out.push_str(r#","event":"#);
+        ::aos_wasm_sdk::push_air_json_string(&mut out, #event_expr);
+        #context_chunk
+        #key_schema_chunk
+        out.push_str(r#","effects_emitted":["#);
+        #(#effect_chunks)*
+        out.push_str(r#"],"impl":{"module":"#);
+        ::aos_wasm_sdk::push_air_json_string(&mut out, #module_lit);
+        out.push_str(r#","entrypoint":"#);
+        ::aos_wasm_sdk::push_air_json_string(&mut out, #entrypoint_lit);
+        out.push_str("}}");
+        out
+    }}
+}
+
+fn schema_ref_name_expr(reference: &WorkflowSchemaRef) -> proc_macro2::TokenStream {
+    match reference {
+        WorkflowSchemaRef::Literal(value) => {
+            let lit = LitStr::new(value, proc_macro2::Span::call_site());
+            quote! { #lit }
+        }
+        WorkflowSchemaRef::Type(ty) => {
+            quote! { <#ty as ::aos_wasm_sdk::AirSchemaRef>::AIR_SCHEMA_NAME }
+        }
+    }
+}
+
+fn effect_ref_name_expr(reference: &WorkflowEffectRef) -> proc_macro2::TokenStream {
+    match reference {
+        WorkflowEffectRef::Literal(value) => {
+            let lit = LitStr::new(value, proc_macro2::Span::call_site());
+            quote! { #lit }
+        }
+        WorkflowEffectRef::Type(ty) => {
+            quote! { <#ty as ::aos_wasm_sdk::AirEffectRef>::AIR_EFFECT_NAME }
+        }
+    }
 }
 
 fn schema_ref_json(reference: &str) -> String {

@@ -35,11 +35,49 @@ struct Composite {
 }
 
 #[derive(AirSchema)]
+#[aos(schema = "demo/NewtypeId@1", air_type = "uuid")]
+#[allow(dead_code)]
+struct NewtypeId(String);
+
+#[derive(AirSchema)]
+#[aos(schema = "demo/RichRecord@1")]
+#[allow(dead_code)]
+struct RichRecord {
+    #[aos(air_type = "hash")]
+    refs: Option<Vec<String>>,
+    #[aos(type_json = r#"{"map":{"key":{"nat":{}},"value":{"hash":{}}}}"#)]
+    refs_by_index: std::collections::BTreeMap<u64, String>,
+}
+
+#[derive(AirSchema)]
+#[aos(schema = "demo/CounterState@1")]
+#[allow(dead_code)]
+struct CounterState {
+    value: u64,
+}
+
+#[derive(AirSchema)]
+#[aos(schema = "demo/CounterEvent@1")]
+#[allow(dead_code)]
+struct CounterEvent {
+    delta: i64,
+}
+
+#[derive(AirSchema)]
+#[aos(schema = "demo/CounterId@1", air_type = "uuid")]
+#[allow(dead_code)]
+struct CounterId(String);
+
+#[derive(AirSchema)]
 #[aos(schema = "demo/Event@1")]
 #[allow(dead_code)]
 enum DemoEvent {
     Created,
     Submitted(TaskSubmitted),
+    Failed {
+        code: String,
+        detail: String,
+    },
     #[aos(schema_ref = "demo/TaskSubmitted@1")]
     ExternalNoop,
 }
@@ -63,6 +101,18 @@ enum SysEvent {
 )]
 #[allow(dead_code)]
 struct CounterWorkflow;
+
+#[aos_wasm_sdk::air_workflow(
+    name = "demo/TypedCounter@1",
+    module = "demo/TypedCounter_wasm@1",
+    state = CounterState,
+    event = CounterEvent,
+    context = aos_wasm_sdk::WorkflowContext,
+    key_schema = CounterId,
+    effects = [aos_wasm_sdk::TimerSetParams]
+)]
+#[allow(dead_code)]
+struct TypedCounterWorkflow;
 
 #[test]
 fn derive_air_schema_emits_parseable_defschema() {
@@ -118,6 +168,40 @@ fn derive_air_schema_supports_first_record_subset() {
 }
 
 #[test]
+fn derive_air_schema_supports_newtype_and_raw_type_overrides() {
+    let node: AirNode =
+        serde_json::from_str(&NewtypeId::air_schema_json()).expect("parse generated AIR");
+    let AirNode::Defschema(schema) = node else {
+        panic!("expected defschema");
+    };
+    assert!(matches!(
+        schema.ty,
+        TypeExpr::Primitive(TypePrimitive::Uuid(_))
+    ));
+
+    let node: AirNode =
+        serde_json::from_str(&RichRecord::air_schema_json()).expect("parse generated AIR");
+    let AirNode::Defschema(schema) = node else {
+        panic!("expected defschema");
+    };
+    let TypeExpr::Record(record) = schema.ty else {
+        panic!("expected record schema");
+    };
+    assert!(matches!(
+        record.record.get("refs"),
+        Some(TypeExpr::Option(option))
+            if matches!(option.option.as_ref(), TypeExpr::List(list)
+                if matches!(list.list.as_ref(), TypeExpr::Primitive(TypePrimitive::Hash(_))))
+    ));
+    assert!(matches!(
+        record.record.get("refs_by_index"),
+        Some(TypeExpr::Map(map))
+            if matches!(map.map.key, aos_air_types::TypeMapKey::Nat(_))
+                && matches!(map.map.value.as_ref(), TypeExpr::Primitive(TypePrimitive::Hash(_)))
+    ));
+}
+
+#[test]
 fn derive_air_schema_supports_unit_and_ref_variants() {
     let node: AirNode =
         serde_json::from_str(&DemoEvent::air_schema_json()).expect("parse generated AIR");
@@ -134,6 +218,14 @@ fn derive_air_schema_supports_unit_and_ref_variants() {
     assert!(matches!(
         variant.variant.get("Submitted"),
         Some(TypeExpr::Ref(_))
+    ));
+    assert!(matches!(
+        variant.variant.get("Failed"),
+        Some(TypeExpr::Record(record))
+            if matches!(
+                record.record.get("code"),
+                Some(TypeExpr::Primitive(TypePrimitive::Text(_)))
+            )
     ));
     assert!(matches!(
         variant.variant.get("ExternalNoop"),
@@ -202,6 +294,27 @@ fn aos_workflow_emits_parseable_defworkflow() {
     assert_eq!(workflow.effects_emitted, vec!["sys/timer.set@1"]);
     assert_eq!(workflow.implementation.module, "demo/Counter_wasm@1");
     assert_eq!(workflow.implementation.entrypoint, "step");
+}
+
+#[test]
+fn aos_workflow_accepts_typed_schema_and_effect_refs() {
+    let node: AirNode = serde_json::from_str(&TypedCounterWorkflow::air_workflow_json())
+        .expect("parse generated AIR");
+    let AirNode::Defworkflow(workflow) = node else {
+        panic!("expected defworkflow");
+    };
+    assert_eq!(workflow.name, "demo/TypedCounter@1");
+    assert_eq!(workflow.state.as_str(), "demo/CounterState@1");
+    assert_eq!(workflow.event.as_str(), "demo/CounterEvent@1");
+    assert_eq!(
+        workflow.context.as_ref().map(|schema| schema.as_str()),
+        Some("sys/WorkflowContext@1")
+    );
+    assert_eq!(
+        workflow.key_schema.as_ref().map(|schema| schema.as_str()),
+        Some("demo/CounterId@1")
+    );
+    assert_eq!(workflow.effects_emitted, vec!["sys/timer.set@1"]);
 }
 
 #[test]

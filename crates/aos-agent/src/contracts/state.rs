@@ -6,10 +6,11 @@ use super::{
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use aos_wasm_sdk::{PendingEffects, SharedBlobGets, SharedBlobPuts};
+use aos_wasm_sdk::{AirSchema, PendingEffect, PendingEffects, SharedBlobGets, SharedBlobPuts};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/PendingBlobGetKind@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum PendingBlobGetKind {
     #[default]
@@ -26,13 +27,16 @@ pub enum PendingBlobGetKind {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/PendingBlobGet@1")]
 pub struct PendingBlobGet {
     pub kind: PendingBlobGetKind,
+    #[aos(air_type = "time")]
     pub emitted_at_ns: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, AirSchema)]
+#[aos(schema = "aos.agent/PendingBlobPutKind@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum PendingBlobPutKind {
     ToolDefinition { tool_id: String },
@@ -47,21 +51,41 @@ impl Default for PendingBlobPutKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/PendingBlobPut@1")]
 pub struct PendingBlobPut {
     pub kind: PendingBlobPutKind,
+    #[aos(air_type = "time")]
     pub emitted_at_ns: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/PendingFollowUpTurn@1")]
 pub struct PendingFollowUpTurn {
     pub tool_batch_id: ToolBatchId,
+    #[aos(air_type = "hash")]
     pub base_message_refs: Vec<String>,
     pub expected_messages: u64,
+    #[aos(type_json = r#"{"map":{"key":{"nat":{}},"value":{"hash":{}}}}"#)]
     pub blob_refs_by_index: BTreeMap<u64, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SharedPendingBlobGet@1")]
+pub struct SharedPendingBlobGet {
+    pub pending: PendingEffect,
+    pub waiters: Vec<PendingBlobGet>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SharedPendingBlobPut@1")]
+pub struct SharedPendingBlobPut {
+    pub pending: PendingEffect,
+    pub waiters: Vec<PendingBlobPut>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, AirSchema)]
+#[aos(schema = "aos.agent/SessionState@1")]
 pub struct SessionState {
     pub session_id: SessionId,
     pub lifecycle: SessionLifecycle,
@@ -71,12 +95,22 @@ pub struct SessionState {
     pub active_run_id: Option<RunId>,
     pub active_run_config: Option<RunConfig>,
     pub active_tool_batch: Option<ActiveToolBatch>,
+    #[aos(type_json = r#"{"map":{"key":{"hash":{}},"value":{"ref":"sys/PendingEffect@1"}}}"#)]
     pub pending_effects: PendingEffects,
+    #[aos(
+        type_json = r#"{"map":{"key":{"hash":{}},"value":{"ref":"aos.agent/SharedPendingBlobGet@1"}}}"#
+    )]
     pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
+    #[aos(
+        type_json = r#"{"map":{"key":{"hash":{}},"value":{"ref":"aos.agent/SharedPendingBlobPut@1"}}}"#
+    )]
     pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
     pub pending_follow_up_turn: Option<PendingFollowUpTurn>,
+    #[aos(air_type = "hash")]
     pub queued_llm_message_refs: Option<Vec<String>>,
+    #[aos(air_type = "hash")]
     pub conversation_message_refs: Vec<String>,
+    #[aos(air_type = "hash")]
     pub last_output_ref: Option<String>,
     pub tool_refs_materialized: bool,
     pub in_flight_effects: u64,
@@ -85,10 +119,13 @@ pub struct SessionState {
     pub tool_profile: String,
     pub tool_runtime_context: ToolRuntimeContext,
     pub effective_tools: EffectiveToolSet,
+    #[aos(air_type = "hash")]
     pub last_tool_plan_hash: Option<String>,
     pub pending_steer: Vec<String>,
     pub pending_follow_up: Vec<String>,
+    #[aos(air_type = "time")]
     pub created_at: u64,
+    #[aos(air_type = "time")]
     pub updated_at: u64,
 }
 

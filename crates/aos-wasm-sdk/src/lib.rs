@@ -6,6 +6,7 @@ mod shared_effects;
 mod workflow_effects;
 mod workflows;
 
+pub use aos_wasm_abi::WorkflowContext;
 pub use shared_effects::*;
 pub use workflow_effects::*;
 pub use workflows::*;
@@ -40,6 +41,21 @@ pub trait AirWorkflowExport {
     const AIR_WORKFLOW_NAME: &'static str;
     const AIR_MODULE_JSON: &'static str;
     const AIR_WORKFLOW_JSON: &'static str;
+
+    fn air_module_json() -> String {
+        String::from(Self::AIR_MODULE_JSON)
+    }
+
+    fn air_workflow_json() -> String {
+        String::from(Self::AIR_WORKFLOW_JSON)
+    }
+}
+
+/// Metadata for an AIR effect reference.
+///
+/// The built-in implementations map parameter payload types to their effect definition names.
+pub trait AirEffectRef {
+    const AIR_EFFECT_NAME: &'static str;
 }
 
 /// Metadata emitted by Rust-authored AIR secret declarations.
@@ -130,6 +146,14 @@ macro_rules! impl_air_schema_ref {
     ($ty:ty => $name:literal) => {
         impl $crate::AirSchemaRef for $ty {
             const AIR_SCHEMA_NAME: &'static str = $name;
+        }
+    };
+}
+
+macro_rules! impl_air_effect_ref {
+    ($ty:ty => $name:literal) => {
+        impl $crate::AirEffectRef for $ty {
+            const AIR_EFFECT_NAME: &'static str = $name;
         }
     };
 }
@@ -246,6 +270,52 @@ impl_air_schema_ref!(aos_effect_types::WorkspaceAnnotationsSetReceipt => "sys/Wo
 impl_air_schema_ref!(aos_effect_types::WorkspaceEmptyRootParams => "sys/WorkspaceEmptyRootParams@1");
 impl_air_schema_ref!(aos_effect_types::WorkspaceEmptyRootReceipt => "sys/WorkspaceEmptyRootReceipt@1");
 
+impl_air_effect_ref!(aos_effect_types::HttpRequestParams => "sys/http.request@1");
+impl_air_effect_ref!(aos_effect_types::BlobPutParams => "sys/blob.put@1");
+impl_air_effect_ref!(aos_effect_types::BlobGetParams => "sys/blob.get@1");
+impl_air_effect_ref!(aos_effect_types::TimerSetParams => "sys/timer.set@1");
+impl_air_effect_ref!(aos_effect_types::PortalSendParams => "sys/portal.send@1");
+impl_air_effect_ref!(aos_effect_types::HostSessionOpenParams => "sys/host.session.open@1");
+impl_air_effect_ref!(aos_effect_types::HostExecParams => "sys/host.exec@1");
+impl_air_effect_ref!(aos_effect_types::HostSessionSignalParams => "sys/host.session.signal@1");
+impl_air_effect_ref!(aos_effect_types::HostFsReadFileParams => "sys/host.fs.read_file@1");
+impl_air_effect_ref!(aos_effect_types::HostFsWriteFileParams => "sys/host.fs.write_file@1");
+impl_air_effect_ref!(aos_effect_types::HostFsEditFileParams => "sys/host.fs.edit_file@1");
+impl_air_effect_ref!(aos_effect_types::HostFsApplyPatchParams => "sys/host.fs.apply_patch@1");
+impl_air_effect_ref!(aos_effect_types::HostFsGrepParams => "sys/host.fs.grep@1");
+impl_air_effect_ref!(aos_effect_types::HostFsGlobParams => "sys/host.fs.glob@1");
+impl_air_effect_ref!(aos_effect_types::HostFsStatParams => "sys/host.fs.stat@1");
+impl_air_effect_ref!(aos_effect_types::HostFsExistsParams => "sys/host.fs.exists@1");
+impl_air_effect_ref!(aos_effect_types::HostFsListDirParams => "sys/host.fs.list_dir@1");
+impl_air_effect_ref!(aos_effect_types::LlmGenerateParams => "sys/llm.generate@1");
+impl_air_effect_ref!(aos_effect_types::VaultPutParams => "sys/vault.put@1");
+impl_air_effect_ref!(aos_effect_types::VaultRotateParams => "sys/vault.rotate@1");
+impl_air_effect_ref!(aos_effect_types::GovProposeParams => "sys/governance.propose@1");
+impl_air_effect_ref!(aos_effect_types::GovShadowParams => "sys/governance.shadow@1");
+impl_air_effect_ref!(aos_effect_types::GovApproveParams => "sys/governance.approve@1");
+impl_air_effect_ref!(aos_effect_types::GovApplyParams => "sys/governance.apply@1");
+impl_air_effect_ref!(aos_effect_types::IntrospectManifestParams => "sys/introspect.manifest@1");
+impl_air_effect_ref!(
+    aos_effect_types::IntrospectWorkflowStateParams => "sys/introspect.workflow_state@1"
+);
+impl_air_effect_ref!(aos_effect_types::IntrospectJournalHeadParams => "sys/introspect.journal_head@1");
+impl_air_effect_ref!(aos_effect_types::IntrospectListCellsParams => "sys/introspect.list_cells@1");
+impl_air_effect_ref!(aos_effect_types::WorkspaceResolveParams => "sys/workspace.resolve@1");
+impl_air_effect_ref!(aos_effect_types::WorkspaceEmptyRootParams => "sys/workspace.empty_root@1");
+impl_air_effect_ref!(aos_effect_types::WorkspaceListParams => "sys/workspace.list@1");
+impl_air_effect_ref!(aos_effect_types::WorkspaceReadRefParams => "sys/workspace.read_ref@1");
+impl_air_effect_ref!(aos_effect_types::WorkspaceReadBytesParams => "sys/workspace.read_bytes@1");
+impl_air_effect_ref!(aos_effect_types::WorkspaceWriteBytesParams => "sys/workspace.write_bytes@1");
+impl_air_effect_ref!(aos_effect_types::WorkspaceWriteRefParams => "sys/workspace.write_ref@1");
+impl_air_effect_ref!(aos_effect_types::WorkspaceRemoveParams => "sys/workspace.remove@1");
+impl_air_effect_ref!(aos_effect_types::WorkspaceDiffParams => "sys/workspace.diff@1");
+impl_air_effect_ref!(
+    aos_effect_types::WorkspaceAnnotationsGetParams => "sys/workspace.annotations_get@1"
+);
+impl_air_effect_ref!(
+    aos_effect_types::WorkspaceAnnotationsSetParams => "sys/workspace.annotations_set@1"
+);
+
 /// Define an AIR secret export as a Rust item.
 #[macro_export]
 macro_rules! aos_air_secret {
@@ -329,12 +399,8 @@ macro_rules! aos_air_world {
                 nodes.push(<$schema as $crate::AirSchemaExport>::air_schema_json());
             )*
             $(
-                nodes.push($crate::__aos_export::String::from(
-                    <$workflow as $crate::AirWorkflowExport>::AIR_MODULE_JSON,
-                ));
-                nodes.push($crate::__aos_export::String::from(
-                    <$workflow as $crate::AirWorkflowExport>::AIR_WORKFLOW_JSON,
-                ));
+                nodes.push(<$workflow as $crate::AirWorkflowExport>::air_module_json());
+                nodes.push(<$workflow as $crate::AirWorkflowExport>::air_workflow_json());
             )*
             $(
                 nodes.push($crate::__aos_export::String::from(

@@ -1,0 +1,1250 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ActiveToolBatch@1",
+    "type": {
+      "record": {
+        "call_status": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "ref": "aos.agent/ToolCallStatus@1"
+            }
+          }
+        },
+        "execution": {
+          "ref": "sys/PendingBatchText@1"
+        },
+        "intent_id": {
+          "hash": {}
+        },
+        "llm_results": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "ref": "aos.agent/ToolCallLlmResult@1"
+            }
+          }
+        },
+        "params_hash": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "pending_effects": {
+          "ref": "sys/PendingEffectSetText@1"
+        },
+        "plan": {
+          "ref": "aos.agent/ToolBatchPlan@1"
+        },
+        "results_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "tool_batch_id": {
+          "ref": "aos.agent/ToolBatchId@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/EffectiveTool@1",
+    "type": {
+      "record": {
+        "args_schema_json": {
+          "text": {}
+        },
+        "description": {
+          "text": {}
+        },
+        "executor": {
+          "ref": "aos.agent/ToolExecutor@1"
+        },
+        "mapper": {
+          "ref": "aos.agent/ToolMapper@1"
+        },
+        "parallel_safe": {
+          "bool": {}
+        },
+        "resource_key": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tool_id": {
+          "text": {}
+        },
+        "tool_name": {
+          "text": {}
+        },
+        "tool_ref": {
+          "hash": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/EffectiveToolSet@1",
+    "type": {
+      "record": {
+        "ordered_tools": {
+          "list": {
+            "ref": "aos.agent/EffectiveTool@1"
+          }
+        },
+        "profile_id": {
+          "text": {}
+        },
+        "profile_requires_host_session": {
+          "bool": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostCommand@1",
+    "type": {
+      "record": {
+        "command": {
+          "variant": {
+            "Cancel": {
+              "record": {
+                "reason": {
+                  "option": {
+                    "text": {}
+                  }
+                }
+              }
+            },
+            "FollowUp": {
+              "record": {
+                "text": {
+                  "text": {}
+                }
+              }
+            },
+            "Noop": {
+              "unit": {}
+            },
+            "Pause": {
+              "unit": {}
+            },
+            "Resume": {
+              "unit": {}
+            },
+            "Steer": {
+              "record": {
+                "text": {
+                  "text": {}
+                }
+              }
+            }
+          }
+        },
+        "command_id": {
+          "text": {}
+        },
+        "issued_at": {
+          "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostSessionStatus@1",
+    "type": {
+      "variant": {
+        "Closed": {
+          "unit": {}
+        },
+        "Error": {
+          "unit": {}
+        },
+        "Expired": {
+          "unit": {}
+        },
+        "Ready": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobGet@1",
+    "type": {
+      "record": {
+        "emitted_at_ns": {
+          "time": {}
+        },
+        "kind": {
+          "ref": "aos.agent/PendingBlobGetKind@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobGetKind@1",
+    "type": {
+      "variant": {
+        "LlmOutputEnvelope": {
+          "unit": {}
+        },
+        "LlmToolCalls": {
+          "unit": {}
+        },
+        "ToolCallArguments": {
+          "record": {
+            "call_id": {
+              "text": {}
+            },
+            "tool_batch_id": {
+              "ref": "aos.agent/ToolBatchId@1"
+            }
+          }
+        },
+        "ToolResultBlob": {
+          "record": {
+            "blob_ref": {
+              "text": {}
+            },
+            "call_id": {
+              "text": {}
+            },
+            "tool_batch_id": {
+              "ref": "aos.agent/ToolBatchId@1"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobPut@1",
+    "type": {
+      "record": {
+        "emitted_at_ns": {
+          "time": {}
+        },
+        "kind": {
+          "ref": "aos.agent/PendingBlobPutKind@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingBlobPutKind@1",
+    "type": {
+      "variant": {
+        "FollowUpMessage": {
+          "record": {
+            "index": {
+              "nat": {}
+            }
+          }
+        },
+        "ToolDefinition": {
+          "record": {
+            "tool_id": {
+              "text": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PendingFollowUpTurn@1",
+    "type": {
+      "record": {
+        "base_message_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "blob_refs_by_index": {
+          "map": {
+            "key": {
+              "nat": {}
+            },
+            "value": {
+              "hash": {}
+            }
+          }
+        },
+        "expected_messages": {
+          "nat": {}
+        },
+        "tool_batch_id": {
+          "ref": "aos.agent/ToolBatchId@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PlannedToolCall@1",
+    "type": {
+      "record": {
+        "accepted": {
+          "bool": {}
+        },
+        "arguments_json": {
+          "text": {}
+        },
+        "arguments_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "call_id": {
+          "text": {}
+        },
+        "executor": {
+          "ref": "aos.agent/ToolExecutor@1"
+        },
+        "mapper": {
+          "ref": "aos.agent/ToolMapper@1"
+        },
+        "parallel_safe": {
+          "bool": {}
+        },
+        "provider_call_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "resource_key": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tool_id": {
+          "text": {}
+        },
+        "tool_name": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ReasoningEffort@1",
+    "type": {
+      "variant": {
+        "High": {
+          "unit": {}
+        },
+        "Low": {
+          "unit": {}
+        },
+        "Medium": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunConfig@1",
+    "type": {
+      "record": {
+        "max_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "model": {
+          "text": {}
+        },
+        "prompt_refs": {
+          "option": {
+            "list": {
+              "hash": {}
+            }
+          }
+        },
+        "provider": {
+          "text": {}
+        },
+        "reasoning_effort": {
+          "option": {
+            "ref": "aos.agent/ReasoningEffort@1"
+          }
+        },
+        "tool_disable": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "tool_enable": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "tool_force": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "tool_profile": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunId@1",
+    "type": {
+      "record": {
+        "run_seq": {
+          "nat": {}
+        },
+        "session_id": {
+          "ref": "aos.agent/SessionId@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionConfig@1",
+    "type": {
+      "record": {
+        "default_prompt_refs": {
+          "option": {
+            "list": {
+              "hash": {}
+            }
+          }
+        },
+        "default_tool_disable": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "default_tool_enable": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "default_tool_force": {
+          "option": {
+            "list": {
+              "text": {}
+            }
+          }
+        },
+        "default_tool_profile": {
+          "option": {
+            "text": {}
+          }
+        },
+        "max_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "model": {
+          "text": {}
+        },
+        "provider": {
+          "text": {}
+        },
+        "reasoning_effort": {
+          "option": {
+            "ref": "aos.agent/ReasoningEffort@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionId@1",
+    "type": {
+      "uuid": {}
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionIngress@1",
+    "type": {
+      "record": {
+        "ingress": {
+          "ref": "aos.agent/SessionIngressKind@1"
+        },
+        "observed_at_ns": {
+          "time": {}
+        },
+        "session_id": {
+          "ref": "aos.agent/SessionId@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionIngressKind@1",
+    "type": {
+      "variant": {
+        "HostCommandReceived": {
+          "ref": "aos.agent/HostCommand@1"
+        },
+        "HostSessionUpdated": {
+          "record": {
+            "host_session_id": {
+              "option": {
+                "text": {}
+              }
+            },
+            "host_session_status": {
+              "option": {
+                "ref": "aos.agent/HostSessionStatus@1"
+              }
+            }
+          }
+        },
+        "Noop": {
+          "ref": "aos.agent/SessionNoop@1"
+        },
+        "RunCancelled": {
+          "record": {
+            "reason": {
+              "option": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "RunCompleted": {
+          "unit": {}
+        },
+        "RunFailed": {
+          "record": {
+            "code": {
+              "text": {}
+            },
+            "detail": {
+              "text": {}
+            }
+          }
+        },
+        "RunRequested": {
+          "record": {
+            "input_ref": {
+              "hash": {}
+            },
+            "run_overrides": {
+              "option": {
+                "ref": "aos.agent/SessionConfig@1"
+              }
+            }
+          }
+        },
+        "ToolOverridesSet": {
+          "record": {
+            "disable": {
+              "option": {
+                "list": {
+                  "text": {}
+                }
+              }
+            },
+            "enable": {
+              "option": {
+                "list": {
+                  "text": {}
+                }
+              }
+            },
+            "force": {
+              "option": {
+                "list": {
+                  "text": {}
+                }
+              }
+            },
+            "scope": {
+              "ref": "aos.agent/ToolOverrideScope@1"
+            }
+          }
+        },
+        "ToolProfileSelected": {
+          "record": {
+            "profile_id": {
+              "text": {}
+            }
+          }
+        },
+        "ToolRegistrySet": {
+          "record": {
+            "default_profile": {
+              "option": {
+                "text": {}
+              }
+            },
+            "profiles": {
+              "option": {
+                "map": {
+                  "key": {
+                    "text": {}
+                  },
+                  "value": {
+                    "list": {
+                      "text": {}
+                    }
+                  }
+                }
+              }
+            },
+            "registry": {
+              "map": {
+                "key": {
+                  "text": {}
+                },
+                "value": {
+                  "ref": "aos.agent/ToolSpec@1"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionLifecycle@1",
+    "type": {
+      "variant": {
+        "Cancelled": {
+          "unit": {}
+        },
+        "Cancelling": {
+          "unit": {}
+        },
+        "Completed": {
+          "unit": {}
+        },
+        "Failed": {
+          "unit": {}
+        },
+        "Idle": {
+          "unit": {}
+        },
+        "Paused": {
+          "unit": {}
+        },
+        "Running": {
+          "unit": {}
+        },
+        "WaitingInput": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionLifecycleChanged@1",
+    "type": {
+      "record": {
+        "from": {
+          "ref": "aos.agent/SessionLifecycle@1"
+        },
+        "in_flight_effects": {
+          "nat": {}
+        },
+        "observed_at_ns": {
+          "time": {}
+        },
+        "output_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "run_id": {
+          "option": {
+            "ref": "aos.agent/RunId@1"
+          }
+        },
+        "session_id": {
+          "ref": "aos.agent/SessionId@1"
+        },
+        "to": {
+          "ref": "aos.agent/SessionLifecycle@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionNoop@1",
+    "type": {
+      "unit": {}
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionState@1",
+    "type": {
+      "record": {
+        "active_run_config": {
+          "option": {
+            "ref": "aos.agent/RunConfig@1"
+          }
+        },
+        "active_run_id": {
+          "option": {
+            "ref": "aos.agent/RunId@1"
+          }
+        },
+        "active_tool_batch": {
+          "option": {
+            "ref": "aos.agent/ActiveToolBatch@1"
+          }
+        },
+        "conversation_message_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "created_at": {
+          "time": {}
+        },
+        "effective_tools": {
+          "ref": "aos.agent/EffectiveToolSet@1"
+        },
+        "in_flight_effects": {
+          "nat": {}
+        },
+        "last_output_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "last_tool_plan_hash": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "lifecycle": {
+          "ref": "aos.agent/SessionLifecycle@1"
+        },
+        "next_run_seq": {
+          "nat": {}
+        },
+        "next_tool_batch_seq": {
+          "nat": {}
+        },
+        "pending_blob_gets": {
+          "map": {
+            "key": {
+              "hash": {}
+            },
+            "value": {
+              "ref": "aos.agent/SharedPendingBlobGet@1"
+            }
+          }
+        },
+        "pending_blob_puts": {
+          "map": {
+            "key": {
+              "hash": {}
+            },
+            "value": {
+              "ref": "aos.agent/SharedPendingBlobPut@1"
+            }
+          }
+        },
+        "pending_effects": {
+          "map": {
+            "key": {
+              "hash": {}
+            },
+            "value": {
+              "ref": "sys/PendingEffect@1"
+            }
+          }
+        },
+        "pending_follow_up": {
+          "list": {
+            "text": {}
+          }
+        },
+        "pending_follow_up_turn": {
+          "option": {
+            "ref": "aos.agent/PendingFollowUpTurn@1"
+          }
+        },
+        "pending_steer": {
+          "list": {
+            "text": {}
+          }
+        },
+        "queued_llm_message_refs": {
+          "option": {
+            "list": {
+              "hash": {}
+            }
+          }
+        },
+        "session_config": {
+          "ref": "aos.agent/SessionConfig@1"
+        },
+        "session_id": {
+          "ref": "aos.agent/SessionId@1"
+        },
+        "tool_profile": {
+          "text": {}
+        },
+        "tool_profiles": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "list": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "tool_refs_materialized": {
+          "bool": {}
+        },
+        "tool_registry": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "ref": "aos.agent/ToolSpec@1"
+            }
+          }
+        },
+        "tool_runtime_context": {
+          "ref": "aos.agent/ToolRuntimeContext@1"
+        },
+        "updated_at": {
+          "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionWorkflowEvent@1",
+    "type": {
+      "variant": {
+        "Ingress": {
+          "ref": "aos.agent/SessionIngress@1"
+        },
+        "Noop": {
+          "ref": "aos.agent/SessionNoop@1"
+        },
+        "Receipt": {
+          "ref": "sys/EffectReceiptEnvelope@1"
+        },
+        "ReceiptRejected": {
+          "ref": "sys/EffectReceiptRejected@1"
+        },
+        "StreamFrame": {
+          "ref": "sys/EffectStreamFrame@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SharedPendingBlobGet@1",
+    "type": {
+      "record": {
+        "pending": {
+          "ref": "sys/PendingEffect@1"
+        },
+        "waiters": {
+          "list": {
+            "ref": "aos.agent/PendingBlobGet@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SharedPendingBlobPut@1",
+    "type": {
+      "record": {
+        "pending": {
+          "ref": "sys/PendingEffect@1"
+        },
+        "waiters": {
+          "list": {
+            "ref": "aos.agent/PendingBlobPut@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolAvailabilityRule@1",
+    "type": {
+      "variant": {
+        "Always": {
+          "unit": {}
+        },
+        "HostSessionNotReady": {
+          "unit": {}
+        },
+        "HostSessionReady": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolBatchId@1",
+    "type": {
+      "record": {
+        "batch_seq": {
+          "nat": {}
+        },
+        "run_id": {
+          "ref": "aos.agent/RunId@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolBatchPlan@1",
+    "type": {
+      "record": {
+        "execution_plan": {
+          "ref": "aos.agent/ToolExecutionPlan@1"
+        },
+        "observed_calls": {
+          "list": {
+            "ref": "aos.agent/ToolCallObserved@1"
+          }
+        },
+        "planned_calls": {
+          "list": {
+            "ref": "aos.agent/PlannedToolCall@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallLlmResult@1",
+    "type": {
+      "record": {
+        "call_id": {
+          "text": {}
+        },
+        "is_error": {
+          "bool": {}
+        },
+        "output_json": {
+          "text": {}
+        },
+        "tool_id": {
+          "text": {}
+        },
+        "tool_name": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallObserved@1",
+    "type": {
+      "record": {
+        "arguments_json": {
+          "text": {}
+        },
+        "arguments_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "call_id": {
+          "text": {}
+        },
+        "provider_call_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tool_name": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallStatus@1",
+    "type": {
+      "variant": {
+        "Cancelled": {
+          "unit": {}
+        },
+        "Failed": {
+          "record": {
+            "code": {
+              "text": {}
+            },
+            "detail": {
+              "text": {}
+            }
+          }
+        },
+        "Ignored": {
+          "unit": {}
+        },
+        "Pending": {
+          "unit": {}
+        },
+        "Queued": {
+          "unit": {}
+        },
+        "Succeeded": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolExecutionPlan@1",
+    "type": {
+      "record": {
+        "groups": {
+          "list": {
+            "list": {
+              "text": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolExecutor@1",
+    "type": {
+      "variant": {
+        "DomainEvent": {
+          "record": {
+            "schema": {
+              "text": {}
+            }
+          }
+        },
+        "Effect": {
+          "record": {
+            "effect": {
+              "text": {}
+            }
+          }
+        },
+        "HostLoop": {
+          "record": {
+            "bridge": {
+              "text": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolMapper@1",
+    "type": {
+      "variant": {
+        "HostExec": {
+          "unit": {}
+        },
+        "HostFsApplyPatch": {
+          "unit": {}
+        },
+        "HostFsEditFile": {
+          "unit": {}
+        },
+        "HostFsExists": {
+          "unit": {}
+        },
+        "HostFsGlob": {
+          "unit": {}
+        },
+        "HostFsGrep": {
+          "unit": {}
+        },
+        "HostFsListDir": {
+          "unit": {}
+        },
+        "HostFsReadFile": {
+          "unit": {}
+        },
+        "HostFsStat": {
+          "unit": {}
+        },
+        "HostFsWriteFile": {
+          "unit": {}
+        },
+        "HostSessionOpen": {
+          "unit": {}
+        },
+        "HostSessionSignal": {
+          "unit": {}
+        },
+        "InspectWorkflow": {
+          "unit": {}
+        },
+        "InspectWorld": {
+          "unit": {}
+        },
+        "WorkspaceApply": {
+          "unit": {}
+        },
+        "WorkspaceCommit": {
+          "unit": {}
+        },
+        "WorkspaceDiff": {
+          "unit": {}
+        },
+        "WorkspaceInspect": {
+          "unit": {}
+        },
+        "WorkspaceList": {
+          "unit": {}
+        },
+        "WorkspaceRead": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolOverrideScope@1",
+    "type": {
+      "variant": {
+        "Run": {
+          "unit": {}
+        },
+        "Session": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolParallelismHint@1",
+    "type": {
+      "record": {
+        "parallel_safe": {
+          "bool": {}
+        },
+        "resource_key": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolRuntimeContext@1",
+    "type": {
+      "record": {
+        "host_session_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "host_session_status": {
+          "option": {
+            "ref": "aos.agent/HostSessionStatus@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolSpec@1",
+    "type": {
+      "record": {
+        "args_schema_json": {
+          "text": {}
+        },
+        "availability_rules": {
+          "list": {
+            "ref": "aos.agent/ToolAvailabilityRule@1"
+          }
+        },
+        "description": {
+          "text": {}
+        },
+        "executor": {
+          "ref": "aos.agent/ToolExecutor@1"
+        },
+        "mapper": {
+          "ref": "aos.agent/ToolMapper@1"
+        },
+        "parallelism_hint": {
+          "ref": "aos.agent/ToolParallelismHint@1"
+        },
+        "tool_id": {
+          "text": {}
+        },
+        "tool_name": {
+          "text": {}
+        },
+        "tool_ref": {
+          "hash": {}
+        }
+      }
+    }
+  }
+]
