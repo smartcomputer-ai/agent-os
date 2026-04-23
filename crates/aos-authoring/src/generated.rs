@@ -1,9 +1,10 @@
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use aos_air_types::{AirNode, Name};
+use aos_air_types::{AirNode, DefEffect, DefWorkflow, Manifest, Name, TypeExpr, builtins};
 
 use crate::manifest_loader::parse_air_nodes_from_str;
 
@@ -24,6 +25,7 @@ pub fn write_generated_air_nodes(
             buckets.push(node)?;
         }
     }
+    buckets.validate_manifest_schema_closure()?;
 
     let generated_dir = world_root.join(GENERATED_AIR_DIR);
     fs::create_dir_all(&generated_dir)
@@ -151,6 +153,214 @@ impl GeneratedAirBuckets {
         }
         Ok(())
     }
+
+    fn validate_manifest_schema_closure(&self) -> Result<()> {
+        let Some(AirNode::Manifest(manifest)) = self.manifests.first() else {
+            return Ok(());
+        };
+
+        let schema_defs: HashMap<&str, &TypeExpr> = self
+            .schemas
+            .iter()
+            .filter_map(|node| match node {
+                AirNode::Defschema(schema) => Some((schema.name.as_str(), &schema.ty)),
+                _ => None,
+            })
+            .collect();
+        let workflow_defs: HashMap<&str, &DefWorkflow> = self
+            .workflows
+            .iter()
+            .filter_map(|node| match node {
+                AirNode::Defworkflow(workflow) => Some((workflow.name.as_str(), workflow)),
+                _ => None,
+            })
+            .collect();
+        let effect_defs: HashMap<&str, &DefEffect> = self
+            .effects
+            .iter()
+            .filter_map(|node| match node {
+                AirNode::Defeffect(effect) => Some((effect.name.as_str(), effect)),
+                _ => None,
+            })
+            .collect();
+        validate_manifest_schema_closure(manifest, &schema_defs, &workflow_defs, &effect_defs)
+    }
+}
+
+fn validate_manifest_schema_closure(
+    manifest: &Manifest,
+    schema_defs: &HashMap<&str, &TypeExpr>,
+    workflow_defs: &HashMap<&str, &DefWorkflow>,
+    effect_defs: &HashMap<&str, &DefEffect>,
+) -> Result<()> {
+    let active_schemas: BTreeSet<&str> = manifest
+        .schemas
+        .iter()
+        .map(|reference| reference.name.as_str())
+        .collect();
+    let active_workflows: BTreeSet<&str> = manifest
+        .workflows
+        .iter()
+        .map(|reference| reference.name.as_str())
+        .collect();
+    let active_effects: BTreeSet<&str> = manifest
+        .effects
+        .iter()
+        .map(|reference| reference.name.as_str())
+        .collect();
+
+    let mut required = SchemaClosure::new(schema_defs, &active_schemas);
+
+    for schema_name in &active_schemas {
+        required.require(schema_name, "manifest.schemas");
+    }
+    for workflow_name in &active_workflows {
+        let Some(workflow) = workflow_defs.get(workflow_name) else {
+            continue;
+        };
+        required.require(
+            workflow.state.as_str(),
+            format!("workflow '{workflow_name}' state"),
+        );
+        required.require(
+            workflow.event.as_str(),
+            format!("workflow '{workflow_name}' event"),
+        );
+        if let Some(schema) = &workflow.context {
+            required.require(
+                schema.as_str(),
+                format!("workflow '{workflow_name}' context"),
+            );
+        }
+        if let Some(schema) = &workflow.annotations {
+            required.require(
+                schema.as_str(),
+                format!("workflow '{workflow_name}' annotations"),
+            );
+        }
+        if let Some(schema) = &workflow.key_schema {
+            required.require(
+                schema.as_str(),
+                format!("workflow '{workflow_name}' key_schema"),
+            );
+        }
+    }
+    for effect_name in &active_effects {
+        let Some(effect) = effect_defs.get(effect_name) else {
+            continue;
+        };
+        required.require(
+            effect.params.as_str(),
+            format!("effect '{effect_name}' params"),
+        );
+        required.require(
+            effect.receipt.as_str(),
+            format!("effect '{effect_name}' receipt"),
+        );
+    }
+    if let Some(routing) = manifest.routing.as_ref() {
+        for route in &routing.subscriptions {
+            required.require(
+                route.event.as_str(),
+                format!("routing subscription for workflow '{}'", route.workflow),
+            );
+        }
+    }
+
+    required.walk();
+    required.finish()
+}
+
+struct SchemaClosure<'a> {
+    schema_defs: &'a HashMap<&'a str, &'a TypeExpr>,
+    active_schemas: &'a BTreeSet<&'a str>,
+    queue: Vec<&'a str>,
+    visited: HashSet<&'a str>,
+    missing: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl<'a> SchemaClosure<'a> {
+    fn new(
+        schema_defs: &'a HashMap<&'a str, &'a TypeExpr>,
+        active_schemas: &'a BTreeSet<&'a str>,
+    ) -> Self {
+        Self {
+            schema_defs,
+            active_schemas,
+            queue: Vec::new(),
+            visited: HashSet::new(),
+            missing: BTreeMap::new(),
+        }
+    }
+
+    fn require(&mut self, schema_name: &'a str, context: impl Into<String>) {
+        if builtins::find_builtin_schema(schema_name).is_some() {
+            return;
+        }
+        if !self.active_schemas.contains(schema_name) {
+            self.missing
+                .entry(schema_name.to_string())
+                .or_default()
+                .insert(context.into());
+            return;
+        }
+        if !self.schema_defs.contains_key(schema_name) {
+            // External import: the generated package can reference schemas provided by another
+            // source. The merged AIR loader validates that those imports are present later.
+            return;
+        }
+        if self.visited.insert(schema_name) {
+            self.queue.push(schema_name);
+        }
+    }
+
+    fn walk(&mut self) {
+        while let Some(schema_name) = self.queue.pop() {
+            let Some(schema) = self.schema_defs.get(schema_name) else {
+                continue;
+            };
+            self.walk_type(schema_name, schema);
+        }
+    }
+
+    fn walk_type(&mut self, owner: &'a str, ty: &'a TypeExpr) {
+        match ty {
+            TypeExpr::Primitive(_) => {}
+            TypeExpr::Record(record) => {
+                for field in record.record.values() {
+                    self.walk_type(owner, field);
+                }
+            }
+            TypeExpr::Variant(variant) => {
+                for arm in variant.variant.values() {
+                    self.walk_type(owner, arm);
+                }
+            }
+            TypeExpr::List(list) => self.walk_type(owner, &list.list),
+            TypeExpr::Set(set) => self.walk_type(owner, &set.set),
+            TypeExpr::Map(map) => self.walk_type(owner, &map.map.value),
+            TypeExpr::Option(option) => self.walk_type(owner, &option.option),
+            TypeExpr::Ref(reference) => {
+                self.require(reference.reference.as_str(), format!("schema '{owner}'"));
+            }
+        }
+    }
+
+    fn finish(self) -> Result<()> {
+        if self.missing.is_empty() {
+            return Ok(());
+        }
+        let details = self
+            .missing
+            .into_iter()
+            .map(|(schema, contexts)| {
+                let contexts = contexts.into_iter().collect::<Vec<_>>().join(", ");
+                format!("{schema} referenced by {contexts}")
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        bail!("generated AIR manifest schema closure is incomplete: {details}")
+    }
 }
 
 fn write_bucket(
@@ -235,5 +445,51 @@ mod tests {
                 .expect("read workflow")
                 .contains(r#""effects_emitted": []"#)
         );
+    }
+
+    #[test]
+    fn write_generated_air_nodes_rejects_incomplete_manifest_schema_closure() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let err = write_generated_air_nodes(
+            temp.path(),
+            &[
+                r#"{"$kind":"defschema","name":"demo/Outer@1","type":{"record":{"inner":{"ref":"demo/Inner@1"}}}}"#,
+                r#"{"$kind":"defschema","name":"demo/Inner@1","type":{"record":{}}}"#,
+                r#"{"$kind":"manifest","air_version":"2","schemas":[{"name":"demo/Outer@1"}],"modules":[],"workflows":[],"effects":[]}"#,
+            ],
+        )
+        .expect_err("closure should be rejected");
+
+        let message = err.to_string();
+        assert!(message.contains("schema closure is incomplete"));
+        assert!(message.contains("demo/Inner@1"));
+    }
+
+    #[test]
+    fn write_generated_air_nodes_allows_external_schema_import_refs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_generated_air_nodes(
+            temp.path(),
+            &[
+                r#"{"$kind":"defschema","name":"demo/Outer@1","type":{"record":{"imported":{"ref":"external/Imported@1"}}}}"#,
+                r#"{"$kind":"manifest","air_version":"2","schemas":[{"name":"demo/Outer@1"},{"name":"external/Imported@1"}],"modules":[],"workflows":[],"effects":[]}"#,
+            ],
+        )
+        .expect("external refs are validated after sources are merged");
+    }
+
+    #[test]
+    fn write_generated_air_nodes_rejects_unlisted_external_schema_refs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let err = write_generated_air_nodes(
+            temp.path(),
+            &[
+                r#"{"$kind":"defschema","name":"demo/Outer@1","type":{"record":{"imported":{"ref":"external/Imported@1"}}}}"#,
+                r#"{"$kind":"manifest","air_version":"2","schemas":[{"name":"demo/Outer@1"}],"modules":[],"workflows":[],"effects":[]}"#,
+            ],
+        )
+        .expect_err("unlisted external ref should be rejected");
+
+        assert!(err.to_string().contains("external/Imported@1"));
     }
 }

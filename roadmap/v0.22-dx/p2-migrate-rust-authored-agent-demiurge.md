@@ -13,7 +13,7 @@ Primary outcome:
 2. `worlds/demiurge` defines its local schemas, workflow, module, manifest refs, and routing in
    Rust.
 3. Demiurge imports `aos-agent` AIR through Cargo package discovery instead of custom
-   `aos.sync.json` import wiring.
+   import config.
 4. The hand-authored AIR path remains exercised by most smoke fixtures.
 
 ## Design Stance
@@ -53,7 +53,11 @@ Demiurge should show the target developer experience:
 2. implement the reducer in Rust,
 3. configure the workflow and routing beside the reducer,
 4. depend on `aos-agent` normally through Cargo,
-5. keep local sync config only for operational concerns such as secrets and workspace sync.
+5. keep local config only for operational concerns such as secrets and workspace sync.
+
+The target local config direction is described in `p3-world-config-and-air-discovery.md`: optional
+`aos.world.json` for local build/sync/secrets, and a separate AIR lock for discovered package
+identity.
 
 ### 3) Smoke fixtures continue to protect hand-authored AIR
 
@@ -71,7 +75,6 @@ placeholder module patching, manifest ref rewriting, and low-level AIR diagnosti
 
 - Do not migrate all smoke fixtures.
 - Do not remove `air/` directory support.
-- Do not remove explicit `aos.sync.json` imports.
 - Do not change kernel workflow/effect execution semantics.
 - Do not introduce Python runtime support.
 - Do not add custom effect authoring beyond emitted effect declarations.
@@ -194,9 +197,9 @@ Required checks:
 3. routing still delivers `TaskSubmitted` and `SessionLifecycleChanged` to Demiurge,
 4. receipt and stream continuation handling remains manifest-independent.
 
-## Phase 2E: Remove Demiurge's Manual `aos-agent` Sync Import
+## Phase 2E: Remove Demiurge's Manual `aos-agent` AIR Import
 
-After `aos-agent` package discovery works, simplify `worlds/demiurge/aos.sync.json`.
+After `aos-agent` package discovery works, remove Demiurge's manual AIR import wiring.
 
 Current responsibilities that should remain:
 
@@ -210,7 +213,9 @@ Responsibilities that should move out:
 2. import lock payload for `aos-agent`,
 3. local `air/manifest.air.json` refs that are derivable from Rust world metadata.
 
-The sync file should become operational configuration, not the primary world definition.
+The local config file should become operational configuration, not the primary world definition.
+Do not keep a backwards-compatibility phase for `aos.sync.json`; migrate remaining operational
+settings directly to optional `aos.world.json` and move AIR identity to `aos.air.lock.json`.
 
 ## Phase 2F: Keep Smoke Fixtures Mostly Hand-Authored
 
@@ -220,7 +225,7 @@ Keep most fixtures as authored AIR JSON so they continue to cover:
 
 1. manifest loading from `air/`,
 2. placeholder module hash resolution,
-3. explicit sync imports,
+3. explicit CLI/test-harness import overrides,
 4. imported AIR lock diagnostics,
 5. hand-authored schema and workflow mistakes,
 6. generated bundle/export/import behavior.
@@ -252,10 +257,10 @@ Required tests:
 
 1. `aos-agent` generated AIR equals expected definitions,
 2. `aos-agent` package metadata is discoverable,
-3. Demiurge builds without manual `aos-agent` `aos.sync.json` import wiring,
+3. Demiurge builds without manual `aos-agent` import config,
 4. Demiurge replay/smoke behavior remains unchanged,
 5. hand-authored smoke fixtures still pass,
-6. explicit `aos.sync.json` imports still work for fixtures that use them.
+6. explicit CLI/test-harness import overrides work for fixtures that need them.
 
 Suggested target set:
 
@@ -278,6 +283,6 @@ P2 is complete when:
 1. `aos-agent` AIR is generated from Rust and exported through Cargo package metadata,
 2. Demiurge's local world definition is Rust-authored,
 3. Demiurge imports `aos-agent` through Cargo discovery,
-4. `worlds/demiurge/aos.sync.json` no longer owns AIR import wiring for `aos-agent`,
+4. Demiurge's local config no longer owns AIR import wiring for `aos-agent`,
 5. most smoke fixtures remain hand-authored and continue to pass,
 6. generated AIR is inspectable and CI-checkable.

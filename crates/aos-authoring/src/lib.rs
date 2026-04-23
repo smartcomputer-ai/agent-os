@@ -22,7 +22,8 @@ pub use generated::{
 };
 pub use local::{local_kernel_config, local_state_paths, reset_local_runtime_state};
 pub use manifest_loader::{
-    LoadedAssets, ZERO_HASH_SENTINEL, load_from_assets, load_from_assets_with_defs,
+    AirSource, LoadedAssets, ZERO_HASH_SENTINEL, load_from_air_sources,
+    load_from_air_sources_with_defs, load_from_assets, load_from_assets_with_defs,
     load_from_assets_with_imports, load_from_assets_with_imports_and_defs,
     parse_air_nodes_from_str,
 };

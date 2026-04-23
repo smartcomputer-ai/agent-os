@@ -209,10 +209,9 @@ fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
     let (map_path, config) = load_sync_config(world_root, None)?;
     let map_root = map_path.parent().unwrap_or(world_root);
     let air_sources = resolve_air_sources(world_root, map_root, &config, &air_dir, &workflow_dir)?;
-    let assets = manifest_loader::load_from_assets_with_imports_and_defs(
+    let assets = manifest_loader::load_from_air_sources_with_defs(
         std::sync::Arc::new(store.clone()),
-        &air_sources.air_dir,
-        &air_sources.import_dirs,
+        &air_sources.sources,
     )
     .with_context(|| format!("load AIR assets from {}", air_sources.air_dir.display()))?
     .ok_or_else(|| anyhow!("no manifest found in {}", air_sources.air_dir.display()))?;

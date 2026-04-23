@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use walkdir::WalkDir;
 
+use crate::generated::write_generated_air_from_cargo_export;
+use crate::manifest_loader::AirSource;
+
 const ZERO_HASH_SENTINEL: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -140,6 +143,7 @@ pub struct WorkspaceSync {
 pub struct ResolvedAirImport {
     pub root: PathBuf,
     pub expected_lock: ImportLockPayload,
+    pub source: AirSource,
     pub cargo_manifest_path: Option<PathBuf>,
     pub cargo_package: Option<String>,
     pub cargo_module_names: Vec<String>,
@@ -149,6 +153,7 @@ pub struct ResolvedAirImport {
 pub struct ResolvedAirSources {
     pub air_dir: PathBuf,
     pub import_dirs: Vec<PathBuf>,
+    pub sources: Vec<AirSource>,
     pub imports: Vec<ResolvedAirImport>,
     pub warnings: Vec<String>,
 }
@@ -217,6 +222,7 @@ fn resolve_air_sources_with_mode(
 
     let mut metadata_cache: HashMap<PathBuf, CargoMetadata> = HashMap::new();
     let mut import_dirs = Vec::new();
+    let mut sources = vec![AirSource::local_directory(air_dir.clone())];
     let mut imports = Vec::new();
     let mut warnings = Vec::new();
 
@@ -235,6 +241,7 @@ fn resolve_air_sources_with_mode(
                 lock_mode,
                 &mut warnings,
             )?;
+            sources.push(resolved.source.clone());
             import_dirs.push(resolved.root.clone());
             imports.push(resolved);
         }
@@ -243,6 +250,7 @@ fn resolve_air_sources_with_mode(
     Ok(ResolvedAirSources {
         air_dir,
         import_dirs,
+        sources,
         imports,
         warnings,
     })
@@ -618,8 +626,9 @@ fn resolve_air_import(
                 defs_hash,
             };
             Ok(ResolvedAirImport {
-                root,
+                root: root.clone(),
                 expected_lock,
+                source: AirSource::imported_directory(root),
                 cargo_manifest_path: None,
                 cargo_package: None,
                 cargo_module_names: Vec::new(),
@@ -708,8 +717,33 @@ fn resolve_cargo_import(
     let air_dir = import
         .air_dir
         .clone()
+        .or_else(|| package.aos_metadata().and_then(|aos| aos.air_dir.clone()))
         .unwrap_or_else(|| PathBuf::from("air"));
     let root = package_root.join(&air_dir);
+    let generated = package
+        .aos_metadata()
+        .map(|aos| {
+            aos.air.as_deref() == Some("generated")
+                || (aos.exports.unwrap_or(false) && aos.export_bin.is_some())
+        })
+        .unwrap_or(false);
+    let export_bin = package
+        .aos_metadata()
+        .and_then(|aos| aos.export_bin.clone());
+    if generated {
+        write_generated_air_from_cargo_export(
+            &package_root,
+            &manifest_path,
+            Some(package.name.as_str()),
+            export_bin.as_deref(),
+        )
+        .with_context(|| {
+            format!(
+                "materialize generated AIR for cargo package '{}'",
+                package.name
+            )
+        })?;
+    }
     let defs_hash = import_defs_hash(&root)?;
     let cargo_module_names = import_module_names(&root)?;
 
@@ -725,8 +759,9 @@ fn resolve_cargo_import(
     };
 
     Ok(ResolvedAirImport {
-        root,
+        root: root.clone(),
         expected_lock,
+        source: AirSource::imported_directory(root),
         cargo_manifest_path: Some(manifest_path),
         cargo_package: Some(package.name.clone()),
         cargo_module_names,
@@ -974,6 +1009,34 @@ struct CargoMetadataPackage {
     version: String,
     source: Option<String>,
     manifest_path: String,
+    #[serde(default)]
+    metadata: Option<CargoPackageMetadata>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CargoPackageMetadata {
+    #[serde(default)]
+    aos: Option<AosPackageMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AosPackageMetadata {
+    #[serde(default)]
+    air: Option<String>,
+    #[serde(default)]
+    air_dir: Option<PathBuf>,
+    #[serde(default)]
+    exports: Option<bool>,
+    #[serde(default)]
+    export_bin: Option<String>,
+}
+
+impl CargoMetadataPackage {
+    fn aos_metadata(&self) -> Option<&AosPackageMetadata> {
+        self.metadata
+            .as_ref()
+            .and_then(|metadata| metadata.aos.as_ref())
+    }
 }
 
 fn collect_json_files(dir: &Path) -> Result<Vec<PathBuf>> {

@@ -14,7 +14,7 @@ Primary outcome:
 2. `aos-authoring` can discover AIR from both authored JSON directories and generated Rust package
    metadata.
 3. Cargo packages such as `aos-agent` can export reusable AIR without every consumer hand-writing
-   `aos.sync.json` import entries.
+   import config.
 
 The kernel should continue to consume only canonical AIR. Rust authoring is sugar that produces the
 same `AirNode`s the current loader already knows how to store, hash, validate, bundle, and upload.
@@ -75,7 +75,7 @@ silently producing loose AIR.
 ### 3) Package discovery should be metadata-driven
 
 Reusable crates should advertise AIR exports through Cargo metadata, not through each downstream
-world's sync file.
+world's local config.
 
 Illustrative shape:
 
@@ -92,6 +92,10 @@ The exact fields can change during implementation, but the metadata should answe
 2. where the generated or checked-in AIR can be found,
 3. which build target provides workflow WASM modules,
 4. what lock identity protects imported defs.
+
+Sync-file AIR imports were a transitional mechanism and should be removed rather than carried
+through a backwards-compatibility phase. See `p3-world-config-and-air-discovery.md` for the optional
+`aos.world.json` and `aos.air.lock.json` direction.
 
 ### 4) Proc macros emit metadata; host-side generation writes AIR files
 
@@ -310,7 +314,7 @@ the logical AIR source contract.
 
 Teach `aos-authoring` to discover AOS-exporting packages through `cargo metadata`.
 
-Current consumer shape:
+Old explicit consumer shape to remove:
 
 ```json
 {
@@ -344,8 +348,10 @@ Discovery rules:
 5. compare that hash with a lock identity in strict mode,
 6. produce warnings locally and hard errors in CI, matching current import lock behavior.
 
-The existing explicit `aos.sync.json` imports should remain valid. They are useful for smoke tests,
-non-Cargo import roots, and migration debugging.
+Sync-file AIR imports should be removed from the normal authoring path. Non-Cargo import roots and
+fixture-specific import behavior should use explicit CLI/test-harness overrides instead. New
+Rust-authored examples should use Cargo dependency discovery plus the lock/config direction in
+`p3-world-config-and-air-discovery.md`.
 
 ## Phase 1E: Developer Commands And CI Hooks
 
@@ -375,7 +381,7 @@ Add focused tests before migrating large worlds:
 3. generate one workflow/module/manifest/routing set,
 4. merge generated AIR with hand-authored AIR,
 5. auto-discover one Cargo dependency export,
-6. preserve explicit `aos.sync.json` import behavior,
+6. support explicit CLI/test-harness import overrides for non-Cargo fixtures,
 7. reject duplicate generated/hand-authored definitions with different hashes.
 
 The first green target should be:

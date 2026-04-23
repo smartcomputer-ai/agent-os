@@ -13,8 +13,62 @@ use aos_kernel::{LoadedManifest, ManifestLoader, Store};
 use serde_json::Value;
 use walkdir::WalkDir;
 
+use crate::generated::{GENERATED_AIR_DIR, write_generated_air_from_cargo_export};
+
 pub const ZERO_HASH_SENTINEL: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
+#[derive(Debug, Clone)]
+pub enum AirSource {
+    /// AIR JSON already present on disk.
+    Directory {
+        path: PathBuf,
+        allow_manifest: bool,
+        include_root: bool,
+    },
+    /// A Rust-authored package that must run its export binary before loading AIR JSON.
+    GeneratedRustPackage {
+        package_root: PathBuf,
+        manifest_path: PathBuf,
+        package_name: Option<String>,
+        bin_name: Option<String>,
+        allow_manifest: bool,
+    },
+}
+
+impl AirSource {
+    pub fn local_directory(path: impl Into<PathBuf>) -> Self {
+        Self::Directory {
+            path: path.into(),
+            allow_manifest: true,
+            include_root: false,
+        }
+    }
+
+    pub fn imported_directory(path: impl Into<PathBuf>) -> Self {
+        Self::Directory {
+            path: path.into(),
+            allow_manifest: false,
+            include_root: true,
+        }
+    }
+
+    pub fn generated_rust_package(
+        package_root: impl Into<PathBuf>,
+        manifest_path: impl Into<PathBuf>,
+        package_name: Option<String>,
+        bin_name: Option<String>,
+        allow_manifest: bool,
+    ) -> Self {
+        Self::GeneratedRustPackage {
+            package_root: package_root.into(),
+            manifest_path: manifest_path.into(),
+            package_name,
+            bin_name,
+            allow_manifest,
+        }
+    }
+}
 
 pub struct LoadedAssets {
     pub loaded: LoadedManifest,
@@ -51,6 +105,28 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
     asset_root: &Path,
     import_roots: &[PathBuf],
 ) -> Result<Option<LoadedAssets>> {
+    let mut sources = Vec::with_capacity(import_roots.len() + 1);
+    sources.push(AirSource::local_directory(asset_root));
+    sources.extend(
+        import_roots
+            .iter()
+            .cloned()
+            .map(AirSource::imported_directory),
+    );
+    load_from_air_sources_with_defs(store, &sources)
+}
+
+pub fn load_from_air_sources<S: Store + 'static>(
+    store: Arc<S>,
+    sources: &[AirSource],
+) -> Result<Option<LoadedManifest>> {
+    Ok(load_from_air_sources_with_defs(store, sources)?.map(|assets| assets.loaded))
+}
+
+pub fn load_from_air_sources_with_defs<S: Store + 'static>(
+    store: Arc<S>,
+    sources: &[AirSource],
+) -> Result<Option<LoadedAssets>> {
     let mut manifest: Option<Manifest> = None;
     let mut schemas: Vec<DefSchema> = Vec::new();
     let mut modules: Vec<DefModule> = Vec::new();
@@ -58,19 +134,7 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
     let mut workflows: Vec<DefWorkflow> = Vec::new();
     let mut effects: Vec<DefEffect> = Vec::new();
 
-    let mut roots = Vec::with_capacity(import_roots.len() + 1);
-    roots.push(AssetRoot {
-        path: asset_root.to_path_buf(),
-        allow_manifest: true,
-        include_root: false,
-    });
-    roots.extend(import_roots.iter().cloned().map(|path| AssetRoot {
-        path,
-        allow_manifest: false,
-        include_root: true,
-    }));
-
-    for root in roots {
+    for root in prepare_air_sources(sources)? {
         for dir_path in asset_search_dirs(&root.path, root.include_root)? {
             for path in collect_json_files(&dir_path)? {
                 let nodes = parse_air_nodes(&path)
@@ -119,6 +183,48 @@ pub fn load_from_assets_with_imports_and_defs<S: Store + 'static>(
     let loaded = ManifestLoader::load_from_manifest(store.as_ref(), &manifest)
         .context("load manifest after authoring asset patching")?;
     Ok(Some(LoadedAssets { loaded, secrets }))
+}
+
+fn prepare_air_sources(sources: &[AirSource]) -> Result<Vec<AssetRoot>> {
+    sources
+        .iter()
+        .map(|source| match source {
+            AirSource::Directory {
+                path,
+                allow_manifest,
+                include_root,
+            } => Ok(AssetRoot {
+                path: path.clone(),
+                allow_manifest: *allow_manifest,
+                include_root: *include_root,
+            }),
+            AirSource::GeneratedRustPackage {
+                package_root,
+                manifest_path,
+                package_name,
+                bin_name,
+                allow_manifest,
+            } => {
+                write_generated_air_from_cargo_export(
+                    package_root,
+                    manifest_path,
+                    package_name.as_deref(),
+                    bin_name.as_deref(),
+                )
+                .with_context(|| {
+                    format!(
+                        "materialize generated AIR for package source {}",
+                        package_root.display()
+                    )
+                })?;
+                Ok(AssetRoot {
+                    path: package_root.join(GENERATED_AIR_DIR),
+                    allow_manifest: *allow_manifest,
+                    include_root: true,
+                })
+            }
+        })
+        .collect()
 }
 
 fn write_nodes<S: Store + ?Sized>(
