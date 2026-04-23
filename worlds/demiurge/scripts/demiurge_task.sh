@@ -136,7 +136,7 @@ cleanup() {
 trap cleanup EXIT
 
 PROFILE_DOC="$("${AOS_BIN}" --json --quiet profile show 2>/dev/null || true)"
-if ! python3 - <<'PY' "${PROFILE_DOC}"
+if ! python3 - "${PROFILE_DOC}" <<'PY'
 import json
 import sys
 
@@ -159,10 +159,10 @@ then
   exit 1
 fi
 
-TASK_EVENT="$(python3 - <<'PY' \
+TASK_EVENT="$(python3 - \
   "${TASK_ID}" "${WORKDIR_VALUE}" "${TASK_TEXT}" \
   "${PROVIDER}" "${MODEL}" "${MAX_TOKENS}" "${TOOL_PROFILE}" \
-  "${ALLOWED_TOOLS_CSV}" "${TOOL_ENABLE_CSV}" "${TOOL_DISABLE_CSV}" "${TOOL_FORCE_CSV}"
+  "${ALLOWED_TOOLS_CSV}" "${TOOL_ENABLE_CSV}" "${TOOL_DISABLE_CSV}" "${TOOL_FORCE_CSV}" <<'PY'
 import json
 import sys
 
@@ -210,7 +210,7 @@ echo "submitting task_id=${TASK_ID}"
   --schema "demiurge/TaskSubmitted@1" \
   --value-json "${TASK_EVENT}" >"${RESULT_FILE}"
 
-python3 - <<'PY' "${RESULT_FILE}" "${AOS_BIN}" "${TASK_ID}" "${AOS_TIMEOUT_MS}" "${POLL_INTERVAL_SEC}"
+python3 - "${RESULT_FILE}" "${AOS_BIN}" "${TASK_ID}" "${AOS_TIMEOUT_MS}" "${POLL_INTERVAL_SEC}" <<'PY'
 import base64
 import json
 import subprocess

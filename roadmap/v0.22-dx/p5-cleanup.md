@@ -1,13 +1,14 @@
+# P5: Cleanup
 
-## workflow abstraction
-we need some sort of abstraction to run workflows that are implemented differently: builtin, wasm, python (future)
+P4 now owns the builtin workflow runtime design:
 
-We do not have any builtin workflows right now, but we want to move aos-sys to building workflows.
+- `roadmap/v0.22-dx/p4-builtin-workflow-runtime.md`
 
-## aos-sys
-We should simply move the workflows defined in aos-sys to builtin workflwos (which are not supported currently, but should be).
+P5 should stay limited to residual cleanup after P4 lands.
 
-These can likely be directly implemented in the kernel for now.
+## Follow-Up Cleanup
 
-Then remove aos-sys crate.
-
+1. Remove any stale docs that still mention building system workflow WASM.
+2. Remove any leftover `aos-sys` references if the crate removal is not completed in P4.
+3. Delete obsolete `.aos/cache/sys-modules` test fixtures or migration notes if they remain.
+4. Re-check examples and smoke fixtures for old `sys/*_wasm@1` module names.

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
     AirNode, DefEffect, DefModule, DefSchema, DefSecret, DefWorkflow, HashRef, Manifest, Name,
-    NamedRef, builtins,
+    NamedRef, TypeExpr, builtins,
 };
 use aos_cbor::Hash;
 use aos_kernel::{LoadedManifest, ManifestLoader, Store};
@@ -169,6 +169,7 @@ pub fn load_from_air_sources_with_defs<S: Store + 'static>(
         None => return Ok(None),
     };
 
+    expand_manifest_schema_closure(&mut manifest, &schemas, &workflows, &effects)?;
     secrets.sort_by(|a, b| a.name.cmp(&b.name));
     let hashes = write_nodes(
         store.as_ref(),
@@ -341,6 +342,138 @@ fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result
     patch_named_refs("workflow", &mut manifest.workflows, &hashes.workflows)?;
     patch_named_refs("effect", &mut manifest.effects, &hashes.effects)?;
     patch_named_refs("secret", &mut manifest.secrets, &hashes.secrets)?;
+    Ok(())
+}
+
+fn expand_manifest_schema_closure(
+    manifest: &mut Manifest,
+    schemas: &[DefSchema],
+    workflows: &[DefWorkflow],
+    effects: &[DefEffect],
+) -> Result<()> {
+    let schema_defs: HashMap<&str, &TypeExpr> = schemas
+        .iter()
+        .map(|schema| (schema.name.as_str(), &schema.ty))
+        .collect();
+    let workflow_defs: HashMap<&str, &DefWorkflow> = workflows
+        .iter()
+        .map(|workflow| (workflow.name.as_str(), workflow))
+        .collect();
+    let effect_defs: HashMap<&str, &DefEffect> = effects
+        .iter()
+        .map(|effect| (effect.name.as_str(), effect))
+        .collect();
+
+    let mut active = manifest
+        .schemas
+        .iter()
+        .map(|reference| reference.name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut queue = Vec::new();
+
+    for reference in &manifest.schemas {
+        queue.push(reference.name.clone());
+    }
+    let workflow_names = manifest
+        .workflows
+        .iter()
+        .map(|reference| reference.name.clone())
+        .collect::<Vec<_>>();
+    for workflow_name in workflow_names {
+        let Some(workflow) = workflow_defs.get(workflow_name.as_str()) else {
+            continue;
+        };
+        require_manifest_schema(manifest, &mut active, &mut queue, workflow.state.as_str())?;
+        require_manifest_schema(manifest, &mut active, &mut queue, workflow.event.as_str())?;
+        if let Some(schema) = &workflow.context {
+            require_manifest_schema(manifest, &mut active, &mut queue, schema.as_str())?;
+        }
+        if let Some(schema) = &workflow.annotations {
+            require_manifest_schema(manifest, &mut active, &mut queue, schema.as_str())?;
+        }
+        if let Some(schema) = &workflow.key_schema {
+            require_manifest_schema(manifest, &mut active, &mut queue, schema.as_str())?;
+        }
+    }
+    let effect_names = manifest
+        .effects
+        .iter()
+        .map(|reference| reference.name.clone())
+        .collect::<Vec<_>>();
+    for effect_name in effect_names {
+        let Some(effect) = effect_defs.get(effect_name.as_str()) else {
+            continue;
+        };
+        require_manifest_schema(manifest, &mut active, &mut queue, effect.params.as_str())?;
+        require_manifest_schema(manifest, &mut active, &mut queue, effect.receipt.as_str())?;
+    }
+    if let Some(routing) = manifest.routing.clone() {
+        for route in routing.subscriptions {
+            require_manifest_schema(manifest, &mut active, &mut queue, route.event.as_str())?;
+        }
+    }
+
+    let mut visited = BTreeSet::new();
+    while let Some(schema_name) = queue.pop() {
+        if builtins::find_builtin_schema(schema_name.as_str()).is_some() {
+            continue;
+        }
+        if !visited.insert(schema_name.clone()) {
+            continue;
+        }
+        let Some(schema) = schema_defs.get(schema_name.as_str()) else {
+            bail!("manifest references unknown schema '{}'", schema_name);
+        };
+        collect_type_schema_refs(schema, &mut |name| {
+            require_manifest_schema(manifest, &mut active, &mut queue, name)
+        })?;
+    }
+
+    Ok(())
+}
+
+fn require_manifest_schema(
+    manifest: &mut Manifest,
+    active: &mut BTreeSet<Name>,
+    queue: &mut Vec<Name>,
+    schema_name: &str,
+) -> Result<()> {
+    if builtins::find_builtin_schema(schema_name).is_some() {
+        return Ok(());
+    }
+    let schema_name = schema_name.to_string();
+    if active.insert(schema_name.clone()) {
+        manifest.schemas.push(NamedRef {
+            name: schema_name.clone(),
+            hash: HashRef::new(ZERO_HASH_SENTINEL)?,
+        });
+        queue.push(schema_name);
+    }
+    Ok(())
+}
+
+fn collect_type_schema_refs(
+    ty: &TypeExpr,
+    require: &mut impl FnMut(&str) -> Result<()>,
+) -> Result<()> {
+    match ty {
+        TypeExpr::Primitive(_) => {}
+        TypeExpr::Record(record) => {
+            for field in record.record.values() {
+                collect_type_schema_refs(field, require)?;
+            }
+        }
+        TypeExpr::Variant(variant) => {
+            for arm in variant.variant.values() {
+                collect_type_schema_refs(arm, require)?;
+            }
+        }
+        TypeExpr::List(list) => collect_type_schema_refs(&list.list, require)?,
+        TypeExpr::Set(set) => collect_type_schema_refs(&set.set, require)?,
+        TypeExpr::Map(map) => collect_type_schema_refs(&map.map.value, require)?,
+        TypeExpr::Option(option) => collect_type_schema_refs(&option.option, require)?,
+        TypeExpr::Ref(reference) => require(reference.reference.as_str())?,
+    }
     Ok(())
 }
 
@@ -609,6 +742,43 @@ mod tests {
         .expect("identical defs should be accepted");
 
         assert!(loaded.is_some());
+    }
+
+    #[test]
+    fn load_from_air_sources_expands_manifest_schema_closure() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let authored = temp.path().join("air");
+        fs::create_dir_all(&authored).expect("mkdir authored");
+        fs::write(
+            authored.join("schemas.air.json"),
+            r#"[
+              {"$kind":"defschema","name":"demo/Outer@1","type":{"record":{"inner":{"ref":"demo/Inner@1"}}}},
+              {"$kind":"defschema","name":"demo/Inner@1","type":{"record":{"name":{"text":{}}}}}
+            ]"#,
+        )
+        .expect("write schemas");
+        fs::write(
+            authored.join("manifest.air.json"),
+            r#"{"$kind":"manifest","air_version":"2","schemas":[{"name":"demo/Outer@1"}],"modules":[],"workflows":[],"effects":[],"secrets":[]}"#,
+        )
+        .expect("write manifest");
+
+        let loaded = load_from_air_sources_with_defs(
+            Arc::new(MemStore::new()),
+            &[AirSource::local_directory(&authored)],
+        )
+        .expect("load manifest")
+        .expect("loaded assets");
+
+        let schema_names = loaded
+            .loaded
+            .manifest
+            .schemas
+            .iter()
+            .map(|reference| reference.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(schema_names.contains(&"demo/Outer@1"));
+        assert!(schema_names.contains(&"demo/Inner@1"));
     }
 
     #[test]
