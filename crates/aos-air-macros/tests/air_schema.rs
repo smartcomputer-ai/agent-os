@@ -1,5 +1,5 @@
 use aos_air_types::{AirNode, ModuleRuntime, TypeExpr, TypePrimitive};
-use aos_wasm_sdk::{AirSchema, AirSchemaExport, AirWorkflowExport};
+use aos_wasm_sdk::{AirSchema, AirSchemaExport, AirType, AirWorkflowExport};
 
 aos_wasm_sdk::aos_air_exports! {
     const TEST_SCHEMA_AIR_NODES_JSON = [TaskSubmitted];
@@ -51,8 +51,7 @@ struct RichRecord {
     pending: aos_wasm_sdk::PendingEffectSet<String>,
 }
 
-#[derive(AirSchema)]
-#[aos(schema = "demo/InlineCommandKind@1")]
+#[derive(AirType)]
 #[allow(dead_code)]
 enum InlineCommandKind {
     Steer { text: String },

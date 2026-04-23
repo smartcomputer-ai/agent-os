@@ -1,5 +1,5 @@
 use alloc::string::String;
-use aos_wasm_sdk::AirSchema;
+use aos_wasm_sdk::{AirSchema, AirType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
@@ -12,8 +12,7 @@ pub struct HostCommand {
     pub command: HostCommandKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
-#[aos(schema = "aos.agent/HostCommandKind@1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirType)]
 #[serde(tag = "$tag", content = "$value")]
 pub enum HostCommandKind {
     Steer {

@@ -13,6 +13,14 @@ pub fn derive_air_schema(input: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro_derive(AirType, attributes(aos))]
+pub fn derive_air_type(input: TokenStream) -> TokenStream {
+    match derive_air_type_impl(parse_macro_input!(input as DeriveInput)) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 #[proc_macro_attribute]
 pub fn aos_workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr with Punctuated::<Meta, Token![,]>::parse_terminated);
@@ -57,52 +65,7 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
     let schema_name = attrs
         .schema
         .ok_or_else(|| syn::Error::new(input.ident.span(), "missing #[aos(schema = \"...\")]"))?;
-    let generated_type = match &input.data {
-        Data::Struct(data) => {
-            if let Some(override_value) = attrs.override_value {
-                let Some(ty_json) = type_override_json(override_value, input.ident.span())? else {
-                    return Err(syn::Error::new(
-                        input.ident.span(),
-                        "expected AIR type override",
-                    ));
-                };
-                ty_json
-            } else {
-                match &data.fields {
-                    Fields::Named(fields) => {
-                        let field_entries = named_field_entries(&fields.named)?;
-                        generated_record_type(&field_entries, input.ident.span())
-                    }
-                    Fields::Unit => {
-                        generated_static_json(primitive_json("unit"), input.ident.span())
-                    }
-                    Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-                        let field = fields.unnamed.first().expect("one unnamed field");
-                        type_json_with_attrs(&field.ty, parse_field_attrs(&field.attrs)?)?
-                    }
-                    other => {
-                        return Err(syn::Error::new(
-                            other.span(),
-                            "AirSchema supports named structs, unit structs, or one-field tuple structs",
-                        ));
-                    }
-                }
-            }
-        }
-        Data::Enum(data) => {
-            let mut variant_entries = Vec::new();
-            for variant in &data.variants {
-                variant_entries.push(variant_json_entry(variant)?);
-            }
-            generated_variant_type(&variant_entries, input.ident.span())
-        }
-        _ => {
-            return Err(syn::Error::new(
-                input.ident.span(),
-                "AirSchema only supports structs and enums in this phase",
-            ));
-        }
-    };
+    let generated_type = generated_air_type(&input, attrs.override_value)?;
     let generated_schema =
         generated_defschema_type(&schema_name, generated_type.clone(), input.ident.span());
     let ident = input.ident;
@@ -115,6 +78,12 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
     let type_expr = generated_type.expr;
 
     Ok(quote! {
+        impl ::aos_wasm_sdk::AirType for #ident {
+            fn air_type_json() -> ::aos_wasm_sdk::__aos_export::String {
+                #type_expr
+            }
+        }
+
         impl ::aos_wasm_sdk::AirSchemaRef for #ident {
             const AIR_SCHEMA_NAME: &'static str = #schema_name_lit;
         }
@@ -125,12 +94,74 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
             fn air_schema_json() -> ::aos_wasm_sdk::__aos_export::String {
                 #schema_expr
             }
+        }
+    })
+}
 
-            fn air_schema_type_json() -> ::aos_wasm_sdk::__aos_export::String {
+fn derive_air_type_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let attrs = parse_type_attrs(&input.attrs, "AirType")?;
+    if attrs.schema.is_some() {
+        return Err(syn::Error::new(
+            input.ident.span(),
+            "AirType emits anonymous AIR types; use AirSchema for named schemas",
+        ));
+    }
+    let generated_type = generated_air_type(&input, attrs.override_value)?;
+    let ident = input.ident;
+    let type_expr = generated_type.expr;
+
+    Ok(quote! {
+        impl ::aos_wasm_sdk::AirType for #ident {
+            fn air_type_json() -> ::aos_wasm_sdk::__aos_export::String {
                 #type_expr
             }
         }
     })
+}
+
+fn generated_air_type(
+    input: &DeriveInput,
+    override_value: Option<FieldOverride>,
+) -> syn::Result<GeneratedJson> {
+    match &input.data {
+        Data::Struct(data) => {
+            if let Some(override_value) = override_value {
+                type_override_json(override_value, input.ident.span())?.ok_or_else(|| {
+                    syn::Error::new(input.ident.span(), "expected AIR type override")
+                })
+            } else {
+                match &data.fields {
+                    Fields::Named(fields) => {
+                        let field_entries = named_field_entries(&fields.named)?;
+                        Ok(generated_record_type(&field_entries, input.ident.span()))
+                    }
+                    Fields::Unit => Ok(generated_static_json(
+                        primitive_json("unit"),
+                        input.ident.span(),
+                    )),
+                    Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                        let field = fields.unnamed.first().expect("one unnamed field");
+                        type_json_with_attrs(&field.ty, parse_field_attrs(&field.attrs)?)
+                    }
+                    other => Err(syn::Error::new(
+                        other.span(),
+                        "AirType supports named structs, unit structs, or one-field tuple structs",
+                    )),
+                }
+            }
+        }
+        Data::Enum(data) => {
+            let mut variant_entries = Vec::new();
+            for variant in &data.variants {
+                variant_entries.push(variant_json_entry(variant)?);
+            }
+            Ok(generated_variant_type(&variant_entries, input.ident.span()))
+        }
+        _ => Err(syn::Error::new(
+            input.ident.span(),
+            "AirType only supports structs and enums in this phase",
+        )),
+    }
 }
 
 #[derive(Default)]
@@ -717,7 +748,7 @@ fn generated_inline_type_for_type(ty: &Type) -> GeneratedJson {
     GeneratedJson {
         static_json: None,
         expr: quote! {
-            <#ty_tokens as ::aos_wasm_sdk::AirSchemaExport>::air_schema_type_json()
+            <#ty_tokens as ::aos_wasm_sdk::AirType>::air_type_json()
         },
     }
 }

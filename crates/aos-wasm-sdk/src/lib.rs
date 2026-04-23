@@ -12,8 +12,13 @@ pub use workflow_effects::*;
 pub use workflows::*;
 
 #[cfg(feature = "air-macros")]
-pub use aos_air_macros::{AirSchema, aos_workflow as air_workflow};
+pub use aos_air_macros::{AirSchema, AirType, aos_workflow as air_workflow};
 pub use serde_cbor::Value;
+
+/// Metadata emitted by Rust-authored anonymous AIR type derives.
+pub trait AirType {
+    fn air_type_json() -> String;
+}
 
 /// Metadata emitted by Rust-authored AIR schema derives.
 ///
@@ -23,15 +28,11 @@ pub trait AirSchemaRef {
     const AIR_SCHEMA_NAME: &'static str;
 }
 
-pub trait AirSchemaExport: AirSchemaRef {
+pub trait AirSchemaExport: AirSchemaRef + AirType {
     const AIR_SCHEMA_JSON: &'static str;
 
     fn air_schema_json() -> String {
         String::from(Self::AIR_SCHEMA_JSON)
-    }
-
-    fn air_schema_type_json() -> String {
-        String::new()
     }
 }
 
@@ -535,8 +536,13 @@ macro_rules! aos_air_manifest {
 /// `aos_authoring::write_generated_air_nodes`.
 ///
 /// ```
-/// # use aos_wasm_sdk::{AirSchemaExport, AirSchemaRef};
+/// # use aos_wasm_sdk::{AirSchemaExport, AirSchemaRef, AirType};
 /// # struct TaskSubmitted;
+/// # impl AirType for TaskSubmitted {
+/// #     fn air_type_json() -> String {
+/// #         String::from(r#"{"record":{}}"#)
+/// #     }
+/// # }
 /// # impl AirSchemaRef for TaskSubmitted {
 /// #     const AIR_SCHEMA_NAME: &'static str = "demo/TaskSubmitted@1";
 /// # }
@@ -731,6 +737,12 @@ mod tests {
     use super::{AirManifestExport, AirSecretExport, air_exports_json};
 
     struct DemoTask;
+
+    impl super::AirType for DemoTask {
+        fn air_type_json() -> String {
+            String::from(r#"{"record":{}}"#)
+        }
+    }
 
     impl super::AirSchemaRef for DemoTask {
         const AIR_SCHEMA_NAME: &'static str = "demo/Task@1";
