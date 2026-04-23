@@ -291,7 +291,6 @@ members = [
   "crates/aos-cli",
   "crates/aos-wasm-sdk",
   "crates/aos-wasm-build",
-  "crates/aos-sys",
   "crates/aos-smoke",
   "crates/aos-agent-eval",
   "crates/fabric-protocol",

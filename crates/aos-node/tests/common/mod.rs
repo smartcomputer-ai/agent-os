@@ -576,7 +576,7 @@ fn prepare_workspace_manifest() -> PreparedManifest {
         builtin_schema_ref("sys/WorkspaceDiffChange@1"),
         builtin_schema_ref("sys/WorkspaceDiffReceipt@1"),
     ]);
-    let mut module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
+    let module_refs = store_defs(&mut blobs, modules.into_iter().map(AirNode::Defmodule));
     let workflow_refs = store_defs(&mut blobs, workflows.into_iter().map(AirNode::Defworkflow));
 
     let manifest = Manifest {
