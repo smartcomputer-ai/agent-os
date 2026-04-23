@@ -1,9 +1,3 @@
-use alloc::string::String;
-use alloc::vec::Vec;
-use aos_wasm_sdk::{
-    AirManifestParts, AirRoute, AirSchemaExport, AirWorkflowExport, air_manifest_json,
-};
-
 use crate::{
     ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommand, HostSessionStatus,
     PendingBlobGet, PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, PendingFollowUpTurn,
@@ -15,115 +9,113 @@ use crate::{
     ToolParallelismHint, ToolRuntimeContext, ToolSpec,
 };
 
-const MANIFEST_SCHEMAS: &[&str] = &[
-    "aos.agent/SessionId@1",
-    "aos.agent/RunId@1",
-    "aos.agent/ToolBatchId@1",
-    "aos.agent/ToolCallStatus@1",
-    "aos.agent/ToolExecutor@1",
-    "aos.agent/ToolAvailabilityRule@1",
-    "aos.agent/ToolParallelismHint@1",
-    "aos.agent/ToolSpec@1",
-    "aos.agent/ToolMapper@1",
-    "aos.agent/HostSessionStatus@1",
-    "aos.agent/ToolRuntimeContext@1",
-    "aos.agent/EffectiveTool@1",
-    "aos.agent/EffectiveToolSet@1",
-    "aos.agent/ToolCallObserved@1",
-    "aos.agent/ToolCallLlmResult@1",
-    "aos.agent/PlannedToolCall@1",
-    "aos.agent/ToolExecutionPlan@1",
-    "aos.agent/ToolBatchPlan@1",
-    "aos.agent/ActiveToolBatch@1",
-    "aos.agent/ToolOverrideScope@1",
-    "aos.agent/ReasoningEffort@1",
-    "aos.agent/SessionConfig@1",
-    "aos.agent/RunConfig@1",
-    "aos.agent/SessionLifecycle@1",
-    "aos.agent/HostCommand@1",
-    "aos.agent/SessionIngressKind@1",
-    "aos.agent/SessionIngress@1",
-    "aos.agent/SessionLifecycleChanged@1",
-    "aos.agent/PendingBlobGetKind@1",
-    "aos.agent/PendingBlobGet@1",
-    "aos.agent/PendingBlobPutKind@1",
-    "aos.agent/PendingBlobPut@1",
-    "aos.agent/PendingFollowUpTurn@1",
-    "aos.agent/SharedPendingBlobGet@1",
-    "aos.agent/SharedPendingBlobPut@1",
-    "aos.agent/SessionState@1",
-    "aos.agent/SessionNoop@1",
-    "aos.agent/SessionWorkflowEvent@1",
-];
-
-const MANIFEST_MODULES: &[&str] = &["aos.agent/SessionWorkflow_wasm@1"];
-const MANIFEST_WORKFLOWS: &[&str] = &["aos.agent/SessionWorkflow@1"];
-const MANIFEST_ROUTES: &[AirRoute] = &[
-    AirRoute {
-        event: "aos.agent/SessionIngress@1",
-        workflow: "aos.agent/SessionWorkflow@1",
-        key_field: "session_id",
-    },
-    AirRoute {
-        event: "sys/WorkspaceCommit@1",
-        workflow: "sys/Workspace@1",
-        key_field: "workspace",
-    },
-];
-
-pub fn aos_air_nodes() -> Vec<String> {
-    let mut nodes = Vec::new();
-
-    nodes.push(SessionId::air_schema_json());
-    nodes.push(RunId::air_schema_json());
-    nodes.push(ToolBatchId::air_schema_json());
-    nodes.push(ToolCallStatus::air_schema_json());
-    nodes.push(ToolMapper::air_schema_json());
-    nodes.push(ToolExecutor::air_schema_json());
-    nodes.push(ToolAvailabilityRule::air_schema_json());
-    nodes.push(ToolParallelismHint::air_schema_json());
-    nodes.push(ToolSpec::air_schema_json());
-    nodes.push(HostSessionStatus::air_schema_json());
-    nodes.push(ToolRuntimeContext::air_schema_json());
-    nodes.push(EffectiveTool::air_schema_json());
-    nodes.push(EffectiveToolSet::air_schema_json());
-    nodes.push(ToolCallObserved::air_schema_json());
-    nodes.push(ToolCallLlmResult::air_schema_json());
-    nodes.push(PlannedToolCall::air_schema_json());
-    nodes.push(ToolExecutionPlan::air_schema_json());
-    nodes.push(ToolBatchPlan::air_schema_json());
-    nodes.push(ActiveToolBatch::air_schema_json());
-    nodes.push(ToolOverrideScope::air_schema_json());
-    nodes.push(ReasoningEffort::air_schema_json());
-    nodes.push(SessionConfig::air_schema_json());
-    nodes.push(RunConfig::air_schema_json());
-    nodes.push(SessionLifecycle::air_schema_json());
-    nodes.push(HostCommand::air_schema_json());
-    nodes.push(SessionIngressKind::air_schema_json());
-    nodes.push(SessionIngress::air_schema_json());
-    nodes.push(SessionLifecycleChanged::air_schema_json());
-    nodes.push(PendingBlobGetKind::air_schema_json());
-    nodes.push(PendingBlobGet::air_schema_json());
-    nodes.push(PendingBlobPutKind::air_schema_json());
-    nodes.push(PendingBlobPut::air_schema_json());
-    nodes.push(PendingFollowUpTurn::air_schema_json());
-    nodes.push(SharedPendingBlobGet::air_schema_json());
-    nodes.push(SharedPendingBlobPut::air_schema_json());
-    nodes.push(SessionState::air_schema_json());
-    nodes.push(SessionWorkflowEvent::air_schema_json());
-    nodes.push(SessionNoop::air_schema_json());
-
-    nodes.push(<SessionWorkflow as AirWorkflowExport>::air_module_json());
-    nodes.push(<SessionWorkflow as AirWorkflowExport>::air_workflow_json());
-    nodes.push(air_manifest_json(AirManifestParts {
+aos_wasm_sdk::aos_air_world! {
+    pub fn aos_air_nodes() {
         air_version: "2",
-        schemas: MANIFEST_SCHEMAS,
-        modules: MANIFEST_MODULES,
-        workflows: MANIFEST_WORKFLOWS,
-        secrets: &[],
-        effects: &[],
-        routes: MANIFEST_ROUTES,
-    }));
+        schemas: [
+            SessionId,
+            RunId,
+            ToolBatchId,
+            ToolCallStatus,
+            ToolExecutor,
+            ToolAvailabilityRule,
+            ToolParallelismHint,
+            ToolSpec,
+            ToolMapper,
+            HostSessionStatus,
+            ToolRuntimeContext,
+            EffectiveTool,
+            EffectiveToolSet,
+            ToolCallObserved,
+            ToolCallLlmResult,
+            PlannedToolCall,
+            ToolExecutionPlan,
+            ToolBatchPlan,
+            ActiveToolBatch,
+            ToolOverrideScope,
+            ReasoningEffort,
+            SessionConfig,
+            RunConfig,
+            SessionLifecycle,
+            HostCommand,
+            SessionIngressKind,
+            SessionIngress,
+            SessionLifecycleChanged,
+            PendingBlobGetKind,
+            PendingBlobGet,
+            PendingBlobPutKind,
+            PendingBlobPut,
+            PendingFollowUpTurn,
+            SharedPendingBlobGet,
+            SharedPendingBlobPut,
+            SessionState,
+            SessionNoop,
+            SessionWorkflowEvent,
+        ],
+        workflows: [SessionWorkflow],
+        routing: [
+            {
+                event_schema: SessionIngress,
+                workflow: SessionWorkflow,
+                key_field: "session_id",
+            },
+            {
+                event: "sys/WorkspaceCommit@1",
+                workflow_name: "sys/Workspace@1",
+                key_field: "workspace",
+            },
+        ],
+    }
+}
 
-    nodes
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::string::String;
+    use std::vec::Vec;
+
+    use super::aos_air_nodes;
+
+    #[test]
+    fn generated_air_matches_checked_in_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let nodes = aos_air_nodes();
+        let fragments: Vec<&str> = nodes.iter().map(String::as_str).collect();
+        aos_authoring::write_generated_air_nodes(temp.path(), &fragments)
+            .expect("write generated AIR");
+
+        let expected_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("air/generated");
+        let actual_dir = temp.path().join("air/generated");
+        assert_eq!(
+            generated_file_names(&actual_dir),
+            generated_file_names(&expected_dir)
+        );
+
+        for name in generated_file_names(&expected_dir) {
+            let actual = fs::read(actual_dir.join(&name)).expect("read generated file");
+            let expected = fs::read(expected_dir.join(&name)).expect("read checked-in file");
+            assert_eq!(
+                String::from_utf8(actual).expect("generated file utf8"),
+                String::from_utf8(expected).expect("checked-in file utf8"),
+                "checked-in generated AIR is stale: {}",
+                name.display()
+            );
+        }
+    }
+
+    fn generated_file_names(dir: &Path) -> Vec<PathBuf> {
+        let mut names = fs::read_dir(dir)
+            .expect("read generated dir")
+            .map(|entry| entry.expect("read entry").path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .map(|path| {
+                path.file_name()
+                    .map(PathBuf::from)
+                    .expect("generated file name")
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
 }

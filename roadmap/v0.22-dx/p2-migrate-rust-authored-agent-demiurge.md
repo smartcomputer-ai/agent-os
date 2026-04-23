@@ -1,6 +1,24 @@
 # P2: Migrate `aos-agent` And Demiurge To Rust-Authored AIR
 
-Status: planned.
+Status: mostly implemented.
+
+Completed so far:
+
+1. `aos-agent` contract schemas derive Rust-authored AIR.
+2. `SessionWorkflow` metadata is generated from Rust with `#[aos_wasm_sdk::air_workflow(...)]`.
+3. `aos-agent` exports generated AIR through Cargo package metadata and `aos-air-export`.
+4. `aos-agent` checked-in AIR is generated-only under `air/generated/`; stale generated AIR fails
+   its crate test.
+5. Demiurge local schemas, workflow metadata, secrets, manifest refs, and routing are Rust-authored.
+6. Demiurge imports `aos-agent` through Cargo package discovery and no longer has manual
+   `aos-agent` AIR import wiring.
+7. Most smoke fixtures remain hand-authored.
+
+Still open:
+
+1. broader replay/smoke validation before declaring P2 closed,
+2. practical authoring guide coverage beyond the current top-level and package notes,
+3. any final README updates for Demiurge if that example becomes the primary public walkthrough.
 
 ## Goal
 
@@ -81,6 +99,8 @@ placeholder module patching, manifest ref rewriting, and low-level AIR diagnosti
 
 ## Phase 2A: Prepare `aos-agent` Contract Types
 
+Status: implemented.
+
 Annotate existing `aos-agent` contract types with `#[derive(AirSchema)]` and focused `#[aos(...)]`
 metadata so generated AIR can match the current checked-in AIR.
 
@@ -113,6 +133,8 @@ there is an intentional AIR change reviewed as part of the migration.
 
 ## Phase 2B: Generate `aos-agent` Workflow And Package Exports
 
+Status: implemented.
+
 Move `SessionWorkflow` AIR metadata into Rust.
 
 Rust-authored source should define:
@@ -135,13 +157,15 @@ exports.
 Recommended validation:
 
 ```text
-aos air generate --package aos-agent
-aos air check --package aos-agent
+aos air generate --world-root crates/aos-agent --manifest-path crates/aos-agent/Cargo.toml --bin aos-air-export
+aos air check --world-root crates/aos-agent --manifest-path crates/aos-agent/Cargo.toml --bin aos-air-export
 cargo test -p aos-agent
 cargo test -p aos-authoring
 ```
 
 ## Phase 2C: Switch `aos-agent` AIR Files To Generated Ownership
+
+Status: implemented using the generated checked-in package model.
 
 Choose one of two acceptable storage models.
 
@@ -152,24 +176,23 @@ Rust source is authoritative.
 Generated AIR is not checked in, except possibly golden test output.
 ```
 
-Pragmatic migration model:
+Implemented package model:
 
 ```text
-Generated AIR is checked in under crates/aos-agent/air/.
+Generated AIR is checked in under crates/aos-agent/air/generated/.
 CI fails if generated output differs.
-Files include a short generated-file header where the parser allows it.
+Rust contracts plus aos_wasm_sdk::aos_air_world! are authoritative.
 ```
-
-The pragmatic model is useful if downstream import tooling still expects a stable directory during
-the transition.
 
 Either way:
 
 1. consumers must be able to import `aos-agent` through package metadata,
-2. direct explicit import of `crates/aos-agent/air` should still work while smoke fixtures migrate,
+2. direct explicit import of `crates/aos-agent/air` should load generated defs,
 3. generated definitions must pass the same import hash logic used today.
 
 ## Phase 2D: Migrate Demiurge Local AIR To Rust
+
+Status: implemented.
 
 Move Demiurge-local definitions from `worlds/demiurge/air` into Rust derives and annotations.
 
@@ -199,6 +222,8 @@ Required checks:
 
 ## Phase 2E: Remove Demiurge's Manual `aos-agent` AIR Import
 
+Status: implemented.
+
 After `aos-agent` package discovery works, remove Demiurge's manual AIR import wiring.
 
 Current responsibilities that should remain:
@@ -220,6 +245,8 @@ build/check output; a dedicated lock file is deferred.
 
 ## Phase 2F: Keep Smoke Fixtures Mostly Hand-Authored
 
+Status: implemented so far; keep this constraint active for future fixture work.
+
 Do not bulk migrate `crates/aos-smoke/fixtures`.
 
 Keep most fixtures as authored AIR JSON so they continue to cover:
@@ -238,6 +265,8 @@ Add a small Rust-authored fixture only where it gives new coverage:
 
 ## Phase 2G: Documentation And Examples
 
+Status: partially implemented.
+
 Update practical docs once migrations land.
 
 Required docs:
@@ -253,6 +282,8 @@ Required docs:
    - how Cargo package discovery works.
 
 ## Testing
+
+Status: partially implemented.
 
 Required tests:
 
@@ -278,6 +309,8 @@ Use narrower targets while landing sub-phases, but P2 should close with the broa
 smoke surface green.
 
 ## Exit Criteria
+
+Status: mostly met, pending broader smoke/replay validation and final docs.
 
 P2 is complete when:
 

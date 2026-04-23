@@ -1,6 +1,23 @@
 # P1: Rust-Authored AIR And Package Discovery
 
-Status: planned.
+Status: partially implemented.
+
+Completed so far:
+
+1. `crates/aos-air-macros` provides `AirSchema`, `AirType`, and `#[aos_workflow(...)]`.
+2. `aos-wasm-sdk` re-exports the macro surface and provides `aos_air_world!` /
+   `aos_air_exports!` collection helpers.
+3. `aos air generate` materializes Rust-authored AIR under `air/generated/`.
+4. `aos air check` compares checked-in `air/generated/` against freshly generated output.
+5. `aos-authoring` resolves AIR from local directories, local Rust export binaries, and direct
+   Cargo dependencies with `[package.metadata.aos]`.
+6. Sync-file AIR imports are removed from the normal authoring path.
+
+Still open:
+
+1. broader diagnostics that point back to Rust annotations,
+2. additional generated/hand-authored conflict tests,
+3. broader fixture and smoke coverage before calling P1 fully closed.
 
 ## Goal
 
@@ -135,6 +152,8 @@ when both are present.
 
 ## Phase 1A: Rust Schema Generation
 
+Status: implemented for the current Rust-authored subset.
+
 Add a Rust AIR schema generation surface using procedural macros.
 
 Rust requires derive and attribute procedural macros to live in a `proc-macro` crate, so P1 should
@@ -240,6 +259,9 @@ Required checks:
 
 ## Phase 1B: Rust Workflow Metadata
 
+Status: implemented for module/workflow metadata and emitted effects; route/manifest assembly is
+owned by `aos_wasm_sdk::aos_air_world!`.
+
 Extend the workflow macro surface so the same Rust declaration that exports the WASM ABI also emits
 AIR workflow metadata.
 
@@ -279,6 +301,8 @@ manifest patching and generated file materialization in `aos-authoring`.
 
 ## Phase 1C: Generated AIR Materialization And Loader Integration
 
+Status: implemented.
+
 Add an `AirSource` layer inside `aos-authoring` so callers no longer assume that all local defs live
 under one `air/` directory.
 
@@ -311,6 +335,8 @@ If later versions need cache-only generation, they can add a `target/aos/air/` m
 the logical AIR source contract.
 
 ## Phase 1D: Cargo Package Discovery
+
+Status: implemented for direct Cargo dependencies that opt in with `[package.metadata.aos]`.
 
 Teach `aos-authoring` to discover AOS-exporting packages through `cargo metadata`.
 
@@ -354,14 +380,15 @@ Rust-authored examples should use Cargo dependency discovery plus the config dir
 
 ## Phase 1E: Developer Commands And CI Hooks
 
+Status: implemented for deterministic generate/check; source-span diagnostics remain future polish.
+
 Add CLI surfaces that make Rust-generated AIR visible.
 
 Recommended commands:
 
 ```text
-aos air generate --manifest-path <Cargo.toml> --package <pkg>
-aos air print --world <world-root>
-aos air check --world <world-root>
+aos air generate --world-root <world-root> --manifest-path <Cargo.toml> --bin aos-air-export
+aos air check --world-root <world-root> --manifest-path <Cargo.toml> --bin aos-air-export
 ```
 
 Required behavior:
@@ -371,7 +398,18 @@ Required behavior:
 3. diagnostics point to Rust source annotations where practical,
 4. output can be diffed as ordinary AIR JSON.
 
+Current implementation note:
+
+- `aos_wasm_sdk::aos_air_world!` owns manifest assembly from typed schema/workflow lists, so
+  packages do not maintain a second manifest reference list by hand.
+- `aos air check` regenerates AIR in a temporary root and compares it with checked-in
+  `air/generated/*.air.json`.
+- `aos-agent` uses generated-only package AIR; most smoke fixtures remain hand-authored AIR
+  coverage.
+
 ## Testing
+
+Status: partially implemented.
 
 Add focused tests before migrating large worlds:
 
@@ -395,10 +433,12 @@ Add CLI tests once the command surface exists.
 
 ## Exit Criteria
 
+Status: mostly met by `aos-agent` and Demiurge, pending broader smoke coverage.
+
 P1 is complete when:
 
 1. a small Rust-authored fixture can build a valid world bundle with no local `air/*.json`,
 2. a package can export AIR through Cargo metadata,
 3. another workflow crate can discover that package's AIR without manual sync import wiring,
 4. hand-authored smoke fixtures still build through the existing AIR directory path,
-5. generated AIR can be printed or materialized for inspection.
+5. generated AIR can be materialized and checked for inspection/CI.

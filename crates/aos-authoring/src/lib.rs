@@ -11,8 +11,9 @@ pub mod util;
 pub use build::{
     CompiledWorkflow, WorkflowBuildProfile, build_bundle_from_local_world,
     build_bundle_from_local_world_ephemeral, build_bundle_from_local_world_ephemeral_with_profile,
-    build_bundle_from_local_world_with_profile, build_loaded_manifest_from_authored_paths,
-    compile_workflow, materialize_imported_cargo_modules, resolve_placeholder_modules,
+    build_bundle_from_local_world_with_profile, build_loaded_manifest_from_air_sources,
+    build_loaded_manifest_from_authored_paths, compile_workflow,
+    materialize_discovered_cargo_modules, resolve_placeholder_modules,
     resolve_sys_module_wasm_hash,
 };
 pub use bundle::{WorldBundle, build_patch_document, load_air_bundle};
@@ -28,8 +29,8 @@ pub use manifest_loader::{
     parse_air_nodes_from_str,
 };
 pub use sync::{
-    ResolvedAirImport, ResolvedAirSources, ResolvedSecretValue, SyncConfig,
-    load_all_sync_secret_values, load_required_secret_value_map, load_sync_config,
-    resolve_air_sources,
+    ResolvedAirPackage, ResolvedAirSources, ResolvedSecretValue, WorldConfig,
+    load_all_world_secret_values, load_required_secret_value_map, load_world_config,
+    resolve_world_air_sources,
 };
 pub use util::{has_placeholder_modules, is_placeholder_hash, patch_modules};

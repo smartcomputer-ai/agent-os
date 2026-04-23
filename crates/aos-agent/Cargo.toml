@@ -28,6 +28,10 @@ serde_cbor.workspace = true
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.10", default-features = false }
 
+[dev-dependencies]
+aos-authoring.workspace = true
+tempfile.workspace = true
+
 [package.metadata.aos]
 air = "generated"
 air_dir = "air"

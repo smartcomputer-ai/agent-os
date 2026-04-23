@@ -217,6 +217,107 @@ macro_rules! aos_air_world {
             air_version: $air_version:literal,
             schemas: [ $($schema:ty),* $(,)? ],
             workflows: [ $($workflow:ty),* $(,)? ],
+            routing: [ $($route:tt),* $(,)? ] $(,)?
+        }
+    ) => {
+        $crate::aos_air_world! {
+            $vis fn $name() {
+                air_version: $air_version,
+                schemas: [ $($schema),* ],
+                workflows: [ $($workflow),* ],
+                secrets: [],
+                import_schemas: [],
+                import_modules: [],
+                import_workflows: [],
+                routing: [ $($route),* ],
+            }
+        }
+    };
+    (
+        $vis:vis fn $name:ident() {
+            air_version: $air_version:literal,
+            schemas: [ $($schema:ty),* $(,)? ],
+            workflows: [ $($workflow:ty),* $(,)? ],
+            secrets: [ $($secret:ty),* $(,)? ],
+            routing: [ $($route:tt),* $(,)? ] $(,)?
+        }
+    ) => {
+        $crate::aos_air_world! {
+            $vis fn $name() {
+                air_version: $air_version,
+                schemas: [ $($schema),* ],
+                workflows: [ $($workflow),* ],
+                secrets: [ $($secret),* ],
+                import_schemas: [],
+                import_modules: [],
+                import_workflows: [],
+                routing: [ $($route),* ],
+            }
+        }
+    };
+    (
+        $vis:vis fn $name:ident() {
+            air_version: $air_version:literal,
+            schemas: [ $($schema:ty),* $(,)? ],
+            workflows: [ $($workflow:ty),* $(,)? ],
+            secrets: [ $($secret:ty),* $(,)? ],
+            import_schema_types: [ $($import_schema_ty:ty),* $(,)? ],
+            import_workflow_types: [ $($import_workflow_ty:ty),* $(,)? ],
+            routing: [ $($route:tt),* $(,)? ] $(,)?
+        }
+    ) => {
+        $vis fn $name() -> $crate::__aos_export::Vec<$crate::__aos_export::String> {
+            let mut nodes = $crate::__aos_export::Vec::new();
+            $(
+                nodes.push(<$schema as $crate::AirSchemaExport>::air_schema_json());
+            )*
+            $(
+                nodes.push(<$workflow as $crate::AirWorkflowExport>::air_module_json());
+                nodes.push(<$workflow as $crate::AirWorkflowExport>::air_workflow_json());
+            )*
+            $(
+                nodes.push($crate::__aos_export::String::from(
+                    <$secret as $crate::AirSecretExport>::AIR_SECRET_JSON,
+                ));
+            )*
+
+            let manifest_schemas: &[&str] = &[
+                $(<$schema as $crate::AirSchemaRef>::AIR_SCHEMA_NAME,)*
+                $(<$import_schema_ty as $crate::AirSchemaRef>::AIR_SCHEMA_NAME,)*
+            ];
+            let manifest_modules: &[&str] = &[
+                $(<$workflow as $crate::AirWorkflowExport>::AIR_MODULE_NAME,)*
+                $(<$import_workflow_ty as $crate::AirWorkflowExport>::AIR_MODULE_NAME,)*
+            ];
+            let manifest_workflows: &[&str] = &[
+                $(<$workflow as $crate::AirWorkflowExport>::AIR_WORKFLOW_NAME,)*
+                $(<$import_workflow_ty as $crate::AirWorkflowExport>::AIR_WORKFLOW_NAME,)*
+            ];
+            let manifest_secrets: &[&str] = &[
+                $(<$secret as $crate::AirSecretExport>::AIR_SECRET_NAME,)*
+            ];
+            let manifest_effects: &[&str] = &[];
+            let manifest_routes: &[$crate::AirRoute] = &[
+                $($crate::__aos_air_route!($route),)*
+            ];
+
+            nodes.push($crate::air_manifest_json($crate::AirManifestParts {
+                air_version: $air_version,
+                schemas: manifest_schemas,
+                modules: manifest_modules,
+                workflows: manifest_workflows,
+                secrets: manifest_secrets,
+                effects: manifest_effects,
+                routes: manifest_routes,
+            }));
+            nodes
+        }
+    };
+    (
+        $vis:vis fn $name:ident() {
+            air_version: $air_version:literal,
+            schemas: [ $($schema:ty),* $(,)? ],
+            workflows: [ $($workflow:ty),* $(,)? ],
             secrets: [ $($secret:ty),* $(,)? ],
             import_schemas: [ $($import_schema:literal),* $(,)? ],
             import_modules: [ $($import_module:literal),* $(,)? ],
@@ -613,6 +714,39 @@ mod tests {
         }
     }
 
+    crate::aos_air_world! {
+        fn minimal_air_nodes() {
+            air_version: "2",
+            schemas: [DemoTask],
+            workflows: [DemoWorkflow],
+            routing: [
+                {
+                    event_schema: DemoTask,
+                    workflow: DemoWorkflow,
+                    key_field: "task_id",
+                }
+            ],
+        }
+    }
+
+    crate::aos_air_world! {
+        fn typed_import_air_nodes() {
+            air_version: "2",
+            schemas: [DemoTask],
+            workflows: [DemoWorkflow],
+            secrets: [OpenAiSecret],
+            import_schema_types: [DemoTask],
+            import_workflow_types: [DemoWorkflow],
+            routing: [
+                {
+                    event_schema: DemoTask,
+                    workflow: DemoWorkflow,
+                    key_field: "task_id",
+                }
+            ],
+        }
+    }
+
     crate::aos_air_manifest! {
         struct DemoManifest {
             air_version: "2",
@@ -684,5 +818,29 @@ mod tests {
             manifest["routing"]["subscriptions"][0]["event"],
             "demo/Task@1"
         );
+    }
+
+    #[test]
+    fn aos_air_world_defaults_empty_optional_sections() {
+        let nodes = minimal_air_nodes();
+        assert_eq!(nodes.len(), 4);
+        let manifest: serde_json::Value =
+            serde_json::from_str(nodes.last().expect("manifest")).expect("parse manifest");
+        assert_eq!(manifest["schemas"][0]["name"], "demo/Task@1");
+        assert_eq!(manifest["modules"][0]["name"], "demo/Workflow_wasm@1");
+        assert_eq!(manifest["workflows"][0]["name"], "demo/Workflow@1");
+        assert_eq!(manifest["secrets"].as_array().expect("secrets").len(), 0);
+        assert_eq!(manifest["effects"].as_array().expect("effects").len(), 0);
+    }
+
+    #[test]
+    fn aos_air_world_accepts_typed_import_refs() {
+        let nodes = typed_import_air_nodes();
+        let manifest: serde_json::Value =
+            serde_json::from_str(nodes.last().expect("manifest")).expect("parse manifest");
+        assert_eq!(manifest["schemas"][0]["name"], "demo/Task@1");
+        assert_eq!(manifest["schemas"][1]["name"], "demo/Task@1");
+        assert_eq!(manifest["modules"][1]["name"], "demo/Workflow_wasm@1");
+        assert_eq!(manifest["workflows"][1]["name"], "demo/Workflow@1");
     }
 }

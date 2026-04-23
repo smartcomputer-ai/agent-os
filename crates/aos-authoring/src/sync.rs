@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
 use dotenvy::from_path_iter;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use walkdir::WalkDir;
 
@@ -17,85 +17,42 @@ const ZERO_HASH_SENTINEL: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
 #[derive(Debug, Deserialize)]
-pub struct SyncConfig {
+pub struct WorldConfig {
     pub version: u32,
     #[serde(default)]
-    pub air: Option<AirSync>,
+    pub air: Option<WorldAirConfig>,
     #[serde(default)]
     pub build: Option<BuildSync>,
-    #[serde(default)]
-    pub modules: Option<ModulesSync>,
     #[serde(default)]
     pub secrets: Option<SecretsSync>,
     #[serde(default)]
     pub workspaces: Vec<WorkspaceSync>,
 }
 
+impl Default for WorldConfig {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            air: None,
+            build: None,
+            secrets: None,
+            workspaces: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
-pub struct AirSync {
+pub struct WorldAirConfig {
+    #[serde(default)]
     pub dir: Option<PathBuf>,
     #[serde(default)]
-    pub imports: Vec<AirImport>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AirImport {
-    #[serde(default)]
-    pub path: Option<PathBuf>,
-    #[serde(default)]
-    pub cargo: Option<CargoAirImport>,
-    #[serde(default)]
-    pub lock: Option<AirImportLock>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub enum AirImportLock {
-    DefsHash(String),
-    Payload(ImportLockPayload),
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ImportLockPayload {
-    pub source: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub manifest_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub air_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    pub defs_hash: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CargoAirImport {
-    pub package: String,
-    #[serde(default)]
-    pub version: Option<String>,
-    #[serde(default)]
-    pub source: Option<String>,
-    #[serde(default)]
-    pub air_dir: Option<PathBuf>,
-    #[serde(default)]
-    pub manifest_path: Option<PathBuf>,
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct BuildSync {
-    pub workflow_dir: Option<PathBuf>,
+    pub module_dir: Option<PathBuf>,
     pub module: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ModulesSync {
-    pub pull: Option<bool>,
-    pub dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,21 +97,25 @@ pub struct WorkspaceSync {
 }
 
 #[derive(Debug, Clone)]
-pub struct ResolvedAirImport {
+pub struct ResolvedAirPackage {
     pub root: PathBuf,
-    pub expected_lock: ImportLockPayload,
     pub source: AirSource,
-    pub cargo_manifest_path: Option<PathBuf>,
-    pub cargo_package: Option<String>,
-    pub cargo_module_names: Vec<String>,
+    pub package_name: String,
+    pub version: String,
+    pub source_id: Option<String>,
+    pub manifest_path: PathBuf,
+    pub air_dir: PathBuf,
+    pub defs_hash: String,
+    pub module_names: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ResolvedAirSources {
     pub air_dir: PathBuf,
+    pub module_dir: PathBuf,
     pub import_dirs: Vec<PathBuf>,
     pub sources: Vec<AirSource>,
-    pub imports: Vec<ResolvedAirImport>,
+    pub packages: Vec<ResolvedAirPackage>,
     pub warnings: Vec<String>,
 }
 
@@ -166,126 +127,136 @@ pub struct ResolvedSecretValue {
     pub plaintext: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LockEnforcementMode {
-    Warn,
-    Error,
-}
-
-pub fn load_sync_config(world_root: &Path, map: Option<&Path>) -> Result<(PathBuf, SyncConfig)> {
-    let path = match map {
+pub fn load_world_config(
+    world_root: &Path,
+    config_path: Option<&Path>,
+) -> Result<(Option<PathBuf>, WorldConfig)> {
+    let path = match config_path {
         Some(path) if path.is_relative() => world_root.join(path),
         Some(path) => path.to_path_buf(),
-        None => world_root.join("aos.sync.json"),
+        None => world_root.join("aos.world.json"),
     };
-    let bytes =
-        std::fs::read(&path).with_context(|| format!("read sync config {}", path.display()))?;
-    let config: SyncConfig = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse sync config {}", path.display()))?;
-    if config.version != 1 {
-        anyhow::bail!("unsupported sync config version {}", config.version);
+    if !path.exists() && config_path.is_none() {
+        return Ok((None, WorldConfig::default()));
     }
-    Ok((path, config))
+    let bytes =
+        std::fs::read(&path).with_context(|| format!("read world config {}", path.display()))?;
+    let config: WorldConfig = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parse world config {}", path.display()))?;
+    if config.version != 1 {
+        anyhow::bail!("unsupported world config version {}", config.version);
+    }
+    Ok((Some(path), config))
 }
 
-pub fn resolve_air_sources(
+pub fn resolve_world_air_sources(
     world_root: &Path,
-    map_root: &Path,
-    config: &SyncConfig,
+    config_path: Option<&Path>,
+    config: &WorldConfig,
     default_air_dir: &Path,
-    default_workflow_dir: &Path,
+    default_module_dir: &Path,
 ) -> Result<ResolvedAirSources> {
-    resolve_air_sources_with_mode(
-        world_root,
-        map_root,
-        config,
-        default_air_dir,
-        default_workflow_dir,
-        lock_mode_from_env(),
-    )
-}
-
-fn resolve_air_sources_with_mode(
-    world_root: &Path,
-    map_root: &Path,
-    config: &SyncConfig,
-    default_air_dir: &Path,
-    default_workflow_dir: &Path,
-    lock_mode: LockEnforcementMode,
-) -> Result<ResolvedAirSources> {
+    let config_root = config_path.and_then(Path::parent).unwrap_or(world_root);
     let air_dir = config
         .air
         .as_ref()
         .and_then(|air| air.dir.as_ref())
-        .map(|dir| resolve_map_path(map_root, dir))
+        .map(|dir| resolve_map_path(config_root, dir))
         .unwrap_or_else(|| default_air_dir.to_path_buf());
+    let module_dir = config
+        .build
+        .as_ref()
+        .and_then(|build| build.module_dir.as_ref())
+        .map(|dir| resolve_map_path(config_root, dir))
+        .unwrap_or_else(|| default_module_dir.to_path_buf());
 
-    let mut metadata_cache: HashMap<PathBuf, CargoMetadata> = HashMap::new();
+    let mut sources = Vec::new();
     let mut import_dirs = Vec::new();
-    let mut sources = vec![AirSource::local_directory(air_dir.clone())];
-    let mut imports = Vec::new();
+    let mut packages = Vec::new();
     let mut warnings = Vec::new();
 
-    if let Some(air) = &config.air {
-        for import in &air.imports {
-            let resolved = resolve_air_import(
-                world_root,
-                map_root,
-                default_workflow_dir,
-                import,
-                &mut metadata_cache,
-            )?;
-            validate_import_lock(
-                &resolved.expected_lock,
-                import.lock.as_ref(),
-                lock_mode,
-                &mut warnings,
-            )?;
-            sources.push(resolved.source.clone());
-            import_dirs.push(resolved.root.clone());
-            imports.push(resolved);
+    let local_export = local_export_bin_manifest(&module_dir);
+    if let Some(manifest_path) = local_export {
+        sources.push(AirSource::generated_rust_package(
+            world_root,
+            manifest_path,
+            None,
+            Some(crate::generated::DEFAULT_AIR_EXPORT_BIN.to_string()),
+            true,
+        ));
+        if air_dir.exists() {
+            sources.push(AirSource::Directory {
+                path: air_dir.clone(),
+                allow_manifest: false,
+                include_root: false,
+            });
         }
+    } else if air_dir.exists() {
+        sources.push(AirSource::local_directory(air_dir.clone()));
+    }
+
+    for package in discover_cargo_air_packages(world_root, &module_dir)? {
+        warnings.push(format!(
+            "discovered AIR package {} {} from {} (defs {})",
+            package.package_name,
+            package.version,
+            package.root.display(),
+            package.defs_hash
+        ));
+        sources.push(package.source.clone());
+        import_dirs.push(package.root.clone());
+        packages.push(package);
     }
 
     Ok(ResolvedAirSources {
         air_dir,
+        module_dir,
         import_dirs,
         sources,
-        imports,
+        packages,
         warnings,
     })
 }
 
-pub fn load_all_sync_secret_values(
+pub fn load_all_world_secret_values(
     world_root: &Path,
-    map: Option<&Path>,
-) -> Result<(PathBuf, SyncConfig, Vec<ResolvedSecretValue>)> {
-    let (map_path, config) = load_sync_config(world_root, map)?;
-    let map_root = map_path.parent().unwrap_or(world_root);
-    let values = resolve_secret_values(map_root, &config, None)?;
-    Ok((map_path, config, values))
+    config_path: Option<&Path>,
+) -> Result<(Option<PathBuf>, WorldConfig, Vec<ResolvedSecretValue>)> {
+    let (resolved_config_path, config) = load_world_config(world_root, config_path)?;
+    let config_root = resolved_config_path
+        .as_deref()
+        .and_then(Path::parent)
+        .unwrap_or(world_root);
+    let values = resolve_world_secret_values(config_root, &config, None)?;
+    Ok((resolved_config_path, config, values))
 }
 
 pub fn load_required_secret_value_map(
     world_root: &Path,
-    map: Option<&Path>,
+    config_path: Option<&Path>,
     required_bindings: &BTreeSet<String>,
 ) -> Result<HashMap<String, Vec<u8>>> {
     if required_bindings.is_empty() {
         return Ok(HashMap::new());
     }
-    let resolved = match map {
-        Some(map) => {
-            let (map_path, config) = load_sync_config(world_root, Some(map))?;
-            let map_root = map_path.parent().unwrap_or(world_root);
-            resolve_secret_values(map_root, &config, Some(required_bindings))?
+    let resolved = match config_path {
+        Some(path) => {
+            let (resolved_config_path, config) = load_world_config(world_root, Some(path))?;
+            let config_root = resolved_config_path
+                .as_deref()
+                .and_then(Path::parent)
+                .unwrap_or(world_root);
+            resolve_world_secret_values(config_root, &config, Some(required_bindings))?
         }
         None => {
-            let default_map = world_root.join("aos.sync.json");
+            let default_map = world_root.join("aos.world.json");
             if default_map.exists() {
-                let (map_path, config) = load_sync_config(world_root, None)?;
-                let map_root = map_path.parent().unwrap_or(world_root);
-                resolve_secret_values(map_root, &config, Some(required_bindings))?
+                let (config_path, config) = load_world_config(world_root, None)?;
+                let config_root = config_path
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .unwrap_or(world_root);
+                resolve_world_secret_values(config_root, &config, Some(required_bindings))?
             } else {
                 Vec::new()
             }
@@ -302,7 +273,7 @@ pub fn load_required_secret_value_map(
         }
         let Some(var_name) = binding.strip_prefix("env:") else {
             anyhow::bail!(
-                "missing sync secret binding '{}' and no legacy env:VAR_NAME fallback applies",
+                "missing world config secret binding '{}' and no legacy env:VAR_NAME fallback applies",
                 binding
             );
         };
@@ -322,24 +293,38 @@ pub fn load_required_secret_value_map(
 
 pub fn load_available_secret_value_map(
     world_root: &Path,
-    map: Option<&Path>,
+    config_path: Option<&Path>,
     required_bindings: &BTreeSet<String>,
 ) -> Result<HashMap<String, Vec<u8>>> {
     if required_bindings.is_empty() {
         return Ok(HashMap::new());
     }
-    let resolved = match map {
-        Some(map) => {
-            let (map_path, config) = load_sync_config(world_root, Some(map))?;
-            let map_root = map_path.parent().unwrap_or(world_root);
-            resolve_secret_values_allow_missing(map_root, &config, Some(required_bindings))?
+    let resolved = match config_path {
+        Some(path) => {
+            let (resolved_config_path, config) = load_world_config(world_root, Some(path))?;
+            let config_root = resolved_config_path
+                .as_deref()
+                .and_then(Path::parent)
+                .unwrap_or(world_root);
+            resolve_world_secret_values_allow_missing(
+                config_root,
+                &config,
+                Some(required_bindings),
+            )?
         }
         None => {
-            let default_map = world_root.join("aos.sync.json");
+            let default_map = world_root.join("aos.world.json");
             if default_map.exists() {
-                let (map_path, config) = load_sync_config(world_root, None)?;
-                let map_root = map_path.parent().unwrap_or(world_root);
-                resolve_secret_values_allow_missing(map_root, &config, Some(required_bindings))?
+                let (config_path, config) = load_world_config(world_root, None)?;
+                let config_root = config_path
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .unwrap_or(world_root);
+                resolve_world_secret_values_allow_missing(
+                    config_root,
+                    &config,
+                    Some(required_bindings),
+                )?
             } else {
                 Vec::new()
             }
@@ -367,12 +352,32 @@ pub fn load_available_secret_value_map(
     Ok(values)
 }
 
-fn resolve_secret_values(
+fn resolve_world_secret_values(
     map_root: &Path,
-    config: &SyncConfig,
+    config: &WorldConfig,
     required_bindings: Option<&BTreeSet<String>>,
 ) -> Result<Vec<ResolvedSecretValue>> {
-    let Some(secrets) = &config.secrets else {
+    resolve_secret_values_from_config(map_root, config.secrets.as_ref(), required_bindings)
+}
+
+fn resolve_world_secret_values_allow_missing(
+    map_root: &Path,
+    config: &WorldConfig,
+    required_bindings: Option<&BTreeSet<String>>,
+) -> Result<Vec<ResolvedSecretValue>> {
+    resolve_secret_values_from_config_allow_missing(
+        map_root,
+        config.secrets.as_ref(),
+        required_bindings,
+    )
+}
+
+fn resolve_secret_values_from_config(
+    map_root: &Path,
+    secrets: Option<&SecretsSync>,
+    required_bindings: Option<&BTreeSet<String>>,
+) -> Result<Vec<ResolvedSecretValue>> {
+    let Some(secrets) = secrets else {
         return Ok(Vec::new());
     };
     if secrets.bindings.is_empty() {
@@ -383,13 +388,13 @@ fn resolve_secret_values(
     for source in &secrets.sources {
         let name = source.name.trim();
         if name.is_empty() {
-            anyhow::bail!("sync secret source name must be non-empty");
+            anyhow::bail!("world config secret source name must be non-empty");
         }
         if sources
             .insert(name.to_string(), load_secret_source(map_root, source)?)
             .is_some()
         {
-            anyhow::bail!("duplicate sync secret source '{}'", name);
+            anyhow::bail!("duplicate world config secret source '{}'", name);
         }
     }
 
@@ -398,10 +403,10 @@ fn resolve_secret_values(
     for binding in &secrets.bindings {
         let binding_id = binding.binding.trim();
         if binding_id.is_empty() {
-            anyhow::bail!("sync secret binding id must be non-empty");
+            anyhow::bail!("world config secret binding id must be non-empty");
         }
         if !seen_bindings.insert(binding_id.to_string()) {
-            anyhow::bail!("duplicate sync secret binding '{}'", binding_id);
+            anyhow::bail!("duplicate world config secret binding '{}'", binding_id);
         }
         if let Some(required) = required_bindings {
             if !required.contains(binding_id) {
@@ -410,14 +415,14 @@ fn resolve_secret_values(
         }
         let source = sources.get(binding.from.source.as_str()).ok_or_else(|| {
             anyhow::anyhow!(
-                "sync secret binding '{}' references unknown source '{}'",
+                "world config secret binding '{}' references unknown source '{}'",
                 binding_id,
                 binding.from.source
             )
         })?;
         let plaintext = source
             .resolve(binding.from.key.as_str())
-            .with_context(|| format!("resolve sync secret binding '{}'", binding_id))?;
+            .with_context(|| format!("resolve world config secret binding '{}'", binding_id))?;
         values.push(ResolvedSecretValue {
             binding: binding_id.to_string(),
             source: binding.from.source.clone(),
@@ -429,12 +434,12 @@ fn resolve_secret_values(
     Ok(values)
 }
 
-fn resolve_secret_values_allow_missing(
+fn resolve_secret_values_from_config_allow_missing(
     map_root: &Path,
-    config: &SyncConfig,
+    secrets: Option<&SecretsSync>,
     required_bindings: Option<&BTreeSet<String>>,
 ) -> Result<Vec<ResolvedSecretValue>> {
-    let Some(secrets) = &config.secrets else {
+    let Some(secrets) = secrets else {
         return Ok(Vec::new());
     };
     if secrets.bindings.is_empty() {
@@ -445,7 +450,7 @@ fn resolve_secret_values_allow_missing(
     for source in &secrets.sources {
         let name = source.name.trim();
         if name.is_empty() {
-            anyhow::bail!("sync secret source name must be non-empty");
+            anyhow::bail!("world config secret source name must be non-empty");
         }
         if sources
             .insert(
@@ -454,7 +459,7 @@ fn resolve_secret_values_allow_missing(
             )
             .is_some()
         {
-            anyhow::bail!("duplicate sync secret source '{}'", name);
+            anyhow::bail!("duplicate world config secret source '{}'", name);
         }
     }
 
@@ -463,10 +468,10 @@ fn resolve_secret_values_allow_missing(
     for binding in &secrets.bindings {
         let binding_id = binding.binding.trim();
         if binding_id.is_empty() {
-            anyhow::bail!("sync secret binding id must be non-empty");
+            anyhow::bail!("world config secret binding id must be non-empty");
         }
         if !seen_bindings.insert(binding_id.to_string()) {
-            anyhow::bail!("duplicate sync secret binding '{}'", binding_id);
+            anyhow::bail!("duplicate world config secret binding '{}'", binding_id);
         }
         if let Some(required) = required_bindings {
             if !required.contains(binding_id) {
@@ -475,14 +480,14 @@ fn resolve_secret_values_allow_missing(
         }
         let source = sources.get(binding.from.source.as_str()).ok_or_else(|| {
             anyhow::anyhow!(
-                "sync secret binding '{}' references unknown source '{}'",
+                "world config secret binding '{}' references unknown source '{}'",
                 binding_id,
                 binding.from.source
             )
         })?;
         let Some(plaintext) = source
             .maybe_resolve(binding.from.key.as_str())
-            .with_context(|| format!("resolve sync secret binding '{}'", binding_id))?
+            .with_context(|| format!("resolve world config secret binding '{}'", binding_id))?
         else {
             continue;
         };
@@ -542,7 +547,7 @@ impl LoadedSecretSource {
 fn load_secret_source(map_root: &Path, source: &SecretSourceSync) -> Result<LoadedSecretSource> {
     let kind = source.kind.trim();
     if kind.is_empty() {
-        anyhow::bail!("sync secret source '{}' must set kind", source.name);
+        anyhow::bail!("world config secret source '{}' must set kind", source.name);
     }
     match kind {
         "dotenv" => {
@@ -562,7 +567,7 @@ fn load_secret_source(map_root: &Path, source: &SecretSourceSync) -> Result<Load
         }
         "env" => Ok(LoadedSecretSource::Env),
         other => anyhow::bail!(
-            "unsupported sync secret source kind '{}' for source '{}'",
+            "unsupported world config secret source kind '{}' for source '{}'",
             other,
             source.name
         ),
@@ -575,7 +580,7 @@ fn load_secret_source_allow_missing(
 ) -> Result<LoadedSecretSource> {
     let kind = source.kind.trim();
     if kind.is_empty() {
-        anyhow::bail!("sync secret source '{}' must set kind", source.name);
+        anyhow::bail!("world config secret source '{}' must set kind", source.name);
     }
     match kind {
         "dotenv" => {
@@ -597,256 +602,118 @@ fn load_secret_source_allow_missing(
         }
         "env" => Ok(LoadedSecretSource::Env),
         other => anyhow::bail!(
-            "unsupported sync secret source kind '{}' for source '{}'",
+            "unsupported world config secret source kind '{}' for source '{}'",
             other,
             source.name
         ),
     }
 }
 
-fn resolve_air_import(
+fn discover_cargo_air_packages(
     world_root: &Path,
-    map_root: &Path,
-    default_workflow_dir: &Path,
-    import: &AirImport,
-    metadata_cache: &mut HashMap<PathBuf, CargoMetadata>,
-) -> Result<ResolvedAirImport> {
-    match (&import.path, &import.cargo) {
-        (Some(path), None) => {
-            let root = resolve_map_path(map_root, path);
-            let defs_hash = import_defs_hash(&root)?;
-            let expected_lock = ImportLockPayload {
-                source: "path".into(),
-                package: None,
-                version: None,
-                source_id: None,
-                manifest_path: None,
-                air_dir: None,
-                path: Some(display_path_for_lock(&root, map_root)),
-                defs_hash,
-            };
-            Ok(ResolvedAirImport {
-                root: root.clone(),
-                expected_lock,
-                source: AirSource::imported_directory(root),
-                cargo_manifest_path: None,
-                cargo_package: None,
-                cargo_module_names: Vec::new(),
-            })
+    module_dir: &Path,
+) -> Result<Vec<ResolvedAirPackage>> {
+    let manifest_path = match default_metadata_manifest(world_root, module_dir) {
+        Ok(path) => path,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let metadata = load_cargo_metadata(&manifest_path)?;
+    let direct_dependency_ids = direct_dependency_package_ids(&metadata)?;
+    let mut packages = Vec::new();
+
+    for package_id in direct_dependency_ids {
+        let Some(package) = metadata.packages.iter().find(|pkg| pkg.id == package_id) else {
+            continue;
+        };
+        let Some(aos) = package.aos_metadata() else {
+            continue;
+        };
+        if !aos.exports.unwrap_or(false) && aos.air.is_none() {
+            continue;
         }
-        (None, Some(cargo)) => resolve_cargo_import(
-            world_root,
-            map_root,
-            default_workflow_dir,
-            cargo,
-            metadata_cache,
-        ),
-        (Some(_), Some(_)) => {
-            anyhow::bail!("air.imports entry must set exactly one of 'path' or 'cargo'")
+        let package_root = PathBuf::from(&package.manifest_path)
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "invalid cargo metadata manifest path '{}'",
+                    package.manifest_path
+                )
+            })?;
+        let air_dir = aos.air_dir.clone().unwrap_or_else(|| PathBuf::from("air"));
+        let root = package_root.join(&air_dir);
+        let generated = aos.air.as_deref() == Some("generated")
+            || (aos.exports.unwrap_or(false) && aos.export_bin.is_some());
+        let export_bin = aos.export_bin.clone();
+        if generated {
+            let package_manifest_path = PathBuf::from(&package.manifest_path);
+            write_generated_air_from_cargo_export(
+                &package_root,
+                &package_manifest_path,
+                None,
+                export_bin.as_deref(),
+            )
+            .with_context(|| {
+                format!(
+                    "materialize generated AIR for discovered cargo package '{}'",
+                    package.name
+                )
+            })?;
         }
-        (None, None) => anyhow::bail!("air.imports entry must set one of 'path' or 'cargo'"),
+        let defs_hash = import_defs_hash(&root)?;
+        let module_names = import_module_names(&root)?;
+        packages.push(ResolvedAirPackage {
+            root: root.clone(),
+            source: AirSource::imported_directory(root),
+            package_name: package.name.clone(),
+            version: package.version.clone(),
+            source_id: package.source.clone(),
+            manifest_path: PathBuf::from(&package.manifest_path),
+            air_dir,
+            defs_hash,
+            module_names,
+        });
     }
+
+    packages.sort_by(|left, right| {
+        left.package_name
+            .cmp(&right.package_name)
+            .then_with(|| left.version.cmp(&right.version))
+            .then_with(|| left.root.cmp(&right.root))
+    });
+    Ok(packages)
 }
 
-fn resolve_cargo_import(
-    world_root: &Path,
-    map_root: &Path,
-    default_workflow_dir: &Path,
-    import: &CargoAirImport,
-    metadata_cache: &mut HashMap<PathBuf, CargoMetadata>,
-) -> Result<ResolvedAirImport> {
-    let manifest_path = match import.manifest_path.as_ref() {
-        Some(path) => resolve_map_path(map_root, path),
-        None => default_metadata_manifest(world_root, default_workflow_dir)?,
+fn direct_dependency_package_ids(metadata: &CargoMetadata) -> Result<BTreeSet<String>> {
+    let Some(resolve) = metadata.resolve.as_ref() else {
+        return Ok(BTreeSet::new());
     };
-
-    let metadata = if let Some(existing) = metadata_cache.get(&manifest_path) {
-        existing
-    } else {
-        let loaded = load_cargo_metadata(&manifest_path)?;
-        metadata_cache.insert(manifest_path.clone(), loaded);
-        metadata_cache
-            .get(&manifest_path)
-            .expect("metadata just inserted")
-    };
-
-    let mut candidates: Vec<&CargoMetadataPackage> = metadata
-        .packages
-        .iter()
-        .filter(|pkg| pkg.name == import.package)
-        .collect();
-
-    if let Some(version) = import.version.as_ref() {
-        let normalized = normalize_version(version);
-        candidates.retain(|pkg| pkg.version == normalized);
-    }
-    if let Some(source) = import.source.as_ref() {
-        candidates.retain(|pkg| pkg.source.as_deref() == Some(source.as_str()));
-    }
-
-    if candidates.is_empty() {
-        anyhow::bail!(
-            "air.imports cargo package '{}' not found via {}",
-            import.package,
-            manifest_path.display()
-        );
-    }
-    if candidates.len() > 1 {
-        let mut choices = candidates
+    let root_id = resolve.root.as_ref().cloned().or_else(|| {
+        metadata
+            .packages
             .iter()
-            .map(|pkg| format!("{}{}", pkg.version, pkg.source.as_deref().unwrap_or("")))
-            .collect::<Vec<_>>();
-        choices.sort();
-        anyhow::bail!(
-            "air.imports cargo package '{}' is ambiguous (candidates: {}); set cargo.version and/or cargo.source",
-            import.package,
-            choices.join(", ")
-        );
-    }
-
-    let package = candidates[0];
-    let package_root = PathBuf::from(&package.manifest_path)
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "invalid cargo metadata manifest path '{}'",
-                package.manifest_path
-            )
-        })?;
-    let air_dir = import
-        .air_dir
-        .clone()
-        .or_else(|| package.aos_metadata().and_then(|aos| aos.air_dir.clone()))
-        .unwrap_or_else(|| PathBuf::from("air"));
-    let root = package_root.join(&air_dir);
-    let generated = package
-        .aos_metadata()
-        .map(|aos| {
-            aos.air.as_deref() == Some("generated")
-                || (aos.exports.unwrap_or(false) && aos.export_bin.is_some())
-        })
-        .unwrap_or(false);
-    let export_bin = package
-        .aos_metadata()
-        .and_then(|aos| aos.export_bin.clone());
-    if generated {
-        write_generated_air_from_cargo_export(
-            &package_root,
-            &manifest_path,
-            Some(package.name.as_str()),
-            export_bin.as_deref(),
-        )
-        .with_context(|| {
-            format!(
-                "materialize generated AIR for cargo package '{}'",
-                package.name
-            )
-        })?;
-    }
-    let defs_hash = import_defs_hash(&root)?;
-    let cargo_module_names = import_module_names(&root)?;
-
-    let expected_lock = ImportLockPayload {
-        source: "cargo".into(),
-        package: Some(package.name.clone()),
-        version: Some(package.version.clone()),
-        source_id: package.source.clone(),
-        manifest_path: Some(display_path_for_lock(&manifest_path, map_root)),
-        air_dir: Some(air_dir.to_string_lossy().to_string()),
-        path: None,
-        defs_hash,
+            .find(|package| package.source.is_none())
+            .map(|package| package.id.clone())
+    });
+    let Some(root_id) = root_id else {
+        return Ok(BTreeSet::new());
     };
-
-    Ok(ResolvedAirImport {
-        root: root.clone(),
-        expected_lock,
-        source: AirSource::imported_directory(root),
-        cargo_manifest_path: Some(manifest_path),
-        cargo_package: Some(package.name.clone()),
-        cargo_module_names,
-    })
-}
-
-fn validate_import_lock(
-    expected: &ImportLockPayload,
-    actual: Option<&AirImportLock>,
-    mode: LockEnforcementMode,
-    warnings: &mut Vec<String>,
-) -> Result<()> {
-    let target = lock_target(expected);
-    let expected_json =
-        serde_json::to_string(expected).context("serialize expected import lock")?;
-    let expected_pretty =
-        serde_json::to_string_pretty(expected).context("serialize expected import lock pretty")?;
-
-    let mismatch = match actual {
-        None => Some(format!("air.import lock missing for '{target}'")),
-        Some(AirImportLock::DefsHash(found)) => {
-            if found.trim() == expected.defs_hash {
-                None
-            } else {
-                Some(format!(
-                    "air.import lock hash mismatch for '{}': expected '{}', found '{}'",
-                    target, expected.defs_hash, found
-                ))
-            }
-        }
-        Some(AirImportLock::Payload(found)) => {
-            if found == expected {
-                None
-            } else {
-                let found_json =
-                    serde_json::to_string(found).context("serialize found import lock")?;
-                Some(format!(
-                    "air.import lock payload mismatch for '{}': expected {}, found {}",
-                    target, expected_json, found_json
-                ))
-            }
-        }
+    let Some(root_node) = resolve.nodes.iter().find(|node| node.id == root_id) else {
+        return Ok(BTreeSet::new());
     };
-
-    if let Some(message) = mismatch {
-        let help = format!("set lock to:\n{}", expected_pretty);
-        match mode {
-            LockEnforcementMode::Warn => {
-                warnings.push(format!("{message}; {help}"));
-                Ok(())
-            }
-            LockEnforcementMode::Error => {
-                anyhow::bail!("{message}; {help}");
-            }
-        }
-    } else {
-        Ok(())
-    }
+    Ok(root_node.dependencies.iter().cloned().collect())
 }
 
-fn lock_target(expected: &ImportLockPayload) -> String {
-    if let Some(path) = &expected.path {
-        path.clone()
-    } else if let Some(package) = &expected.package {
-        package.clone()
+fn local_export_bin_manifest(module_dir: &Path) -> Option<PathBuf> {
+    let manifest_path = module_dir.join("Cargo.toml");
+    let export_bin = module_dir
+        .join("src")
+        .join("bin")
+        .join(format!("{}.rs", crate::generated::DEFAULT_AIR_EXPORT_BIN));
+    if manifest_path.exists() && export_bin.exists() {
+        Some(manifest_path)
     } else {
-        "<unknown import>".to_string()
-    }
-}
-
-fn lock_mode_from_env() -> LockEnforcementMode {
-    if env_flag_true("AOS_IMPORT_LOCK_STRICT") || std::env::var_os("CI").is_some() {
-        LockEnforcementMode::Error
-    } else {
-        LockEnforcementMode::Warn
-    }
-}
-
-fn env_flag_true(name: &str) -> bool {
-    match std::env::var(name) {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on"
-        }
-        Err(_) => false,
+        None
     }
 }
 
@@ -940,18 +807,18 @@ fn add_def_entry(
     Ok(())
 }
 
-fn default_metadata_manifest(world_root: &Path, default_workflow_dir: &Path) -> Result<PathBuf> {
-    let workflow_manifest = default_workflow_dir.join("Cargo.toml");
-    if workflow_manifest.exists() {
-        return Ok(workflow_manifest);
+fn default_metadata_manifest(world_root: &Path, default_module_dir: &Path) -> Result<PathBuf> {
+    let module_manifest = default_module_dir.join("Cargo.toml");
+    if module_manifest.exists() {
+        return Ok(module_manifest);
     }
     let world_manifest = world_root.join("Cargo.toml");
     if world_manifest.exists() {
         return Ok(world_manifest);
     }
     anyhow::bail!(
-        "cargo air import requires Cargo.toml; checked {} and {}",
-        workflow_manifest.display(),
+        "cargo AIR discovery requires Cargo.toml; checked {} and {}",
+        module_manifest.display(),
         world_manifest.display()
     )
 }
@@ -978,10 +845,6 @@ fn load_cargo_metadata(manifest_path: &Path) -> Result<CargoMetadata> {
     Ok(metadata)
 }
 
-fn normalize_version(version: &str) -> String {
-    version.trim().trim_start_matches('=').to_string()
-}
-
 fn resolve_map_path(map_root: &Path, path: &Path) -> PathBuf {
     if path.is_relative() {
         map_root.join(path)
@@ -990,27 +853,37 @@ fn resolve_map_path(map_root: &Path, path: &Path) -> PathBuf {
     }
 }
 
-fn display_path_for_lock(path: &Path, map_root: &Path) -> String {
-    if let Ok(relative) = path.strip_prefix(map_root) {
-        relative.to_string_lossy().to_string()
-    } else {
-        path.to_string_lossy().to_string()
-    }
-}
-
 #[derive(Debug, Deserialize)]
 struct CargoMetadata {
     packages: Vec<CargoMetadataPackage>,
+    #[serde(default)]
+    resolve: Option<CargoMetadataResolve>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CargoMetadataPackage {
+    id: String,
     name: String,
     version: String,
     source: Option<String>,
     manifest_path: String,
     #[serde(default)]
     metadata: Option<CargoPackageMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoMetadataResolve {
+    #[serde(default)]
+    root: Option<String>,
+    #[serde(default)]
+    nodes: Vec<CargoMetadataResolveNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoMetadataResolveNode {
+    id: String,
+    #[serde(default)]
+    dependencies: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1166,19 +1039,8 @@ fn ensure_hash_field(map: &mut serde_json::Map<String, Value>, key: &str) {
 mod tests {
     use super::*;
 
-    fn empty_config() -> SyncConfig {
-        SyncConfig {
-            version: 1,
-            air: None,
-            build: None,
-            modules: None,
-            secrets: None,
-            workspaces: Vec::new(),
-        }
-    }
-
     #[test]
-    fn load_all_sync_secret_values_reads_dotenv_bindings() {
+    fn load_all_world_secret_values_reads_dotenv_bindings() {
         let temp = tempfile::TempDir::new().expect("tempdir");
         std::fs::write(
             temp.path().join(".env"),
@@ -1187,7 +1049,7 @@ mod tests {
         .expect("write .env");
 
         std::fs::write(
-            temp.path().join("aos.sync.json"),
+            temp.path().join("aos.world.json"),
             serde_json::to_vec(&serde_json::json!({
                 "version": 1,
                 "secrets": {
@@ -1206,12 +1068,12 @@ mod tests {
                     ]
                 }
             }))
-            .expect("encode sync config"),
+            .expect("encode world config"),
         )
-        .expect("write sync config");
+        .expect("write world config");
 
         let (_map, _config, values) =
-            load_all_sync_secret_values(temp.path(), None).expect("load secret values");
+            load_all_world_secret_values(temp.path(), None).expect("load secret values");
         assert_eq!(values.len(), 2);
         assert_eq!(values[0].binding, "llm/openai_api");
         assert_eq!(values[0].plaintext, b"openai-test");
@@ -1220,135 +1082,95 @@ mod tests {
     }
 
     #[test]
-    fn resolve_air_sources_path_import_is_map_relative() {
+    fn load_world_config_is_optional() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let (path, config) = load_world_config(temp.path(), None).expect("load world config");
+        assert!(path.is_none());
+        assert_eq!(config.version, 1);
+        assert!(config.workspaces.is_empty());
+    }
+
+    #[test]
+    fn resolve_world_air_sources_uses_config_relative_paths() {
         let temp = tempfile::TempDir::new().expect("tempdir");
         let world_root = temp.path().join("world");
-        let map_root = world_root.clone();
-        let workflow_dir = world_root.join("workflow");
-        let default_air = world_root.join("air-default");
-        let import_root = world_root.join("../sdk/air");
-        std::fs::create_dir_all(&import_root).expect("mkdir import");
+        let config_root = world_root.join("config");
+        let air_dir = config_root.join("custom-air");
+        let module_dir = config_root.join("custom-workflow");
+        std::fs::create_dir_all(&air_dir).expect("mkdir air");
+        std::fs::create_dir_all(&module_dir).expect("mkdir module dir");
         std::fs::write(
-            import_root.join("defs.air.json"),
-            r#"[{"$kind":"defschema","name":"demo/S@1","type":{"text":{}}}]"#,
+            air_dir.join("manifest.air.json"),
+            r#"{"$kind":"manifest","air_version":"2","schemas":[],"modules":[],"workflows":[],"effects":[],"secrets":[]}"#,
         )
-        .expect("write defs");
-        let lock_hash = import_defs_hash(&import_root).expect("import hash");
+        .expect("write manifest");
 
-        let mut config = empty_config();
-        config.air = Some(AirSync {
-            dir: Some(PathBuf::from("air")),
-            imports: vec![AirImport {
-                path: Some(PathBuf::from("../sdk/air")),
-                cargo: None,
-                lock: Some(AirImportLock::DefsHash(lock_hash)),
-            }],
-        });
+        let config = WorldConfig {
+            version: 1,
+            air: Some(WorldAirConfig {
+                dir: Some(PathBuf::from("custom-air")),
+                mode: None,
+            }),
+            build: Some(BuildSync {
+                module_dir: Some(PathBuf::from("custom-workflow")),
+                module: None,
+            }),
+            secrets: None,
+            workspaces: Vec::new(),
+        };
 
-        let resolved =
-            resolve_air_sources(&world_root, &map_root, &config, &default_air, &workflow_dir)
-                .expect("resolve");
-        assert_eq!(resolved.air_dir, world_root.join("air"));
-        assert_eq!(resolved.import_dirs, vec![world_root.join("../sdk/air")]);
-    }
-
-    #[test]
-    fn resolve_air_sources_rejects_invalid_import_shape() {
-        let world_root = PathBuf::from("/tmp/world");
-        let map_root = world_root.clone();
-        let workflow_dir = world_root.join("workflow");
-        let default_air = world_root.join("air-default");
-
-        let mut config = empty_config();
-        config.air = Some(AirSync {
-            dir: Some(PathBuf::from("air")),
-            imports: vec![AirImport {
-                path: Some(PathBuf::from("../sdk/air")),
-                cargo: Some(CargoAirImport {
-                    package: "aos-agent".into(),
-                    version: None,
-                    source: None,
-                    air_dir: None,
-                    manifest_path: None,
-                }),
-                lock: None,
-            }],
-        });
-
-        let err = resolve_air_sources(&world_root, &map_root, &config, &default_air, &workflow_dir)
-            .expect_err("expected error");
-        assert!(err.to_string().contains("exactly one"));
-    }
-
-    #[test]
-    fn resolve_air_sources_cargo_import_finds_workspace_package() {
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let world_root = workspace_root.clone();
-        let map_root = workspace_root.clone();
-        let workflow_dir = workspace_root.join("worlds/demiurge/workflow");
-        let default_air = workspace_root.join("air");
-
-        let mut config = empty_config();
-        let import_root = workspace_root.join("crates/aos-agent/air");
-        let lock_hash = import_defs_hash(&import_root).expect("import hash");
-        config.air = Some(AirSync {
-            dir: Some(PathBuf::from("worlds/demiurge/air")),
-            imports: vec![AirImport {
-                path: None,
-                cargo: Some(CargoAirImport {
-                    package: "aos-agent".into(),
-                    version: None,
-                    source: None,
-                    air_dir: Some(PathBuf::from("air")),
-                    manifest_path: Some(PathBuf::from("Cargo.toml")),
-                }),
-                lock: Some(AirImportLock::DefsHash(lock_hash)),
-            }],
-        });
-
-        let resolved =
-            resolve_air_sources(&world_root, &map_root, &config, &default_air, &workflow_dir)
-                .expect("resolve");
-        let actual = std::fs::canonicalize(&resolved.import_dirs[0]).expect("canonical actual");
-        let expected = std::fs::canonicalize(workspace_root.join("crates/aos-agent/air"))
-            .expect("canonical expected");
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn missing_lock_warns_in_warn_mode() {
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let import_root = temp.path().join("sdk");
-        std::fs::create_dir_all(&import_root).expect("mkdir");
-        std::fs::write(
-            import_root.join("defs.air.json"),
-            r#"[{"$kind":"defschema","name":"demo/S@1","type":{"text":{}}}]"#,
-        )
-        .expect("write defs");
-
-        let mut config = empty_config();
-        config.air = Some(AirSync {
-            dir: None,
-            imports: vec![AirImport {
-                path: Some(PathBuf::from("sdk")),
-                cargo: None,
-                lock: None,
-            }],
-        });
-
-        let resolved = resolve_air_sources_with_mode(
-            temp.path(),
-            temp.path(),
+        let resolved = resolve_world_air_sources(
+            &world_root,
+            Some(&config_root.join("aos.world.json")),
             &config,
-            &temp.path().join("air"),
-            &temp.path().join("workflow"),
-            LockEnforcementMode::Warn,
+            &world_root.join("air"),
+            &world_root.join("workflow"),
         )
         .expect("resolve");
 
-        assert_eq!(resolved.import_dirs.len(), 1);
-        assert_eq!(resolved.warnings.len(), 1);
-        assert!(resolved.warnings[0].contains("lock missing"));
+        assert_eq!(resolved.air_dir, air_dir);
+        assert_eq!(resolved.module_dir, module_dir);
+        assert_eq!(resolved.import_dirs.len(), 0);
+        assert_eq!(resolved.sources.len(), 1);
+    }
+
+    #[test]
+    fn resolve_world_air_sources_discovers_aos_metadata_dependency() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let world_root = workspace_root.join("worlds/demiurge");
+        let workflow_dir = workspace_root.join("worlds/demiurge/workflow");
+        let config = WorldConfig::default();
+
+        let resolved = resolve_world_air_sources(
+            &world_root,
+            None,
+            &config,
+            &world_root.join("air"),
+            &workflow_dir,
+        )
+        .expect("resolve");
+
+        assert!(
+            resolved
+                .packages
+                .iter()
+                .any(|package| package.package_name == "aos-agent")
+        );
+        let actual = resolved
+            .import_dirs
+            .iter()
+            .find(|path| path.ends_with("crates/aos-agent/air"))
+            .and_then(|path| std::fs::canonicalize(path).ok())
+            .expect("canonical actual");
+        let expected = std::fs::canonicalize(workspace_root.join("crates/aos-agent/air"))
+            .expect("canonical expected");
+        assert_eq!(actual, expected);
+        assert!(
+            resolved
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("discovered AIR package aos-agent"))
+        );
     }
 
     #[test]
@@ -1369,39 +1191,5 @@ mod tests {
 
         let hash = import_defs_hash(&import_root).expect("hash");
         assert!(hash.starts_with("sha256:"));
-    }
-
-    #[test]
-    fn missing_lock_fails_in_error_mode() {
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let import_root = temp.path().join("sdk");
-        std::fs::create_dir_all(&import_root).expect("mkdir");
-        std::fs::write(
-            import_root.join("defs.air.json"),
-            r#"[{"$kind":"defschema","name":"demo/S@1","type":{"text":{}}}]"#,
-        )
-        .expect("write defs");
-
-        let mut config = empty_config();
-        config.air = Some(AirSync {
-            dir: None,
-            imports: vec![AirImport {
-                path: Some(PathBuf::from("sdk")),
-                cargo: None,
-                lock: None,
-            }],
-        });
-
-        let err = resolve_air_sources_with_mode(
-            temp.path(),
-            temp.path(),
-            &config,
-            &temp.path().join("air"),
-            &temp.path().join("workflow"),
-            LockEnforcementMode::Error,
-        )
-        .expect_err("should fail");
-
-        assert!(err.to_string().contains("lock missing"));
     }
 }

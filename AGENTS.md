@@ -86,7 +86,8 @@ Shadow reports bounded observed effects/in-flight state and ledger deltas. Prima
 - Backend seams: `aos-node/src/model/backends.rs` defines journal, checkpoint, world inventory, and blob contracts; implementations live under `aos-node/src/infra/`.
 - Control surface: `aos-node/src/control/` serves hot active-world reads and direct acceptance. Do not rebuild projection/materializer paths for default reads.
 - Module build/cache: workflows compiled via `aos-wasm-build`, cached under `.aos/cache/{modules|wasmtime}`.
-- Workspace sync uses `aos.sync.json` plus `aos push`/`aos pull`; filesystem names are segment-encoded with `~`-hex when needed.
+- Rust-authored AIR uses SDK derives plus `aos_wasm_sdk::aos_air_world!`; check generated package AIR with `aos air check` when `air/generated/` is committed.
+- Workspace sync uses optional `aos.world.json` workspace entries plus `aos push`/`aos pull`; filesystem names are segment-encoded with `~`-hex when needed.
 
 ## Project Structure (Rust workspace, edition 2024)
 

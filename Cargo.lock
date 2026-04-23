@@ -152,6 +152,7 @@ name = "aos-agent"
 version = "0.1.0"
 dependencies = [
  "aos-air-types",
+ "aos-authoring",
  "aos-effect-types",
  "aos-effects",
  "aos-wasm-abi",
@@ -162,6 +163,7 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "sha2",
+ "tempfile",
 ]
 
 [[package]]

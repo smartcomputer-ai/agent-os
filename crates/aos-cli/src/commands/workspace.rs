@@ -99,12 +99,12 @@ struct WorkspaceDiffArgs {
 
 #[derive(Args, Debug)]
 struct WorkspacePushArgs {
-    /// Local world root that contains `aos.sync.json`.
+    /// Local world root that may contain `aos.world.json`.
     #[arg(long)]
     local_root: Option<PathBuf>,
-    /// Explicit sync map path. Defaults to `aos.sync.json`.
+    /// Explicit world config path. Defaults to `aos.world.json` when present.
     #[arg(long)]
-    map: Option<PathBuf>,
+    config: Option<PathBuf>,
     /// Local directory to push when syncing one workspace explicitly.
     dir: Option<PathBuf>,
     /// Workspace ref to push when syncing one workspace explicitly.
@@ -119,12 +119,12 @@ struct WorkspacePushArgs {
 
 #[derive(Args, Debug)]
 struct WorkspacePullArgs {
-    /// Local world root that contains `aos.sync.json`.
+    /// Local world root that may contain `aos.world.json`.
     #[arg(long)]
     local_root: Option<PathBuf>,
-    /// Explicit sync map path. Defaults to `aos.sync.json`.
+    /// Explicit world config path. Defaults to `aos.world.json` when present.
     #[arg(long)]
-    map: Option<PathBuf>,
+    config: Option<PathBuf>,
     /// Workspace ref to pull when syncing one workspace explicitly.
     reference: Option<String>,
     /// Local destination directory when syncing one workspace explicitly.
@@ -275,7 +275,7 @@ pub(crate) async fn handle(
             let dirs = resolve_local_dirs(args.local_root.as_deref())?;
             let (_, _, entries) = load_sync_entries(
                 &dirs.root,
-                args.map.as_deref(),
+                args.config.as_deref(),
                 args.reference.as_deref(),
                 args.dir.as_deref(),
             )?;
@@ -298,7 +298,7 @@ pub(crate) async fn handle(
             let dirs = resolve_local_dirs(args.local_root.as_deref())?;
             let (_, _, entries) = load_sync_entries(
                 &dirs.root,
-                args.map.as_deref(),
+                args.config.as_deref(),
                 args.reference.as_deref(),
                 args.dir.as_deref(),
             )?;

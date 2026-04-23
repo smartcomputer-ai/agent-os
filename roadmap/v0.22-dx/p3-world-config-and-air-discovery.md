@@ -1,6 +1,25 @@
 # P3: Optional World Config And AIR Discovery Cleanup
 
-Status: planned.
+Status: mostly implemented.
+
+Completed so far:
+
+1. `aos.world.json` is the optional local world config file.
+2. The loader falls back to inferred defaults when `aos.world.json` is absent.
+3. `aos.sync.json` is not kept as a compatibility alias in the normal path.
+4. AIR imports no longer live in world config; direct Cargo dependencies with
+   `[package.metadata.aos]` are discovered automatically.
+5. Discovered packages carry package/source identity and defs hashes in authoring resolution.
+6. Existing `aos.sync.json` files in the current tree have been removed or replaced with
+   `aos.world.json` where operational config is still needed.
+7. `build.workflow_dir` has been renamed to `build.module_dir`.
+8. `modules.pull` has been removed from world config.
+
+Still open:
+
+1. surface discovered AIR package identities more directly from user-facing build/check commands,
+2. keep explicit CLI/test-harness override behavior covered for non-Cargo fixtures,
+3. decide later whether `aos.air.lock.json` is needed after the discovery model settles.
 
 ## Goal
 
@@ -91,7 +110,7 @@ Illustrative shape:
   "version": 1,
   "air": { "mode": "auto" },
   "build": {
-    "workflow_dir": "workflow",
+    "module_dir": "workflow",
     "profile": "debug",
     "module": "demiurge/Demiurge_wasm@1"
   },
@@ -113,9 +132,6 @@ Illustrative shape:
       }
     ]
   },
-  "modules": {
-    "pull": false
-  }
 }
 ```
 
@@ -124,6 +140,8 @@ This file should be sparse in practice. Most worlds should not need to set `air`
 ## Migration Plan
 
 ### Phase 3A: Read Optional `aos.world.json`
+
+Status: implemented.
 
 Add a new loader that checks, in order:
 
@@ -136,6 +154,8 @@ Do not keep `aos.sync.json` as a deprecated alias. Existing sync files should be
 
 ### Phase 3B: Move AIR Source Resolution To Auto Discovery
 
+Status: implemented for the normal authoring path.
+
 Build `AirSource` resolution from:
 
 1. local world/workflow generated AIR,
@@ -146,6 +166,8 @@ Build `AirSource` resolution from:
 This removes `air.imports` from local world config.
 
 ### Phase 3C: Expose Discovered AIR Identity
+
+Status: partially implemented.
 
 Expose discovered AIR packages and defs hashes from build/check commands.
 
@@ -159,6 +181,8 @@ The first version should:
 
 ### Phase 3D: Migrate Existing Sync Files
 
+Status: implemented for existing in-tree sync files.
+
 Remove existing `aos.sync.json` files and replace only the still-needed operational parts:
 
 1. `worlds/demiurge/aos.sync.json` becomes optional `aos.world.json` or inferred defaults,
@@ -169,6 +193,8 @@ Remove existing `aos.sync.json` files and replace only the still-needed operatio
 4. all `aos-agent` AIR import wiring is removed from config files.
 
 ### Phase 3E: Remove Sync-File AIR Imports
+
+Status: implemented for the normal authoring path.
 
 Remove sync-file AIR import support from the normal authoring path. Docs and examples should use:
 
@@ -184,6 +210,8 @@ Remove sync-file AIR import support from the normal authoring path. Docs and exa
 - Do not require every world to use Rust-authored AIR.
 
 ## Exit Criteria
+
+Status: mostly met, except for more direct user-facing discovered package output.
 
 P3 is complete when:
 

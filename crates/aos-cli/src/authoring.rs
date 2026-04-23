@@ -7,8 +7,8 @@ use anyhow::{Context, Result, anyhow};
 use aos_air_types::{AirNode, Manifest, ModuleRuntime, WasmArtifact};
 use aos_authoring::bundle::import_genesis;
 use aos_authoring::{
-    SyncConfig, WorldBundle, build_bundle_from_local_world_ephemeral, build_patch_document,
-    load_all_sync_secret_values, load_sync_config,
+    WorldBundle, WorldConfig, build_bundle_from_local_world_ephemeral, build_patch_document,
+    load_all_world_secret_values, load_world_config,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::Store;
@@ -94,12 +94,15 @@ pub fn resolve_local_dirs(local_root: Option<&Path>) -> Result<LocalWorldDirs> {
 
 pub fn load_sync_entries(
     world_root: &Path,
-    map: Option<&Path>,
+    config_path: Option<&Path>,
     reference: Option<&str>,
     dir: Option<&Path>,
-) -> Result<(PathBuf, SyncConfig, Vec<SyncEntry>)> {
-    let (map_path, config) = load_sync_config(world_root, map)?;
-    let map_root = map_path.parent().unwrap_or(world_root);
+) -> Result<(Option<PathBuf>, WorldConfig, Vec<SyncEntry>)> {
+    let (resolved_config_path, config) = load_world_config(world_root, config_path)?;
+    let config_root = resolved_config_path
+        .as_deref()
+        .and_then(Path::parent)
+        .unwrap_or(world_root);
     let entries = match (reference, dir) {
         (Some(reference), Some(dir)) => vec![SyncEntry {
             reference: reference.to_string(),
@@ -112,7 +115,7 @@ pub fn load_sync_entries(
             .iter()
             .map(|entry| SyncEntry {
                 reference: entry.reference.clone(),
-                dir: resolve_map_path(map_root, &entry.dir),
+                dir: resolve_map_path(config_root, &entry.dir),
                 ignore: entry.ignore.clone(),
                 annotations: entry.annotations.clone(),
             })
@@ -123,7 +126,7 @@ pub fn load_sync_entries(
             ));
         }
     };
-    Ok((map_path, config, entries))
+    Ok((resolved_config_path, config, entries))
 }
 
 pub fn build_bundle_from_world(
@@ -220,11 +223,12 @@ pub async fn sync_node_secrets(
     client: &ApiClient,
     universe_id: Option<&str>,
     local_root: Option<&Path>,
-    map: Option<&Path>,
+    config_path: Option<&Path>,
     actor: Option<&str>,
 ) -> Result<Value> {
     let dirs = resolve_local_dirs(local_root)?;
-    let (map_path, _config, values) = load_all_sync_secret_values(&dirs.root, map)?;
+    let (resolved_config_path, _config, values) =
+        load_all_world_secret_values(&dirs.root, config_path)?;
     let mut synced = Vec::new();
     let mut unchanged = Vec::new();
 
@@ -304,7 +308,9 @@ pub async fn sync_node_secrets(
     }
 
     Ok(serde_json::json!({
-        "map": map_path.display().to_string(),
+        "config": resolved_config_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
         "synced": synced,
         "unchanged": unchanged,
     }))

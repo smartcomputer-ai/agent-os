@@ -41,28 +41,27 @@ def _patch_workflow_sdk_path(workflow_dir: Path, sdk_root: Optional[Path]) -> No
     cargo_toml.write_text(cargo_text.replace(_SDK_PATH_SENTINEL, str(sdk_root)))
 
 
-def _write_minimal_sync_config(
+def _write_minimal_world_config(
     world_root: Path,
     *,
-    workflow_dir: str = "workflow",
+    module_dir: str = "workflow",
     include_workspaces: bool = False,
 ) -> None:
     config: Dict[str, Any] = {
         "air": {"dir": "air"},
-        "modules": {"pull": False},
         "version": 1,
     }
-    if (world_root / workflow_dir).exists():
-        config["build"] = {"workflow_dir": workflow_dir}
+    if (world_root / module_dir).exists():
+        config["build"] = {"module_dir": module_dir}
     if include_workspaces:
         config["workspaces"] = [
             {
-                "dir": workflow_dir,
+                "dir": module_dir,
                 "ignore": ["target/", ".git/", ".aos/"],
                 "ref": "workflow",
             }
         ]
-    (world_root / "aos.sync.json").write_text(json.dumps(config, indent=2))
+    (world_root / "aos.world.json").write_text(json.dumps(config, indent=2))
 
 
 def _resolve_repo_root(repo_root: Optional[PathLike]) -> Path:
@@ -141,8 +140,8 @@ def stage_authored_world(
         staged_root / "workflow",
         _coerce_path(sdk_root) if sdk_root is not None else None,
     )
-    if not (staged_root / "aos.sync.json").exists():
-        _write_minimal_sync_config(
+    if not (staged_root / "aos.world.json").exists():
+        _write_minimal_world_config(
             staged_root,
             include_workspaces=include_workspaces,
         )

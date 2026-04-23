@@ -98,7 +98,7 @@ struct WorldCreateArgs {
     /// Make the created world the selected world on the current CLI profile.
     #[arg(long)]
     select: bool,
-    /// Sync configured secrets from `aos.sync.json` before create. On local targets this is a
+    /// Sync configured secrets from `aos.world.json` before create. On local targets this is a
     /// compatibility no-op; local secrets resolve from env/`.env` at world load.
     #[arg(long)]
     sync_secrets: bool,
@@ -431,7 +431,7 @@ struct WorldPatchArgs {
     /// Force a fresh workflow build instead of reusing cache.
     #[arg(long)]
     force_build: bool,
-    /// Sync configured secrets from `aos.sync.json` before patch. On local targets this is a
+    /// Sync configured secrets from `aos.world.json` before patch. On local targets this is a
     /// compatibility no-op; local secrets resolve from env/`.env` at world load.
     #[arg(long)]
     sync_secrets: bool,
@@ -664,7 +664,7 @@ async fn handle_create(
                     "local --sync-secrets is a compatibility no-op; local secrets resolve from env/.env at world load",
                 );
             } else {
-                print_verbose(output, "syncing node secrets from aos.sync.json");
+                print_verbose(output, "syncing node secrets from aos.world.json");
                 let synced = sync_node_secrets(
                     client,
                     secret_universe.as_deref(),
@@ -1116,7 +1116,7 @@ async fn handle_patch(
                 "local --sync-secrets is a compatibility no-op; local secrets resolve from env/.env at world load",
             );
         } else {
-            print_verbose(output, "syncing node secrets from aos.sync.json");
+            print_verbose(output, "syncing node secrets from aos.world.json");
             let universe_id = super::common::universe_id_for_world(client, &world).await?;
             let synced = sync_node_secrets(
                 client,

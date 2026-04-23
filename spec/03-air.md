@@ -445,7 +445,7 @@ receipts and stream frames rather than re-running external work.
 
 ## 16) On-Disk Expectations
 
-- authored world root: `air/`, `aos.sync.json`, `.aos/`
+- authored world root: `air/`, optional `aos.world.json`, `.aos/`
 - canonical manifest export: `manifest.air.json` and optional `.aos/manifest.air.cbor`
 - local caches: `.aos/cache/{modules,wasmtime}`
 - node state root: `.aos-node/`

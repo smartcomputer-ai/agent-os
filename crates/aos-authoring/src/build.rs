@@ -16,8 +16,9 @@ use walkdir::WalkDir;
 use crate::bundle::WorldBundle;
 use crate::local::local_state_paths;
 use crate::manifest_loader;
-use crate::sync::ResolvedAirImport;
-use crate::sync::{load_sync_config, resolve_air_sources};
+use crate::sync::ResolvedAirPackage;
+use crate::sync::ResolvedAirSources;
+use crate::sync::{load_world_config, resolve_world_air_sources};
 use crate::util::{is_placeholder_hash, set_module_wasm_hash};
 
 pub struct CompiledWorkflow {
@@ -85,25 +86,22 @@ pub fn compile_workflow(
     )
 }
 
-pub fn materialize_imported_cargo_modules(
-    imports: &[ResolvedAirImport],
+pub fn materialize_discovered_cargo_modules(
+    packages: &[ResolvedAirPackage],
     world_root: &Path,
     cache_root: &Path,
     store: &impl Store,
     build_profile: WorkflowBuildProfile,
 ) -> Result<usize> {
     let mut refreshed = 0usize;
-    for import in imports {
-        let Some(manifest_path) = import.cargo_manifest_path.as_ref() else {
-            continue;
-        };
-        for module_name in &import.cargo_module_names {
+    for package in packages {
+        for module_name in &package.module_names {
             let Some(bin_name) = module_bin_name(module_name) else {
                 continue;
             };
             let bytes = build_cargo_wasm_bin(
-                manifest_path,
-                import.cargo_package.as_deref(),
+                &package.manifest_path,
+                Some(package.package_name.as_str()),
                 bin_name.as_str(),
                 cache_root,
                 build_profile,
@@ -136,7 +134,7 @@ pub fn materialize_imported_cargo_modules(
 
 /// Build a world bundle from a local authored-world root.
 ///
-/// This resolves sync imports, materializes imported cargo modules, optionally
+/// This resolves AIR sources, materializes discovered cargo modules, optionally
 /// compiles the local workflow crate, patches placeholder hashes, refreshes
 /// manifest module refs, and returns the opened local store alongside the
 /// assembled bundle.
@@ -206,9 +204,14 @@ fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
 ) -> Result<(WorldBundle, Vec<String>)> {
     let air_dir = world_root.join("air");
     let workflow_dir = world_root.join("workflow");
-    let (map_path, config) = load_sync_config(world_root, None)?;
-    let map_root = map_path.parent().unwrap_or(world_root);
-    let air_sources = resolve_air_sources(world_root, map_root, &config, &air_dir, &workflow_dir)?;
+    let (config_path, config) = load_world_config(world_root, None)?;
+    let air_sources = resolve_world_air_sources(
+        world_root,
+        config_path.as_deref(),
+        &config,
+        &air_dir,
+        &workflow_dir,
+    )?;
     let assets = manifest_loader::load_from_air_sources_with_defs(
         std::sync::Arc::new(store.clone()),
         &air_sources.sources,
@@ -218,16 +221,16 @@ fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
 
     let mut loaded = assets.loaded;
     let secrets = assets.secrets;
-    materialize_imported_cargo_modules(
-        &air_sources.imports,
+    materialize_discovered_cargo_modules(
+        &air_sources.packages,
         world_root,
         &paths.cache_root(),
         store,
         build_profile,
     )?;
-    let compiled = if workflow_dir.exists() {
+    let compiled = if air_sources.module_dir.exists() {
         Some(compile_workflow_with_cache_override(
-            &workflow_dir,
+            &air_sources.module_dir,
             Some(&paths.module_cache_dir()),
             store,
             force_build,
@@ -252,7 +255,7 @@ fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
 }
 
 /// Build a loaded manifest directly from authored AIR plus an optional workflow crate,
-/// without requiring a full local-world root or sync config.
+/// without requiring a full local-world root or world config.
 ///
 /// This is the narrow authoring path for workflow-focused harness tests. The caller
 /// provides a scratch root for local build/cache state; the authored inputs remain in place.
@@ -289,6 +292,48 @@ pub fn build_loaded_manifest_from_authored_paths(
         &mut loaded,
         &store,
         module_root,
+        &paths,
+        compiled.as_ref().map(|value| &value.hash),
+        None,
+    )?;
+    refresh_module_refs(&mut loaded, &store)?;
+    Ok((store, loaded))
+}
+
+pub fn build_loaded_manifest_from_air_sources(
+    air_sources: &ResolvedAirSources,
+    scratch_root: &Path,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(MemStore, LoadedManifest)> {
+    let paths = local_state_paths(scratch_root);
+    paths.ensure_root().context("create local state root")?;
+    let store = MemStore::new();
+    let assets = manifest_loader::load_from_air_sources_with_defs(
+        std::sync::Arc::new(store.clone()),
+        &air_sources.sources,
+    )
+    .with_context(|| format!("load AIR assets from {}", air_sources.air_dir.display()))?
+    .ok_or_else(|| anyhow!("no manifest found in {}", air_sources.air_dir.display()))?;
+
+    let mut loaded = assets.loaded;
+    let compiled = air_sources
+        .module_dir
+        .exists()
+        .then(|| {
+            compile_workflow_with_cache_override(
+                &air_sources.module_dir,
+                None,
+                &store,
+                force_build,
+                build_profile,
+            )
+        })
+        .transpose()?;
+    resolve_placeholder_modules(
+        &mut loaded,
+        &store,
+        scratch_root,
         &paths,
         compiled.as_ref().map(|value| &value.hash),
         None,
@@ -855,10 +900,6 @@ mod tests {
                 std::fs::copy(entry.path(), &target)?;
             }
         }
-        std::fs::write(
-            temp.path().join("aos.sync.json"),
-            serde_json::to_vec(&serde_json::json!({ "version": 1 }))?,
-        )?;
         let aos_state = temp.path().join(".aos");
         if aos_state.exists() {
             std::fs::remove_dir_all(&aos_state)?;
@@ -886,6 +927,32 @@ mod tests {
         );
         assert!(!temp.path().join(".aos/cas").exists());
         assert!(temp.path().join(".aos/cache/modules").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn demiurge_bundle_build_discovers_agent_air_from_cargo() -> Result<()> {
+        let world_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("worlds/demiurge")
+            .canonicalize()?;
+
+        let (_store, bundle, warnings) = build_bundle_from_local_world_ephemeral_with_profile(
+            &world_root,
+            false,
+            WorkflowBuildProfile::Debug,
+        )?;
+
+        assert!(warnings.iter().any(|warning| {
+            warning.contains("discovered AIR package aos-agent") && warning.contains("sha256:")
+        }));
+        assert!(
+            bundle
+                .manifest
+                .modules
+                .iter()
+                .any(|module| module.name.as_str() == "aos.agent/SessionWorkflow_wasm@1")
+        );
         Ok(())
     }
 
