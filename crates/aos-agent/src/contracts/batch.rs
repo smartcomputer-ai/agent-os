@@ -35,9 +35,9 @@ pub struct ActiveToolBatch {
     pub params_hash: Option<String>,
     pub plan: ToolBatchPlan,
     pub call_status: BTreeMap<String, ToolCallStatus>,
-    #[aos(schema_ref = "sys/PendingEffectSetText@1")]
+    #[aos(schema_ref = PendingEffectSet<String>)]
     pub pending_effects: PendingEffectSet<String>,
-    #[aos(schema_ref = "sys/PendingBatchText@1")]
+    #[aos(schema_ref = PendingBatch<String>)]
     pub execution: PendingBatch<String>,
     pub llm_results: BTreeMap<String, super::ToolCallLlmResult>,
     #[aos(air_type = "hash")]

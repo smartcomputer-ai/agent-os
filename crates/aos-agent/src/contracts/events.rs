@@ -47,7 +47,7 @@ pub enum SessionIngressKind {
         reason: Option<String>,
     },
     #[default]
-    #[aos(schema_ref = "aos.agent/SessionNoop@1")]
+    #[aos(schema_ref = SessionNoop)]
     Noop,
 }
 
@@ -83,7 +83,7 @@ pub enum SessionWorkflowEvent {
     ReceiptRejected(EffectReceiptRejected),
     StreamFrame(EffectStreamFrameEnvelope),
     #[default]
-    #[aos(schema_ref = "aos.agent/SessionNoop@1")]
+    #[aos(schema_ref = SessionNoop)]
     Noop,
 }
 

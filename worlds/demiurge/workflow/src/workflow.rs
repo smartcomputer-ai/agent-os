@@ -4,8 +4,9 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_agent::{
-    EffectReceiptRejected, RunId, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionLifecycleChanged, default_tool_registry,
+    EffectReceiptRejected, ReasoningEffort, RunId, SessionConfig, SessionId, SessionIngress,
+    SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, SessionNoop,
+    default_tool_registry,
     helpers::{
         LocalSessionSpawnRequest, SessionHandoffRequest, SpawnOrHandoffSessionPlan,
         SpawnOrHandoffSessionRequest, emit_session_ingresses, spawn_or_handoff_session,
@@ -31,8 +32,8 @@ const EFFECT_BLOB_PUT: &str = "sys/blob.put@1";
 pub struct TaskConfig {
     pub provider: Option<String>,
     pub model: Option<String>,
-    #[aos(schema_ref = "aos.agent/ReasoningEffort@1")]
-    pub reasoning_effort: Option<aos_agent::ReasoningEffort>,
+    #[aos(schema_ref = ReasoningEffort)]
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub max_tokens: Option<u64>,
     pub tool_profile: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
@@ -45,7 +46,7 @@ pub struct TaskConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
 #[aos(schema = "demiurge/TaskSubmitted@1")]
 pub struct TaskSubmitted {
-    #[aos(schema_ref = "aos.agent/SessionId@1")]
+    #[aos(schema_ref = SessionId)]
     pub task_id: SessionId,
     #[aos(air_type = "time")]
     pub observed_at_ns: u64,
@@ -86,13 +87,13 @@ pub enum PendingStage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
 #[aos(schema = "demiurge/TaskFinished@1")]
 pub struct TaskFinished {
-    #[aos(schema_ref = "aos.agent/SessionId@1")]
+    #[aos(schema_ref = SessionId)]
     pub task_id: SessionId,
     #[aos(air_type = "time")]
     pub observed_at_ns: u64,
     pub status: TaskStatus,
     pub failure: Option<TaskFailure>,
-    #[aos(schema_ref = "aos.agent/RunId@1")]
+    #[aos(schema_ref = RunId)]
     pub run_id: Option<RunId>,
     #[aos(air_type = "hash")]
     pub output_ref: Option<String>,
@@ -101,7 +102,7 @@ pub struct TaskFinished {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
 #[aos(schema = "demiurge/State@1")]
 pub struct DemiurgeState {
-    #[aos(schema_ref = "aos.agent/SessionId@1")]
+    #[aos(schema_ref = SessionId)]
     pub task_id: SessionId,
     pub status: TaskStatus,
     pub workdir: Option<String>,
@@ -125,13 +126,13 @@ pub struct DemiurgeState {
 #[serde(tag = "$tag", content = "$value")]
 pub enum DemiurgeWorkflowEvent {
     TaskSubmitted(TaskSubmitted),
-    #[aos(schema_ref = "aos.agent/SessionLifecycleChanged@1")]
+    #[aos(schema_ref = SessionLifecycleChanged)]
     SessionLifecycleChanged(SessionLifecycleChanged),
     Receipt(EffectReceiptEnvelope),
     ReceiptRejected(EffectReceiptRejected),
     StreamFrame(aos_agent::EffectStreamFrameEnvelope),
     #[default]
-    #[aos(schema_ref = "aos.agent/SessionNoop@1")]
+    #[aos(schema_ref = SessionNoop)]
     Noop,
 }
 

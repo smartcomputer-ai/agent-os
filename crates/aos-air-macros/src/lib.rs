@@ -57,7 +57,7 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
     let schema_name = attrs
         .schema
         .ok_or_else(|| syn::Error::new(input.ident.span(), "missing #[aos(schema = \"...\")]"))?;
-    let generated_schema = match &input.data {
+    let generated_type = match &input.data {
         Data::Struct(data) => {
             if let Some(override_value) = attrs.override_value {
                 let Some(ty_json) = type_override_json(override_value, input.ident.span())? else {
@@ -66,25 +66,19 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
                         "expected AIR type override",
                     ));
                 };
-                generated_defschema_type(&schema_name, ty_json, input.ident.span())
+                ty_json
             } else {
                 match &data.fields {
                     Fields::Named(fields) => {
                         let field_entries = named_field_entries(&fields.named)?;
-                        generated_defschema_record(&schema_name, &field_entries, input.ident.span())
+                        generated_record_type(&field_entries, input.ident.span())
                     }
-                    Fields::Unit => generated_defschema_type(
-                        &schema_name,
-                        generated_static_json(primitive_json("unit"), input.ident.span()),
-                        input.ident.span(),
-                    ),
+                    Fields::Unit => {
+                        generated_static_json(primitive_json("unit"), input.ident.span())
+                    }
                     Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
                         let field = fields.unnamed.first().expect("one unnamed field");
-                        generated_defschema_type(
-                            &schema_name,
-                            type_json_with_override(&field.ty, parse_type_override(&field.attrs)?)?,
-                            input.ident.span(),
-                        )
+                        type_json_with_attrs(&field.ty, parse_field_attrs(&field.attrs)?)?
                     }
                     other => {
                         return Err(syn::Error::new(
@@ -100,7 +94,7 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
             for variant in &data.variants {
                 variant_entries.push(variant_json_entry(variant)?);
             }
-            generated_defschema_variant(&schema_name, &variant_entries, input.ident.span())
+            generated_variant_type(&variant_entries, input.ident.span())
         }
         _ => {
             return Err(syn::Error::new(
@@ -109,6 +103,8 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
             ));
         }
     };
+    let generated_schema =
+        generated_defschema_type(&schema_name, generated_type.clone(), input.ident.span());
     let ident = input.ident;
     let schema_name_lit = LitStr::new(&schema_name, ident.span());
     let schema_lit = LitStr::new(
@@ -116,6 +112,7 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
         ident.span(),
     );
     let schema_expr = generated_schema.expr;
+    let type_expr = generated_type.expr;
 
     Ok(quote! {
         impl ::aos_wasm_sdk::AirSchemaRef for #ident {
@@ -127,6 +124,10 @@ fn derive_air_schema_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
 
             fn air_schema_json() -> ::aos_wasm_sdk::__aos_export::String {
                 #schema_expr
+            }
+
+            fn air_schema_type_json() -> ::aos_wasm_sdk::__aos_export::String {
+                #type_expr
             }
         }
     })
@@ -333,8 +334,7 @@ fn parse_type_attrs(attrs: &[Attribute], owner: &str) -> syn::Result<AosTypeAttr
                 Ok(())
             } else if meta.path.is_ident("schema_ref") {
                 ensure_no_override_option(&parsed.override_value, &meta)?;
-                let value: LitStr = meta.value()?.parse()?;
-                parsed.override_value = Some(FieldOverride::SchemaRef(value.value()));
+                parsed.override_value = Some(parse_schema_ref_override(&meta)?);
                 Ok(())
             } else if meta.path.is_ident("air_type") {
                 ensure_no_override_option(&parsed.override_value, &meta)?;
@@ -346,6 +346,10 @@ fn parse_type_attrs(attrs: &[Attribute], owner: &str) -> syn::Result<AosTypeAttr
                 let value: LitStr = meta.value()?.parse()?;
                 parsed.override_value = Some(FieldOverride::RawJson(value.value()));
                 Ok(())
+            } else if meta.path.is_ident("inline") || meta.path.is_ident("map_key_air_type") {
+                Err(meta.error(format!(
+                    "supported #[aos(...)] options for {owner} are schema, schema_ref, air_type, and type_json"
+                )))
             } else {
                 Err(meta.error(format!(
                     "supported #[aos(...)] options for {owner} are schema, schema_ref, air_type, and type_json"
@@ -356,48 +360,103 @@ fn parse_type_attrs(attrs: &[Attribute], owner: &str) -> syn::Result<AosTypeAttr
     Ok(parsed)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum FieldOverride {
     None,
-    SchemaRef(String),
+    SchemaRefLiteral(String),
+    SchemaRefType(Type),
     Primitive(String),
     RawJson(String),
 }
 
+#[derive(Clone)]
+struct FieldAttrs {
+    override_value: FieldOverride,
+    map_key_air_type: Option<String>,
+    inline: bool,
+}
+
+impl Default for FieldAttrs {
+    fn default() -> Self {
+        Self {
+            override_value: FieldOverride::None,
+            map_key_air_type: None,
+            inline: false,
+        }
+    }
+}
+
+fn parse_schema_ref_override(meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<FieldOverride> {
+    let value = meta.value()?;
+    if value.peek(LitStr) {
+        let value: LitStr = value.parse()?;
+        return Ok(FieldOverride::SchemaRefLiteral(value.value()));
+    }
+    let ty: Type = value.parse()?;
+    ensure_type_path(&ty, "schema_ref")?;
+    Ok(FieldOverride::SchemaRefType(ty))
+}
+
+#[derive(Clone)]
 struct GeneratedJson {
     static_json: Option<String>,
     expr: proc_macro2::TokenStream,
 }
 
-fn parse_type_override(attrs: &[Attribute]) -> syn::Result<FieldOverride> {
-    let mut override_value = FieldOverride::None;
+fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrs> {
+    let mut parsed = FieldAttrs::default();
     for attr in attrs.iter().filter(|attr| attr.path().is_ident("aos")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("schema_ref") {
-                ensure_no_override(&override_value, &meta)?;
-                let value: LitStr = meta.value()?.parse()?;
-                override_value = FieldOverride::SchemaRef(value.value());
+                ensure_no_override(&parsed.override_value, &meta)?;
+                ensure_not_inline(parsed.inline, &meta)?;
+                parsed.override_value = parse_schema_ref_override(&meta)?;
                 Ok(())
             } else if meta.path.is_ident("air_type") {
-                ensure_no_override(&override_value, &meta)?;
+                ensure_no_override(&parsed.override_value, &meta)?;
+                ensure_not_inline(parsed.inline, &meta)?;
                 let value: LitStr = meta.value()?.parse()?;
-                override_value = FieldOverride::Primitive(value.value());
+                parsed.override_value = FieldOverride::Primitive(value.value());
                 Ok(())
             } else if meta.path.is_ident("type_json") {
-                ensure_no_override(&override_value, &meta)?;
+                ensure_no_override(&parsed.override_value, &meta)?;
+                ensure_not_inline(parsed.inline, &meta)?;
                 let value: LitStr = meta.value()?.parse()?;
-                override_value = FieldOverride::RawJson(value.value());
+                parsed.override_value = FieldOverride::RawJson(value.value());
+                Ok(())
+            } else if meta.path.is_ident("map_key_air_type") {
+                if parsed.map_key_air_type.is_some() {
+                    return Err(meta.error("field already has an AIR map key override"));
+                }
+                let value: LitStr = meta.value()?.parse()?;
+                parsed.map_key_air_type = Some(value.value());
+                Ok(())
+            } else if meta.path.is_ident("inline") {
+                ensure_no_override(&parsed.override_value, &meta)?;
+                if parsed.map_key_air_type.is_some() {
+                    return Err(meta.error("inline fields cannot define a map key override"));
+                }
+                parsed.inline = true;
                 Ok(())
             } else {
-                Err(meta.error("supported field options are schema_ref, air_type, and type_json"))
+                Err(meta.error(
+                    "supported field options are schema_ref, air_type, type_json, map_key_air_type, and inline",
+                ))
             }
         })?;
     }
-    Ok(override_value)
+    Ok(parsed)
 }
 
 fn variant_json_entry(variant: &Variant) -> syn::Result<(String, GeneratedJson)> {
-    let override_value = parse_type_override(&variant.attrs)?;
+    let attrs = parse_field_attrs(&variant.attrs)?;
+    if attrs.inline || attrs.map_key_air_type.is_some() {
+        return Err(syn::Error::new(
+            variant.span(),
+            "AirSchema enum variants do not support inline or map_key_air_type",
+        ));
+    }
+    let override_value = attrs.override_value;
     let name = variant.ident.to_string();
     let ty_json = if let Some(override_json) =
         type_override_json(override_value.clone(), variant.span())?
@@ -415,7 +474,7 @@ fn variant_json_entry(variant: &Variant) -> syn::Result<(String, GeneratedJson)>
             Fields::Unit => generated_static_json(primitive_json("unit"), variant.span()),
             Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
                 let field = fields.unnamed.first().expect("one unnamed field");
-                type_json_with_override(&field.ty, parse_type_override(&field.attrs)?)?
+                type_json_with_attrs(&field.ty, parse_field_attrs(&field.attrs)?)?
             }
             Fields::Named(fields) => {
                 generated_record_type(&named_field_entries(&fields.named)?, variant.span())
@@ -441,8 +500,8 @@ fn named_field_entries(
             .as_ref()
             .ok_or_else(|| syn::Error::new(field.span(), "expected named field"))?;
         let name = ident.to_string();
-        let override_value = parse_type_override(&field.attrs)?;
-        let ty_json = type_json_with_override(&field.ty, override_value)?;
+        let attrs = parse_field_attrs(&field.attrs)?;
+        let ty_json = type_json_with_attrs(&field.ty, attrs)?;
         field_entries.push((name, ty_json));
     }
     Ok(field_entries)
@@ -470,6 +529,30 @@ fn ensure_no_override_option(
     }
 }
 
+fn ensure_not_inline(inline: bool, meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<()> {
+    if inline {
+        Err(meta.error("inline fields cannot define an AIR type override"))
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_type_path(ty: &Type, key: &str) -> syn::Result<()> {
+    let Type::Path(path) = ty else {
+        return Err(syn::Error::new(
+            ty.span(),
+            format!("AIR option '{key}' must be a string literal or type path"),
+        ));
+    };
+    if path.qself.is_some() {
+        return Err(syn::Error::new(
+            ty.span(),
+            format!("AIR option '{key}' does not support qualified self paths"),
+        ));
+    }
+    Ok(())
+}
+
 fn type_json(ty: &Type) -> syn::Result<GeneratedJson> {
     let Type::Path(path) = ty else {
         return Err(syn::Error::new(ty.span(), "unsupported AIR field type"));
@@ -493,23 +576,61 @@ fn type_json(ty: &Type) -> syn::Result<GeneratedJson> {
         }
         "BTreeMap" => {
             let (key, value) = two_generic_types(&segment.arguments, ty.span(), "BTreeMap")?;
-            if !is_string_type(key) {
-                return Err(syn::Error::new(
-                    key.span(),
-                    "AIR only supports BTreeMap<String, T> in this phase",
-                ));
-            }
-            Ok(map_generated_json(type_json(value)?, ty.span()))
+            let key_json = map_key_json(key, None)?;
+            Ok(map_generated_json(key_json, type_json(value)?, ty.span()))
         }
         _ => Ok(generated_schema_ref_for_type(ty)),
     }
 }
 
-fn type_json_with_override(ty: &Type, override_value: FieldOverride) -> syn::Result<GeneratedJson> {
-    let Some(base) = type_override_json(override_value, ty.span())? else {
+fn type_json_with_attrs(ty: &Type, attrs: FieldAttrs) -> syn::Result<GeneratedJson> {
+    if attrs.inline {
+        return Ok(generated_inline_type_for_type(ty));
+    }
+    if attrs.map_key_air_type.is_some() || is_btree_map_type(ty) {
+        return map_type_json_with_attrs(ty, attrs);
+    }
+    let Some(base) = type_override_json(attrs.override_value, ty.span())? else {
         return type_json(ty);
     };
     Ok(wrap_generated_json_for_outer_type(ty, base))
+}
+
+fn map_type_json_with_attrs(ty: &Type, attrs: FieldAttrs) -> syn::Result<GeneratedJson> {
+    if is_option_or_vec_type(ty) {
+        return Err(syn::Error::new(
+            ty.span(),
+            "map_key_air_type cannot be applied through Option<T> or Vec<T>",
+        ));
+    }
+    let map_parts = btree_map_types(ty)?;
+    let key_json = if let Some(key_air_type) = attrs.map_key_air_type.as_deref() {
+        map_key_primitive_json(key_air_type).ok_or_else(|| {
+            syn::Error::new(
+                ty.span(),
+                format!("unsupported AIR map key primitive override '{key_air_type}'"),
+            )
+        })?
+    } else if let Some((key, _)) = map_parts {
+        map_key_json(key, None)?
+    } else {
+        primitive_json("text")
+    };
+
+    let value_json = if let Some((_, value)) = map_parts {
+        let Some(base) = type_override_json(attrs.override_value, value.span())? else {
+            return Ok(map_generated_json(key_json, type_json(value)?, ty.span()));
+        };
+        wrap_generated_json_for_outer_type(value, base)
+    } else {
+        type_override_json(attrs.override_value, ty.span())?.ok_or_else(|| {
+            syn::Error::new(
+                ty.span(),
+                "map_key_air_type on non-BTreeMap fields requires schema_ref, air_type, or type_json",
+            )
+        })?
+    };
+    Ok(map_generated_json(key_json, value_json, ty.span()))
 }
 
 fn type_override_json(
@@ -517,10 +638,11 @@ fn type_override_json(
     span: proc_macro2::Span,
 ) -> syn::Result<Option<GeneratedJson>> {
     match override_value {
-        FieldOverride::SchemaRef(reference) => Ok(Some(generated_static_json(
+        FieldOverride::SchemaRefLiteral(reference) => Ok(Some(generated_static_json(
             schema_ref_json(&reference),
             span,
         ))),
+        FieldOverride::SchemaRefType(ty) => Ok(Some(generated_schema_ref_for_type(&ty))),
         FieldOverride::Primitive(kind) => Ok(Some(generated_static_json(
             primitive_type_json(&kind).ok_or_else(|| {
                 syn::Error::new(span, format!("unsupported AIR primitive override '{kind}'"))
@@ -590,6 +712,16 @@ fn generated_schema_ref_for_type(ty: &Type) -> GeneratedJson {
     }
 }
 
+fn generated_inline_type_for_type(ty: &Type) -> GeneratedJson {
+    let ty_tokens = quote! { #ty };
+    GeneratedJson {
+        static_json: None,
+        expr: quote! {
+            <#ty_tokens as ::aos_wasm_sdk::AirSchemaExport>::air_schema_type_json()
+        },
+    }
+}
+
 fn wrap_generated_json(kind: &str, inner: GeneratedJson, span: proc_macro2::Span) -> GeneratedJson {
     let static_json = inner
         .static_json
@@ -609,13 +741,17 @@ fn wrap_generated_json(kind: &str, inner: GeneratedJson, span: proc_macro2::Span
     }
 }
 
-fn map_generated_json(value: GeneratedJson, span: proc_macro2::Span) -> GeneratedJson {
+fn map_generated_json(
+    key_json: String,
+    value: GeneratedJson,
+    span: proc_macro2::Span,
+) -> GeneratedJson {
     let static_json = value
         .static_json
         .as_ref()
-        .map(|value_json| format!(r#"{{"map":{{"key":{{"text":{{}}}},"value":{value_json}}}}}"#));
+        .map(|value_json| format!(r#"{{"map":{{"key":{key_json},"value":{value_json}}}}}"#));
     let value_expr = value.expr;
-    let prefix = LitStr::new(r#"{"map":{"key":{"text":{}},"value":"#, span);
+    let prefix = LitStr::new(&format!(r#"{{"map":{{"key":{key_json},"value":"#), span);
     GeneratedJson {
         static_json,
         expr: quote! {{
@@ -695,54 +831,7 @@ fn generated_defschema_type(
     }
 }
 
-fn generated_defschema_record(
-    schema_name: &str,
-    fields: &[(String, GeneratedJson)],
-    span: proc_macro2::Span,
-) -> GeneratedJson {
-    let static_fields: Option<Vec<(String, String)>> = fields
-        .iter()
-        .map(|(field, ty)| {
-            ty.static_json
-                .as_ref()
-                .map(|json| (field.clone(), json.clone()))
-        })
-        .collect();
-    let static_json = static_fields
-        .as_ref()
-        .map(|fields| defschema_record_json(schema_name, fields));
-
-    let schema_name_lit = LitStr::new(schema_name, span);
-    let field_chunks = fields.iter().enumerate().map(|(idx, (field, ty))| {
-        let comma = idx > 0;
-        let field_lit = LitStr::new(field, span);
-        let ty_expr = ty.expr.clone();
-        quote! {
-            if #comma {
-                out.push(',');
-            }
-            ::aos_wasm_sdk::push_air_json_string(&mut out, #field_lit);
-            out.push(':');
-            let field_ty = #ty_expr;
-            out.push_str(&field_ty);
-        }
-    });
-
-    GeneratedJson {
-        static_json,
-        expr: quote! {{
-            let mut out = ::aos_wasm_sdk::__aos_export::String::from(r#"{"$kind":"defschema","name":"#);
-            ::aos_wasm_sdk::push_air_json_string(&mut out, #schema_name_lit);
-            out.push_str(r#","type":{"record":{"#);
-            #(#field_chunks)*
-            out.push_str("}}}");
-            out
-        }},
-    }
-}
-
-fn generated_defschema_variant(
-    schema_name: &str,
+fn generated_variant_type(
     variants: &[(String, GeneratedJson)],
     span: proc_macro2::Span,
 ) -> GeneratedJson {
@@ -756,9 +845,8 @@ fn generated_defschema_variant(
         .collect();
     let static_json = static_variants
         .as_ref()
-        .map(|variants| defschema_variant_json(schema_name, variants));
+        .map(|variants| variant_type_json(variants));
 
-    let schema_name_lit = LitStr::new(schema_name, span);
     let variant_chunks = variants.iter().enumerate().map(|(idx, (variant, ty))| {
         let comma = idx > 0;
         let variant_lit = LitStr::new(variant, span);
@@ -777,11 +865,9 @@ fn generated_defschema_variant(
     GeneratedJson {
         static_json,
         expr: quote! {{
-            let mut out = ::aos_wasm_sdk::__aos_export::String::from(r#"{"$kind":"defschema","name":"#);
-            ::aos_wasm_sdk::push_air_json_string(&mut out, #schema_name_lit);
-            out.push_str(r#","type":{"variant":{"#);
+            let mut out = ::aos_wasm_sdk::__aos_export::String::from(r#"{"variant":{"#);
             #(#variant_chunks)*
-            out.push_str("}}}");
+            out.push_str("}}");
             out
         }},
     }
@@ -853,21 +939,68 @@ fn two_generic_types<'a>(
     Ok((first, second))
 }
 
-fn is_string_type(ty: &Type) -> bool {
+fn is_btree_map_type(ty: &Type) -> bool {
+    path_last_ident(ty).is_some_and(|ident| ident == "BTreeMap")
+}
+
+fn is_option_or_vec_type(ty: &Type) -> bool {
+    path_last_ident(ty).is_some_and(|ident| ident == "Option" || ident == "Vec")
+}
+
+fn btree_map_types(ty: &Type) -> syn::Result<Option<(&Type, &Type)>> {
+    let Type::Path(path) = ty else {
+        return Ok(None);
+    };
+    let Some(segment) = path.path.segments.last() else {
+        return Ok(None);
+    };
+    if segment.ident != "BTreeMap" {
+        return Ok(None);
+    }
+    two_generic_types(&segment.arguments, ty.span(), "BTreeMap").map(Some)
+}
+
+fn path_last_ident(ty: &Type) -> Option<String> {
     match ty {
         Type::Path(path) => path
             .path
             .segments
             .last()
-            .is_some_and(|segment| segment.ident == "String"),
-        _ => false,
+            .map(|segment| segment.ident.to_string()),
+        _ => None,
     }
 }
 
-fn defschema_record_json(schema_name: &str, fields: &[(String, String)]) -> String {
-    let name = json_string(schema_name);
-    let record = record_type_json(fields);
-    format!(r#"{{"$kind":"defschema","name":{name},"type":{record}}}"#)
+fn map_key_json(ty: &Type, override_kind: Option<&str>) -> syn::Result<String> {
+    if let Some(kind) = override_kind {
+        return map_key_primitive_json(kind).ok_or_else(|| {
+            syn::Error::new(
+                ty.span(),
+                format!("unsupported AIR map key primitive override '{kind}'"),
+            )
+        });
+    }
+    let Some(ident) = path_last_ident(ty) else {
+        return Err(syn::Error::new(ty.span(), "unsupported AIR map key type"));
+    };
+    match ident.as_str() {
+        "String" => Ok(primitive_json("text")),
+        "u64" => Ok(primitive_json("nat")),
+        "i64" => Ok(primitive_json("int")),
+        other => Err(syn::Error::new(
+            ty.span(),
+            format!(
+                "unsupported AIR map key type '{other}'; use map_key_air_type for text, nat, int, uuid, or hash keys"
+            ),
+        )),
+    }
+}
+
+fn map_key_primitive_json(kind: &str) -> Option<String> {
+    match kind {
+        "int" | "nat" | "text" | "uuid" | "hash" => Some(primitive_json(kind)),
+        _ => None,
+    }
 }
 
 fn record_type_json(fields: &[(String, String)]) -> String {
@@ -889,9 +1022,8 @@ fn defschema_type_json(schema_name: &str, ty: &str) -> String {
     format!(r#"{{"$kind":"defschema","name":{name},"type":{ty}}}"#)
 }
 
-fn defschema_variant_json(schema_name: &str, variants: &[(String, String)]) -> String {
-    let name = json_string(schema_name);
-    let mut out = format!(r#"{{"$kind":"defschema","name":{name},"type":{{"variant":{{"#);
+fn variant_type_json(variants: &[(String, String)]) -> String {
+    let mut out = String::from(r#"{"variant":{"#);
     for (idx, (variant, ty)) in variants.iter().enumerate() {
         if idx > 0 {
             out.push(',');
@@ -900,7 +1032,7 @@ fn defschema_variant_json(schema_name: &str, variants: &[(String, String)]) -> S
         out.push(':');
         out.push_str(ty);
     }
-    out.push_str("}}}");
+    out.push_str("}}");
     out
 }
 

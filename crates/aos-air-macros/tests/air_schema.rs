@@ -23,7 +23,7 @@ struct TaskSubmitted {
 #[aos(schema = "demo/Composite@1")]
 #[allow(dead_code)]
 struct Composite {
-    #[aos(schema_ref = "demo/TaskSubmitted@1")]
+    #[aos(schema_ref = TaskSubmitted)]
     parent: String,
     optional_parent: Option<TaskSubmitted>,
     #[aos(air_type = "time")]
@@ -45,8 +45,26 @@ struct NewtypeId(String);
 struct RichRecord {
     #[aos(air_type = "hash")]
     refs: Option<Vec<String>>,
-    #[aos(type_json = r#"{"map":{"key":{"nat":{}},"value":{"hash":{}}}}"#)]
+    #[aos(map_key_air_type = "nat", air_type = "hash")]
     refs_by_index: std::collections::BTreeMap<u64, String>,
+    #[aos(schema_ref = aos_wasm_sdk::PendingEffectSet<String>)]
+    pending: aos_wasm_sdk::PendingEffectSet<String>,
+}
+
+#[derive(AirSchema)]
+#[aos(schema = "demo/InlineCommandKind@1")]
+#[allow(dead_code)]
+enum InlineCommandKind {
+    Steer { text: String },
+    Noop,
+}
+
+#[derive(AirSchema)]
+#[aos(schema = "demo/InlineCommand@1")]
+#[allow(dead_code)]
+struct InlineCommand {
+    #[aos(inline)]
+    command: InlineCommandKind,
 }
 
 #[derive(AirSchema)]
@@ -78,7 +96,7 @@ enum DemoEvent {
         code: String,
         detail: String,
     },
-    #[aos(schema_ref = "demo/TaskSubmitted@1")]
+    #[aos(schema_ref = TaskSubmitted)]
     ExternalNoop,
 }
 
@@ -199,6 +217,10 @@ fn derive_air_schema_supports_newtype_and_raw_type_overrides() {
             if matches!(map.map.key, aos_air_types::TypeMapKey::Nat(_))
                 && matches!(map.map.value.as_ref(), TypeExpr::Primitive(TypePrimitive::Hash(_)))
     ));
+    let Some(TypeExpr::Ref(pending_ref)) = record.record.get("pending") else {
+        panic!("expected pending ref");
+    };
+    assert_eq!(pending_ref.reference.as_str(), "sys/PendingEffectSetText@1");
 }
 
 #[test]
@@ -230,6 +252,30 @@ fn derive_air_schema_supports_unit_and_ref_variants() {
     assert!(matches!(
         variant.variant.get("ExternalNoop"),
         Some(TypeExpr::Ref(_))
+    ));
+}
+
+#[test]
+fn derive_air_schema_supports_inline_field_types() {
+    let node: AirNode =
+        serde_json::from_str(&InlineCommand::air_schema_json()).expect("parse generated AIR");
+    let AirNode::Defschema(schema) = node else {
+        panic!("expected defschema");
+    };
+    let TypeExpr::Record(record) = schema.ty else {
+        panic!("expected record schema");
+    };
+    assert!(matches!(
+        record.record.get("command"),
+        Some(TypeExpr::Variant(variant))
+            if matches!(
+                variant.variant.get("Steer"),
+                Some(TypeExpr::Record(record))
+                    if matches!(
+                        record.record.get("text"),
+                        Some(TypeExpr::Primitive(TypePrimitive::Text(_)))
+                    )
+            )
     ));
 }
 

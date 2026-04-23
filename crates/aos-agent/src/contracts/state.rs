@@ -66,7 +66,7 @@ pub struct PendingFollowUpTurn {
     #[aos(air_type = "hash")]
     pub base_message_refs: Vec<String>,
     pub expected_messages: u64,
-    #[aos(type_json = r#"{"map":{"key":{"nat":{}},"value":{"hash":{}}}}"#)]
+    #[aos(map_key_air_type = "nat", air_type = "hash")]
     pub blob_refs_by_index: BTreeMap<u64, String>,
 }
 
@@ -95,15 +95,11 @@ pub struct SessionState {
     pub active_run_id: Option<RunId>,
     pub active_run_config: Option<RunConfig>,
     pub active_tool_batch: Option<ActiveToolBatch>,
-    #[aos(type_json = r#"{"map":{"key":{"hash":{}},"value":{"ref":"sys/PendingEffect@1"}}}"#)]
+    #[aos(map_key_air_type = "hash", schema_ref = PendingEffect)]
     pub pending_effects: PendingEffects,
-    #[aos(
-        type_json = r#"{"map":{"key":{"hash":{}},"value":{"ref":"aos.agent/SharedPendingBlobGet@1"}}}"#
-    )]
+    #[aos(map_key_air_type = "hash", schema_ref = SharedPendingBlobGet)]
     pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
-    #[aos(
-        type_json = r#"{"map":{"key":{"hash":{}},"value":{"ref":"aos.agent/SharedPendingBlobPut@1"}}}"#
-    )]
+    #[aos(map_key_air_type = "hash", schema_ref = SharedPendingBlobPut)]
     pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
     pub pending_follow_up_turn: Option<PendingFollowUpTurn>,
     #[aos(air_type = "hash")]

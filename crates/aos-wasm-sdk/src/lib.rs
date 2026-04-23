@@ -29,6 +29,10 @@ pub trait AirSchemaExport: AirSchemaRef {
     fn air_schema_json() -> String {
         String::from(Self::AIR_SCHEMA_JSON)
     }
+
+    fn air_schema_type_json() -> String {
+        String::new()
+    }
 }
 
 /// Metadata emitted by Rust-authored AIR workflow attributes.
@@ -161,6 +165,8 @@ macro_rules! impl_air_effect_ref {
 impl_air_schema_ref!(aos_wasm_abi::WorkflowContext => "sys/WorkflowContext@1");
 impl_air_schema_ref!(aos_wasm_abi::PureContext => "sys/PureContext@1");
 impl_air_schema_ref!(crate::PendingEffect => "sys/PendingEffect@1");
+impl_air_schema_ref!(crate::PendingEffectSet<alloc::string::String> => "sys/PendingEffectSetText@1");
+impl_air_schema_ref!(crate::PendingBatch<alloc::string::String> => "sys/PendingBatchText@1");
 impl_air_schema_ref!(crate::EffectReceiptEnvelope => "sys/EffectReceiptEnvelope@1");
 impl_air_schema_ref!(crate::EffectReceiptRejected => "sys/EffectReceiptRejected@1");
 impl_air_schema_ref!(crate::EffectStreamFrameEnvelope => "sys/EffectStreamFrame@1");

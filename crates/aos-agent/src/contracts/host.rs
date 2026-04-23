@@ -8,13 +8,12 @@ pub struct HostCommand {
     pub command_id: String,
     #[aos(air_type = "time")]
     pub issued_at: u64,
-    #[aos(
-        type_json = r#"{"variant":{"Steer":{"record":{"text":{"text":{}}}},"FollowUp":{"record":{"text":{"text":{}}}},"Pause":{"unit":{}},"Resume":{"unit":{}},"Cancel":{"record":{"reason":{"option":{"text":{}}}}},"Noop":{"unit":{}}}}"#
-    )]
+    #[aos(inline)]
     pub command: HostCommandKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/HostCommandKind@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum HostCommandKind {
     Steer {
