@@ -1,10 +1,11 @@
 use super::{ToolBatchId, ToolBatchPlan};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
-use aos_wasm_sdk::{PendingBatch, PendingEffectSet};
+use aos_wasm_sdk::{AirSchema, PendingBatch, PendingEffectSet};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, AirSchema)]
+#[aos(schema = "aos.agent/ToolCallStatus@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum ToolCallStatus {
     Queued,
@@ -24,16 +25,22 @@ impl ToolCallStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ActiveToolBatch@1")]
 pub struct ActiveToolBatch {
     pub tool_batch_id: ToolBatchId,
+    #[aos(air_type = "hash")]
     pub intent_id: String,
+    #[aos(air_type = "hash")]
     pub params_hash: Option<String>,
     pub plan: ToolBatchPlan,
     pub call_status: BTreeMap<String, ToolCallStatus>,
+    #[aos(schema_ref = "sys/PendingEffectSetText@1")]
     pub pending_effects: PendingEffectSet<String>,
+    #[aos(schema_ref = "sys/PendingBatchText@1")]
     pub execution: PendingBatch<String>,
     pub llm_results: BTreeMap<String, super::ToolCallLlmResult>,
+    #[aos(air_type = "hash")]
     pub results_ref: Option<String>,
 }
 
