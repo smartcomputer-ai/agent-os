@@ -19,8 +19,8 @@ use serde_json::{Value, json};
 
 use crate::GlobalOpts;
 use crate::authoring::{
-    build_bundle_from_world, build_patch, fetch_remote_manifest, resolve_local_dirs,
-    sync_node_secrets, upload_bundle, upload_patch_bytes, upload_patch_json,
+    build_bundle_from_world, build_patch, build_report_meta, fetch_remote_manifest,
+    resolve_local_dirs, sync_node_secrets, upload_bundle, upload_patch_bytes, upload_patch_json,
 };
 use crate::client::ApiClient;
 use crate::config::{ConfigPaths, load_config, save_config};
@@ -694,32 +694,34 @@ async fn handle_create(
         print_verbose(
             output,
             format!(
-                "building local AIR/workflow bundle from root {} (air {}, workflow {})",
+                "building local AIR/module bundle from root {} (air {}, module {})",
                 dirs.root.display(),
                 dirs.air_dir.display(),
-                dirs.workflow_dir.display()
+                dirs.module_dir.display()
             ),
         );
-        let (store, bundle, mut warnings) =
-            build_bundle_from_world(args.local_root.as_deref(), args.force_build)?;
+        let built = build_bundle_from_world(args.local_root.as_deref(), args.force_build)?;
+        let build_meta = build_report_meta(&built.report);
+        let mut warnings = built.report.warnings.clone();
         if !is_local_target {
             warnings.extend(
                 secret_binding_readiness_warnings(
                     client,
                     secret_universe.as_deref(),
-                    &bundle.manifest,
-                    &bundle.secrets,
+                    &built.bundle.manifest,
+                    &built.bundle.secrets,
                 )
                 .await,
             );
         }
         print_verbose(output, "uploading bundle to node CAS");
-        let uploaded = upload_bundle(client, &store, &bundle, warnings, Some(&dirs)).await?;
+        let uploaded =
+            upload_bundle(client, &built.store, &built.bundle, warnings, Some(&dirs)).await?;
         if args.upload_only {
             return print_success(
                 output,
                 json!({ "manifest_hash": uploaded.manifest_hash }),
-                None,
+                build_meta,
                 uploaded.warnings,
             );
         }
@@ -744,7 +746,7 @@ async fn handle_create(
             let world_id = created_world_id(&data)?;
             select_created_world(global, &world_id)?;
         }
-        return print_success(output, data, None, uploaded.warnings);
+        return print_success(output, data, build_meta, uploaded.warnings);
     }
 
     if let Some(source_selector) = args.from_world.as_deref() {
@@ -1148,22 +1150,23 @@ async fn handle_patch(
     print_verbose(
         output,
         format!(
-            "building local AIR/workflow bundle from root {} (air {}, workflow {})",
+            "building local AIR/module bundle from root {} (air {}, module {})",
             dirs.root.display(),
             dirs.air_dir.display(),
-            dirs.workflow_dir.display()
+            dirs.module_dir.display()
         ),
     );
-    let (store, bundle, mut warnings) =
-        build_bundle_from_world(args.local_root.as_deref(), args.force_build)?;
+    let built = build_bundle_from_world(args.local_root.as_deref(), args.force_build)?;
+    let build_meta = build_report_meta(&built.report);
+    let mut warnings = built.report.warnings.clone();
     if !is_local_target {
         let universe_id = super::common::universe_id_for_world(client, &world).await?;
         warnings.extend(
             secret_binding_readiness_warnings(
                 client,
                 Some(&universe_id),
-                &bundle.manifest,
-                &bundle.secrets,
+                &built.bundle.manifest,
+                &built.bundle.secrets,
             )
             .await,
         );
@@ -1173,7 +1176,7 @@ async fn handle_patch(
         format!("fetching current manifest for world {world}"),
     );
     let remote = fetch_remote_manifest(client, &world).await?;
-    let local_manifest_hash = Hash::of_bytes(&to_canonical_cbor(&bundle.manifest)?).to_hex();
+    let local_manifest_hash = Hash::of_bytes(&to_canonical_cbor(&built.bundle.manifest)?).to_hex();
     if local_manifest_hash == remote.manifest_hash {
         return print_success(
             output,
@@ -1182,14 +1185,15 @@ async fn handle_patch(
                 "manifest_hash": local_manifest_hash,
                 "world": world,
             }),
-            None,
+            build_meta,
             warnings,
         );
     }
     print_verbose(output, "uploading bundle to node CAS");
-    let uploaded = upload_bundle(client, &store, &bundle, warnings, Some(&dirs)).await?;
+    let uploaded =
+        upload_bundle(client, &built.store, &built.bundle, warnings, Some(&dirs)).await?;
     print_verbose(output, "building governance patch document");
-    let patch = build_patch(&remote, &bundle)?;
+    let patch = build_patch(&remote, &built.bundle)?;
     let patch_summary = summarize_patch_document_value(&patch);
     let patch_hash = upload_patch_json(client, &world, &patch).await?;
     print_verbose(output, "submitting governance propose command");
@@ -1303,7 +1307,7 @@ async fn handle_patch(
             }
         }
     }
-    print_success(output, result, None, uploaded.warnings)
+    print_success(output, result, build_meta, uploaded.warnings)
 }
 
 async fn secret_binding_readiness_warnings(

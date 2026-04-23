@@ -18,12 +18,18 @@ use crate::local::local_state_paths;
 use crate::manifest_loader;
 use crate::sync::ResolvedAirPackage;
 use crate::sync::ResolvedAirSources;
-use crate::sync::{load_world_config, resolve_world_air_sources};
+use crate::sync::{default_world_module_dir, load_world_config, resolve_world_air_sources};
 use crate::util::{is_placeholder_hash, set_module_wasm_hash};
 
 pub struct CompiledWorkflow {
     pub hash: HashRef,
     pub cache_hit: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LocalWorldBuildReport {
+    pub warnings: Vec<String>,
+    pub discovered_air_packages: Vec<ResolvedAirPackage>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,17 +160,30 @@ pub fn build_bundle_from_local_world_with_profile(
     force_build: bool,
     build_profile: WorkflowBuildProfile,
 ) -> Result<(FsCas, WorldBundle, Vec<String>)> {
+    let (store, bundle, report) = build_bundle_from_local_world_with_profile_and_report(
+        world_root,
+        force_build,
+        build_profile,
+    )?;
+    Ok((store, bundle, report.warnings))
+}
+
+pub fn build_bundle_from_local_world_with_profile_and_report(
+    world_root: &Path,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(FsCas, WorldBundle, LocalWorldBuildReport)> {
     let paths = local_state_paths(world_root);
     paths.ensure_root().context("create local state root")?;
     let store = FsCas::open_with_paths(&paths).context("open local CAS")?;
-    let (bundle, warnings) = build_bundle_from_local_world_with_store(
+    let (bundle, report) = build_bundle_from_local_world_with_store(
         world_root,
         &paths,
         &store,
         force_build,
         build_profile,
     )?;
-    Ok((store, bundle, warnings))
+    Ok((store, bundle, report))
 }
 
 pub fn build_bundle_from_local_world_ephemeral(
@@ -183,16 +202,29 @@ pub fn build_bundle_from_local_world_ephemeral_with_profile(
     force_build: bool,
     build_profile: WorkflowBuildProfile,
 ) -> Result<(MemStore, WorldBundle, Vec<String>)> {
+    let (store, bundle, report) = build_bundle_from_local_world_ephemeral_with_profile_and_report(
+        world_root,
+        force_build,
+        build_profile,
+    )?;
+    Ok((store, bundle, report.warnings))
+}
+
+pub fn build_bundle_from_local_world_ephemeral_with_profile_and_report(
+    world_root: &Path,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(MemStore, WorldBundle, LocalWorldBuildReport)> {
     let paths = local_state_paths(world_root);
     let store = MemStore::new();
-    let (bundle, warnings) = build_bundle_from_local_world_with_store(
+    let (bundle, report) = build_bundle_from_local_world_with_store(
         world_root,
         &paths,
         &store,
         force_build,
         build_profile,
     )?;
-    Ok((store, bundle, warnings))
+    Ok((store, bundle, report))
 }
 
 fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
@@ -201,16 +233,16 @@ fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
     store: &S,
     force_build: bool,
     build_profile: WorkflowBuildProfile,
-) -> Result<(WorldBundle, Vec<String>)> {
+) -> Result<(WorldBundle, LocalWorldBuildReport)> {
     let air_dir = world_root.join("air");
-    let workflow_dir = world_root.join("workflow");
+    let module_dir = default_world_module_dir(world_root);
     let (config_path, config) = load_world_config(world_root, None)?;
     let air_sources = resolve_world_air_sources(
         world_root,
         config_path.as_deref(),
         &config,
         &air_dir,
-        &workflow_dir,
+        &module_dir,
     )?;
     let assets = manifest_loader::load_from_air_sources_with_defs(
         std::sync::Arc::new(store.clone()),
@@ -248,10 +280,11 @@ fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
         None,
     )?;
     refresh_module_refs(&mut loaded, store)?;
-    Ok((
-        WorldBundle::from_loaded_assets(loaded, secrets),
-        air_sources.warnings,
-    ))
+    let report = LocalWorldBuildReport {
+        warnings: air_sources.warnings,
+        discovered_air_packages: air_sources.packages,
+    };
+    Ok((WorldBundle::from_loaded_assets(loaded, secrets), report))
 }
 
 /// Build a loaded manifest directly from authored AIR plus an optional workflow crate,
@@ -937,15 +970,28 @@ mod tests {
             .join("worlds/demiurge")
             .canonicalize()?;
 
-        let (_store, bundle, warnings) = build_bundle_from_local_world_ephemeral_with_profile(
-            &world_root,
-            false,
-            WorkflowBuildProfile::Debug,
-        )?;
+        let (_store, bundle, report) =
+            build_bundle_from_local_world_ephemeral_with_profile_and_report(
+                &world_root,
+                false,
+                WorkflowBuildProfile::Debug,
+            )?;
 
-        assert!(warnings.iter().any(|warning| {
+        assert!(report.warnings.iter().any(|warning| {
             warning.contains("discovered AIR package aos-agent") && warning.contains("sha256:")
         }));
+        let package = report
+            .discovered_air_packages
+            .iter()
+            .find(|package| package.package_name == "aos-agent")
+            .expect("aos-agent package");
+        assert!(package.defs_hash.starts_with("sha256:"));
+        assert!(
+            package
+                .module_names
+                .iter()
+                .any(|name| name == "aos.agent/SessionWorkflow_wasm@1")
+        );
         assert!(
             bundle
                 .manifest

@@ -5,9 +5,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow, bail};
 use aos_authoring::{
     WorkflowBuildProfile, build_loaded_manifest_from_air_sources,
-    build_loaded_manifest_from_authored_paths, load_required_secret_value_map, load_world_config,
-    local_state_paths, materialize_discovered_cargo_modules, reset_local_runtime_state,
-    resolve_world_air_sources,
+    build_loaded_manifest_from_authored_paths, default_world_module_dir,
+    load_required_secret_value_map, load_world_config, local_state_paths,
+    materialize_discovered_cargo_modules, reset_local_runtime_state, resolve_world_air_sources,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::builtins::{
@@ -150,14 +150,14 @@ pub fn bootstrap_node_world_harness(
 
     let paths = local_state_paths(world_root);
     let air_dir = world_root.join("air");
-    let workflow_dir = world_root.join("workflow");
+    let module_dir = default_world_module_dir(world_root);
     let (config_path, config) = load_world_config(world_root, None).context("load world config")?;
     let air_sources = resolve_world_air_sources(
         world_root,
         config_path.as_deref(),
         &config,
         &air_dir,
-        &workflow_dir,
+        &module_dir,
     )
     .context("resolve local AIR sources")?;
     let stage_store = MemStore::new();

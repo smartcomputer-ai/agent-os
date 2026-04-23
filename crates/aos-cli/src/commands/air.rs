@@ -1,12 +1,16 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use aos_authoring::{DEFAULT_AIR_EXPORT_BIN, write_generated_air_from_cargo_export};
+use aos_authoring::{
+    DEFAULT_AIR_EXPORT_BIN, default_world_module_dir, load_world_config, resolve_world_air_sources,
+    write_generated_air_from_cargo_export,
+};
 use clap::{Args, Subcommand};
-use serde_json::json;
+use serde_json::{Value, json};
 use walkdir::WalkDir;
 
 use crate::GlobalOpts;
+use crate::authoring::discovered_air_packages_value;
 use crate::output::{OutputOpts, print_success};
 
 #[derive(Args, Debug)]
@@ -29,7 +33,7 @@ struct AirGenerateArgs {
     /// World root where generated AIR should be written.
     #[arg(long, default_value = ".")]
     world_root: PathBuf,
-    /// Cargo manifest containing the AIR export binary. Defaults to <world-root>/workflow/Cargo.toml.
+    /// Cargo manifest containing the AIR export binary. Defaults to <world-root>/Cargo.toml when present, else <world-root>/workflow/Cargo.toml.
     #[arg(long)]
     manifest_path: Option<PathBuf>,
     /// Cargo package to run when the manifest is a workspace.
@@ -45,7 +49,7 @@ struct AirCheckArgs {
     /// World root containing the checked-in air/generated/ directory.
     #[arg(long, default_value = ".")]
     world_root: PathBuf,
-    /// Cargo manifest containing the AIR export binary. Defaults to <world-root>/workflow/Cargo.toml.
+    /// Cargo manifest containing the AIR export binary. Defaults to <world-root>/Cargo.toml when present, else <world-root>/workflow/Cargo.toml.
     #[arg(long)]
     manifest_path: Option<PathBuf>,
     /// Cargo package to run when the manifest is a workspace.
@@ -66,7 +70,8 @@ pub(crate) async fn handle(_global: &GlobalOpts, output: OutputOpts, args: AirAr
 fn handle_generate(output: OutputOpts, args: AirGenerateArgs) -> Result<()> {
     let manifest_path = args
         .manifest_path
-        .unwrap_or_else(|| args.world_root.join("workflow/Cargo.toml"));
+        .unwrap_or_else(|| default_world_module_dir(&args.world_root).join("Cargo.toml"));
+    let (discovered_air_packages, warnings) = discover_air_packages_for_output(&args.world_root)?;
     let written = write_generated_air_from_cargo_export(
         &args.world_root,
         &manifest_path,
@@ -84,9 +89,10 @@ fn handle_generate(output: OutputOpts, args: AirGenerateArgs) -> Result<()> {
                 .into_iter()
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>(),
+            "discovered_air_packages": discovered_air_packages,
         }),
         None,
-        vec![],
+        warnings,
     )
 }
 
@@ -94,7 +100,8 @@ fn handle_check(output: OutputOpts, args: AirCheckArgs) -> Result<()> {
     let manifest_path = args
         .manifest_path
         .clone()
-        .unwrap_or_else(|| args.world_root.join("workflow/Cargo.toml"));
+        .unwrap_or_else(|| default_world_module_dir(&args.world_root).join("Cargo.toml"));
+    let (discovered_air_packages, warnings) = discover_air_packages_for_output(&args.world_root)?;
     let temp = tempfile::tempdir().context("create temporary AIR check root")?;
     let written = write_generated_air_from_cargo_export(
         temp.path(),
@@ -154,10 +161,26 @@ fn handle_check(output: OutputOpts, args: AirCheckArgs) -> Result<()> {
                 .into_iter()
                 .filter_map(|path| path.strip_prefix(temp.path()).ok().map(|path| path.display().to_string()))
                 .collect::<Vec<_>>(),
+            "discovered_air_packages": discovered_air_packages,
         }),
         None,
-        vec![],
+        warnings,
     )
+}
+
+fn discover_air_packages_for_output(world_root: &std::path::Path) -> Result<(Value, Vec<String>)> {
+    let (config_path, config) = load_world_config(world_root, None)?;
+    let air_sources = resolve_world_air_sources(
+        world_root,
+        config_path.as_deref(),
+        &config,
+        &world_root.join("air"),
+        &default_world_module_dir(world_root),
+    )?;
+    Ok((
+        discovered_air_packages_value(&air_sources.packages),
+        air_sources.warnings,
+    ))
 }
 
 fn collect_generated_files(root: &std::path::Path) -> Result<Vec<PathBuf>> {

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "build": {
-    "module_dir": "workflow",
+    "module_dir": ".",
     "module": "demiurge/Demiurge_wasm@1"
   },
   "secrets": {
@@ -32,11 +32,14 @@
   "workspaces": [
     {
       "ref": "workflow",
-      "dir": "workflow",
+      "dir": ".",
       "ignore": [
         "target/",
         ".git/",
-        ".aos/"
+        ".aos/",
+        "air/",
+        "modules/",
+        ".env"
       ]
     }
   ]

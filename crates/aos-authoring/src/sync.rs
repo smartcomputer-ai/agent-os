@@ -127,6 +127,14 @@ pub struct ResolvedSecretValue {
     pub plaintext: Vec<u8>,
 }
 
+pub fn default_world_module_dir(world_root: &Path) -> PathBuf {
+    if world_root.join("Cargo.toml").exists() {
+        world_root.to_path_buf()
+    } else {
+        world_root.join("workflow")
+    }
+}
+
 pub fn load_world_config(
     world_root: &Path,
     config_path: Option<&Path>,
@@ -1138,7 +1146,6 @@ mod tests {
     fn resolve_world_air_sources_discovers_aos_metadata_dependency() {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let world_root = workspace_root.join("worlds/demiurge");
-        let workflow_dir = workspace_root.join("worlds/demiurge/workflow");
         let config = WorldConfig::default();
 
         let resolved = resolve_world_air_sources(
@@ -1146,7 +1153,7 @@ mod tests {
             None,
             &config,
             &world_root.join("air"),
-            &workflow_dir,
+            &default_world_module_dir(&world_root),
         )
         .expect("resolve");
 

@@ -39,7 +39,7 @@ export OPENAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
 ```
 
-From the repo root, build the local debug binaries and workflow artifacts once:
+From the repo root, build the local debug binaries and module artifacts once:
 
 ```bash
 rustup target add wasm32-unknown-unknown
@@ -47,6 +47,12 @@ rustup target add wasm32-unknown-unknown
 cargo build -p aos-cli
 cargo build -p aos-sys --target wasm32-unknown-unknown
 cargo build -p aos-agent --bin session_workflow --target wasm32-unknown-unknown
+```
+
+You can inspect the Rust-authored world definition before creating the world:
+
+```bash
+cargo run -q -p aos-cli -- air check --world-root worlds/demiurge --pretty
 ```
 
 In terminal 1, start the unified local node:

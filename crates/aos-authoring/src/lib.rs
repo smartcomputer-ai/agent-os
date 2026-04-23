@@ -9,9 +9,11 @@ pub mod sync;
 pub mod util;
 
 pub use build::{
-    CompiledWorkflow, WorkflowBuildProfile, build_bundle_from_local_world,
+    CompiledWorkflow, LocalWorldBuildReport, WorkflowBuildProfile, build_bundle_from_local_world,
     build_bundle_from_local_world_ephemeral, build_bundle_from_local_world_ephemeral_with_profile,
-    build_bundle_from_local_world_with_profile, build_loaded_manifest_from_air_sources,
+    build_bundle_from_local_world_ephemeral_with_profile_and_report,
+    build_bundle_from_local_world_with_profile,
+    build_bundle_from_local_world_with_profile_and_report, build_loaded_manifest_from_air_sources,
     build_loaded_manifest_from_authored_paths, compile_workflow,
     materialize_discovered_cargo_modules, resolve_placeholder_modules,
     resolve_sys_module_wasm_hash,
@@ -30,7 +32,7 @@ pub use manifest_loader::{
 };
 pub use sync::{
     ResolvedAirPackage, ResolvedAirSources, ResolvedSecretValue, WorldConfig,
-    load_all_world_secret_values, load_required_secret_value_map, load_world_config,
-    resolve_world_air_sources,
+    default_world_module_dir, load_all_world_secret_values, load_required_secret_value_map,
+    load_world_config, resolve_world_air_sources,
 };
 pub use util::{has_placeholder_modules, is_placeholder_hash, patch_modules};

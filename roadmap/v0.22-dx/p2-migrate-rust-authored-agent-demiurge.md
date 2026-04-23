@@ -13,12 +13,13 @@ Completed so far:
 6. Demiurge imports `aos-agent` through Cargo package discovery and no longer has manual
    `aos-agent` AIR import wiring.
 7. Most smoke fixtures remain hand-authored.
+8. Broader authoring/agent/kernel/CLI/smoke validation has passed for the migration slice.
+9. Demiurge now uses a root-crate world layout: `worlds/demiurge/Cargo.toml` plus `src/`.
 
 Still open:
 
-1. broader replay/smoke validation before declaring P2 closed,
-2. practical authoring guide coverage beyond the current top-level and package notes,
-3. any final README updates for Demiurge if that example becomes the primary public walkthrough.
+1. practical authoring guide coverage beyond the current top-level and package notes,
+2. any final README updates for Demiurge if that example becomes the primary public walkthrough.
 
 ## Goal
 
@@ -283,7 +284,7 @@ Required docs:
 
 ## Testing
 
-Status: partially implemented.
+Status: implemented for the current migration slice.
 
 Required tests:
 
@@ -310,7 +311,7 @@ smoke surface green.
 
 ## Exit Criteria
 
-Status: mostly met, pending broader smoke/replay validation and final docs.
+Status: met for implementation; final docs remain follow-up.
 
 P2 is complete when:
 

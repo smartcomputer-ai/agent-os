@@ -7,8 +7,9 @@ use anyhow::{Context, Result, anyhow};
 use aos_air_types::{AirNode, Manifest, ModuleRuntime, WasmArtifact};
 use aos_authoring::bundle::import_genesis;
 use aos_authoring::{
-    WorldBundle, WorldConfig, build_bundle_from_local_world_ephemeral, build_patch_document,
-    load_all_world_secret_values, load_world_config,
+    LocalWorldBuildReport, ResolvedAirPackage, WorldBundle, WorldConfig,
+    build_bundle_from_local_world_ephemeral_with_profile_and_report, build_patch_document,
+    default_world_module_dir, load_all_world_secret_values, load_world_config,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::Store;
@@ -38,13 +39,19 @@ fn with_universe(path: &str, universe_id: &str) -> String {
 pub struct LocalWorldDirs {
     pub root: PathBuf,
     pub air_dir: PathBuf,
-    pub workflow_dir: PathBuf,
+    pub module_dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
 pub struct UploadedBundle {
     pub manifest_hash: String,
     pub warnings: Vec<String>,
+}
+
+pub struct BuiltLocalWorld {
+    pub store: aos_kernel::MemStore,
+    pub bundle: WorldBundle,
+    pub report: LocalWorldBuildReport,
 }
 
 #[derive(Debug, Clone)]
@@ -87,7 +94,7 @@ pub fn resolve_local_dirs(local_root: Option<&Path>) -> Result<LocalWorldDirs> {
     };
     Ok(LocalWorldDirs {
         air_dir: root.join("air"),
-        workflow_dir: root.join("workflow"),
+        module_dir: default_world_module_dir(&root),
         root,
     })
 }
@@ -132,9 +139,47 @@ pub fn load_sync_entries(
 pub fn build_bundle_from_world(
     local_root: Option<&Path>,
     force_build: bool,
-) -> Result<(aos_kernel::MemStore, WorldBundle, Vec<String>)> {
+) -> Result<BuiltLocalWorld> {
     let dirs = resolve_local_dirs(local_root)?;
-    build_bundle_from_local_world_ephemeral(&dirs.root, force_build)
+    let (store, bundle, report) = build_bundle_from_local_world_ephemeral_with_profile_and_report(
+        &dirs.root,
+        force_build,
+        aos_authoring::WorkflowBuildProfile::Release,
+    )?;
+    Ok(BuiltLocalWorld {
+        store,
+        bundle,
+        report,
+    })
+}
+
+pub fn discovered_air_packages_value(packages: &[ResolvedAirPackage]) -> Value {
+    Value::Array(
+        packages
+            .iter()
+            .map(|package| {
+                serde_json::json!({
+                    "package": &package.package_name,
+                    "version": &package.version,
+                    "source": &package.source_id,
+                    "manifest_path": package.manifest_path.display().to_string(),
+                    "air_dir": package.air_dir.display().to_string(),
+                    "root": package.root.display().to_string(),
+                    "defs_hash": &package.defs_hash,
+                    "modules": &package.module_names,
+                })
+            })
+            .collect(),
+    )
+}
+
+pub fn build_report_meta(report: &LocalWorldBuildReport) -> Option<Value> {
+    if report.discovered_air_packages.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "discovered_air_packages": discovered_air_packages_value(&report.discovered_air_packages),
+    }))
 }
 
 pub async fn upload_bundle(
@@ -761,12 +806,12 @@ fn module_source_hint(module_name: &str, source_dirs: Option<&LocalWorldDirs>) -
     let Some(source_dirs) = source_dirs else {
         return "local build inputs".to_string();
     };
-    let workflow_dir = source_dirs.workflow_dir.display();
+    let module_dir = source_dirs.module_dir.display();
     let modules_dir = source_dirs.root.join("modules");
-    if source_dirs.workflow_dir.exists() {
+    if source_dirs.module_dir.exists() {
         format!(
-            "workflow dir {} via ephemeral build artifact (fallback modules dir {} for content-addressed wasm named {}-<sha256>.wasm)",
-            workflow_dir,
+            "module dir {} via ephemeral build artifact (fallback modules dir {} for content-addressed wasm named {}-<sha256>.wasm)",
+            module_dir,
             modules_dir.display(),
             module_name
         )
@@ -895,5 +940,31 @@ mod tests {
             Some("node_secret_store")
         );
         assert_eq!(body.get("actor").and_then(Value::as_str), Some("sync"));
+    }
+
+    #[test]
+    fn build_report_meta_includes_discovered_air_package_identity() {
+        let report = LocalWorldBuildReport {
+            warnings: Vec::new(),
+            discovered_air_packages: vec![ResolvedAirPackage {
+                root: PathBuf::from("/repo/crates/aos-agent/air"),
+                source: aos_authoring::AirSource::imported_directory("/repo/crates/aos-agent/air"),
+                package_name: "aos-agent".into(),
+                version: "0.1.0".into(),
+                source_id: None,
+                manifest_path: PathBuf::from("/repo/crates/aos-agent/Cargo.toml"),
+                air_dir: PathBuf::from("air"),
+                defs_hash: "sha256:abc".into(),
+                module_names: vec!["aos.agent/SessionWorkflow_wasm@1".into()],
+            }],
+        };
+
+        let meta = build_report_meta(&report).expect("meta");
+        let package = &meta["discovered_air_packages"][0];
+        assert_eq!(package["package"], "aos-agent");
+        assert_eq!(package["version"], "0.1.0");
+        assert_eq!(package["defs_hash"], "sha256:abc");
+        assert_eq!(package["air_dir"], "air");
+        assert_eq!(package["modules"][0], "aos.agent/SessionWorkflow_wasm@1");
     }
 }

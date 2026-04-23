@@ -1,6 +1,6 @@
 # P3: Optional World Config And AIR Discovery Cleanup
 
-Status: mostly implemented.
+Status: implemented for the current v0.22 DX slice.
 
 Completed so far:
 
@@ -14,12 +14,15 @@ Completed so far:
    `aos.world.json` where operational config is still needed.
 7. `build.workflow_dir` has been renamed to `build.module_dir`.
 8. `modules.pull` has been removed from world config.
+9. Build output metadata and `aos air generate/check` JSON output include discovered AIR package
+   identity, module names, and defs hashes.
+10. Conventional Rust-authored worlds can put their module crate at the world root; `workflow/`
+    remains a fallback layout.
 
-Still open:
+Follow-up polish:
 
-1. surface discovered AIR package identities more directly from user-facing build/check commands,
-2. keep explicit CLI/test-harness override behavior covered for non-Cargo fixtures,
-3. decide later whether `aos.air.lock.json` is needed after the discovery model settles.
+1. keep explicit CLI/test-harness override behavior covered for non-Cargo fixtures,
+2. decide later whether `aos.air.lock.json` is needed after the discovery model settles.
 
 ## Goal
 
@@ -46,8 +49,8 @@ world. It is not part of world identity, manifest hashing, replay, or governance
 If the file is absent, authoring commands should infer conventional defaults:
 
 1. local AIR from `air/` when present,
-2. local workflow crate from `workflow/Cargo.toml` when present,
-3. Rust-authored AIR from the workflow crate export binary when present,
+2. local module crate from `<world-root>/Cargo.toml` when present, else `workflow/Cargo.toml`,
+3. Rust-authored AIR from the module crate export binary when present,
 4. reusable AIR from direct Cargo dependencies with `[package.metadata.aos]`,
 5. no workspace sync roots,
 6. no secret source config beyond explicit CLI inputs and existing env fallbacks.
@@ -110,7 +113,7 @@ Illustrative shape:
   "version": 1,
   "air": { "mode": "auto" },
   "build": {
-    "module_dir": "workflow",
+    "module_dir": ".",
     "profile": "debug",
     "module": "demiurge/Demiurge_wasm@1"
   },
@@ -167,7 +170,7 @@ This removes `air.imports` from local world config.
 
 ### Phase 3C: Expose Discovered AIR Identity
 
-Status: partially implemented.
+Status: implemented.
 
 Expose discovered AIR packages and defs hashes from build/check commands.
 
@@ -211,7 +214,7 @@ Remove sync-file AIR import support from the normal authoring path. Docs and exa
 
 ## Exit Criteria
 
-Status: mostly met, except for more direct user-facing discovered package output.
+Status: met for the current v0.22 DX slice.
 
 P3 is complete when:
 

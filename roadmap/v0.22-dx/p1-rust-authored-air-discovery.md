@@ -236,7 +236,7 @@ The first CLI surface is the same bridge:
 
 ```text
 aos air generate --world-root <world-root> \
-  --manifest-path <workflow/Cargo.toml> \
+  --manifest-path <Cargo.toml> \
   --bin aos-air-export
 ```
 

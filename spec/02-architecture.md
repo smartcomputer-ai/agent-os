@@ -235,11 +235,11 @@ Example:
 {
   "version": 1,
   "air": { "dir": "air" },
-  "build": { "module_dir": "workflow", "module": "demo/Workflow@1" },
+  "build": { "module_dir": ".", "module": "demo/Workflow@1" },
   "workspaces": [
     {
       "ref": "workflow",
-      "dir": "workflow",
+      "dir": ".",
       "ignore": ["target/", ".git/", ".aos/"],
       "annotations": {
         "README.md": { "sys/commit.title": "Notes Workflow" },
