@@ -209,7 +209,7 @@ Modules have no ambient access to time or randomness; all nondeterminism is isol
 
 - authored world root/
   - manifest.air.json (text) and manifest.air.cbor (canonical)
-  - aos.sync.json
+  - aos.world.json
   - .aos/cas/<shard>/<digest>
   - .aos/cache/modules/
   - .aos/cache/wasmtime/
@@ -224,23 +224,22 @@ Modules have no ambient access to time or randomness; all nondeterminism is isol
 
 ### CLI
 
-The command‑line interface provides: world init/info; propose/shadow/diff/approve/apply; run/tail; receipts ls/show; workspace inspection and edits (`aos ws`); filesystem sync via `aos push`/`aos pull` with `aos.sync.json`.
+The command‑line interface provides: world init/info; propose/shadow/diff/approve/apply; run/tail; receipts ls/show; workspace inspection and edits (`aos ws`); filesystem sync via `aos push`/`aos pull` with optional `aos.world.json` workspace entries.
 
 ### Workspace Sync (`aos push` / `aos pull`)
 
-Workspace sync is driven by a map file, `aos.sync.json` (world root by default). It declares how AIR assets, workflow builds, module exports, and workspace trees map to local directories.
+Workspace sync is driven by optional `aos.world.json` workspace entries. AIR assets and workflow builds are discovered from the authored world layout and Cargo package metadata; the world config only carries local operator concerns such as workspace directories and secret sources.
 
 Example:
 ```json
 {
   "version": 1,
   "air": { "dir": "air" },
-  "build": { "workflow_dir": "workflow", "module": "demo/Workflow@1" },
-  "modules": { "pull": false },
+  "build": { "module_dir": ".", "module": "demo/Workflow@1" },
   "workspaces": [
     {
       "ref": "workflow",
-      "dir": "workflow",
+      "dir": ".",
       "ignore": ["target/", ".git/", ".aos/"],
       "annotations": {
         "README.md": { "sys/commit.title": "Notes Workflow" },

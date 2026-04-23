@@ -233,7 +233,7 @@ Update only support crates that directly block the P1 targets.
 Likely touch points:
 
 - `crates/aos-cbor` only if schema embedding or canonicalization wrappers require changes.
-- `crates/aos-sys` only if generated support schemas or fixture helpers still emit `op` fields.
+- Generated support schema emitters only if fixture helpers still emit `op` fields.
 - `crates/aos-wasm-sdk` only if compile-time helper types are needed by authoring tests.
 
 Do not chase every downstream compile error in this phase.

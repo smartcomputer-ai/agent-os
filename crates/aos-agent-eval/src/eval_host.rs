@@ -118,7 +118,6 @@ impl EvalHost {
             &mut assets.loaded,
             store.as_ref(),
             cfg.world_root,
-            &paths,
             None,
             None,
         )?;

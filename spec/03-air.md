@@ -286,13 +286,11 @@ Built-in schemas live in `spec/defs/builtin-schemas*.air.json`.
 Built-in modules live in `spec/defs/builtin-modules.air.json`, including:
 
 - `sys/builtin_effects@1`
-- `sys/workspace_wasm@1`
-- `sys/http_publish_wasm@1`
+- `sys/builtin_workspaces@1`
 
 Built-in workflows live in `spec/defs/builtin-workflows.air.json`, including:
 
 - `sys/Workspace@1`
-- `sys/HttpPublish@1`
 
 Built-in effects live in `spec/defs/builtin-effects.air.json`, including:
 
@@ -445,7 +443,7 @@ receipts and stream frames rather than re-running external work.
 
 ## 16) On-Disk Expectations
 
-- authored world root: `air/`, `aos.sync.json`, `.aos/`
+- authored world root: `air/`, optional `aos.world.json`, `.aos/`
 - canonical manifest export: `manifest.air.json` and optional `.aos/manifest.air.cbor`
 - local caches: `.aos/cache/{modules,wasmtime}`
 - node state root: `.aos-node/`

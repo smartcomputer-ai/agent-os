@@ -1,9 +1,11 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use aos_wasm_sdk::AirSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, AirSchema)]
+#[aos(schema = "aos.agent/ToolExecutor@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum ToolExecutor {
     Effect { effect: String },
@@ -19,7 +21,10 @@ impl Default for ToolExecutor {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default, AirSchema,
+)]
+#[aos(schema = "aos.agent/ToolMapper@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum ToolMapper {
     #[default]
@@ -45,7 +50,8 @@ pub enum ToolMapper {
     WorkspaceCommit,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ToolAvailabilityRule@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum ToolAvailabilityRule {
     #[default]
@@ -54,16 +60,19 @@ pub enum ToolAvailabilityRule {
     HostSessionNotReady,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ToolParallelismHint@1")]
 pub struct ToolParallelismHint {
     pub parallel_safe: bool,
     pub resource_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ToolSpec@1")]
 pub struct ToolSpec {
     pub tool_id: String,
     pub tool_name: String,
+    #[aos(air_type = "hash")]
     pub tool_ref: String,
     pub description: String,
     pub args_schema_json: String,
@@ -73,7 +82,8 @@ pub struct ToolSpec {
     pub parallelism_hint: ToolParallelismHint,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/HostSessionStatus@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum HostSessionStatus {
     #[default]
@@ -83,16 +93,19 @@ pub enum HostSessionStatus {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ToolRuntimeContext@1")]
 pub struct ToolRuntimeContext {
     pub host_session_id: Option<String>,
     pub host_session_status: Option<HostSessionStatus>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/EffectiveTool@1")]
 pub struct EffectiveTool {
     pub tool_id: String,
     pub tool_name: String,
+    #[aos(air_type = "hash")]
     pub tool_ref: String,
     pub description: String,
     pub args_schema_json: String,
@@ -102,7 +115,8 @@ pub struct EffectiveTool {
     pub resource_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/EffectiveToolSet@1")]
 pub struct EffectiveToolSet {
     pub profile_id: String,
     pub profile_requires_host_session: bool,
@@ -136,20 +150,23 @@ impl EffectiveToolSet {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ToolCallObserved@1")]
 pub struct ToolCallObserved {
     pub call_id: String,
     pub tool_name: String,
     #[serde(default)]
     pub arguments_json: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[aos(air_type = "hash")]
     pub arguments_ref: Option<String>,
     pub provider_call_id: Option<String>,
 }
 
 pub type ToolCallObservedList = Vec<ToolCallObserved>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ToolCallLlmResult@1")]
 pub struct ToolCallLlmResult {
     pub call_id: String,
     pub tool_id: String,
@@ -158,12 +175,14 @@ pub struct ToolCallLlmResult {
     pub output_json: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/PlannedToolCall@1")]
 pub struct PlannedToolCall {
     pub call_id: String,
     pub tool_id: String,
     pub tool_name: String,
     pub arguments_json: String,
+    #[aos(air_type = "hash")]
     pub arguments_ref: Option<String>,
     pub provider_call_id: Option<String>,
     pub mapper: ToolMapper,
@@ -173,19 +192,22 @@ pub struct PlannedToolCall {
     pub accepted: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ToolExecutionPlan@1")]
 pub struct ToolExecutionPlan {
     pub groups: Vec<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ToolBatchPlan@1")]
 pub struct ToolBatchPlan {
     pub observed_calls: Vec<ToolCallObserved>,
     pub planned_calls: Vec<PlannedToolCall>,
     pub execution_plan: ToolExecutionPlan,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/ToolOverrideScope@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum ToolOverrideScope {
     #[default]

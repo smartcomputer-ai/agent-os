@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/aos-air-macros",
   "crates/aos-authoring",
   "crates/aos-effect-types",
   "crates/aos-air-types",
@@ -17,7 +18,6 @@ members = [
   "crates/aos-cli",
   "crates/aos-wasm-sdk",
   "crates/aos-wasm-build",
-  "crates/aos-sys",
   "crates/aos-smoke",
   "crates/aos-agent-eval",
   "crates/fabric-protocol",
@@ -40,6 +40,7 @@ publish = false
 # Workspace crates.
 aos-agent = { path = "crates/aos-agent" }
 aos-air-exec = { path = "crates/aos-air-exec" }
+aos-air-macros = { path = "crates/aos-air-macros" }
 aos-air-types = { path = "crates/aos-air-types" }
 aos-authoring = { path = "crates/aos-authoring" }
 aos-cbor = { path = "crates/aos-cbor" }
@@ -49,7 +50,6 @@ aos-effects = { path = "crates/aos-effects" }
 aos-kernel = { path = "crates/aos-kernel" }
 aos-llm = { path = "crates/aos-llm" }
 aos-node = { path = "crates/aos-node" }
-aos-sys = { path = "crates/aos-sys" }
 aos-wasm = { path = "crates/aos-wasm" }
 aos-wasm-abi = { path = "crates/aos-wasm-abi" }
 aos-wasm-build = { path = "crates/aos-wasm-build" }
@@ -77,6 +77,8 @@ jsonschema = "0.17"
 log = "0.4"
 once_cell = "1"
 predicates = "3"
+proc-macro2 = "1"
+quote = "1"
 regex = "1"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
@@ -85,6 +87,7 @@ serde_cbor = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+syn = { version = "2", features = ["full"] }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }

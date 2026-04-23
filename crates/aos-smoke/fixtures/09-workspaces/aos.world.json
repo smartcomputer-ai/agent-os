@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "build": {
+    "module_dir": "workflow"
+  },
+  "workspaces": [
+    {
+      "ref": "workflow",
+      "dir": "workflow",
+      "ignore": [
+        "target/",
+        ".git/",
+        ".aos/"
+      ]
+    }
+  ]
+}

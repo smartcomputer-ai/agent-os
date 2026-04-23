@@ -6,11 +6,17 @@
 #![no_std]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 pub mod contracts;
 #[doc(hidden)]
 pub mod helpers;
 #[doc(hidden)]
 pub mod tools;
+mod workflow;
+mod world;
 
 pub use contracts::*;
+pub use workflow::SessionWorkflow;
+pub use world::aos_air_nodes;

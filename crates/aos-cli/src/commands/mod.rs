@@ -1,3 +1,4 @@
+pub(crate) mod air;
 pub(crate) mod cas;
 pub(crate) mod common;
 pub(crate) mod node;
@@ -32,6 +33,8 @@ pub(crate) enum Command {
     /// Inspect and synchronize node workspaces.
     #[command(visible_alias = "ws")]
     Workspace(workspace::WorkspaceArgs),
+    /// Generate and inspect authored AIR.
+    Air(air::AirArgs),
     /// Interact with the universe CAS directly.
     Cas(cas::CasArgs),
     /// Inspect service state.
@@ -50,6 +53,7 @@ pub(crate) async fn dispatch(
         Command::Universe(args) => universe::handle(global, output, args).await,
         Command::World(args) => world::handle(global, output, args).await,
         Command::Workspace(args) => workspace::handle(global, output, args).await,
+        Command::Air(args) => air::handle(global, output, args).await,
         Command::Cas(args) => cas::handle(global, output, args).await,
         Command::Ops(args) => ops::handle(global, output, args).await,
     }

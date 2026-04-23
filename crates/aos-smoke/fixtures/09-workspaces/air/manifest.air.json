@@ -33,10 +33,6 @@
         "event": "sys/WorkspaceCommit@1",
         "key_field": "workspace",
         "workflow": "sys/Workspace@1"
-      },
-      {
-        "event": "sys/HttpPublishSet@1",
-        "workflow": "sys/HttpPublish@1"
       }
     ]
   },

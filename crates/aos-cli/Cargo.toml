@@ -11,7 +11,6 @@ aos-air-types.workspace = true
 aos-cbor.workspace = true
 aos-kernel.workspace = true
 aos-node.workspace = true
-aos-sys.workspace = true
 
 anyhow.workspace = true
 base64.workspace = true
@@ -23,6 +22,7 @@ serde.workspace = true
 serde_bytes.workspace = true
 serde_cbor.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing-subscriber.workspace = true
 uuid.workspace = true
@@ -32,7 +32,6 @@ walkdir.workspace = true
 assert_cmd.workspace = true
 axum.workspace = true
 predicates.workspace = true
-tempfile.workspace = true
 tower.workspace = true
 
 [[bin]]

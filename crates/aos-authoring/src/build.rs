@@ -16,13 +16,20 @@ use walkdir::WalkDir;
 use crate::bundle::WorldBundle;
 use crate::local::local_state_paths;
 use crate::manifest_loader;
-use crate::sync::ResolvedAirImport;
-use crate::sync::{load_sync_config, resolve_air_sources};
+use crate::sync::ResolvedAirPackage;
+use crate::sync::ResolvedAirSources;
+use crate::sync::{default_world_module_dir, load_world_config, resolve_world_air_sources};
 use crate::util::{is_placeholder_hash, set_module_wasm_hash};
 
 pub struct CompiledWorkflow {
     pub hash: HashRef,
     pub cache_hit: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LocalWorldBuildReport {
+    pub warnings: Vec<String>,
+    pub discovered_air_packages: Vec<ResolvedAirPackage>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,25 +92,22 @@ pub fn compile_workflow(
     )
 }
 
-pub fn materialize_imported_cargo_modules(
-    imports: &[ResolvedAirImport],
+pub fn materialize_discovered_cargo_modules(
+    packages: &[ResolvedAirPackage],
     world_root: &Path,
     cache_root: &Path,
     store: &impl Store,
     build_profile: WorkflowBuildProfile,
 ) -> Result<usize> {
     let mut refreshed = 0usize;
-    for import in imports {
-        let Some(manifest_path) = import.cargo_manifest_path.as_ref() else {
-            continue;
-        };
-        for module_name in &import.cargo_module_names {
+    for package in packages {
+        for module_name in &package.module_names {
             let Some(bin_name) = module_bin_name(module_name) else {
                 continue;
             };
             let bytes = build_cargo_wasm_bin(
-                manifest_path,
-                import.cargo_package.as_deref(),
+                &package.manifest_path,
+                Some(package.package_name.as_str()),
                 bin_name.as_str(),
                 cache_root,
                 build_profile,
@@ -136,7 +140,7 @@ pub fn materialize_imported_cargo_modules(
 
 /// Build a world bundle from a local authored-world root.
 ///
-/// This resolves sync imports, materializes imported cargo modules, optionally
+/// This resolves AIR sources, materializes discovered cargo modules, optionally
 /// compiles the local workflow crate, patches placeholder hashes, refreshes
 /// manifest module refs, and returns the opened local store alongside the
 /// assembled bundle.
@@ -156,17 +160,30 @@ pub fn build_bundle_from_local_world_with_profile(
     force_build: bool,
     build_profile: WorkflowBuildProfile,
 ) -> Result<(FsCas, WorldBundle, Vec<String>)> {
+    let (store, bundle, report) = build_bundle_from_local_world_with_profile_and_report(
+        world_root,
+        force_build,
+        build_profile,
+    )?;
+    Ok((store, bundle, report.warnings))
+}
+
+pub fn build_bundle_from_local_world_with_profile_and_report(
+    world_root: &Path,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(FsCas, WorldBundle, LocalWorldBuildReport)> {
     let paths = local_state_paths(world_root);
     paths.ensure_root().context("create local state root")?;
     let store = FsCas::open_with_paths(&paths).context("open local CAS")?;
-    let (bundle, warnings) = build_bundle_from_local_world_with_store(
+    let (bundle, report) = build_bundle_from_local_world_with_store(
         world_root,
         &paths,
         &store,
         force_build,
         build_profile,
     )?;
-    Ok((store, bundle, warnings))
+    Ok((store, bundle, report))
 }
 
 pub fn build_bundle_from_local_world_ephemeral(
@@ -185,16 +202,29 @@ pub fn build_bundle_from_local_world_ephemeral_with_profile(
     force_build: bool,
     build_profile: WorkflowBuildProfile,
 ) -> Result<(MemStore, WorldBundle, Vec<String>)> {
+    let (store, bundle, report) = build_bundle_from_local_world_ephemeral_with_profile_and_report(
+        world_root,
+        force_build,
+        build_profile,
+    )?;
+    Ok((store, bundle, report.warnings))
+}
+
+pub fn build_bundle_from_local_world_ephemeral_with_profile_and_report(
+    world_root: &Path,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(MemStore, WorldBundle, LocalWorldBuildReport)> {
     let paths = local_state_paths(world_root);
     let store = MemStore::new();
-    let (bundle, warnings) = build_bundle_from_local_world_with_store(
+    let (bundle, report) = build_bundle_from_local_world_with_store(
         world_root,
         &paths,
         &store,
         force_build,
         build_profile,
     )?;
-    Ok((store, bundle, warnings))
+    Ok((store, bundle, report))
 }
 
 fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
@@ -203,32 +233,36 @@ fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
     store: &S,
     force_build: bool,
     build_profile: WorkflowBuildProfile,
-) -> Result<(WorldBundle, Vec<String>)> {
+) -> Result<(WorldBundle, LocalWorldBuildReport)> {
     let air_dir = world_root.join("air");
-    let workflow_dir = world_root.join("workflow");
-    let (map_path, config) = load_sync_config(world_root, None)?;
-    let map_root = map_path.parent().unwrap_or(world_root);
-    let air_sources = resolve_air_sources(world_root, map_root, &config, &air_dir, &workflow_dir)?;
-    let assets = manifest_loader::load_from_assets_with_imports_and_defs(
+    let module_dir = default_world_module_dir(world_root);
+    let (config_path, config) = load_world_config(world_root, None)?;
+    let air_sources = resolve_world_air_sources(
+        world_root,
+        config_path.as_deref(),
+        &config,
+        &air_dir,
+        &module_dir,
+    )?;
+    let assets = manifest_loader::load_from_air_sources_with_defs(
         std::sync::Arc::new(store.clone()),
-        &air_sources.air_dir,
-        &air_sources.import_dirs,
+        &air_sources.sources,
     )
     .with_context(|| format!("load AIR assets from {}", air_sources.air_dir.display()))?
     .ok_or_else(|| anyhow!("no manifest found in {}", air_sources.air_dir.display()))?;
 
     let mut loaded = assets.loaded;
     let secrets = assets.secrets;
-    materialize_imported_cargo_modules(
-        &air_sources.imports,
+    materialize_discovered_cargo_modules(
+        &air_sources.packages,
         world_root,
         &paths.cache_root(),
         store,
         build_profile,
     )?;
-    let compiled = if workflow_dir.exists() {
+    let compiled = if air_sources.module_dir.exists() {
         Some(compile_workflow_with_cache_override(
-            &workflow_dir,
+            &air_sources.module_dir,
             Some(&paths.module_cache_dir()),
             store,
             force_build,
@@ -241,19 +275,19 @@ fn build_bundle_from_local_world_with_store<S: Store + Clone + 'static>(
         &mut loaded,
         store,
         world_root,
-        paths,
         compiled.as_ref().map(|value| &value.hash),
         None,
     )?;
     refresh_module_refs(&mut loaded, store)?;
-    Ok((
-        WorldBundle::from_loaded_assets(loaded, secrets),
-        air_sources.warnings,
-    ))
+    let report = LocalWorldBuildReport {
+        warnings: air_sources.warnings,
+        discovered_air_packages: air_sources.packages,
+    };
+    Ok((WorldBundle::from_loaded_assets(loaded, secrets), report))
 }
 
 /// Build a loaded manifest directly from authored AIR plus an optional workflow crate,
-/// without requiring a full local-world root or sync config.
+/// without requiring a full local-world root or world config.
 ///
 /// This is the narrow authoring path for workflow-focused harness tests. The caller
 /// provides a scratch root for local build/cache state; the authored inputs remain in place.
@@ -290,7 +324,47 @@ pub fn build_loaded_manifest_from_authored_paths(
         &mut loaded,
         &store,
         module_root,
-        &paths,
+        compiled.as_ref().map(|value| &value.hash),
+        None,
+    )?;
+    refresh_module_refs(&mut loaded, &store)?;
+    Ok((store, loaded))
+}
+
+pub fn build_loaded_manifest_from_air_sources(
+    air_sources: &ResolvedAirSources,
+    scratch_root: &Path,
+    force_build: bool,
+    build_profile: WorkflowBuildProfile,
+) -> Result<(MemStore, LoadedManifest)> {
+    let paths = local_state_paths(scratch_root);
+    paths.ensure_root().context("create local state root")?;
+    let store = MemStore::new();
+    let assets = manifest_loader::load_from_air_sources_with_defs(
+        std::sync::Arc::new(store.clone()),
+        &air_sources.sources,
+    )
+    .with_context(|| format!("load AIR assets from {}", air_sources.air_dir.display()))?
+    .ok_or_else(|| anyhow!("no manifest found in {}", air_sources.air_dir.display()))?;
+
+    let mut loaded = assets.loaded;
+    let compiled = air_sources
+        .module_dir
+        .exists()
+        .then(|| {
+            compile_workflow_with_cache_override(
+                &air_sources.module_dir,
+                None,
+                &store,
+                force_build,
+                build_profile,
+            )
+        })
+        .transpose()?;
+    resolve_placeholder_modules(
+        &mut loaded,
+        &store,
+        scratch_root,
         compiled.as_ref().map(|value| &value.hash),
         None,
     )?;
@@ -301,9 +375,8 @@ pub fn build_loaded_manifest_from_authored_paths(
 /// Resolve placeholder module hashes in a loaded manifest.
 ///
 /// Resolution order:
-/// 1) Known system modules from workspace build artifacts (fallback: sys-module cache)
-/// 2) `modules/` directory in the world root (content-addressed wasm files)
-/// 3) Compiled workflow hash (if provided) when exactly one non-sys placeholder remains
+/// 1) `modules/` directory in the world root (content-addressed wasm files)
+/// 2) Compiled workflow hash (if provided) when exactly one placeholder remains
 ///
 /// If `specific_module` is provided, that module is patched with the compiled hash
 /// (and must currently be a placeholder).
@@ -311,7 +384,6 @@ pub fn resolve_placeholder_modules(
     loaded: &mut LoadedManifest,
     store: &impl Store,
     world_root: &Path,
-    paths: &LocalStatePaths,
     compiled_hash: Option<&HashRef>,
     specific_module: Option<&str>,
 ) -> Result<usize> {
@@ -339,24 +411,10 @@ pub fn resolve_placeholder_modules(
         }
     }
 
-    let mut unresolved_non_sys: Vec<String> = Vec::new();
-    let mut unresolved_sys: Vec<String> = Vec::new();
+    let mut unresolved: Vec<String> = Vec::new();
 
     for (name, module) in loaded.modules.iter_mut() {
         if !is_placeholder_hash(module) {
-            continue;
-        }
-        if let Some(spec) = sys_module_spec(name.as_str()) {
-            match resolve_sys_module(store, paths, world_root, spec)? {
-                Some(hash) => {
-                    if set_module_wasm_hash(module, hash) {
-                        patched += 1;
-                    }
-                }
-                None => {
-                    unresolved_sys.push(name.to_string());
-                }
-            }
             continue;
         }
         if let Some(hash) = resolve_from_world_modules(store, world_root, name.as_str())? {
@@ -365,13 +423,13 @@ pub fn resolve_placeholder_modules(
             }
             continue;
         }
-        unresolved_non_sys.push(name.to_string());
+        unresolved.push(name.to_string());
     }
 
-    if !unresolved_non_sys.is_empty() {
+    if !unresolved.is_empty() {
         if let Some(hash) = compiled_hash {
-            if unresolved_non_sys.len() == 1 {
-                let target = unresolved_non_sys.remove(0);
+            if unresolved.len() == 1 {
+                let target = unresolved.remove(0);
                 if let Some(module) = loaded.modules.get_mut(target.as_str()) {
                     if set_module_wasm_hash(module, hash.clone()) {
                         patched += 1;
@@ -381,20 +439,15 @@ pub fn resolve_placeholder_modules(
         }
     }
 
-    let mut still_missing: Vec<String> = Vec::new();
-    still_missing.extend(unresolved_non_sys);
-    still_missing.extend(unresolved_sys);
-
-    if !still_missing.is_empty() {
+    if !unresolved.is_empty() {
         let mut msg = String::from("unresolved module wasm hashes:\n");
-        for name in &still_missing {
+        for name in &unresolved {
             msg.push_str(&format!("  - {name}\n"));
         }
         msg.push_str("\nResolution hints:\n");
         msg.push_str(
             "  - add content-addressed wasm to <world>/modules/<name>@<ver>-<hash>.wasm\n",
         );
-        msg.push_str("  - build system modules with `cargo build -p aos-sys --target wasm32-unknown-unknown`\n");
         if compiled_hash.is_none() {
             msg.push_str("  - or provide a workflow/ to compile local modules\n");
         }
@@ -429,15 +482,6 @@ fn resolve_from_world_modules(
     module_name: &str,
 ) -> Result<Option<HashRef>> {
     let modules_dir = world_root.join("modules");
-    resolve_from_modules_dir(store, &modules_dir, module_name)
-}
-
-fn resolve_from_sys_cache(
-    store: &impl Store,
-    paths: &LocalStatePaths,
-    module_name: &str,
-) -> Result<Option<HashRef>> {
-    let modules_dir = sys_cache_dir(paths);
     resolve_from_modules_dir(store, &modules_dir, module_name)
 }
 
@@ -512,85 +556,6 @@ fn resolve_from_modules_dir(
         .context("create hash ref")
 }
 
-struct SysModuleSpec {
-    name: &'static str,
-    bin: &'static str,
-}
-
-fn sys_module_spec(name: &str) -> Option<&'static SysModuleSpec> {
-    SYS_MODULES.iter().find(|spec| spec.name == name)
-}
-
-const SYS_MODULES: &[SysModuleSpec] = &[
-    SysModuleSpec {
-        name: "sys/workspace_wasm@1",
-        bin: "workspace",
-    },
-    SysModuleSpec {
-        name: "sys/http_publish_wasm@1",
-        bin: "http_publish",
-    },
-];
-
-fn resolve_sys_module(
-    store: &impl Store,
-    paths: &LocalStatePaths,
-    world_root: &Path,
-    spec: &SysModuleSpec,
-) -> Result<Option<HashRef>> {
-    let target_dir = resolve_target_dir();
-    let profiles = ["debug", "release"];
-    for profile in profiles {
-        let path = target_dir
-            .join("wasm32-unknown-unknown")
-            .join(profile)
-            .join(format!("{}.wasm", spec.bin));
-        if path.exists() {
-            let bytes =
-                fs::read(&path).with_context(|| format!("read system wasm {}", path.display()))?;
-            let hash = Hash::of_bytes(&bytes).to_hex();
-            let stored = store.put_blob(&bytes).context("store system wasm blob")?;
-            let hash_ref = HashRef::new(stored.to_hex()).context("create hash ref")?;
-            if hash_ref.as_str() != hash {
-                anyhow::bail!(
-                    "system wasm hash mismatch for '{}': computed {hash}, stored {}",
-                    spec.name,
-                    hash_ref.as_str()
-                );
-            }
-            persist_module_file(&sys_cache_dir(paths), spec.name, hash_ref.as_str(), &bytes)?;
-            if should_copy_sys_modules() {
-                persist_module_file(
-                    &world_root.join("modules"),
-                    spec.name,
-                    hash_ref.as_str(),
-                    &bytes,
-                )?;
-            }
-            return Ok(Some(hash_ref));
-        }
-    }
-
-    resolve_from_sys_cache(store, paths, spec.name)
-}
-
-pub fn resolve_sys_module_wasm_hash(
-    store: &impl Store,
-    paths: &LocalStatePaths,
-    world_root: &Path,
-    module_name: &str,
-) -> Result<HashRef> {
-    let Some(spec) = sys_module_spec(module_name) else {
-        anyhow::bail!("unknown system module '{module_name}'");
-    };
-    if let Some(hash) = resolve_sys_module(store, paths, world_root, spec)? {
-        return Ok(hash);
-    }
-    anyhow::bail!(
-        "system wasm for '{module_name}' not found; build with `cargo build -p aos-sys --target wasm32-unknown-unknown`"
-    );
-}
-
 fn persist_module_file(
     modules_dir: &Path,
     module_name: &str,
@@ -648,31 +613,6 @@ fn remove_stale_module_files(modules_dir: &Path, module_name: &str, keep_hash: &
         fs::remove_file(path).with_context(|| format!("remove stale module {}", path.display()))?;
     }
     Ok(())
-}
-
-fn sys_cache_dir(paths: &LocalStatePaths) -> PathBuf {
-    paths.cache_root().join("sys-modules")
-}
-
-fn should_copy_sys_modules() -> bool {
-    match std::env::var("AOS_SYS_MODULES_COPY") {
-        Ok(val) => {
-            let val = val.to_lowercase();
-            !(val.is_empty() || val == "0" || val == "false" || val == "no")
-        }
-        Err(_) => false,
-    }
-}
-
-fn resolve_target_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR") {
-        let mut path = PathBuf::from(dir);
-        if path.is_relative() {
-            path = workspace_root().join(path);
-        }
-        return path;
-    }
-    workspace_root().join("target")
 }
 
 fn build_cargo_wasm_bin(
@@ -775,14 +715,6 @@ fn camel_to_snake(input: &str) -> String {
     out
 }
 
-fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("workspace root")
-        .to_path_buf()
-}
-
 fn normalize_hash_str(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if trimmed.starts_with("sha256:") {
@@ -856,10 +788,6 @@ mod tests {
                 std::fs::copy(entry.path(), &target)?;
             }
         }
-        std::fs::write(
-            temp.path().join("aos.sync.json"),
-            serde_json::to_vec(&serde_json::json!({ "version": 1 }))?,
-        )?;
         let aos_state = temp.path().join(".aos");
         if aos_state.exists() {
             std::fs::remove_dir_all(&aos_state)?;
@@ -887,6 +815,45 @@ mod tests {
         );
         assert!(!temp.path().join(".aos/cas").exists());
         assert!(temp.path().join(".aos/cache/modules").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn demiurge_bundle_build_discovers_agent_air_from_cargo() -> Result<()> {
+        let world_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("worlds/demiurge")
+            .canonicalize()?;
+
+        let (_store, bundle, report) =
+            build_bundle_from_local_world_ephemeral_with_profile_and_report(
+                &world_root,
+                false,
+                WorkflowBuildProfile::Debug,
+            )?;
+
+        assert!(report.warnings.iter().any(|warning| {
+            warning.contains("discovered AIR package aos-agent") && warning.contains("sha256:")
+        }));
+        let package = report
+            .discovered_air_packages
+            .iter()
+            .find(|package| package.package_name == "aos-agent")
+            .expect("aos-agent package");
+        assert!(package.defs_hash.starts_with("sha256:"));
+        assert!(
+            package
+                .module_names
+                .iter()
+                .any(|name| name == "aos.agent/SessionWorkflow_wasm@1")
+        );
+        assert!(
+            bundle
+                .manifest
+                .modules
+                .iter()
+                .any(|module| module.name.as_str() == "aos.agent/SessionWorkflow_wasm@1")
+        );
         Ok(())
     }
 
