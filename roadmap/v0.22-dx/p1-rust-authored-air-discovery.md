@@ -91,11 +91,11 @@ The exact fields can change during implementation, but the metadata should answe
 1. does this package export AIR,
 2. where the generated or checked-in AIR can be found,
 3. which build target provides workflow WASM modules,
-4. what lock identity protects imported defs.
+4. what defs identity should be reported for review.
 
 Sync-file AIR imports were a transitional mechanism and should be removed rather than carried
 through a backwards-compatibility phase. See `p3-world-config-and-air-discovery.md` for the optional
-`aos.world.json` and `aos.air.lock.json` direction.
+`aos.world.json` direction and the decision to defer AIR lock files.
 
 ### 4) Proc macros emit metadata; host-side generation writes AIR files
 
@@ -345,12 +345,11 @@ Discovery rules:
 2. only import packages that opt in through `package.metadata.aos`,
 3. support both checked-in AIR directories and generated AIR outputs,
 4. compute a defs hash from imported definitions,
-5. compare that hash with a lock identity in strict mode,
-6. produce warnings locally and hard errors in CI, matching current import lock behavior.
+5. expose discovered package identities and defs hashes in build/check output.
 
 Sync-file AIR imports should be removed from the normal authoring path. Non-Cargo import roots and
 fixture-specific import behavior should use explicit CLI/test-harness overrides instead. New
-Rust-authored examples should use Cargo dependency discovery plus the lock/config direction in
+Rust-authored examples should use Cargo dependency discovery plus the config direction in
 `p3-world-config-and-air-discovery.md`.
 
 ## Phase 1E: Developer Commands And CI Hooks

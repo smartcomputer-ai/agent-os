@@ -13,8 +13,9 @@ Primary outcome:
 2. `aos.world.json` becomes the optional local config file for build, workspace sync, and secret
    source hints,
 3. reusable AIR packages are discovered from Cargo metadata,
-4. AIR import identity moves to a dedicated lock file instead of sync import entries,
-5. hand-authored AIR remains supported without sync-file import wiring.
+4. discovered AIR packages and defs hashes are visible in diagnostics/check output,
+5. hand-authored AIR remains supported without sync-file import wiring,
+6. a dedicated AIR lock file is deferred until the discovery shape settles.
 
 ## Design Stance
 
@@ -57,35 +58,22 @@ test-harness-only overrides for:
 They should not live in `aos.world.json`, and they should not be the primary developer-facing
 package import mechanism.
 
-### 3) AIR lock identity should move out of sync config
+### 3) AIR dependency identity is visible first, locked later
 
 Current `air.imports[*].lock` payloads couple import identity to sync config. That shape should be
-removed. Import identity should live in a dedicated file, for example:
+removed in the cutover.
 
-```text
-aos.air.lock.json
-```
+The first version should not introduce a lock file. Instead, authoring commands should print or
+return the discovered AIR dependency identities and defs hashes so changes are reviewable:
 
-The lock should record discovered and explicit AIR dependencies after generation/materialization:
+1. package name,
+2. package version and source,
+3. package manifest path,
+4. AIR directory or generated export binary,
+5. defs hash.
 
-```json
-{
-  "version": 1,
-  "packages": [
-    {
-      "source": "cargo",
-      "package": "aos-agent",
-      "version": "0.1.0",
-      "source_id": null,
-      "manifest_path": "workflow/Cargo.toml",
-      "air_dir": "air",
-      "defs_hash": "sha256:..."
-    }
-  ]
-}
-```
-
-Local commands may warn when the lock is missing or stale. CI/strict mode should fail.
+A future hardening phase may add `aos.air.lock.json` once the discovery model is stable. That lock
+should use the same defs hash semantics, but it is explicitly not part of the first implementation.
 
 ### 4) Workspace sync remains local operational config
 
@@ -101,10 +89,7 @@ Illustrative shape:
 ```json
 {
   "version": 1,
-  "air": {
-    "mode": "auto",
-    "lock": "aos.air.lock.json"
-  },
+  "air": { "mode": "auto" },
   "build": {
     "workflow_dir": "workflow",
     "profile": "debug",
@@ -160,12 +145,17 @@ Build `AirSource` resolution from:
 
 This removes `air.imports` from local world config.
 
-### Phase 3C: Add `aos.air.lock.json`
+### Phase 3C: Expose Discovered AIR Identity
 
-Create lock read/write/check helpers for discovered AIR dependencies.
+Expose discovered AIR packages and defs hashes from build/check commands.
 
-The lock should cover both generated and checked-in package AIR after materialization, using the
-same defs hash semantics as existing import locks.
+The first version should:
+
+1. compute the same deterministic defs hash used by existing import locks,
+2. include discovered AIR dependencies in command output and diagnostics,
+3. fail only on real load/validation conflicts, not on missing lock files.
+
+`aos.air.lock.json` remains a later phase.
 
 ### Phase 3D: Migrate Existing Sync Files
 
@@ -183,7 +173,7 @@ Remove existing `aos.sync.json` files and replace only the still-needed operatio
 Remove sync-file AIR import support from the normal authoring path. Docs and examples should use:
 
 1. Cargo dependency discovery for reusable Rust packages,
-2. `aos.air.lock.json` for import identity,
+2. visible discovered package/defs hash output for review,
 3. CLI/test-harness overrides for non-Cargo or fixture-specific imports.
 
 ## Non-Goals
@@ -199,7 +189,7 @@ P3 is complete when:
 
 1. a Rust-authored world with conventional layout builds without any config file,
 2. Demiurge no longer uses sync config for `aos-agent` AIR import wiring,
-3. `aos.air.lock.json` records discovered AIR dependency identity,
+3. build/check output reports discovered AIR dependencies and defs hashes,
 4. `aos.world.json` can carry workspace sync and secret source config when needed,
 5. existing `aos.sync.json` files are removed or replaced with `aos.world.json`,
 6. docs clearly distinguish canonical AIR from local world config.

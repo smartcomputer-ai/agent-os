@@ -56,8 +56,8 @@ Demiurge should show the target developer experience:
 5. keep local config only for operational concerns such as secrets and workspace sync.
 
 The target local config direction is described in `p3-world-config-and-air-discovery.md`: optional
-`aos.world.json` for local build/sync/secrets, and a separate AIR lock for discovered package
-identity.
+`aos.world.json` for local build/sync/secrets, visible discovered package hashes in build/check
+output, and no AIR lock file in the first version.
 
 ### 3) Smoke fixtures continue to protect hand-authored AIR
 
@@ -215,7 +215,8 @@ Responsibilities that should move out:
 
 The local config file should become operational configuration, not the primary world definition.
 Do not keep a backwards-compatibility phase for `aos.sync.json`; migrate remaining operational
-settings directly to optional `aos.world.json` and move AIR identity to `aos.air.lock.json`.
+settings directly to optional `aos.world.json`. AIR dependency identity should be visible in
+build/check output; a dedicated lock file is deferred.
 
 ## Phase 2F: Keep Smoke Fixtures Mostly Hand-Authored
 
@@ -226,7 +227,7 @@ Keep most fixtures as authored AIR JSON so they continue to cover:
 1. manifest loading from `air/`,
 2. placeholder module hash resolution,
 3. explicit CLI/test-harness import overrides,
-4. imported AIR lock diagnostics,
+4. discovered AIR dependency/hash diagnostics,
 5. hand-authored schema and workflow mistakes,
 6. generated bundle/export/import behavior.
 
