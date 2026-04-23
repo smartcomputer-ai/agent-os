@@ -45,7 +45,6 @@ From the repo root, build the local debug binaries and module artifacts once:
 rustup target add wasm32-unknown-unknown
 
 cargo build -p aos-cli
-cargo build -p aos-sys --target wasm32-unknown-unknown
 cargo build -p aos-agent --bin session_workflow --target wasm32-unknown-unknown
 ```
 
@@ -106,11 +105,9 @@ Provider selection defaults to:
 
 - `openai-responses` when `OPENAI_API_KEY` is present
 - `anthropic` when `ANTHROPIC_API_KEY` is present
-- `mock` otherwise
 
-With a live provider, the script waits for terminal completion and prints the extracted assistant
-response when an output blob is available. With `mock`, success only means Demiurge and
-SessionWorkflow start correctly in the local runtime; no real LLM call is made.
+The script requires a live provider. It waits for terminal completion and prints the extracted
+assistant response when an output blob is available.
 
 ## Local Task Run
 

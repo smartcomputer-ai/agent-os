@@ -70,7 +70,6 @@ export ANTHROPIC_API_KEY=...
 rustup target add wasm32-unknown-unknown
 
 cargo build -p aos-cli
-cargo build -p aos-sys --target wasm32-unknown-unknown
 cargo build -p aos-agent --bin session_workflow --target wasm32-unknown-unknown
 ```
 

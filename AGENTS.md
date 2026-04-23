@@ -107,7 +107,6 @@ Crates keep deterministic core small and effectful code at the edges:
 - `aos-node` — Unified node library: worker runtime, hot control facade, direct HTTP/control acceptance, async effect runtime, replay/checkpoints, SQLite/Kafka journal backends, blobstore, vault, and node startup config.
 - `aos-cli` — Primary `aos` binary: CLI parsing, profiles, workspace commands, authoring flows, control client, and `aos node` orchestration.
 - `aos-authoring` — Authored-world build/upload/sync helpers, manifest loading, module placeholder resolution, and local state utilities.
-- `aos-sys` — Shared `no_std` types for built-in system workflows such as `sys/Workspace@1` and `sys/HttpPublish@1`.
 - `aos-llm` — Shared LLM client/provider abstraction used by adapters and agent tooling.
 - `aos-agent` — `aos.agent/*` contract types, helper reducers, and workflow binaries for agent sessions.
 - `aos-agent-eval` — Prompt/tool eval runner for agent session workflows.
