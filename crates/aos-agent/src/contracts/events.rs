@@ -1,6 +1,7 @@
 use super::{
-    HostCommand, HostSessionStatus, RunId, SessionConfig, SessionId, SessionLifecycle,
-    ToolOverrideScope, ToolSpec,
+    ContextOperationState, HostCommand, HostSessionStatus, RunCause, RunId, RunLifecycle,
+    SessionConfig, SessionId, SessionLifecycle, SessionStatus, ToolOverrideScope, ToolSpec,
+    TurnObservation,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -11,14 +12,42 @@ use serde::{Deserialize, Serialize};
 pub use aos_wasm_sdk::{EffectReceiptRejected, EffectStreamFrameEnvelope};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
-#[aos(schema = "aos.agent/SessionIngressKind@1")]
+#[aos(schema = "aos.agent/SessionInputKind@1")]
 #[serde(tag = "$tag", content = "$value")]
-pub enum SessionIngressKind {
+pub enum SessionInputKind {
     RunRequested {
         #[aos(air_type = "hash")]
         input_ref: String,
         run_overrides: Option<SessionConfig>,
     },
+    RunStartRequested {
+        cause: RunCause,
+        run_overrides: Option<SessionConfig>,
+    },
+    FollowUpInputAppended {
+        #[aos(air_type = "hash")]
+        input_ref: String,
+        run_overrides: Option<SessionConfig>,
+    },
+    RunSteerRequested {
+        #[aos(air_type = "hash")]
+        instruction_ref: String,
+    },
+    RunInterruptRequested {
+        #[aos(air_type = "hash")]
+        reason_ref: Option<String>,
+    },
+    SessionOpened {
+        config: Option<SessionConfig>,
+    },
+    SessionConfigUpdated {
+        config: SessionConfig,
+    },
+    SessionPaused,
+    SessionResumed,
+    SessionArchived,
+    SessionExpired,
+    SessionClosed,
     HostCommandReceived(HostCommand),
     ToolRegistrySet {
         registry: BTreeMap<String, ToolSpec>,
@@ -33,6 +62,10 @@ pub enum SessionIngressKind {
         enable: Option<Vec<String>>,
         disable: Option<Vec<String>>,
         force: Option<Vec<String>>,
+    },
+    TurnObserved(TurnObservation),
+    ContextOperationUpdated {
+        operation: Option<ContextOperationState>,
     },
     HostSessionUpdated {
         host_session_id: Option<String>,
@@ -52,12 +85,12 @@ pub enum SessionIngressKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
-#[aos(schema = "aos.agent/SessionIngress@1")]
-pub struct SessionIngress {
+#[aos(schema = "aos.agent/SessionInput@1")]
+pub struct SessionInput {
     pub session_id: SessionId,
     #[aos(air_type = "time")]
     pub observed_at_ns: u64,
-    pub ingress: SessionIngressKind,
+    pub input: SessionInputKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
@@ -75,10 +108,34 @@ pub struct SessionLifecycleChanged {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SessionStatusChanged@1")]
+pub struct SessionStatusChanged {
+    pub session_id: SessionId,
+    #[aos(air_type = "time")]
+    pub observed_at_ns: u64,
+    pub from: SessionStatus,
+    pub to: SessionStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/RunLifecycleChanged@1")]
+pub struct RunLifecycleChanged {
+    pub session_id: SessionId,
+    pub run_id: RunId,
+    #[aos(air_type = "time")]
+    pub observed_at_ns: u64,
+    pub from: RunLifecycle,
+    pub to: RunLifecycle,
+    pub cause: RunCause,
+    #[aos(air_type = "hash")]
+    pub output_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
 #[aos(schema = "aos.agent/SessionWorkflowEvent@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum SessionWorkflowEvent {
-    Ingress(SessionIngress),
+    Input(SessionInput),
     Receipt(EffectReceiptEnvelope),
     ReceiptRejected(EffectReceiptRejected),
     StreamFrame(EffectStreamFrameEnvelope),
@@ -97,7 +154,7 @@ impl SessionWorkflowEvent {
             Self::Receipt(value) => Some(value.into()),
             Self::ReceiptRejected(value) => Some(value.into()),
             Self::StreamFrame(value) => Some(value.into()),
-            Self::Ingress(_) | Self::Noop => None,
+            Self::Input(_) | Self::Noop => None,
         }
     }
 }

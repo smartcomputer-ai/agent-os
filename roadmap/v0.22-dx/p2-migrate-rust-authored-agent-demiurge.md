@@ -58,7 +58,7 @@ Its Rust source should be the source of truth for:
 1. contract schema definitions,
 2. `aos.agent/SessionWorkflow@1`,
 3. `aos.agent/SessionWorkflow_wasm@1`,
-4. routing subscriptions for `SessionIngress`,
+4. routing subscriptions for `SessionInput`,
 5. emitted effect allowlists.
 
 Generated AIR may still be checked in temporarily during the migration, but CI should prove it is
@@ -111,7 +111,7 @@ Scope:
 2. tool config and registry contracts,
 3. session config/run config contracts,
 4. lifecycle and host command contracts,
-5. ingress and lifecycle domain events,
+5. input and lifecycle domain events,
 6. pending effect state contracts,
 7. `SessionState`,
 8. `SessionWorkflowEvent`.
@@ -147,7 +147,7 @@ Rust-authored source should define:
 5. context schema: `sys/WorkflowContext@1`,
 6. key schema: `aos.agent/SessionId@1`,
 7. emitted effects,
-8. `SessionIngress` routing with `key_field = "session_id"`.
+8. `SessionInput` routing with `key_field = "session_id"`.
 
 This should be expressed through the `#[aos_workflow(...)]` authoring surface rather than separate
 JSON or sync metadata.

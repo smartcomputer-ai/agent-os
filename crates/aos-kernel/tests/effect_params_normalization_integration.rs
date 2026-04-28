@@ -292,6 +292,39 @@ fn timer_params_cbor(deliver_at: u64, key: Option<String>) -> Vec<u8> {
     serde_cbor::to_vec(&CborValue::Map(map)).expect("encode timer params")
 }
 
+fn llm_window_item_value(ref_: &str) -> CborValue {
+    let mut kind = BTreeMap::new();
+    kind.insert(
+        CborValue::Text("$tag".into()),
+        CborValue::Text("MessageRef".into()),
+    );
+    kind.insert(CborValue::Text("$value".into()), CborValue::Null);
+
+    let mut item = BTreeMap::new();
+    item.insert(
+        CborValue::Text("item_id".into()),
+        CborValue::Text("input".into()),
+    );
+    item.insert(CborValue::Text("kind".into()), CborValue::Map(kind));
+    item.insert(CborValue::Text("ref_".into()), CborValue::Text(ref_.into()));
+    item.insert(CborValue::Text("lane".into()), CborValue::Null);
+    item.insert(CborValue::Text("source_range".into()), CborValue::Null);
+    item.insert(
+        CborValue::Text("source_refs".into()),
+        CborValue::Array(vec![CborValue::Text(ref_.into())]),
+    );
+    item.insert(
+        CborValue::Text("provider_compatibility".into()),
+        CborValue::Null,
+    );
+    item.insert(CborValue::Text("estimated_tokens".into()), CborValue::Null);
+    item.insert(
+        CborValue::Text("metadata".into()),
+        CborValue::Map(BTreeMap::new()),
+    );
+    CborValue::Map(item)
+}
+
 fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
     let mut map = BTreeMap::new();
     let mut runtime = BTreeMap::new();
@@ -312,9 +345,9 @@ fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
     runtime.insert(CborValue::Text("tool_choice".into()), CborValue::Null);
     map.insert(CborValue::Text("runtime".into()), CborValue::Map(runtime));
     map.insert(
-        CborValue::Text("message_refs".into()),
-        CborValue::Array(vec![CborValue::Text(
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
+        CborValue::Text("window_items".into()),
+        CborValue::Array(vec![llm_window_item_value(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
         )]),
     );
     map.insert(CborValue::Text("api_key".into()), CborValue::Null);
@@ -335,9 +368,9 @@ fn llm_params_cbor_reordered(temp_value: CborValue) -> Vec<u8> {
     );
     runtime.insert(CborValue::Text("temperature".into()), temp_value);
     map.insert(
-        CborValue::Text("message_refs".into()),
-        CborValue::Array(vec![CborValue::Text(
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
+        CborValue::Text("window_items".into()),
+        CborValue::Array(vec![llm_window_item_value(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
         )]),
     );
     map.insert(CborValue::Text("runtime".into()), CborValue::Map(runtime));

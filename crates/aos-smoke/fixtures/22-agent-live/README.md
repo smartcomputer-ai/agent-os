@@ -5,7 +5,7 @@ Live SDK agent smoke fixture:
 - AIR `aos.agent/*` schemas are imported from `crates/aos-agent/air`,
 - routing binds directly to keyed SDK module `aos.agent/SessionWorkflow@1`,
 - fixture prompt/tool assets are embedded in the runner (no external asset dir),
-- runner drives `SessionIngress` lifecycle and tool-batch observe/settle ingress events,
+- runner drives `SessionInput` lifecycle and tool-batch observe/settle input events,
 - runner uploads the default prompt pack blob and passes it as `default_prompt_refs`,
 - live LLM issues tool calls over multiple steps,
 - harness emulates incremental search traversal,

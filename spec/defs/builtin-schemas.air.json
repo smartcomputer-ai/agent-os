@@ -512,6 +512,132 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/LlmTranscriptRange@1",
+    "type": {
+      "record": {
+        "start_seq": {
+          "nat": {}
+        },
+        "end_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmWindowItemKind@1",
+    "type": {
+      "variant": {
+        "MessageRef": {
+          "unit": {}
+        },
+        "AosSummaryRef": {
+          "unit": {}
+        },
+        "ProviderNativeArtifactRef": {
+          "unit": {}
+        },
+        "ProviderRawWindowRef": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmProviderCompatibility@1",
+    "type": {
+      "record": {
+        "provider": {
+          "text": {}
+        },
+        "api_kind": {
+          "text": {}
+        },
+        "model": {
+          "option": {
+            "text": {}
+          }
+        },
+        "model_family": {
+          "option": {
+            "text": {}
+          }
+        },
+        "artifact_type": {
+          "text": {}
+        },
+        "opaque": {
+          "bool": {}
+        },
+        "encrypted": {
+          "bool": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmWindowItem@1",
+    "type": {
+      "record": {
+        "item_id": {
+          "text": {}
+        },
+        "kind": {
+          "ref": "sys/LlmWindowItemKind@1"
+        },
+        "ref_": {
+          "hash": {}
+        },
+        "lane": {
+          "option": {
+            "text": {}
+          }
+        },
+        "source_range": {
+          "option": {
+            "ref": "sys/LlmTranscriptRange@1"
+          }
+        },
+        "source_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "provider_compatibility": {
+          "option": {
+            "ref": "sys/LlmProviderCompatibility@1"
+          }
+        },
+        "estimated_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "metadata": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "text": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/LlmGenerateParams@1",
     "type": {
       "record": {
@@ -526,9 +652,9 @@
         "model": {
           "text": {}
         },
-        "message_refs": {
+        "window_items": {
           "list": {
-            "hash": {}
+            "ref": "sys/LlmWindowItem@1"
           }
         },
         "runtime": {
@@ -606,6 +732,329 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/LlmCompactStrategy@1",
+    "type": {
+      "variant": {
+        "ProviderNative": {
+          "unit": {}
+        },
+        "AosSummary": {
+          "unit": {}
+        },
+        "Auto": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmTokenCountQuality@1",
+    "type": {
+      "variant": {
+        "Exact": {
+          "unit": {}
+        },
+        "ProviderEstimate": {
+          "unit": {}
+        },
+        "LocalEstimate": {
+          "unit": {}
+        },
+        "Unknown": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmTokenCountByRef@1",
+    "type": {
+      "record": {
+        "ref_": {
+          "hash": {}
+        },
+        "tokens": {
+          "nat": {}
+        },
+        "quality": {
+          "ref": "sys/LlmTokenCountQuality@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmCountTokensParams@1",
+    "type": {
+      "record": {
+        "correlation_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "provider": {
+          "text": {}
+        },
+        "model": {
+          "text": {}
+        },
+        "window_items": {
+          "list": {
+            "ref": "sys/LlmWindowItem@1"
+          }
+        },
+        "tool_definitions_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "response_format_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "provider_options_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "rendering_profile": {
+          "option": {
+            "text": {}
+          }
+        },
+        "candidate_plan_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "metadata": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "text": {}
+            }
+          }
+        },
+        "api_key": {
+          "option": {
+            "ref": "sys/TextOrSecretRef@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmCountTokensReceipt@1",
+    "type": {
+      "record": {
+        "input_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "original_input_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "counts_by_ref": {
+          "list": {
+            "ref": "sys/LlmTokenCountByRef@1"
+          }
+        },
+        "tool_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "response_format_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "quality": {
+          "ref": "sys/LlmTokenCountQuality@1"
+        },
+        "provider": {
+          "text": {}
+        },
+        "model": {
+          "text": {}
+        },
+        "candidate_plan_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "provider_metadata_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "warnings_ref": {
+          "option": {
+            "hash": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmCompactionArtifactKind@1",
+    "type": {
+      "variant": {
+        "AosSummary": {
+          "unit": {}
+        },
+        "ProviderNative": {
+          "unit": {}
+        },
+        "Mixed": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/TokenUsage@1",
+    "type": {
+      "record": {
+        "prompt": {
+          "nat": {}
+        },
+        "completion": {
+          "nat": {}
+        },
+        "total": {
+          "option": {
+            "nat": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmCompactParams@1",
+    "type": {
+      "record": {
+        "correlation_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "operation_id": {
+          "text": {}
+        },
+        "provider": {
+          "text": {}
+        },
+        "model": {
+          "text": {}
+        },
+        "strategy": {
+          "ref": "sys/LlmCompactStrategy@1"
+        },
+        "source_window_items": {
+          "list": {
+            "ref": "sys/LlmWindowItem@1"
+          }
+        },
+        "preserve_window_items": {
+          "list": {
+            "ref": "sys/LlmWindowItem@1"
+          }
+        },
+        "recent_tail_items": {
+          "list": {
+            "ref": "sys/LlmWindowItem@1"
+          }
+        },
+        "source_range": {
+          "option": {
+            "ref": "sys/LlmTranscriptRange@1"
+          }
+        },
+        "target_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "provider_options_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "api_key": {
+          "option": {
+            "ref": "sys/TextOrSecretRef@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmCompactReceipt@1",
+    "type": {
+      "record": {
+        "operation_id": {
+          "text": {}
+        },
+        "artifact_kind": {
+          "ref": "sys/LlmCompactionArtifactKind@1"
+        },
+        "artifact_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "source_range": {
+          "option": {
+            "ref": "sys/LlmTranscriptRange@1"
+          }
+        },
+        "compacted_through": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "active_window_items": {
+          "list": {
+            "ref": "sys/LlmWindowItem@1"
+          }
+        },
+        "token_usage": {
+          "option": {
+            "ref": "sys/TokenUsage@1"
+          }
+        },
+        "provider_metadata_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "warnings_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "provider_id": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/LlmGenerateReceipt@1",
     "type": {
       "record": {
@@ -620,6 +1069,11 @@
         "provider_response_id": {
           "option": {
             "text": {}
+          }
+        },
+        "provider_context_items": {
+          "list": {
+            "ref": "sys/LlmWindowItem@1"
           }
         },
         "finish_reason": {

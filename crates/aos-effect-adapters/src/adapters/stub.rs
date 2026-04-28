@@ -2,8 +2,10 @@ use anyhow::Context;
 use aos_air_types::HashRef;
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, HeaderMap, HttpRequestParams,
-    HttpRequestReceipt, LlmFinishReason, LlmGenerateParams, LlmGenerateReceipt, RequestTimings,
-    TimerSetParams, TimerSetReceipt, TokenUsage,
+    HttpRequestReceipt, LlmCompactParams, LlmCompactReceipt, LlmCompactionArtifactKind,
+    LlmCountTokensParams, LlmCountTokensReceipt, LlmFinishReason, LlmGenerateParams,
+    LlmGenerateReceipt, LlmTokenCountByRef, LlmTokenCountQuality, LlmWindowItem, LlmWindowItemKind,
+    RequestTimings, TimerSetParams, TimerSetReceipt, TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use async_trait::async_trait;
@@ -56,6 +58,7 @@ impl AsyncEffectAdapter for StubLlmAdapter {
             output_ref: fake_hashref(0x31),
             raw_output_ref: None,
             provider_response_id: None,
+            provider_context_items: Vec::new(),
             finish_reason: LlmFinishReason {
                 reason: "stub".into(),
                 raw: None,
@@ -75,6 +78,117 @@ impl AsyncEffectAdapter for StubLlmAdapter {
             intent_hash: intent.intent_hash,
             status: ReceiptStatus::Ok,
             payload_cbor: encode_receipt_payload("llm.generate", &receipt_payload)?,
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        })
+    }
+}
+
+pub struct StubLlmCompactAdapter;
+
+#[async_trait]
+impl AsyncEffectAdapter for StubLlmCompactAdapter {
+    fn kind(&self) -> &str {
+        "llm.compact"
+    }
+
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+        let params: LlmCompactParams =
+            serde_cbor::from_slice(&intent.params_cbor).context("decode llm.compact params")?;
+        let artifact_ref = fake_hashref(0x41);
+        let active_window_items =
+            if params.preserve_window_items.is_empty() && params.recent_tail_items.is_empty() {
+                vec![LlmWindowItem {
+                    item_id: format!("compact:{}:summary", params.operation_id),
+                    kind: LlmWindowItemKind::AosSummaryRef,
+                    ref_: artifact_ref.clone(),
+                    lane: Some("Summary".into()),
+                    source_range: params.source_range.clone(),
+                    source_refs: params
+                        .source_window_items
+                        .iter()
+                        .map(|item| item.ref_.clone())
+                        .collect(),
+                    provider_compatibility: None,
+                    estimated_tokens: params.target_tokens,
+                    metadata: Default::default(),
+                }]
+            } else {
+                params
+                    .preserve_window_items
+                    .iter()
+                    .chain(params.recent_tail_items.iter())
+                    .cloned()
+                    .collect()
+            };
+        let receipt_payload = LlmCompactReceipt {
+            operation_id: params.operation_id,
+            artifact_kind: LlmCompactionArtifactKind::AosSummary,
+            artifact_refs: vec![artifact_ref],
+            source_range: params.source_range,
+            compacted_through: None,
+            active_window_items,
+            token_usage: Some(TokenUsage {
+                prompt: 0,
+                completion: 0,
+                total: Some(0),
+            }),
+            provider_metadata_ref: None,
+            warnings_ref: None,
+            provider_id: params.provider,
+        };
+        Ok(EffectReceipt {
+            intent_hash: intent.intent_hash,
+            status: ReceiptStatus::Ok,
+            payload_cbor: encode_receipt_payload("llm.compact", &receipt_payload)?,
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        })
+    }
+}
+
+pub struct StubLlmCountTokensAdapter;
+
+#[async_trait]
+impl AsyncEffectAdapter for StubLlmCountTokensAdapter {
+    fn kind(&self) -> &str {
+        "llm.count_tokens"
+    }
+
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+        let params: LlmCountTokensParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode llm.count_tokens params")?;
+        let input_tokens = params
+            .window_items
+            .iter()
+            .map(|item| item.estimated_tokens.unwrap_or(0))
+            .sum::<u64>();
+        let counts_by_ref = params
+            .window_items
+            .iter()
+            .map(|item| LlmTokenCountByRef {
+                ref_: item.ref_.clone(),
+                tokens: item.estimated_tokens.unwrap_or(0),
+                quality: LlmTokenCountQuality::LocalEstimate,
+            })
+            .collect();
+        let receipt_payload = LlmCountTokensReceipt {
+            input_tokens: Some(input_tokens),
+            original_input_tokens: Some(input_tokens),
+            counts_by_ref,
+            tool_tokens: None,
+            response_format_tokens: None,
+            quality: LlmTokenCountQuality::LocalEstimate,
+            provider: params.provider,
+            model: params.model,
+            candidate_plan_id: params.candidate_plan_id,
+            provider_metadata_ref: None,
+            warnings_ref: None,
+        };
+        Ok(EffectReceipt {
+            intent_hash: intent.intent_hash,
+            status: ReceiptStatus::Ok,
+            payload_cbor: encode_receipt_payload("llm.count_tokens", &receipt_payload)?,
             cost_cents: Some(0),
             signature: vec![0; 64],
         })

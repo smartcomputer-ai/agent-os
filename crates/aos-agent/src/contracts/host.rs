@@ -15,12 +15,6 @@ pub struct HostCommand {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirType)]
 #[serde(tag = "$tag", content = "$value")]
 pub enum HostCommandKind {
-    Steer {
-        text: String,
-    },
-    FollowUp {
-        text: String,
-    },
     Pause,
     Resume,
     Cancel {

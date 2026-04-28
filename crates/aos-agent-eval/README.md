@@ -7,7 +7,7 @@ Prompt-level eval harness for `aos.agent/SessionWorkflow@1` with live tool execu
 - Creates one clean temp world per CLI invocation, then reuses it for all cases/runs.
 - Allocates a fresh session + workspace directory per attempt for isolation.
 - Seeds case files into the per-attempt workspace.
-- Boots the SDK session workflow using fixture AIR + imported SDK AIR defs.
+- Boots the SDK session workflow directly from `crates/aos-agent/air`.
 - Dispatches real host tools (`host.fs.*`, `host.exec`, etc.) through host adapters.
 - Executes `llm.generate` live through provider APIs, then feeds receipts back to kernel.
 - Asserts case expectations (tool usage, tool output content, filesystem outcomes).

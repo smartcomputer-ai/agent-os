@@ -1,5 +1,6 @@
 mod batch;
 mod config;
+mod context;
 mod events;
 mod failure;
 mod host;
@@ -8,9 +9,12 @@ mod lifecycle;
 mod llm;
 mod state;
 mod tooling;
+mod trace;
+mod turn;
 
 pub use batch::*;
 pub use config::*;
+pub use context::*;
 pub use events::*;
 pub use failure::*;
 pub use host::*;
@@ -19,3 +23,5 @@ pub use lifecycle::*;
 pub use llm::*;
 pub use state::*;
 pub use tooling::*;
+pub use trace::*;
+pub use turn::*;

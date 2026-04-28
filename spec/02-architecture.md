@@ -163,7 +163,7 @@ Built-in external effects include:
 - **HTTP**: `sys/http.request@1`
 - **Blob**: `sys/blob.{put,get}@1`
 - **Timer**: `sys/timer.set@1`
-- **LLM**: `sys/llm.generate@1`
+- **LLM**: `sys/llm.generate@1`, `sys/llm.count_tokens@1`, `sys/llm.compact@1`
 - **Vault**: `sys/vault.{put,rotate}@1`
 - **Host/session**: `sys/host.*@1`
 

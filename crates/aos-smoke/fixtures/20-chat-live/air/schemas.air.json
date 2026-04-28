@@ -18,7 +18,7 @@
         "provider": { "text": {} },
         "model": { "text": {} },
         "api_key_alias": { "text": {} },
-        "message_refs": { "list": { "hash": {} } },
+        "window_refs": { "list": { "hash": {} } },
         "tool_refs": { "option": { "list": { "hash": {} } } },
         "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
         "max_tokens": { "option": { "nat": {} } }
@@ -67,7 +67,7 @@
         "provider": { "text": {} },
         "model": { "text": {} },
         "api_key_alias": { "text": {} },
-        "message_refs": { "list": { "hash": {} } },
+        "window_refs": { "list": { "hash": {} } },
         "tool_refs": { "option": { "list": { "hash": {} } } },
         "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
         "max_tokens": { "option": { "nat": {} } }

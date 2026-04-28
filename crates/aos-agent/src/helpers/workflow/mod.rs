@@ -1,21 +1,35 @@
 use super::{
-    LlmStepContext, RequestLlm, SessionEffectCommand, SessionReduceOutput, allocate_run_id,
-    can_apply_host_command, enqueue_host_text, pop_follow_up_if_ready, request_llm,
+    DefaultTurnPlanner, LlmCompactStepContext, LlmCountTokensStepContext, LlmStepContext,
+    RequestLlm, RequestLlmCompact, RequestLlmCountTokens, SessionEffectCommand,
+    SessionWorkflowOutput, TurnPlanError, TurnRequest, allocate_run_id, can_apply_host_command,
+    pop_follow_up_if_ready, request_llm, request_llm_compact, request_llm_count_tokens,
     transition_lifecycle,
 };
 use crate::contracts::{
-    EffectiveTool, EffectiveToolSet, HostCommandKind, PendingBlobGetKind, PendingBlobPutKind,
-    PendingFollowUpTurn, RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle,
-    SessionState, SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallStatus,
-    ToolOverrideScope, ToolSpec, default_tool_profile_for_provider,
+    ActiveWindowItem, CompactionArtifactKind, CompactionRecord, CompactionStrategy,
+    ContextOperationPhase, ContextOperationState, ContextPressureReason, ContextPressureRecord,
+    HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
+    PendingBlobPutKind, QueuedRunStart, RunCause, RunConfig, RunFailure, RunInterrupt,
+    RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry, RunTraceEntryKind,
+    RunTraceRef, RunTraceSummary, SessionConfig, SessionInputKind, SessionLifecycle, SessionState,
+    SessionStatus, SessionWorkflowEvent, StagedToolFollowUpTurn, ToolBatchPlan, ToolCallStatus,
+    ToolOverrideScope, ToolSpec, TranscriptLedgerEntryKind, TranscriptRange, TurnBudget, TurnInput,
+    TurnInputKind, TurnInputLane, TurnObservation, TurnPlan, TurnPrerequisiteKind, TurnPriority,
+    TurnToolChoice, TurnToolInput,
 };
-use crate::tools::{
-    ToolEffectOp, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
-};
+use crate::helpers::TurnPlanner;
+use crate::tools::{ToolEffectOp, map_tool_receipt_to_llm_result};
 use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
 use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec;
 use alloc::vec::Vec;
-use aos_effects::builtins::LlmGenerateReceipt;
+use aos_effects::builtins::{
+    HostLocalTarget, HostMount, HostSandboxTarget, HostSessionOpenParams, HostTarget,
+    LlmCompactReceipt, LlmCompactStrategy, LlmCompactionArtifactKind, LlmCountTokensReceipt,
+    LlmGenerateReceipt,
+};
 use aos_wasm_sdk::{EffectReceiptEnvelope, EffectReceiptRejected};
 
 mod blob_effects;
@@ -23,22 +37,109 @@ mod tool_batch;
 mod types;
 
 use self::blob_effects::{
-    enqueue_blob_get, enqueue_blob_put, handle_pending_blob_get_receipt,
-    handle_pending_blob_put_receipt, has_pending_tool_definition_puts,
+    enqueue_blob_get, enqueue_blob_put, handle_blob_get_receipt, handle_blob_put_receipt,
+    has_open_tool_definition_puts,
 };
 use self::types::pending_effect_lookup_err_to_session_err;
 pub use self::types::{
-    CompletedToolBatch, RunToolBatch, RunToolBatchResult, SessionReduceError, SessionRuntimeLimits,
-    StartedToolBatch, ToolBatchReceiptMatch,
+    CompletedToolBatch, RunToolBatch, RunToolBatchResult, SessionRuntimeLimits,
+    SessionWorkflowError, StartedToolBatch, ToolBatchReceiptMatch,
 };
 
 const TOOL_RESULT_BLOB_MAX_BYTES: usize = 8 * 1024;
+const USAGE_HIGH_WATER_INPUT_TOKENS: u64 = 64_000;
+
+pub(super) fn trace_ref(kind: impl Into<String>, value: impl Into<String>) -> RunTraceRef {
+    let value = value.into();
+    if value.starts_with("sha256:") {
+        RunTraceRef {
+            kind: kind.into(),
+            ref_: Some(value),
+            value: None,
+        }
+    } else {
+        RunTraceRef {
+            kind: kind.into(),
+            ref_: None,
+            value: Some(value),
+        }
+    }
+}
+
+pub(super) fn push_run_trace(
+    state: &mut SessionState,
+    kind: RunTraceEntryKind,
+    summary: impl Into<String>,
+    refs: Vec<RunTraceRef>,
+    metadata: BTreeMap<String, String>,
+) {
+    let observed_at_ns = state.updated_at;
+    let Some(run) = state.current_run.as_mut() else {
+        return;
+    };
+    push_trace_entry(
+        &mut run.trace,
+        observed_at_ns,
+        kind,
+        summary.into(),
+        refs,
+        metadata,
+    );
+    run.updated_at = observed_at_ns;
+}
+
+fn push_trace_entry(
+    trace: &mut RunTrace,
+    observed_at_ns: u64,
+    kind: RunTraceEntryKind,
+    summary: String,
+    refs: Vec<RunTraceRef>,
+    metadata: BTreeMap<String, String>,
+) {
+    let max_entries = if trace.max_entries == 0 {
+        crate::contracts::DEFAULT_RUN_TRACE_MAX_ENTRIES
+    } else {
+        trace.max_entries
+    } as usize;
+    let seq = trace.next_seq;
+    trace.next_seq = trace.next_seq.saturating_add(1);
+    if max_entries > 0 {
+        while trace.entries.len() >= max_entries {
+            trace.entries.remove(0);
+            trace.dropped_entries = trace.dropped_entries.saturating_add(1);
+        }
+        trace.entries.push(RunTraceEntry {
+            seq,
+            observed_at_ns,
+            kind,
+            summary,
+            refs,
+            metadata,
+        });
+    } else {
+        trace.dropped_entries = trace.dropped_entries.saturating_add(1);
+    }
+}
+
+fn summarize_trace(trace: &RunTrace) -> RunTraceSummary {
+    let first = trace.entries.first();
+    let last = trace.entries.last();
+    RunTraceSummary {
+        entry_count: trace.entries.len() as u64,
+        dropped_entries: trace.dropped_entries,
+        first_seq: first.map(|entry| entry.seq),
+        last_seq: last.map(|entry| entry.seq),
+        last_kind: last.map(|entry| entry.kind.clone()),
+        last_summary: last.map(|entry| entry.summary.clone()),
+        last_observed_at_ns: last.map(|entry| entry.observed_at_ns),
+    }
+}
 
 pub fn run_tool_batch(
     state: &mut SessionState,
     request: RunToolBatch<'_>,
-    out: &mut SessionReduceOutput,
-) -> Result<RunToolBatchResult, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<RunToolBatchResult, SessionWorkflowError> {
     let started = tool_batch::run_tool_batch(state, request, out)?;
     let completed = tool_batch::take_completed_tool_batch(state);
     let completion = handle_completed_tool_batch(state, completed, out)?;
@@ -50,8 +151,8 @@ pub fn run_tool_batch(
 
 pub fn continue_tool_batch(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
-) -> Result<Option<CompletedToolBatch>, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<Option<CompletedToolBatch>, SessionWorkflowError> {
     let completion = tool_batch::advance_tool_batch(state, out)?;
     handle_completed_tool_batch(state, completion, out)
 }
@@ -59,8 +160,8 @@ pub fn continue_tool_batch(
 pub fn settle_tool_batch_receipt(
     state: &mut SessionState,
     envelope: &EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<ToolBatchReceiptMatch, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<ToolBatchReceiptMatch, SessionWorkflowError> {
     match tool_batch::settle_tool_batch_receipt(state, envelope, out)? {
         ToolBatchReceiptMatch::Unmatched => Ok(ToolBatchReceiptMatch::Unmatched),
         ToolBatchReceiptMatch::Matched { completion } => Ok(ToolBatchReceiptMatch::Matched {
@@ -71,10 +172,16 @@ pub fn settle_tool_batch_receipt(
 
 fn transition_to_waiting_input_if_running(
     state: &mut SessionState,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if matches!(state.lifecycle, SessionLifecycle::Running) {
         transition_lifecycle(state, SessionLifecycle::WaitingInput)
-            .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+            .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
+    }
+    if let Some(run) = state.current_run.as_mut()
+        && matches!(run.lifecycle, RunLifecycle::Running)
+    {
+        run.lifecycle = RunLifecycle::WaitingInput;
+        run.updated_at = state.updated_at;
     }
     Ok(())
 }
@@ -82,7 +189,7 @@ fn transition_to_waiting_input_if_running(
 pub fn apply_session_workflow_event(
     state: &mut SessionState,
     event: &SessionWorkflowEvent,
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event_with_catalog_and_limits(
         state,
         event,
@@ -97,7 +204,7 @@ pub fn apply_session_workflow_event_with_catalog(
     event: &SessionWorkflowEvent,
     allowed_providers: &[&str],
     allowed_models: &[&str],
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event_with_catalog_and_limits(
         state,
         event,
@@ -113,17 +220,42 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
     allowed_providers: &[&str],
     allowed_models: &[&str],
     limits: SessionRuntimeLimits,
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     stamp_timestamps(state, event);
 
-    let mut out = SessionReduceOutput::default();
+    let mut out = SessionWorkflowOutput::default();
     match event {
-        SessionWorkflowEvent::Ingress(ingress) => {
+        SessionWorkflowEvent::Input(input) => {
             if state.session_id.0.is_empty() {
-                state.session_id = ingress.session_id.clone();
+                state.session_id = input.session_id.clone();
             }
-            match &ingress.ingress {
-                SessionIngressKind::RunRequested {
+            match &input.input {
+                SessionInputKind::RunRequested {
+                    input_ref,
+                    run_overrides,
+                } => {
+                    let cause = RunCause::direct_input(input_ref.clone());
+                    validate_run_request_catalog(
+                        state,
+                        run_overrides.as_ref(),
+                        allowed_providers,
+                        allowed_models,
+                    )?;
+                    on_run_start_requested(state, &cause, run_overrides.as_ref(), &mut out)?;
+                }
+                SessionInputKind::RunStartRequested {
+                    cause,
+                    run_overrides,
+                } => {
+                    validate_run_request_catalog(
+                        state,
+                        run_overrides.as_ref(),
+                        allowed_providers,
+                        allowed_models,
+                    )?;
+                    on_run_start_requested(state, cause, run_overrides.as_ref(), &mut out)?;
+                }
+                SessionInputKind::FollowUpInputAppended {
                     input_ref,
                     run_overrides,
                 } => {
@@ -133,12 +265,44 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                         allowed_providers,
                         allowed_models,
                     )?;
-                    on_run_requested(state, input_ref, run_overrides.as_ref(), &mut out)?;
+                    on_follow_up_input_appended(
+                        state,
+                        input_ref,
+                        run_overrides.as_ref(),
+                        &mut out,
+                    )?;
                 }
-                SessionIngressKind::HostCommandReceived(command) => {
-                    on_host_command(state, command)?
+                SessionInputKind::RunSteerRequested { instruction_ref } => {
+                    on_run_steer_requested(state, instruction_ref)?;
                 }
-                SessionIngressKind::ToolRegistrySet {
+                SessionInputKind::RunInterruptRequested { reason_ref } => {
+                    on_run_interrupt_requested(state, reason_ref.clone(), &mut out)?;
+                }
+                SessionInputKind::SessionOpened { config } => {
+                    on_session_opened(state, config.as_ref())?;
+                }
+                SessionInputKind::SessionConfigUpdated { config } => {
+                    state.session_config = config.clone();
+                }
+                SessionInputKind::SessionPaused => {
+                    transition_session_status(state, SessionStatus::Paused)?;
+                }
+                SessionInputKind::SessionResumed => {
+                    transition_session_status(state, SessionStatus::Open)?;
+                }
+                SessionInputKind::SessionArchived => {
+                    transition_session_status(state, SessionStatus::Archived)?;
+                }
+                SessionInputKind::SessionExpired => {
+                    transition_session_status(state, SessionStatus::Expired)?;
+                }
+                SessionInputKind::SessionClosed => {
+                    transition_session_status(state, SessionStatus::Closed)?;
+                }
+                SessionInputKind::HostCommandReceived(command) => {
+                    on_host_command(state, command, &mut out)?
+                }
+                SessionInputKind::ToolRegistrySet {
                     registry,
                     profiles,
                     default_profile,
@@ -148,10 +312,10 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     profiles.as_ref(),
                     default_profile.as_ref(),
                 )?,
-                SessionIngressKind::ToolProfileSelected { profile_id } => {
+                SessionInputKind::ToolProfileSelected { profile_id } => {
                     on_tool_profile_selected(state, profile_id)?
                 }
-                SessionIngressKind::ToolOverridesSet {
+                SessionInputKind::ToolOverridesSet {
                     scope,
                     enable,
                     disable,
@@ -163,28 +327,70 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     disable.as_deref(),
                     force.as_deref(),
                 )?,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::TurnObserved(observation) => {
+                    on_turn_observed(state, observation);
+                }
+                SessionInputKind::ContextOperationUpdated { operation } => {
+                    on_context_operation_updated(state, operation.clone(), &mut out)?;
+                }
+                SessionInputKind::HostSessionUpdated {
                     host_session_id,
                     host_session_status,
                 } => {
                     on_host_session_updated(state, host_session_id.as_ref(), *host_session_status)?
                 }
-                SessionIngressKind::RunCompleted => {
+                SessionInputKind::RunCompleted => {
+                    finish_current_run(
+                        state,
+                        RunLifecycle::Completed,
+                        Some(RunOutcome {
+                            output_ref: state.last_output_ref.clone(),
+                            failure: None,
+                            cancelled_reason: None,
+                            interrupted_reason_ref: None,
+                        }),
+                    );
                     transition_lifecycle(state, SessionLifecycle::Completed)
-                        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
+                    start_next_queued_run(state, &mut out)?;
                 }
-                SessionIngressKind::RunFailed { .. } => {
+                SessionInputKind::RunFailed { code, detail } => {
+                    finish_current_run(
+                        state,
+                        RunLifecycle::Failed,
+                        Some(RunOutcome {
+                            output_ref: state.last_output_ref.clone(),
+                            failure: Some(RunFailure {
+                                code: code.clone(),
+                                detail: detail.clone(),
+                            }),
+                            cancelled_reason: None,
+                            interrupted_reason_ref: None,
+                        }),
+                    );
                     transition_lifecycle(state, SessionLifecycle::Failed)
-                        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
+                    start_next_queued_run(state, &mut out)?;
                 }
-                SessionIngressKind::RunCancelled { .. } => {
+                SessionInputKind::RunCancelled { reason } => {
+                    finish_current_run(
+                        state,
+                        RunLifecycle::Cancelled,
+                        Some(RunOutcome {
+                            output_ref: state.last_output_ref.clone(),
+                            failure: None,
+                            cancelled_reason: reason.clone(),
+                            interrupted_reason_ref: None,
+                        }),
+                    );
                     transition_lifecycle(state, SessionLifecycle::Cancelled)
-                        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
+                    start_next_queued_run(state, &mut out)?;
                 }
-                SessionIngressKind::Noop => {}
+                SessionInputKind::Noop => {}
             }
         }
         SessionWorkflowEvent::Receipt(receipt) => on_receipt_envelope(state, receipt, &mut out)?,
@@ -193,10 +399,14 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
         }
         SessionWorkflowEvent::StreamFrame(frame) => {
             let _ = state.pending_effects.observe(frame.into());
+            trace_stream_frame(state, frame);
         }
         SessionWorkflowEvent::Noop => {}
     }
 
+    trace_workflow_output(state, &out);
+    recompute_in_flight_effects(state);
+    finish_interrupted_run_if_quiescent(state, &mut out)?;
     recompute_in_flight_effects(state);
     enforce_runtime_limits(state, limits)?;
     Ok(out)
@@ -205,7 +415,7 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
 pub fn apply_session_event(
     state: &mut SessionState,
     event: &SessionWorkflowEvent,
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event(state, event)
 }
 
@@ -214,7 +424,7 @@ pub fn apply_session_event_with_catalog(
     event: &SessionWorkflowEvent,
     allowed_providers: &[&str],
     allowed_models: &[&str],
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event_with_catalog(state, event, allowed_providers, allowed_models)
 }
 
@@ -224,7 +434,7 @@ pub fn apply_session_event_with_catalog_and_limits(
     allowed_providers: &[&str],
     allowed_models: &[&str],
     limits: SessionRuntimeLimits,
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event_with_catalog_and_limits(
         state,
         event,
@@ -239,7 +449,7 @@ pub fn validate_run_request_catalog(
     run_overrides: Option<&SessionConfig>,
     allowed_providers: &[&str],
     allowed_models: &[&str],
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     let requested = select_run_config(&state.session_config, run_overrides);
     validate_run_catalog(&requested, allowed_providers, allowed_models)
 }
@@ -248,7 +458,7 @@ pub fn validate_run_catalog(
     config: &RunConfig,
     allowed_providers: &[&str],
     allowed_models: &[&str],
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     validate_run_config(config)?;
 
     if !allowed_providers.is_empty()
@@ -256,7 +466,7 @@ pub fn validate_run_catalog(
             .iter()
             .any(|value| config.provider.trim() == value.trim())
     {
-        return Err(SessionReduceError::UnknownProvider);
+        return Err(SessionWorkflowError::UnknownProvider);
     }
 
     if !allowed_models.is_empty()
@@ -264,75 +474,308 @@ pub fn validate_run_catalog(
             .iter()
             .any(|value| config.model.trim() == value.trim())
     {
-        return Err(SessionReduceError::UnknownModel);
+        return Err(SessionWorkflowError::UnknownModel);
     }
 
     Ok(())
 }
 
-fn on_run_requested(
+fn on_session_opened(
     state: &mut SessionState,
-    input_ref: &str,
+    config: Option<&SessionConfig>,
+) -> Result<(), SessionWorkflowError> {
+    if let Some(config) = config {
+        state.session_config = config.clone();
+    }
+    transition_session_status(state, SessionStatus::Open)
+}
+
+fn transition_session_status(
+    state: &mut SessionState,
+    next: SessionStatus,
+) -> Result<(), SessionWorkflowError> {
+    if state.status == next {
+        return Ok(());
+    }
+    if state.active_run_id.is_some()
+        && matches!(
+            next,
+            SessionStatus::Archived | SessionStatus::Expired | SessionStatus::Closed
+        )
+    {
+        return Err(SessionWorkflowError::RunAlreadyActive);
+    }
+    state.status = next;
+    Ok(())
+}
+
+fn on_run_start_requested(
+    state: &mut SessionState,
+    cause: &RunCause,
     run_overrides: Option<&SessionConfig>,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    if !state.status.accepts_new_runs() {
+        return Err(SessionWorkflowError::InvalidLifecycleTransition);
+    }
     if state.active_run_id.is_some() {
-        return Err(SessionReduceError::RunAlreadyActive);
+        return Err(SessionWorkflowError::RunAlreadyActive);
+    }
+    if cause.input_refs.is_empty() {
+        return Err(SessionWorkflowError::EmptyMessageRefs);
     }
 
     let requested = select_run_config(&state.session_config, run_overrides);
     validate_run_config(&requested)?;
 
     transition_lifecycle(state, SessionLifecycle::Running)
-        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
 
     let run_id = allocate_run_id(state);
     state.active_run_id = Some(run_id.clone());
     state.active_run_config = Some(requested.clone());
+    state.current_run = Some(RunState {
+        run_id: run_id.clone(),
+        lifecycle: RunLifecycle::Running,
+        cause: cause.clone(),
+        config: requested.clone(),
+        input_refs: cause.input_refs.clone(),
+        turn_plan: None,
+        queued_steer_refs: Vec::new(),
+        interrupt: None,
+        active_tool_batch: None,
+        pending_effects: aos_wasm_sdk::PendingEffects::new(),
+        pending_blob_gets: aos_wasm_sdk::SharedBlobGets::new(),
+        pending_blob_puts: aos_wasm_sdk::SharedBlobPuts::new(),
+        staged_tool_follow_up_turn: None,
+        pending_llm_turn_items: None,
+        blocked_on_context_operation: None,
+        last_output_ref: None,
+        last_llm_usage: None,
+        tool_refs_materialized: false,
+        in_flight_effects: 0,
+        outcome: None,
+        trace: RunTrace::default(),
+        started_at: state.updated_at,
+        updated_at: state.updated_at,
+    });
+    let mut refs = cause
+        .input_refs
+        .iter()
+        .cloned()
+        .map(|value| trace_ref("input_ref", value))
+        .collect::<Vec<_>>();
+    if let Some(payload_ref) = cause.payload_ref.as_ref() {
+        refs.push(trace_ref("payload_ref", payload_ref.clone()));
+    }
+    let mut metadata = BTreeMap::new();
+    metadata.insert("cause_kind".into(), cause.kind.clone());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::RunStarted,
+        "run started",
+        refs,
+        metadata,
+    );
     state.active_tool_batch = None;
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
-    state.pending_follow_up_turn = None;
-    state.queued_llm_message_refs = None;
-    state.conversation_message_refs.clear();
+    state.staged_tool_follow_up_turn = None;
+    state.pending_llm_turn_items = None;
+    state.queued_steer_refs.clear();
+    state.run_interrupt = None;
     state.last_output_ref = None;
+    if let Some(run) = state.current_run.as_mut() {
+        run.last_llm_usage = None;
+    }
+    state.tool_refs_materialized = false;
 
-    refresh_effective_tools(state, Some(&requested))?;
-    state.conversation_message_refs.push(input_ref.into());
-    queue_llm_turn(state, state.conversation_message_refs.clone(), out)
+    state.context_state.append_message_refs(
+        cause.input_refs.iter().cloned(),
+        "run_input",
+        state.updated_at,
+    );
+    set_pending_llm_turn(state, state.context_state.active_window_items.clone(), out)
+}
+
+fn on_follow_up_input_appended(
+    state: &mut SessionState,
+    input_ref: &str,
+    run_overrides: Option<&SessionConfig>,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    let queued = QueuedRunStart {
+        cause: RunCause::direct_input(input_ref.into()),
+        run_overrides: run_overrides.cloned(),
+        queued_at: state.updated_at,
+    };
+    if state.active_run_id.is_none() {
+        return start_queued_run(state, queued, out);
+    }
+
+    let mut refs = queued
+        .cause
+        .input_refs
+        .iter()
+        .cloned()
+        .map(|value| trace_ref("input_ref", value))
+        .collect::<Vec<_>>();
+    refs.push(trace_ref("queue", "follow_up"));
+    push_run_trace(
+        state,
+        RunTraceEntryKind::InterventionRequested,
+        "follow-up input queued",
+        refs,
+        BTreeMap::new(),
+    );
+    state.queued_follow_up_runs.push(queued);
+    Ok(())
+}
+
+fn on_context_operation_updated(
+    state: &mut SessionState,
+    operation: Option<ContextOperationState>,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    match operation {
+        Some(operation) => state.context_state.set_pending_operation(operation),
+        None => state.context_state.clear_pending_operation(),
+    }
+    trace_context_operation_state(state);
+    sync_current_run_execution(state);
+    dispatch_pending_llm_turn(state, out)
+}
+
+fn trace_context_operation_state(state: &mut SessionState) {
+    let mut refs = Vec::new();
+    let mut metadata = BTreeMap::new();
+    let summary = if let Some(operation) = state.context_state.pending_context_operation.as_ref() {
+        refs.push(trace_ref(
+            "context_operation_id",
+            operation.operation_id.clone(),
+        ));
+        metadata.insert("phase".into(), operation.phase.as_str().into());
+        metadata.insert("reason".into(), format!("{:?}", operation.reason));
+        metadata.insert("strategy".into(), format!("{:?}", operation.strategy));
+        if let Some(candidate_plan_id) = operation.candidate_plan_id.as_ref() {
+            refs.push(trace_ref("candidate_plan_id", candidate_plan_id.clone()));
+        }
+        "context operation updated"
+    } else {
+        metadata.insert("phase".into(), "Idle".into());
+        "context operation cleared"
+    };
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ContextOperationStateChanged,
+        summary,
+        refs,
+        metadata,
+    );
+}
+
+fn on_run_steer_requested(
+    state: &mut SessionState,
+    instruction_ref: &str,
+) -> Result<(), SessionWorkflowError> {
+    if state.active_run_id.is_none() {
+        return Err(SessionWorkflowError::RunNotActive);
+    }
+    let refs = vec![trace_ref("instruction_ref", instruction_ref.to_string())];
+    push_run_trace(
+        state,
+        RunTraceEntryKind::InterventionRequested,
+        "steer instruction queued for next LLM turn",
+        refs,
+        BTreeMap::new(),
+    );
+    state.queued_steer_refs.push(instruction_ref.into());
+    sync_current_run_execution(state);
+    Ok(())
+}
+
+fn on_run_interrupt_requested(
+    state: &mut SessionState,
+    reason_ref: Option<String>,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    if state.active_run_id.is_none() {
+        return Err(SessionWorkflowError::RunNotActive);
+    }
+    let interrupt = RunInterrupt {
+        reason_ref,
+        requested_at: state.updated_at,
+    };
+    let refs = interrupt
+        .reason_ref
+        .iter()
+        .cloned()
+        .map(|value| trace_ref("reason_ref", value))
+        .collect::<Vec<_>>();
+    push_run_trace(
+        state,
+        RunTraceEntryKind::InterventionRequested,
+        "run interrupt requested",
+        refs,
+        BTreeMap::new(),
+    );
+    state.run_interrupt = Some(interrupt);
+    state.pending_llm_turn_items = None;
+    sync_current_run_execution(state);
+    finish_interrupted_run_if_quiescent(state, out)
 }
 
 fn on_host_command(
     state: &mut SessionState,
     command: &crate::contracts::HostCommand,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     if !can_apply_host_command(state, &command.command) {
-        return Err(SessionReduceError::HostCommandRejected);
+        return Err(SessionWorkflowError::HostCommandRejected);
     }
 
-    enqueue_host_text(state, &command.command);
+    let mut metadata = BTreeMap::new();
+    metadata.insert("command_id".into(), command.command_id.clone());
+    metadata.insert("issued_at".into(), command.issued_at.to_string());
+    metadata.insert("command".into(), alloc::format!("{:?}", command.command));
+    push_run_trace(
+        state,
+        RunTraceEntryKind::InterventionRequested,
+        "host command received",
+        Vec::new(),
+        metadata,
+    );
 
     match &command.command {
         HostCommandKind::Pause => {
+            transition_session_status(state, SessionStatus::Paused)?;
             transition_lifecycle(state, SessionLifecycle::Paused)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
         }
         HostCommandKind::Resume => {
+            transition_session_status(state, SessionStatus::Open)?;
             transition_lifecycle(state, SessionLifecycle::Running)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
         }
         HostCommandKind::Cancel { .. } => {
             transition_lifecycle(state, SessionLifecycle::Cancelling)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
+            finish_current_run(
+                state,
+                RunLifecycle::Cancelled,
+                Some(RunOutcome {
+                    output_ref: state.last_output_ref.clone(),
+                    failure: None,
+                    cancelled_reason: Some("host command cancel".into()),
+                    interrupted_reason_ref: None,
+                }),
+            );
             transition_lifecycle(state, SessionLifecycle::Cancelled)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
             clear_active_run(state);
+            start_next_queued_run(state, out)?;
         }
-        HostCommandKind::Steer { .. }
-        | HostCommandKind::FollowUp { .. }
-        | HostCommandKind::Noop => {
-            let _ = pop_follow_up_if_ready(state);
-        }
+        HostCommandKind::Noop => {}
     }
 
     Ok(())
@@ -342,22 +785,22 @@ fn validate_tool_registry_payload(
     registry: &BTreeMap<String, ToolSpec>,
     profiles: Option<&BTreeMap<String, Vec<String>>>,
     default_profile: Option<&String>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     crate::tools::registry::validate_tool_registry(registry)
-        .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
+        .map_err(|_| SessionWorkflowError::InvalidToolRegistry)?;
 
     if let Some(profiles) = profiles {
         for tool_ids in profiles.values() {
             for tool_id in tool_ids {
                 if !registry.contains_key(tool_id) {
-                    return Err(SessionReduceError::InvalidToolRegistry);
+                    return Err(SessionWorkflowError::InvalidToolRegistry);
                 }
             }
         }
         if let Some(profile) = default_profile
             && !profiles.contains_key(profile)
         {
-            return Err(SessionReduceError::InvalidToolRegistry);
+            return Err(SessionWorkflowError::InvalidToolRegistry);
         }
     }
     Ok(())
@@ -368,7 +811,7 @@ fn on_tool_registry_set(
     registry: &BTreeMap<String, ToolSpec>,
     profiles: Option<&BTreeMap<String, Vec<String>>>,
     default_profile: Option<&String>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     validate_tool_registry_payload(registry, profiles, default_profile)?;
     state.tool_registry = registry.clone();
     if let Some(profiles) = profiles {
@@ -378,20 +821,18 @@ fn on_tool_registry_set(
         state.tool_profile = default_profile.clone();
     }
 
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())
+    Ok(())
 }
 
 fn on_tool_profile_selected(
     state: &mut SessionState,
     profile_id: &str,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if !state.tool_profiles.contains_key(profile_id) {
-        return Err(SessionReduceError::ToolProfileUnknown);
+        return Err(SessionWorkflowError::ToolProfileUnknown);
     }
     state.tool_profile = profile_id.into();
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())
+    Ok(())
 }
 
 fn on_tool_overrides_set(
@@ -400,7 +841,7 @@ fn on_tool_overrides_set(
     enable: Option<&[String]>,
     disable: Option<&[String]>,
     force: Option<&[String]>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     validate_known_tool_names(state, enable)?;
     validate_known_tool_names(state, disable)?;
     validate_known_tool_names(state, force)?;
@@ -415,34 +856,62 @@ fn on_tool_overrides_set(
             let active = state
                 .active_run_config
                 .as_mut()
-                .ok_or(SessionReduceError::RunNotActive)?;
+                .ok_or(SessionWorkflowError::RunNotActive)?;
             active.tool_enable = enable.map(|items| items.to_vec());
             active.tool_disable = disable.map(|items| items.to_vec());
             active.tool_force = force.map(|items| items.to_vec());
         }
     }
 
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())
+    Ok(())
 }
 
 fn on_host_session_updated(
     state: &mut SessionState,
     host_session_id: Option<&String>,
     host_session_status: Option<crate::contracts::HostSessionStatus>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     state.tool_runtime_context.host_session_id = host_session_id.cloned();
     state.tool_runtime_context.host_session_status = host_session_status;
+    Ok(())
+}
 
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())
+fn on_turn_observed(state: &mut SessionState, observation: &TurnObservation) {
+    match observation {
+        TurnObservation::InputObserved(input) => {
+            state
+                .turn_state
+                .durable_inputs
+                .retain(|existing| existing.input_id != input.input_id);
+            state.turn_state.durable_inputs.push(input.clone());
+        }
+        TurnObservation::InputRemoved { input_id } => {
+            state
+                .turn_state
+                .durable_inputs
+                .retain(|existing| existing.input_id != *input_id);
+        }
+        TurnObservation::CustomStateRefUpdated(value) => {
+            state.turn_state.custom_state_refs.retain(|existing| {
+                existing.planner_id != value.planner_id || existing.key != value.key
+            });
+            state.turn_state.custom_state_refs.push(value.clone());
+        }
+        TurnObservation::CustomStateRefRemoved { planner_id, key } => {
+            state
+                .turn_state
+                .custom_state_refs
+                .retain(|existing| existing.planner_id != *planner_id || existing.key != *key);
+        }
+        TurnObservation::Noop => {}
+    }
 }
 
 fn handle_standalone_host_session_open_receipt(
     state: &mut SessionState,
     envelope: &EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<bool, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<bool, SessionWorkflowError> {
     if envelope.effect != "sys/host.session.open@1" {
         return Ok(false);
     }
@@ -459,24 +928,30 @@ fn handle_standalone_host_session_open_receipt(
     if let Some(host_session_status) = mapped.runtime_delta.host_session_status {
         state.tool_runtime_context.host_session_status = Some(host_session_status);
     }
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())?;
-
     if mapped.is_error {
         fail_run(state)?;
         return Ok(true);
     }
 
-    dispatch_queued_llm_turn(state, out)?;
+    dispatch_pending_llm_turn(state, out)?;
     Ok(true)
 }
 
 fn handle_llm_generate_receipt(
     state: &mut SessionState,
     envelope: &EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     if envelope.status != "ok" {
+        if let Some(receipt) = envelope
+            .decode_receipt_payload::<LlmGenerateReceipt>()
+            .ok()
+            .filter(is_context_limit_generate_receipt)
+        {
+            observe_context_pressure_from_generate_failure(state, &receipt);
+            dispatch_pending_llm_turn(state, out)?;
+            return Ok(());
+        }
         fail_run(state)?;
         return Ok(());
     }
@@ -486,7 +961,33 @@ fn handle_llm_generate_receipt(
         return Ok(());
     };
 
+    let usage = llm_usage_record_from_receipt(&receipt);
     state.last_output_ref = Some(receipt.output_ref.as_str().into());
+    if let Some(run) = state.current_run.as_mut() {
+        run.last_llm_usage = Some(usage.clone());
+    }
+    state.context_state.last_llm_usage = Some(usage.clone());
+    let refs = vec![trace_ref("output_ref", receipt.output_ref.to_string())];
+    let mut metadata = BTreeMap::new();
+    metadata.insert("provider_id".into(), receipt.provider_id.clone());
+    metadata.insert("finish_reason".into(), receipt.finish_reason.reason.clone());
+    metadata.insert("status".into(), envelope.status.clone());
+    if !receipt.provider_context_items.is_empty() {
+        metadata.insert(
+            "provider_context_item_count".into(),
+            receipt.provider_context_items.len().to_string(),
+        );
+    }
+    insert_llm_usage_trace_metadata(&mut metadata, &usage);
+    push_run_trace(
+        state,
+        RunTraceEntryKind::LlmReceived,
+        "llm receipt received",
+        refs,
+        metadata,
+    );
+    trace_provider_context_items_from_generate(state, &receipt);
+    schedule_usage_high_water_compaction_if_needed(state, &receipt, &usage);
 
     if enqueue_blob_get(
         state,
@@ -500,6 +1001,481 @@ fn handle_llm_generate_receipt(
     }
 
     Ok(())
+}
+
+fn is_context_limit_generate_receipt(receipt: &LlmGenerateReceipt) -> bool {
+    let reason = receipt.finish_reason.reason.to_ascii_lowercase();
+    let raw = receipt
+        .finish_reason
+        .raw
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    reason.contains("context")
+        || raw.contains("context length")
+        || raw.contains("context limit")
+        || raw.contains("too many tokens")
+        || raw.contains("maximum context")
+        || raw.contains("input tokens")
+}
+
+fn observe_context_pressure_from_generate_failure(
+    state: &mut SessionState,
+    receipt: &LlmGenerateReceipt,
+) {
+    let usage = llm_usage_record_from_receipt(receipt);
+    let candidate_plan_id = state
+        .current_run
+        .as_ref()
+        .and_then(|run| run.turn_plan.as_ref())
+        .map(hash_cbor);
+    let provider = Some(receipt.provider_id.clone());
+    let model = state
+        .active_run_config
+        .as_ref()
+        .map(|config| config.model.clone());
+    let pressure = ContextPressureRecord {
+        reason: ContextPressureReason::ProviderContextLimit,
+        provider,
+        model,
+        candidate_plan_id: candidate_plan_id.clone(),
+        observed_usage: Some(usage),
+        error_kind: Some("ProviderContextLimit".into()),
+        error_ref: receipt
+            .raw_output_ref
+            .as_ref()
+            .map(|value| value.to_string()),
+        recommended_strategy: Some(CompactionStrategy::Auto),
+        observed_at_ns: state.updated_at,
+    };
+    state.context_state.last_context_pressure = Some(pressure.clone());
+
+    let operation_id = context_operation_id(state, "context-limit");
+    let source_range = compactable_transcript_range(state);
+    let mut operation = ContextOperationState::needs_compaction(
+        operation_id.clone(),
+        ContextPressureReason::ProviderContextLimit,
+        CompactionStrategy::Auto,
+        source_range,
+        state.updated_at,
+    );
+    operation.candidate_plan_id = candidate_plan_id;
+    state.context_state.set_pending_operation(operation);
+
+    if let Some(items) = state
+        .current_run
+        .as_ref()
+        .and_then(|run| run.turn_plan.as_ref())
+        .map(|plan| plan.active_window_items.clone())
+    {
+        state.pending_llm_turn_items = Some(items);
+    }
+    trace_context_pressure_observed(state, &pressure);
+    trace_context_operation_state(state);
+    sync_current_run_execution(state);
+}
+
+fn schedule_usage_high_water_compaction_if_needed(
+    state: &mut SessionState,
+    receipt: &LlmGenerateReceipt,
+    usage: &crate::contracts::LlmUsageRecord,
+) {
+    if state.context_state.pending_context_operation.is_some() {
+        return;
+    }
+    if usage.prompt_tokens < USAGE_HIGH_WATER_INPUT_TOKENS {
+        return;
+    }
+
+    let candidate_plan_id = state
+        .current_run
+        .as_ref()
+        .and_then(|run| run.turn_plan.as_ref())
+        .map(hash_cbor);
+    let pressure = ContextPressureRecord {
+        reason: ContextPressureReason::UsageHighWater,
+        provider: Some(receipt.provider_id.clone()),
+        model: state
+            .active_run_config
+            .as_ref()
+            .map(|config| config.model.clone()),
+        candidate_plan_id: candidate_plan_id.clone(),
+        observed_usage: Some(usage.clone()),
+        error_kind: None,
+        error_ref: None,
+        recommended_strategy: Some(CompactionStrategy::Auto),
+        observed_at_ns: state.updated_at,
+    };
+    state.context_state.last_context_pressure = Some(pressure.clone());
+
+    let mut operation = ContextOperationState::needs_compaction(
+        context_operation_id(state, "usage-high-water"),
+        ContextPressureReason::UsageHighWater,
+        CompactionStrategy::Auto,
+        compactable_transcript_range(state),
+        state.updated_at,
+    );
+    operation.candidate_plan_id = candidate_plan_id;
+    state.context_state.set_pending_operation(operation);
+    trace_context_pressure_observed(state, &pressure);
+    trace_context_operation_state(state);
+    sync_current_run_execution(state);
+}
+
+fn trace_provider_context_items_from_generate(
+    state: &mut SessionState,
+    receipt: &LlmGenerateReceipt,
+) {
+    if receipt.provider_context_items.is_empty() {
+        return;
+    }
+    let refs = receipt
+        .provider_context_items
+        .iter()
+        .map(|item| trace_ref("provider_context_item_ref", item.ref_.to_string()))
+        .collect::<Vec<_>>();
+    let metadata = BTreeMap::from([
+        ("provider_id".into(), receipt.provider_id.clone()),
+        (
+            "provider_context_item_count".into(),
+            receipt.provider_context_items.len().to_string(),
+        ),
+    ]);
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ProviderContextArtifactsObserved,
+        "provider context artifacts surfaced from llm receipt",
+        refs,
+        metadata,
+    );
+}
+
+fn trace_context_pressure_observed(state: &mut SessionState, pressure: &ContextPressureRecord) {
+    let mut refs = Vec::new();
+    if let Some(error_ref) = pressure.error_ref.as_ref() {
+        refs.push(trace_ref("error_ref", error_ref.clone()));
+    }
+    if let Some(candidate_plan_id) = pressure.candidate_plan_id.as_ref() {
+        refs.push(trace_ref("candidate_plan_id", candidate_plan_id.clone()));
+    }
+    let mut metadata = BTreeMap::new();
+    metadata.insert("reason".into(), format!("{:?}", pressure.reason));
+    if let Some(provider) = pressure.provider.as_ref() {
+        metadata.insert("provider".into(), provider.clone());
+    }
+    if let Some(model) = pressure.model.as_ref() {
+        metadata.insert("model".into(), model.clone());
+    }
+    if let Some(usage) = pressure.observed_usage.as_ref() {
+        insert_llm_usage_trace_metadata(&mut metadata, usage);
+    }
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ContextPressureObserved,
+        "context pressure observed",
+        refs,
+        metadata,
+    );
+}
+
+fn compactable_transcript_range(state: &SessionState) -> Option<TranscriptRange> {
+    let end_seq = state.context_state.transcript_ledger.next_seq;
+    if end_seq == 0 {
+        None
+    } else {
+        Some(TranscriptRange {
+            start_seq: state.context_state.compacted_through.unwrap_or(0),
+            end_seq,
+        })
+    }
+}
+
+fn context_operation_id(state: &SessionState, reason: &str) -> String {
+    let run_seq = state
+        .active_run_id
+        .as_ref()
+        .map(|id| id.run_seq)
+        .unwrap_or(0);
+    format!("ctx-op:{reason}:run-{run_seq}:{}", state.updated_at)
+}
+
+fn handle_llm_compact_receipt(
+    state: &mut SessionState,
+    envelope: &EffectReceiptEnvelope,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    if envelope.status != "ok" {
+        mark_context_operation_failed(state, "llm.compact receipt status not ok");
+        return Ok(());
+    }
+
+    let Some(receipt): Option<LlmCompactReceipt> = envelope.decode_receipt_payload().ok() else {
+        mark_context_operation_failed(state, "invalid llm.compact receipt payload");
+        return Ok(());
+    };
+
+    apply_llm_compact_receipt(state, receipt)?;
+    dispatch_pending_llm_turn(state, out)
+}
+
+fn handle_llm_count_tokens_receipt(
+    state: &mut SessionState,
+    envelope: &EffectReceiptEnvelope,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    if envelope.status != "ok" {
+        mark_context_operation_failed(state, "llm.count_tokens receipt status not ok");
+        return Ok(());
+    }
+
+    let Some(receipt): Option<LlmCountTokensReceipt> = envelope.decode_receipt_payload().ok()
+    else {
+        mark_context_operation_failed(state, "invalid llm.count_tokens receipt payload");
+        return Ok(());
+    };
+
+    apply_llm_count_tokens_receipt(state, receipt);
+    dispatch_pending_llm_turn(state, out)
+}
+
+fn apply_llm_count_tokens_receipt(state: &mut SessionState, receipt: LlmCountTokensReceipt) {
+    state.context_state.last_token_count = Some(crate::contracts::LlmTokenCountRecord {
+        input_tokens: receipt.input_tokens,
+        original_input_tokens: receipt.original_input_tokens,
+        tool_tokens: receipt.tool_tokens,
+        response_format_tokens: receipt.response_format_tokens,
+        quality: token_count_quality(receipt.quality.clone()),
+        provider: receipt.provider.clone(),
+        model: receipt.model.clone(),
+        candidate_plan_id: receipt.candidate_plan_id.clone(),
+        provider_metadata_ref: receipt
+            .provider_metadata_ref
+            .as_ref()
+            .map(|value| value.to_string()),
+        warnings_ref: receipt.warnings_ref.as_ref().map(|value| value.to_string()),
+        counted_at_ns: state.updated_at,
+    });
+
+    if let Some(mut operation) = state.context_state.pending_context_operation.clone() {
+        if matches!(operation.phase, ContextOperationPhase::CountingTokens) {
+            operation.phase = ContextOperationPhase::Idle;
+            operation.updated_at_ns = state.updated_at;
+            state.context_state.set_pending_operation(operation);
+        }
+    }
+    sync_current_run_execution(state);
+
+    let mut metadata = BTreeMap::new();
+    metadata.insert("provider".into(), receipt.provider);
+    metadata.insert("model".into(), receipt.model);
+    metadata.insert("quality".into(), format!("{:?}", receipt.quality));
+    if let Some(input_tokens) = receipt.input_tokens {
+        metadata.insert("input_tokens".into(), input_tokens.to_string());
+    }
+    push_run_trace(
+        state,
+        RunTraceEntryKind::TokenCountReceived,
+        "llm token count received",
+        Vec::new(),
+        metadata,
+    );
+}
+
+fn apply_llm_compact_receipt(
+    state: &mut SessionState,
+    receipt: LlmCompactReceipt,
+) -> Result<(), SessionWorkflowError> {
+    let Some(mut operation) = state.context_state.pending_context_operation.clone() else {
+        return Ok(());
+    };
+    if operation.operation_id != receipt.operation_id {
+        mark_context_operation_failed(state, "llm.compact receipt operation mismatch");
+        return Ok(());
+    }
+    if receipt.active_window_items.is_empty() {
+        mark_context_operation_failed(state, "llm.compact receipt missing active window");
+        return Ok(());
+    }
+
+    operation.phase = ContextOperationPhase::ApplyingCompaction;
+    operation.updated_at_ns = state.updated_at;
+    state.context_state.set_pending_operation(operation.clone());
+    trace_context_operation_state(state);
+
+    let active_window_items = receipt
+        .active_window_items
+        .iter()
+        .map(crate::helpers::llm::active_window_item_from_llm)
+        .collect::<Vec<_>>();
+    let compacted_through = receipt.compacted_through.or_else(|| {
+        receipt
+            .source_range
+            .as_ref()
+            .map(|range| range.end_seq)
+            .or(operation.source_range.as_ref().map(|range| range.end_seq))
+    });
+    let source_range = receipt
+        .source_range
+        .as_ref()
+        .map(|range| TranscriptRange {
+            start_seq: range.start_seq,
+            end_seq: range.end_seq,
+        })
+        .or(operation.source_range.clone())
+        .unwrap_or_else(|| TranscriptRange {
+            start_seq: 0,
+            end_seq: compacted_through.unwrap_or(0),
+        });
+    let artifact_kind = compaction_artifact_kind(receipt.artifact_kind);
+    let usage = receipt
+        .token_usage
+        .as_ref()
+        .map(|usage| crate::contracts::LlmUsageRecord {
+            prompt_tokens: usage.prompt,
+            completion_tokens: usage.completion,
+            total_tokens: usage.total,
+            reasoning_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        });
+    let record = CompactionRecord {
+        operation_id: receipt.operation_id.clone(),
+        strategy: operation.strategy.clone(),
+        artifact_kind,
+        artifact_refs: receipt
+            .artifact_refs
+            .iter()
+            .map(|value| value.to_string())
+            .collect(),
+        source_range,
+        source_refs: active_window_items
+            .iter()
+            .flat_map(|item| item.source_refs.clone())
+            .collect(),
+        active_window_items: active_window_items.clone(),
+        provider_compatibility: active_window_items
+            .iter()
+            .find_map(|item| item.provider_compatibility.clone()),
+        usage,
+        created_at_ns: state.updated_at,
+        warnings: Vec::new(),
+    };
+
+    state.context_state.active_window_items = active_window_items;
+    state.context_state.compacted_through = compacted_through;
+    state.context_state.last_compaction = Some(record.clone());
+    state.context_state.compaction_records.push(record);
+    state.context_state.clear_pending_operation();
+    if let Some(items) = state.pending_llm_turn_items.as_mut() {
+        *items = state.context_state.active_window_items.clone();
+    }
+    sync_current_run_execution(state);
+
+    push_run_trace(
+        state,
+        RunTraceEntryKind::CompactionReceived,
+        "context compaction receipt applied",
+        vec![trace_ref(
+            "context_operation_id",
+            receipt.operation_id.clone(),
+        )],
+        BTreeMap::from([("provider_id".into(), receipt.provider_id)]),
+    );
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ActiveWindowUpdated,
+        "active window replaced by compaction result",
+        state
+            .context_state
+            .active_window_items
+            .iter()
+            .map(|item| trace_ref("window_item_ref", item.ref_.clone()))
+            .collect(),
+        BTreeMap::new(),
+    );
+    Ok(())
+}
+
+fn mark_context_operation_failed(state: &mut SessionState, failure: &str) {
+    let Some(mut operation) = state.context_state.pending_context_operation.clone() else {
+        return;
+    };
+    operation.phase = ContextOperationPhase::Failed;
+    operation.failure = Some(failure.into());
+    operation.updated_at_ns = state.updated_at;
+    state.context_state.set_pending_operation(operation);
+    trace_context_operation_state(state);
+    sync_current_run_execution(state);
+}
+
+fn compaction_artifact_kind(value: LlmCompactionArtifactKind) -> CompactionArtifactKind {
+    match value {
+        LlmCompactionArtifactKind::AosSummary => CompactionArtifactKind::AosSummary,
+        LlmCompactionArtifactKind::ProviderNative => CompactionArtifactKind::ProviderNative,
+        LlmCompactionArtifactKind::Mixed => CompactionArtifactKind::Mixed,
+    }
+}
+
+fn token_count_quality(
+    value: aos_effects::builtins::LlmTokenCountQuality,
+) -> crate::contracts::LlmTokenCountQuality {
+    match value {
+        aos_effects::builtins::LlmTokenCountQuality::Exact => {
+            crate::contracts::LlmTokenCountQuality::Exact
+        }
+        aos_effects::builtins::LlmTokenCountQuality::ProviderEstimate => {
+            crate::contracts::LlmTokenCountQuality::ProviderEstimate
+        }
+        aos_effects::builtins::LlmTokenCountQuality::LocalEstimate => {
+            crate::contracts::LlmTokenCountQuality::LocalEstimate
+        }
+        aos_effects::builtins::LlmTokenCountQuality::Unknown => {
+            crate::contracts::LlmTokenCountQuality::Unknown
+        }
+    }
+}
+
+fn llm_usage_record_from_receipt(receipt: &LlmGenerateReceipt) -> crate::contracts::LlmUsageRecord {
+    crate::contracts::LlmUsageRecord {
+        prompt_tokens: receipt.token_usage.prompt,
+        completion_tokens: receipt.token_usage.completion,
+        total_tokens: receipt.token_usage.total,
+        reasoning_tokens: receipt
+            .usage_details
+            .as_ref()
+            .and_then(|details| details.reasoning_tokens),
+        cache_read_tokens: receipt
+            .usage_details
+            .as_ref()
+            .and_then(|details| details.cache_read_tokens),
+        cache_write_tokens: receipt
+            .usage_details
+            .as_ref()
+            .and_then(|details| details.cache_write_tokens),
+    }
+}
+
+fn insert_llm_usage_trace_metadata(
+    metadata: &mut BTreeMap<String, String>,
+    usage: &crate::contracts::LlmUsageRecord,
+) {
+    metadata.insert("prompt_tokens".into(), usage.prompt_tokens.to_string());
+    metadata.insert(
+        "completion_tokens".into(),
+        usage.completion_tokens.to_string(),
+    );
+    if let Some(total) = usage.total_tokens {
+        metadata.insert("total_tokens".into(), total.to_string());
+    }
+    if let Some(reasoning) = usage.reasoning_tokens {
+        metadata.insert("reasoning_tokens".into(), reasoning.to_string());
+    }
+    if let Some(cache_read) = usage.cache_read_tokens {
+        metadata.insert("cache_read_tokens".into(), cache_read.to_string());
+    }
+    if let Some(cache_write) = usage.cache_write_tokens {
+        metadata.insert("cache_write_tokens".into(), cache_write.to_string());
+    }
 }
 
 fn rejected_as_error_envelope(rejected: &EffectReceiptRejected) -> EffectReceiptEnvelope {
@@ -532,10 +1508,11 @@ fn rejected_as_error_envelope(rejected: &EffectReceiptRejected) -> EffectReceipt
 fn on_receipt_envelope(
     state: &mut SessionState,
     envelope: &EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
-    if handle_pending_blob_get_receipt(state, envelope, out)?
-        || handle_pending_blob_put_receipt(state, envelope, out)?
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    trace_receipt_envelope(state, envelope);
+    if handle_blob_get_receipt(state, envelope, out)?
+        || handle_blob_put_receipt(state, envelope, out)?
     {
         recompute_in_flight_effects(state);
         return Ok(());
@@ -547,6 +1524,8 @@ fn on_receipt_envelope(
                 let _ = handle_standalone_host_session_open_receipt(state, envelope, out)?;
             }
             "sys/llm.generate@1" => handle_llm_generate_receipt(state, envelope, out)?,
+            "sys/llm.count_tokens@1" => handle_llm_count_tokens_receipt(state, envelope, out)?,
+            "sys/llm.compact@1" => handle_llm_compact_receipt(state, envelope, out)?,
             _ => {}
         }
         recompute_in_flight_effects(state);
@@ -568,11 +1547,12 @@ fn on_receipt_envelope(
 fn on_receipt_rejected(
     state: &mut SessionState,
     rejected: &EffectReceiptRejected,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    trace_receipt_rejected(state, rejected);
     let envelope = rejected_as_error_envelope(rejected);
-    if handle_pending_blob_get_receipt(state, &envelope, out)?
-        || handle_pending_blob_put_receipt(state, &envelope, out)?
+    if handle_blob_get_receipt(state, &envelope, out)?
+        || handle_blob_put_receipt(state, &envelope, out)?
     {
         recompute_in_flight_effects(state);
         return Ok(());
@@ -584,6 +1564,10 @@ fn on_receipt_rejected(
                 let _ = handle_standalone_host_session_open_receipt(state, &envelope, out)?;
             }
             "sys/llm.generate@1" => fail_run(state)?,
+            "sys/llm.count_tokens@1" => {
+                mark_context_operation_failed(state, "llm.count_tokens rejected")
+            }
+            "sys/llm.compact@1" => mark_context_operation_failed(state, "llm.compact rejected"),
             _ => {}
         }
         recompute_in_flight_effects(state);
@@ -625,20 +1609,113 @@ fn recompute_in_flight_effects(state: &mut SessionState) {
         + pending_tool_effect_receipts
         + pending_host_loop_calls;
     state.in_flight_effects = total as u64;
+    sync_current_run_execution(state);
 }
 
-fn fail_run(state: &mut SessionState) -> Result<(), SessionReduceError> {
+fn sync_current_run_execution(state: &mut SessionState) {
+    let Some(run) = state.current_run.as_mut() else {
+        return;
+    };
+    run.active_tool_batch = state.active_tool_batch.clone();
+    run.pending_effects = state.pending_effects.clone();
+    run.pending_blob_gets = state.pending_blob_gets.clone();
+    run.pending_blob_puts = state.pending_blob_puts.clone();
+    run.staged_tool_follow_up_turn = state.staged_tool_follow_up_turn.clone();
+    run.pending_llm_turn_items = state.pending_llm_turn_items.clone();
+    run.blocked_on_context_operation = state
+        .context_state
+        .pending_context_operation
+        .as_ref()
+        .map(|operation| operation.operation_id.clone());
+    run.queued_steer_refs = state.queued_steer_refs.clone();
+    run.interrupt = state.run_interrupt.clone();
+    run.last_output_ref = state.last_output_ref.clone();
+    run.tool_refs_materialized = state.tool_refs_materialized;
+    run.in_flight_effects = state.in_flight_effects;
+    run.updated_at = state.updated_at;
+}
+
+fn fail_run(state: &mut SessionState) -> Result<(), SessionWorkflowError> {
+    finish_current_run(
+        state,
+        RunLifecycle::Failed,
+        Some(RunOutcome {
+            output_ref: state.last_output_ref.clone(),
+            failure: Some(RunFailure {
+                code: "run_failed".into(),
+                detail: "run failed while handling effect receipt".into(),
+            }),
+            cancelled_reason: None,
+            interrupted_reason_ref: None,
+        }),
+    );
     transition_lifecycle(state, SessionLifecycle::Failed)
-        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
     clear_active_run(state);
     Ok(())
+}
+
+fn start_queued_run(
+    state: &mut SessionState,
+    queued: QueuedRunStart,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    on_run_start_requested(state, &queued.cause, queued.run_overrides.as_ref(), out)
+}
+
+fn start_next_queued_run(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    let Some(queued) = pop_follow_up_if_ready(state) else {
+        return Ok(());
+    };
+    start_queued_run(state, queued, out)
+}
+
+fn has_open_runtime_work(state: &SessionState) -> bool {
+    !state.pending_effects.is_empty()
+        || !state.pending_blob_gets.is_empty()
+        || !state.pending_blob_puts.is_empty()
+        || state.staged_tool_follow_up_turn.is_some()
+        || state
+            .active_tool_batch
+            .as_ref()
+            .is_some_and(|batch| !batch.is_settled())
+}
+
+pub(super) fn finish_interrupted_run_if_quiescent(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    if state.run_interrupt.is_none() || has_open_runtime_work(state) {
+        return Ok(());
+    }
+    let reason_ref = state
+        .run_interrupt
+        .as_ref()
+        .and_then(|interrupt| interrupt.reason_ref.clone());
+    finish_current_run(
+        state,
+        RunLifecycle::Interrupted,
+        Some(RunOutcome {
+            output_ref: state.last_output_ref.clone(),
+            failure: None,
+            cancelled_reason: None,
+            interrupted_reason_ref: reason_ref,
+        }),
+    );
+    transition_lifecycle(state, SessionLifecycle::Interrupted)
+        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
+    clear_active_run(state);
+    start_next_queued_run(state, out)
 }
 
 fn handle_completed_tool_batch(
     state: &mut SessionState,
     completion: Option<CompletedToolBatch>,
-    out: &mut SessionReduceOutput,
-) -> Result<Option<CompletedToolBatch>, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<Option<CompletedToolBatch>, SessionWorkflowError> {
     let Some(completion) = completion else {
         return Ok(None);
     };
@@ -655,14 +1732,14 @@ fn handle_completed_tool_batch(
         enqueue_blob_put(
             state,
             bytes,
-            PendingBlobPutKind::FollowUpMessage { index: idx as u64 },
+            PendingBlobPutKind::ToolFollowUpMessage { index: idx as u64 },
             out,
         );
         expected_messages = expected_messages.saturating_add(1);
     }
-    state.pending_follow_up_turn = Some(PendingFollowUpTurn {
+    state.staged_tool_follow_up_turn = Some(StagedToolFollowUpTurn {
         tool_batch_id: completion.tool_batch_id.clone(),
-        base_message_refs: state.conversation_message_refs.clone(),
+        base_window_items: state.context_state.active_window_items.clone(),
         expected_messages,
         blob_refs_by_index: BTreeMap::new(),
     });
@@ -704,37 +1781,122 @@ fn build_tool_batch_follow_up_messages(completion: &CompletedToolBatch) -> Vec<s
     messages
 }
 
-fn queue_llm_turn(
+fn set_pending_llm_turn(
     state: &mut SessionState,
-    message_refs: Vec<String>,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
-    state.queued_llm_message_refs = Some(message_refs);
-    dispatch_queued_llm_turn(state, out)
+    items: Vec<ActiveWindowItem>,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    state.pending_llm_turn_items = Some(items);
+    dispatch_pending_llm_turn(state, out)
 }
 
-fn dispatch_queued_llm_turn(
+fn dispatch_pending_llm_turn(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
-    if state.queued_llm_message_refs.is_none() {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    dispatch_pending_llm_turn_with_planner(
+        state,
+        out,
+        &DefaultTurnPlanner,
+        TurnBudget {
+            max_input_tokens: None,
+            reserve_output_tokens: None,
+            max_message_refs: None,
+            max_tool_refs: None,
+        },
+    )
+}
+
+fn render_active_window_message_refs(
+    items: &[ActiveWindowItem],
+) -> Result<Vec<String>, SessionWorkflowError> {
+    let mut refs = Vec::new();
+    for item in items {
+        let Some(ref_) = item.renderable_message_ref() else {
+            return Err(SessionWorkflowError::UnrenderableActiveWindowItem);
+        };
+        refs.push(ref_.to_string());
+    }
+    if refs.is_empty() {
+        return Err(SessionWorkflowError::EmptyMessageRefs);
+    }
+    Ok(refs)
+}
+
+pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+    planner: &P,
+    budget: TurnBudget,
+) -> Result<(), SessionWorkflowError> {
+    if state.pending_llm_turn_items.is_none() {
+        return Ok(());
+    }
+    if state.run_interrupt.is_some() {
         return Ok(());
     }
     if !state.pending_effects.is_empty()
         || !state.pending_blob_gets.is_empty()
         || !state.pending_blob_puts.is_empty()
-        || state.pending_follow_up_turn.is_some()
+        || state.staged_tool_follow_up_turn.is_some()
     {
         return Ok(());
     }
 
-    if should_auto_open_host_session(state) {
-        emit_auto_host_session_open(state, out)?;
+    let Some(window_items) = state.pending_llm_turn_items.clone() else {
+        return Ok(());
+    };
+    let steer_refs = state.queued_steer_refs.clone();
+    let plan = build_turn_plan_for_pending_turn(state, window_items, planner, budget)?;
+
+    if plan.prerequisites.iter().any(|item| {
+        matches!(
+            item.kind,
+            TurnPrerequisiteKind::CompactContext | TurnPrerequisiteKind::CountTokens
+        )
+    }) {
+        if plan
+            .prerequisites
+            .iter()
+            .any(|item| matches!(item.kind, TurnPrerequisiteKind::CompactContext))
+        {
+            request_context_compaction(state, out, &plan)?;
+        }
+        if plan
+            .prerequisites
+            .iter()
+            .any(|item| matches!(item.kind, TurnPrerequisiteKind::CountTokens))
+        {
+            request_context_token_count(state, out, &plan)?;
+        }
+        trace_context_operation_blocked_turn(state, &plan);
+        sync_current_run_execution(state);
         return Ok(());
     }
 
-    if !state.tool_refs_materialized {
-        for tool in state.effective_tools.ordered_tools.clone() {
+    if plan
+        .prerequisites
+        .iter()
+        .any(|item| matches!(item.kind, TurnPrerequisiteKind::OpenHostSession))
+    {
+        if !state
+            .pending_effects
+            .contains_effect("sys/host.session.open@1")
+        {
+            emit_auto_host_session_open(state, out)?;
+        }
+        return Ok(());
+    }
+
+    if plan
+        .prerequisites
+        .iter()
+        .any(|item| matches!(item.kind, TurnPrerequisiteKind::MaterializeToolDefinitions))
+    {
+        for tool_id in plan.selected_tool_ids.clone() {
+            let Some(tool) = state.tool_registry.get(&tool_id).cloned() else {
+                return Err(SessionWorkflowError::UnknownToolOverride);
+            };
             let bytes = crate::tools::registry::tool_definition_bytes(
                 tool.tool_name.as_str(),
                 tool.description.as_str(),
@@ -749,20 +1911,18 @@ fn dispatch_queued_llm_turn(
                 out,
             );
         }
-        if has_pending_tool_definition_puts(state) {
+        if has_open_tool_definition_puts(state) {
             return Ok(());
         }
         state.tool_refs_materialized = true;
     }
 
-    let Some(message_refs) = state.queued_llm_message_refs.take() else {
-        return Ok(());
-    };
     let run_seq = state
         .active_run_id
         .as_ref()
         .map(|id| id.run_seq)
         .unwrap_or(0);
+    state.pending_llm_turn_items = None;
 
     request_llm(
         state,
@@ -773,78 +1933,423 @@ fn dispatch_queued_llm_turn(
                     "run-{run_seq}-turn-{}",
                     state.next_tool_batch_seq + 1
                 )),
-                message_refs,
+                window_items: plan.active_window_items.clone(),
                 temperature: None,
                 top_p: None,
-                tool_refs: state.effective_tools.tool_refs(),
-                tool_choice: Some(aos_effects::builtins::LlmToolChoice::Auto),
+                tool_refs: selected_tool_refs(state, &plan),
+                tool_choice: plan.tool_choice.clone().map(turn_tool_choice_to_llm),
                 stop_sequences: None,
                 metadata: None,
-                provider_options_ref: None,
-                response_format_ref: None,
+                provider_options_ref: plan.provider_options_ref.clone(),
+                response_format_ref: plan.response_format_ref.clone(),
                 api_key: None,
             },
         },
     )?;
-    Ok(())
-}
-
-fn should_auto_open_host_session(state: &SessionState) -> bool {
-    if state.active_run_id.is_none() {
-        return false;
-    }
-    if !state.effective_tools.profile_requires_host_session {
-        return false;
-    }
-    if state.tool_runtime_context.host_session_status
-        == Some(crate::contracts::HostSessionStatus::Ready)
-    {
-        return false;
-    }
-    !state
-        .pending_effects
-        .contains_effect("sys/host.session.open@1")
-}
-
-fn emit_auto_host_session_open(
-    state: &mut SessionState,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
-    let params = map_tool_arguments_to_effect_params(
-        crate::contracts::ToolMapper::HostSessionOpen,
-        "{}",
-        &state.tool_runtime_context,
-    )
-    .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
-    out.effects.push(SessionEffectCommand::ToolEffect {
-        kind: ToolEffectOp::HostSessionOpen,
-        params_json: serde_json::to_string(&params.params_json).unwrap_or_else(|_| "{}".into()),
-        pending: super::begin_pending_effect(
+    if !steer_refs.is_empty() {
+        let refs = steer_refs
+            .iter()
+            .cloned()
+            .map(|value| trace_ref("instruction_ref", value))
+            .collect::<Vec<_>>();
+        push_run_trace(
             state,
-            "sys/host.session.open@1",
-            &params.params_json,
-            None,
-        ),
-    });
+            RunTraceEntryKind::InterventionApplied,
+            "steer instruction injected into LLM turn",
+            refs,
+            BTreeMap::new(),
+        );
+        state.queued_steer_refs.clear();
+        sync_current_run_execution(state);
+    }
     Ok(())
 }
 
-fn refresh_effective_tools(
+fn request_context_compaction(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+    plan: &TurnPlan,
+) -> Result<(), SessionWorkflowError> {
+    if state.pending_effects.contains_effect("sys/llm.compact@1") {
+        return Ok(());
+    }
+    let Some(mut operation) = state.context_state.pending_context_operation.clone() else {
+        return Ok(());
+    };
+    if matches!(
+        operation.phase,
+        ContextOperationPhase::Compacting | ContextOperationPhase::ApplyingCompaction
+    ) {
+        return Ok(());
+    }
+
+    let run_seq = state
+        .active_run_id
+        .as_ref()
+        .map(|id| id.run_seq)
+        .unwrap_or(0);
+    let requested = request_llm_compact(
+        state,
+        out,
+        RequestLlmCompact {
+            step: LlmCompactStepContext {
+                correlation_id: Some(format!("run-{run_seq}-compact")),
+                operation_id: operation.operation_id.clone(),
+                source_window_items: plan.active_window_items.clone(),
+                preserve_window_items: Vec::new(),
+                recent_tail_items: Vec::new(),
+                source_range: operation.source_range.clone(),
+                strategy: llm_compact_strategy(operation.strategy.clone()),
+                target_tokens: None,
+                provider_options_ref: plan.provider_options_ref.clone(),
+                api_key: None,
+            },
+        },
+    )?;
+
+    operation.phase = ContextOperationPhase::Compacting;
+    operation.params_hash = Some(requested.pending.params_hash.clone());
+    operation.updated_at_ns = state.updated_at;
+    state.context_state.set_pending_operation(operation);
+    trace_context_operation_state(state);
+    Ok(())
+}
+
+fn request_context_token_count(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+    plan: &TurnPlan,
+) -> Result<(), SessionWorkflowError> {
+    if state
+        .pending_effects
+        .contains_effect("sys/llm.count_tokens@1")
+    {
+        return Ok(());
+    }
+    let Some(mut operation) = state.context_state.pending_context_operation.clone() else {
+        return Ok(());
+    };
+    if !matches!(operation.phase, ContextOperationPhase::CountingTokens) {
+        return Ok(());
+    }
+
+    let run_seq = state
+        .active_run_id
+        .as_ref()
+        .map(|id| id.run_seq)
+        .unwrap_or(0);
+    let requested = request_llm_count_tokens(
+        state,
+        out,
+        RequestLlmCountTokens {
+            step: LlmCountTokensStepContext {
+                correlation_id: Some(format!("run-{run_seq}-count-tokens")),
+                window_items: plan.active_window_items.clone(),
+                tool_definitions_ref: selected_tool_refs(state, plan).and_then(|refs| {
+                    if refs.len() == 1 {
+                        refs.into_iter().next()
+                    } else {
+                        None
+                    }
+                }),
+                response_format_ref: plan.response_format_ref.clone(),
+                provider_options_ref: plan.provider_options_ref.clone(),
+                rendering_profile: None,
+                candidate_plan_id: Some(hash_cbor(plan)),
+                metadata: BTreeMap::new(),
+                api_key: None,
+            },
+        },
+    )?;
+
+    operation.params_hash = Some(requested.pending.params_hash.clone());
+    operation.updated_at_ns = state.updated_at;
+    state.context_state.set_pending_operation(operation);
+    trace_context_operation_state(state);
+    Ok(())
+}
+
+fn llm_compact_strategy(value: CompactionStrategy) -> LlmCompactStrategy {
+    match value {
+        CompactionStrategy::ProviderNative => LlmCompactStrategy::ProviderNative,
+        CompactionStrategy::AosSummary => LlmCompactStrategy::AosSummary,
+        CompactionStrategy::Auto => LlmCompactStrategy::Auto,
+    }
+}
+
+fn trace_context_operation_blocked_turn(state: &mut SessionState, plan: &TurnPlan) {
+    let Some(operation) = state.context_state.pending_context_operation.as_ref() else {
+        return;
+    };
+    let operation_id = operation.operation_id.clone();
+    let operation_phase = operation.phase.as_str().to_string();
+    let operation_reason = format!("{:?}", operation.reason);
+    let mut refs = vec![trace_ref("context_operation_id", operation_id.clone())];
+    refs.extend(
+        plan.prerequisites
+            .iter()
+            .filter(|prerequisite| {
+                matches!(
+                    prerequisite.kind,
+                    TurnPrerequisiteKind::CompactContext | TurnPrerequisiteKind::CountTokens
+                )
+            })
+            .map(|prerequisite| trace_ref("prerequisite_id", prerequisite.prerequisite_id.clone())),
+    );
+    let mut metadata = BTreeMap::new();
+    metadata.insert("phase".into(), operation_phase);
+    metadata.insert("reason".into(), operation_reason);
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ContextOperationStateChanged,
+        "llm dispatch blocked by context operation",
+        refs,
+        metadata,
+    );
+    if plan
+        .prerequisites
+        .iter()
+        .any(|prerequisite| matches!(prerequisite.kind, TurnPrerequisiteKind::CompactContext))
+    {
+        push_run_trace(
+            state,
+            RunTraceEntryKind::CompactionRequested,
+            "context compaction required before llm dispatch",
+            vec![trace_ref("context_operation_id", operation_id)],
+            BTreeMap::new(),
+        );
+    }
+}
+
+pub fn build_turn_plan_for_pending_turn<P: TurnPlanner>(
+    state: &mut SessionState,
+    mut turn_items: Vec<ActiveWindowItem>,
+    planner: &P,
+    budget: TurnBudget,
+) -> Result<TurnPlan, SessionWorkflowError> {
+    let steer_refs = state.queued_steer_refs.clone();
+    if !steer_refs.is_empty() {
+        turn_items.extend(steer_refs.iter().cloned().map(|ref_| {
+            ActiveWindowItem::message_ref(
+                alloc::format!("steer:{ref_}"),
+                ref_,
+                Some(TurnInputLane::Steer),
+                None,
+                None,
+            )
+        }));
+    }
+    let turn_refs = render_active_window_message_refs(&turn_items)?;
+    let (run_id, prompt_refs, cause, mut run_config) = {
+        let run = state
+            .current_run
+            .as_ref()
+            .ok_or(SessionWorkflowError::RunNotActive)?;
+        (
+            run.run_id.clone(),
+            run.config.prompt_refs.clone().unwrap_or_default(),
+            run.cause.clone(),
+            run.config.clone(),
+        )
+    };
+    if run_config.host_session_open.is_none() {
+        run_config.host_session_open = state.session_config.default_host_session_open.clone();
+    }
+    let compacted_through = state.context_state.compacted_through.unwrap_or(0);
+    let transcript_refs = state
+        .context_state
+        .transcript_ledger
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry.kind, TranscriptLedgerEntryKind::MessageRef))
+        .filter(|entry| entry.seq >= compacted_through)
+        .map(|entry| entry.ref_.clone())
+        .into_iter()
+        .filter(|value| !turn_refs.iter().any(|turn| *turn == *value))
+        .collect::<Vec<_>>();
+    let inputs = build_turn_inputs(&prompt_refs, &transcript_refs, &turn_refs, Some(&cause));
+    let tools = build_turn_tool_inputs(state, Some(&run_config))?;
+    let mut plan = planner
+        .build_turn(TurnRequest {
+            session_id: &state.session_id,
+            run_id: &run_id,
+            run_cause: Some(&cause),
+            run_config: &run_config,
+            budget,
+            state: &state.turn_state,
+            inputs: &inputs,
+            tools: &tools,
+            registry: &state.tool_registry,
+            profiles: &state.tool_profiles,
+            runtime: &state.tool_runtime_context,
+            pending_context_operation: state.context_state.pending_context_operation.as_ref(),
+        })
+        .map_err(turn_plan_error_to_workflow_error)?;
+    add_workflow_prerequisites(state, &mut plan);
+    apply_turn_plan_to_state(state, plan)
+}
+
+fn add_workflow_prerequisites(state: &SessionState, plan: &mut TurnPlan) {
+    if !state.tool_refs_materialized && !plan.selected_tool_ids.is_empty() {
+        plan.prerequisites.push(crate::contracts::TurnPrerequisite {
+            prerequisite_id: "tool_definitions:materialize".into(),
+            kind: TurnPrerequisiteKind::MaterializeToolDefinitions,
+            reason: "selected tool definitions must be materialized before llm dispatch".into(),
+            input_ids: Vec::new(),
+            tool_ids: plan.selected_tool_ids.clone(),
+        });
+        if !plan
+            .report
+            .unresolved
+            .iter()
+            .any(|item| item == "tool_definitions_pending")
+        {
+            plan.report
+                .unresolved
+                .push("tool_definitions_pending".into());
+        }
+    }
+}
+
+fn apply_turn_plan_to_state(
+    state: &mut SessionState,
+    plan: TurnPlan,
+) -> Result<TurnPlan, SessionWorkflowError> {
+    if plan.active_window_items.is_empty() {
+        return Err(SessionWorkflowError::EmptyMessageRefs);
+    }
+    crate::helpers::apply_turn_state_updates(&mut state.turn_state, &plan.state_updates);
+    state.turn_state.last_report = Some(plan.report.clone());
+    let refs = plan
+        .active_window_items
+        .iter()
+        .map(|item| trace_ref("selected_ref", item.ref_.clone()))
+        .collect::<Vec<_>>();
+    let mut metadata = BTreeMap::new();
+    metadata.insert("planner".into(), plan.report.planner.clone());
+    metadata.insert(
+        "selected_message_count".into(),
+        plan.report.selected_message_count.to_string(),
+    );
+    metadata.insert(
+        "dropped_message_count".into(),
+        plan.report.dropped_message_count.to_string(),
+    );
+    metadata.insert(
+        "selected_tool_count".into(),
+        plan.report.selected_tool_count.to_string(),
+    );
+    push_run_trace(
+        state,
+        RunTraceEntryKind::TurnPlanned,
+        "turn plan selected model inputs and tools",
+        refs,
+        metadata,
+    );
+    if let Some(run) = state.current_run.as_mut() {
+        run.turn_plan = Some(plan.clone());
+    }
+    Ok(plan)
+}
+
+fn turn_plan_error_to_workflow_error(err: TurnPlanError) -> SessionWorkflowError {
+    match err {
+        TurnPlanError::EmptySelection => SessionWorkflowError::EmptyMessageRefs,
+        TurnPlanError::UnknownTool => SessionWorkflowError::UnknownToolOverride,
+    }
+}
+
+fn build_turn_inputs(
+    prompt_refs: &[String],
+    transcript_refs: &[String],
+    turn_refs: &[String],
+    cause: Option<&RunCause>,
+) -> Vec<TurnInput> {
+    let mut inputs = Vec::new();
+    for (idx, value) in prompt_refs.iter().enumerate() {
+        inputs.push(turn_input(
+            format!("prompt:{idx}"),
+            TurnInputLane::System,
+            TurnInputKind::MessageRef,
+            TurnPriority::Required,
+            value.clone(),
+            Some("prompt".into()),
+        ));
+    }
+    if let Some(cause) = cause {
+        if let Some(payload_ref) = cause.payload_ref.as_ref() {
+            inputs.push(turn_input(
+                "cause:payload".into(),
+                TurnInputLane::Domain,
+                TurnInputKind::MessageRef,
+                TurnPriority::High,
+                payload_ref.clone(),
+                cause.payload_schema.clone(),
+            ));
+        }
+        for (idx, subject) in cause.subject_refs.iter().enumerate() {
+            if let Some(value) = subject.ref_.as_ref() {
+                inputs.push(turn_input(
+                    format!("cause:subject:{idx}"),
+                    TurnInputLane::Domain,
+                    TurnInputKind::MessageRef,
+                    TurnPriority::High,
+                    value.clone(),
+                    Some(subject.kind.clone()),
+                ));
+            }
+        }
+    }
+    for (idx, value) in transcript_refs.iter().enumerate() {
+        inputs.push(turn_input(
+            format!("transcript:{idx}"),
+            TurnInputLane::Conversation,
+            TurnInputKind::MessageRef,
+            TurnPriority::Normal,
+            value.clone(),
+            Some("transcript".into()),
+        ));
+    }
+    for (idx, value) in turn_refs.iter().enumerate() {
+        inputs.push(turn_input(
+            format!("turn:{idx}"),
+            TurnInputLane::Conversation,
+            TurnInputKind::MessageRef,
+            TurnPriority::Required,
+            value.clone(),
+            Some("turn".into()),
+        ));
+    }
+    inputs
+}
+
+fn turn_input(
+    input_id: String,
+    lane: TurnInputLane,
+    kind: TurnInputKind,
+    priority: TurnPriority,
+    content_ref: String,
+    source_kind: Option<String>,
+) -> TurnInput {
+    TurnInput {
+        input_id,
+        lane,
+        kind,
+        priority,
+        content_ref,
+        estimated_tokens: None,
+        source_kind,
+        source_id: None,
+        correlation_id: None,
+        tags: Vec::new(),
+    }
+}
+
+fn build_turn_tool_inputs(
     state: &mut SessionState,
     run_config: Option<&RunConfig>,
-) -> Result<(), SessionReduceError> {
-    let provider = run_config
-        .map(|cfg| cfg.provider.as_str())
-        .or_else(|| {
-            if state.session_config.provider.trim().is_empty() {
-                None
-            } else {
-                Some(state.session_config.provider.as_str())
-            }
-        })
-        .unwrap_or("openai");
-
-    let profile_id = run_config
+) -> Result<Vec<TurnToolInput>, SessionWorkflowError> {
+    let configured_profile_id = run_config
         .and_then(|cfg| cfg.tool_profile.clone())
         .or_else(|| state.session_config.default_tool_profile.clone())
         .or_else(|| {
@@ -853,15 +2358,18 @@ fn refresh_effective_tools(
             } else {
                 Some(state.tool_profile.clone())
             }
-        })
-        .unwrap_or_else(|| default_tool_profile_for_provider(provider));
+        });
 
-    let base_profile = state
-        .tool_profiles
-        .get(&profile_id)
-        .ok_or(SessionReduceError::ToolProfileUnknown)?;
-
-    validate_known_tool_names(state, Some(base_profile.as_slice()))?;
+    let base_profile = if let Some(profile_id) = configured_profile_id.as_ref() {
+        let base_profile = state
+            .tool_profiles
+            .get(profile_id)
+            .ok_or(SessionWorkflowError::ToolProfileUnknown)?;
+        validate_known_tool_names(state, Some(base_profile.as_slice()))?;
+        base_profile.as_slice()
+    } else {
+        &[]
+    };
 
     let enabled_session = state.session_config.default_tool_enable.as_deref();
     let disabled_session = state.session_config.default_tool_disable.as_deref();
@@ -913,66 +2421,140 @@ fn refresh_effective_tools(
     extras.sort();
     ordered_names.extend(extras);
 
-    let mut ordered_tools = Vec::new();
-    let mut profile_requires_host_session = false;
-    for tool_id in ordered_names {
-        let Some(spec) = state.tool_registry.get(&tool_id) else {
-            return Err(SessionReduceError::UnknownToolOverride);
-        };
-        if spec
-            .availability_rules
-            .iter()
-            .any(|rule| matches!(rule, ToolAvailabilityRule::HostSessionReady))
-        {
-            profile_requires_host_session = true;
-        }
-        if !is_tool_available(spec, &state.tool_runtime_context) {
-            continue;
-        }
-        ordered_tools.push(EffectiveTool {
-            tool_id: spec.tool_id.clone(),
-            tool_name: spec.tool_name.clone(),
-            tool_ref: spec.tool_ref.clone(),
-            description: spec.description.clone(),
-            args_schema_json: spec.args_schema_json.clone(),
-            mapper: spec.mapper,
-            executor: spec.executor.clone(),
-            parallel_safe: spec.parallelism_hint.parallel_safe,
-            resource_key: spec.parallelism_hint.resource_key.clone(),
-        });
+    state.tool_profile = configured_profile_id.unwrap_or_default();
+    Ok(ordered_names
+        .into_iter()
+        .map(|tool_id| TurnToolInput {
+            tool_id,
+            priority: TurnPriority::Normal,
+            estimated_tokens: None,
+            source_kind: Some("tool_profile".into()),
+            source_id: if state.tool_profile.is_empty() {
+                None
+            } else {
+                Some(state.tool_profile.clone())
+            },
+            tags: Vec::new(),
+        })
+        .collect())
+}
+
+fn selected_tool_refs(state: &SessionState, plan: &TurnPlan) -> Option<Vec<String>> {
+    if plan.selected_tool_ids.is_empty() {
+        return None;
     }
+    Some(
+        plan.selected_tool_ids
+            .iter()
+            .filter_map(|tool_id| state.tool_registry.get(tool_id))
+            .map(|tool| tool.tool_ref.clone())
+            .collect(),
+    )
+}
 
-    state.tool_profile = profile_id.clone();
-    state.effective_tools = EffectiveToolSet {
-        profile_id,
-        profile_requires_host_session,
-        ordered_tools,
-    };
-    state.tool_refs_materialized = state.effective_tools.ordered_tools.is_empty();
+fn turn_tool_choice_to_llm(value: TurnToolChoice) -> aos_effects::builtins::LlmToolChoice {
+    match value {
+        TurnToolChoice::Auto => aos_effects::builtins::LlmToolChoice::Auto,
+        TurnToolChoice::NoneChoice => aos_effects::builtins::LlmToolChoice::NoneChoice,
+        TurnToolChoice::Required => aos_effects::builtins::LlmToolChoice::Required,
+        TurnToolChoice::Tool { name } => aos_effects::builtins::LlmToolChoice::Tool { name },
+    }
+}
 
+fn emit_auto_host_session_open(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    let config = effective_host_session_open_config(state)
+        .ok_or(SessionWorkflowError::InvalidToolRegistry)?;
+    let params = host_session_open_params_from_config(config);
+    let params_json =
+        serde_json::to_value(&params).map_err(|_| SessionWorkflowError::InvalidToolRegistry)?;
+    out.effects.push(SessionEffectCommand::ToolEffect {
+        kind: ToolEffectOp::HostSessionOpen,
+        params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
+        pending: super::begin_pending_effect(state, "sys/host.session.open@1", &params_json, None),
+    });
     Ok(())
 }
 
-fn is_tool_available(spec: &ToolSpec, runtime: &crate::contracts::ToolRuntimeContext) -> bool {
-    spec.availability_rules.iter().all(|rule| match rule {
-        ToolAvailabilityRule::Always => true,
-        ToolAvailabilityRule::HostSessionReady => {
-            runtime.host_session_status == Some(crate::contracts::HostSessionStatus::Ready)
-        }
-        ToolAvailabilityRule::HostSessionNotReady => {
-            runtime.host_session_status != Some(crate::contracts::HostSessionStatus::Ready)
-        }
-    })
+fn effective_host_session_open_config(state: &SessionState) -> Option<&HostSessionOpenConfig> {
+    state
+        .active_run_config
+        .as_ref()
+        .and_then(|config| config.host_session_open.as_ref())
+        .or_else(|| state.session_config.default_host_session_open.as_ref())
+}
+
+fn host_session_open_params_from_config(config: &HostSessionOpenConfig) -> HostSessionOpenParams {
+    HostSessionOpenParams {
+        target: host_target_from_config(&config.target),
+        session_ttl_ns: config.session_ttl_ns,
+        labels: config.labels.clone(),
+    }
+}
+
+fn host_target_from_config(config: &HostTargetConfig) -> HostTarget {
+    match config {
+        HostTargetConfig::Local {
+            mounts,
+            workdir,
+            env,
+            network_mode,
+        } => HostTarget::local(HostLocalTarget {
+            mounts: mounts.as_ref().map(|items| {
+                items
+                    .iter()
+                    .map(|mount| HostMount {
+                        host_path: mount.host_path.clone(),
+                        guest_path: mount.guest_path.clone(),
+                        mode: mount.mode.clone(),
+                    })
+                    .collect()
+            }),
+            workdir: workdir.clone(),
+            env: env.clone(),
+            network_mode: network_mode.clone().unwrap_or_else(|| "none".into()),
+        }),
+        HostTargetConfig::Sandbox {
+            image,
+            runtime_class,
+            workdir,
+            env,
+            network_mode,
+            mounts,
+            cpu_limit_millis,
+            memory_limit_bytes,
+        } => HostTarget::sandbox(HostSandboxTarget {
+            image: image.clone(),
+            runtime_class: runtime_class.clone(),
+            workdir: workdir.clone(),
+            env: env.clone(),
+            network_mode: network_mode.clone(),
+            mounts: mounts.as_ref().map(|items| {
+                items
+                    .iter()
+                    .map(|mount| HostMount {
+                        host_path: mount.host_path.clone(),
+                        guest_path: mount.guest_path.clone(),
+                        mode: mount.mode.clone(),
+                    })
+                    .collect()
+            }),
+            cpu_limit_millis: *cpu_limit_millis,
+            memory_limit_bytes: *memory_limit_bytes,
+        }),
+    }
 }
 
 fn validate_known_tool_names(
     state: &SessionState,
     names: Option<&[String]>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if let Some(names) = names {
         for tool_name in names {
             if !state.tool_registry.contains_key(tool_name) {
-                return Err(SessionReduceError::UnknownToolOverride);
+                return Err(SessionWorkflowError::UnknownToolOverride);
             }
         }
     }
@@ -991,29 +2573,86 @@ fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfi
         tool_enable: source.default_tool_enable.clone(),
         tool_disable: source.default_tool_disable.clone(),
         tool_force: source.default_tool_force.clone(),
+        host_session_open: source.default_host_session_open.clone(),
     }
 }
 
-fn validate_run_config(config: &RunConfig) -> Result<(), SessionReduceError> {
+fn validate_run_config(config: &RunConfig) -> Result<(), SessionWorkflowError> {
     if config.provider.trim().is_empty() {
-        return Err(SessionReduceError::MissingProvider);
+        return Err(SessionWorkflowError::MissingProvider);
     }
     if config.model.trim().is_empty() {
-        return Err(SessionReduceError::MissingModel);
+        return Err(SessionWorkflowError::MissingModel);
     }
     Ok(())
+}
+
+fn finish_current_run(
+    state: &mut SessionState,
+    lifecycle: RunLifecycle,
+    outcome: Option<RunOutcome>,
+) {
+    let Some(mut run) = state.current_run.take() else {
+        return;
+    };
+    run.lifecycle = lifecycle;
+    run.updated_at = state.updated_at;
+    run.outcome = outcome.clone();
+    let mut refs = Vec::new();
+    if let Some(output_ref) = outcome.as_ref().and_then(|value| value.output_ref.as_ref()) {
+        refs.push(trace_ref("output_ref", output_ref.clone()));
+    }
+    let mut metadata = BTreeMap::new();
+    metadata.insert("lifecycle".into(), alloc::format!("{lifecycle:?}"));
+    if let Some(failure) = outcome.as_ref().and_then(|value| value.failure.as_ref()) {
+        metadata.insert("failure_code".into(), failure.code.clone());
+    }
+    if let Some(reason) = outcome
+        .as_ref()
+        .and_then(|value| value.cancelled_reason.as_ref())
+    {
+        metadata.insert("cancelled_reason".into(), reason.clone());
+    }
+    if let Some(reason_ref) = outcome
+        .as_ref()
+        .and_then(|value| value.interrupted_reason_ref.as_ref())
+    {
+        refs.push(trace_ref("interrupted_reason_ref", reason_ref.clone()));
+    }
+    push_trace_entry(
+        &mut run.trace,
+        state.updated_at,
+        RunTraceEntryKind::RunFinished,
+        "run finished".into(),
+        refs,
+        metadata,
+    );
+    let trace_summary = summarize_trace(&run.trace);
+    state.run_history.push(RunRecord {
+        run_id: run.run_id,
+        lifecycle,
+        cause: run.cause,
+        input_refs: run.input_refs,
+        outcome,
+        last_llm_usage: run.last_llm_usage,
+        trace_summary,
+        started_at: run.started_at,
+        ended_at: state.updated_at,
+    });
 }
 
 fn clear_active_run(state: &mut SessionState) {
     state.active_run_id = None;
     state.active_run_config = None;
+    state.current_run = None;
     state.active_tool_batch = None;
     state.pending_effects.clear();
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
-    state.pending_follow_up_turn = None;
-    state.queued_llm_message_refs = None;
-    state.conversation_message_refs.clear();
+    state.staged_tool_follow_up_turn = None;
+    state.pending_llm_turn_items = None;
+    state.queued_steer_refs.clear();
+    state.run_interrupt = None;
     state.tool_refs_materialized = false;
     state.in_flight_effects = 0;
 }
@@ -1021,13 +2660,13 @@ fn clear_active_run(state: &mut SessionState) {
 fn enforce_runtime_limits(
     state: &SessionState,
     limits: SessionRuntimeLimits,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if let Some(max) = limits.max_pending_effects {
         let total_pending = state.pending_effects.len()
             + state.pending_blob_gets.len()
             + state.pending_blob_puts.len();
         if total_pending as u64 > max {
-            return Err(SessionReduceError::TooManyPendingEffects);
+            return Err(SessionWorkflowError::TooManyPendingEffects);
         }
     }
     Ok(())
@@ -1035,7 +2674,7 @@ fn enforce_runtime_limits(
 
 fn stamp_timestamps(state: &mut SessionState, event: &SessionWorkflowEvent) {
     let ts = match event {
-        SessionWorkflowEvent::Ingress(ingress) => ingress.observed_at_ns,
+        SessionWorkflowEvent::Input(input) => input.observed_at_ns,
         SessionWorkflowEvent::Receipt(receipt) => receipt.emitted_at_seq,
         SessionWorkflowEvent::ReceiptRejected(rejected) => rejected.emitted_at_seq,
         SessionWorkflowEvent::StreamFrame(frame) => frame.emitted_at_seq,
@@ -1056,11 +2695,237 @@ fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
     aos_wasm_sdk::effect_params_hash(value).unwrap_or_default()
 }
 
+fn trace_workflow_output(state: &mut SessionState, out: &SessionWorkflowOutput) {
+    for effect in &out.effects {
+        match effect {
+            SessionEffectCommand::LlmGenerate { params, pending } => {
+                let mut refs = Vec::new();
+                refs.push(trace_ref("params_hash", pending.params_hash.clone()));
+                if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+                    refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+                }
+                refs.extend(
+                    params
+                        .window_items
+                        .iter()
+                        .map(|item| trace_ref("window_item_ref", item.ref_.to_string())),
+                );
+                if let Some(tool_refs) = params.runtime.tool_refs.as_ref() {
+                    refs.extend(
+                        tool_refs
+                            .iter()
+                            .map(|value| trace_ref("tool_ref", value.to_string())),
+                    );
+                }
+                let mut metadata = BTreeMap::new();
+                metadata.insert("provider".into(), params.provider.clone());
+                metadata.insert("model".into(), params.model.clone());
+                if let Some(correlation_id) = params.correlation_id.as_ref() {
+                    metadata.insert("correlation_id".into(), correlation_id.clone());
+                }
+                push_run_trace(
+                    state,
+                    RunTraceEntryKind::LlmRequested,
+                    "llm turn requested",
+                    refs,
+                    metadata,
+                );
+            }
+            SessionEffectCommand::LlmCompact { params, pending } => {
+                let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
+                if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+                    refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+                }
+                refs.push(trace_ref(
+                    "context_operation_id",
+                    params.operation_id.clone(),
+                ));
+                refs.extend(
+                    params
+                        .source_window_items
+                        .iter()
+                        .map(|item| trace_ref("window_item_ref", item.ref_.to_string())),
+                );
+                let mut metadata = BTreeMap::new();
+                metadata.insert("provider".into(), params.provider.clone());
+                metadata.insert("model".into(), params.model.clone());
+                metadata.insert("strategy".into(), format!("{:?}", params.strategy));
+                push_run_trace(
+                    state,
+                    RunTraceEntryKind::CompactionRequested,
+                    "llm compaction requested",
+                    refs,
+                    metadata,
+                );
+            }
+            SessionEffectCommand::LlmCountTokens { params, pending } => {
+                let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
+                if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+                    refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+                }
+                refs.extend(
+                    params
+                        .window_items
+                        .iter()
+                        .map(|item| trace_ref("window_item_ref", item.ref_.to_string())),
+                );
+                let mut metadata = BTreeMap::new();
+                metadata.insert("provider".into(), params.provider.clone());
+                metadata.insert("model".into(), params.model.clone());
+                if let Some(candidate_plan_id) = params.candidate_plan_id.as_ref() {
+                    metadata.insert("candidate_plan_id".into(), candidate_plan_id.clone());
+                }
+                push_run_trace(
+                    state,
+                    RunTraceEntryKind::TokenCountRequested,
+                    "llm token count requested",
+                    refs,
+                    metadata,
+                );
+            }
+            SessionEffectCommand::ToolEffect { kind, pending, .. } => {
+                let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
+                if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+                    refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+                }
+                let mut metadata = BTreeMap::new();
+                metadata.insert("effect".into(), kind.as_str().into());
+                push_run_trace(
+                    state,
+                    RunTraceEntryKind::EffectEmitted,
+                    "tool effect emitted",
+                    refs,
+                    metadata,
+                );
+            }
+            SessionEffectCommand::BlobPut { pending, .. } => {
+                trace_effect_command(state, "sys/blob.put@1", pending);
+            }
+            SessionEffectCommand::BlobGet { pending, .. } => {
+                trace_effect_command(state, "sys/blob.get@1", pending);
+            }
+        }
+    }
+
+    for event in &out.domain_events {
+        let mut refs = Vec::new();
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload_json) {
+            refs.push(trace_ref("payload_hash", hash_cbor(&payload)));
+        }
+        let mut metadata = BTreeMap::new();
+        metadata.insert("schema".into(), event.schema.into());
+        push_run_trace(
+            state,
+            RunTraceEntryKind::DomainEventEmitted,
+            "domain event emitted",
+            refs,
+            metadata,
+        );
+    }
+}
+
+fn trace_effect_command(
+    state: &mut SessionState,
+    effect: &str,
+    pending: &aos_wasm_sdk::PendingEffect,
+) {
+    let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
+    if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+        refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+    }
+    let mut metadata = BTreeMap::new();
+    metadata.insert("effect".into(), effect.into());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::EffectEmitted,
+        "effect emitted",
+        refs,
+        metadata,
+    );
+}
+
+fn trace_receipt_envelope(state: &mut SessionState, envelope: &EffectReceiptEnvelope) {
+    let mut refs = Vec::new();
+    if let Some(params_hash) = envelope.params_hash.as_ref() {
+        refs.push(trace_ref("params_hash", params_hash.clone()));
+    }
+    if let Some(issuer_ref) = envelope.issuer_ref.as_ref() {
+        refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+    }
+    refs.push(trace_ref("intent_id", envelope.intent_id.clone()));
+    let mut metadata = BTreeMap::new();
+    metadata.insert("effect".into(), envelope.effect.clone());
+    metadata.insert("status".into(), envelope.status.clone());
+    metadata.insert("emitted_at_seq".into(), envelope.emitted_at_seq.to_string());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ReceiptSettled,
+        "effect receipt admitted",
+        refs,
+        metadata,
+    );
+}
+
+fn trace_receipt_rejected(state: &mut SessionState, rejected: &EffectReceiptRejected) {
+    let mut refs = Vec::new();
+    if let Some(params_hash) = rejected.params_hash.as_ref() {
+        refs.push(trace_ref("params_hash", params_hash.clone()));
+    }
+    if let Some(issuer_ref) = rejected.issuer_ref.as_ref() {
+        refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+    }
+    refs.push(trace_ref("intent_id", rejected.intent_id.clone()));
+    let mut metadata = BTreeMap::new();
+    metadata.insert("effect".into(), rejected.effect.clone());
+    metadata.insert("status".into(), rejected.status.clone());
+    metadata.insert("error_code".into(), rejected.error_code.clone());
+    metadata.insert("emitted_at_seq".into(), rejected.emitted_at_seq.to_string());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ReceiptSettled,
+        "effect receipt rejected",
+        refs,
+        metadata,
+    );
+}
+
+fn trace_stream_frame(state: &mut SessionState, frame: &aos_wasm_sdk::EffectStreamFrameEnvelope) {
+    let mut refs = Vec::new();
+    if let Some(params_hash) = frame.params_hash.as_ref() {
+        refs.push(trace_ref("params_hash", params_hash.clone()));
+    }
+    if let Some(issuer_ref) = frame.issuer_ref.as_ref() {
+        refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+    }
+    if let Some(payload_ref) = frame.payload_ref.as_ref() {
+        refs.push(trace_ref("payload_ref", payload_ref.clone()));
+    }
+    refs.push(trace_ref("intent_id", frame.intent_id.clone()));
+    let mut metadata = BTreeMap::new();
+    metadata.insert("effect".into(), frame.effect.clone());
+    metadata.insert("kind".into(), frame.kind.clone());
+    metadata.insert("seq".into(), frame.seq.to_string());
+    metadata.insert("payload_size".into(), frame.payload.len().to_string());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::StreamFrameObserved,
+        "effect stream frame observed",
+        refs,
+        metadata,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::contracts::{
-        HostSessionStatus, SessionId, SessionIngress, ToolCallObserved, ToolOverrideScope,
+        CauseRef, CompactionStrategy, ContextOperationState, ContextPressureReason,
+        HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, RunCauseOrigin, RunId,
+        SessionId, SessionInput, ToolCallObserved, ToolProfileBuilder, ToolRegistryBuilder,
+        TranscriptRange, TurnInput, TurnInputKind, TurnInputLane, TurnPrerequisiteKind,
+        TurnPriority, TurnReport, TurnToolChoice, local_coding_agent_tool_profile_for_provider,
+        local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
+        tool_bundle_host_sandbox,
     };
     use alloc::string::ToString;
     use alloc::vec;
@@ -1069,8 +2934,10 @@ mod tests {
         WorkspaceEmptyRootReceipt, WorkspaceResolveReceipt, WorkspaceWriteRefReceipt,
     };
     use aos_effects::builtins::{
-        BlobGetReceipt, BlobPutReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
-        LlmToolCall, TokenUsage,
+        BlobGetReceipt, BlobPutReceipt, LlmCompactReceipt, LlmCompactionArtifactKind,
+        LlmCountTokensReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
+        LlmProviderCompatibility, LlmTokenCountQuality, LlmToolCall, LlmTranscriptRange,
+        LlmUsageDetails, LlmWindowItem, LlmWindowItemKind, TokenUsage,
     };
 
     fn fake_hash(ch: char) -> String {
@@ -1081,11 +2948,15 @@ mod tests {
         out
     }
 
-    fn ingress(observed_at_ns: u64, ingress: SessionIngressKind) -> SessionWorkflowEvent {
-        SessionWorkflowEvent::Ingress(SessionIngress {
+    fn active_window_refs(items: &[ActiveWindowItem]) -> Vec<String> {
+        items.iter().map(|item| item.ref_.clone()).collect()
+    }
+
+    fn session_input(observed_at_ns: u64, input: SessionInputKind) -> SessionWorkflowEvent {
+        SessionWorkflowEvent::Input(SessionInput {
             session_id: SessionId("s-1".into()),
             observed_at_ns,
-            ingress,
+            input,
         })
     }
 
@@ -1139,9 +3010,9 @@ mod tests {
     }
 
     fn run_request_event(ts: u64) -> SessionWorkflowEvent {
-        ingress(
+        session_input(
             ts,
-            SessionIngressKind::RunRequested {
+            SessionInputKind::RunRequested {
                 input_ref: fake_hash('a'),
                 run_overrides: Some(SessionConfig {
                     provider: "openai".into(),
@@ -1153,14 +3024,107 @@ mod tests {
                     default_tool_enable: None,
                     default_tool_disable: None,
                     default_tool_force: None,
+                    default_host_session_open: None,
                 }),
             },
         )
     }
 
+    fn local_coding_state() -> SessionState {
+        let mut state = SessionState::default();
+        state.tool_registry = local_coding_agent_tool_registry();
+        state.tool_profiles = local_coding_agent_tool_profiles();
+        state.tool_profile = local_coding_agent_tool_profile_for_provider("openai");
+        state.session_config.default_host_session_open = Some(local_host_session_open_config());
+        state
+    }
+
+    fn ready_state_with_llm_generate(state: &mut SessionState) -> (String, Option<String>) {
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            state,
+            &session_input(
+                0,
+                SessionInputKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )
+        .expect("host session ready");
+
+        let out = apply_session_workflow_event(state, &run_request_event(1)).expect("run");
+        let blob_put_hashes = out
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. }))
+            .map(|effect| effect.params_hash().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            !blob_put_hashes.is_empty(),
+            "expected initial blob.put effects"
+        );
+
+        let mut llm_pending = None;
+        for (idx, hash) in blob_put_hashes.iter().enumerate() {
+            let out = apply_session_workflow_event(
+                state,
+                &receipt_event(
+                    2 + idx as u64,
+                    "sys/blob.put@1",
+                    Some(hash.clone()),
+                    "ok",
+                    &BlobPutReceipt {
+                        blob_ref: hash_ref_for_index(idx),
+                        edge_ref: hash_ref_for_index(idx + 1),
+                        size: 111,
+                    },
+                ),
+            )
+            .expect("blob.put receipt");
+            llm_pending = out.effects.iter().find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { pending, .. } => Some(pending.clone()),
+                _ => None,
+            });
+        }
+
+        let pending = llm_pending.expect("expected llm.generate");
+        (pending.params_hash, pending.issuer_ref)
+    }
+
+    fn local_host_session_open_config() -> HostSessionOpenConfig {
+        HostSessionOpenConfig {
+            target: HostTargetConfig::Local {
+                mounts: None,
+                workdir: None,
+                env: None,
+                network_mode: Some("none".into()),
+            },
+            session_ttl_ns: None,
+            labels: None,
+        }
+    }
+
+    fn sandbox_host_session_open_config() -> HostSessionOpenConfig {
+        HostSessionOpenConfig {
+            target: HostTargetConfig::Sandbox {
+                image: "aos-agent-test:latest".into(),
+                runtime_class: Some("fabric".into()),
+                workdir: Some("/workspace".into()),
+                env: None,
+                network_mode: Some("none".into()),
+                mounts: None,
+                cpu_limit_millis: Some(2000),
+                memory_limit_bytes: Some(512 * 1024 * 1024),
+            },
+            session_ttl_ns: Some(60_000_000_000),
+            labels: None,
+        }
+    }
+
     #[test]
     fn run_request_auto_opens_host_session_when_missing() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
 
         let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
@@ -1173,28 +3137,1035 @@ mod tests {
         ));
         assert_eq!(state.pending_effects.len(), 1);
         assert!(state.pending_blob_puts.is_empty());
-        assert!(state.queued_llm_message_refs.is_some());
+        assert!(state.pending_llm_turn_items.is_some());
         assert_eq!(state.in_flight_effects, 1);
-        assert_eq!(state.effective_tools.profile_id, "openai");
-        let tools: Vec<&str> = state
-            .effective_tools
-            .ordered_tools
+        let plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.as_ref())
+            .expect("turn plan");
+        assert!(matches!(
+            plan.prerequisites.first().map(|item| &item.kind),
+            Some(TurnPrerequisiteKind::OpenHostSession)
+        ));
+    }
+
+    #[test]
+    fn run_request_does_not_auto_open_host_session_without_config() {
+        let mut state = local_coding_state();
+        state.session_config.default_host_session_open = None;
+        state.session_id = SessionId("s-1".into());
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+        assert_eq!(state.lifecycle, SessionLifecycle::Running);
+        assert!(!out.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                SessionEffectCommand::ToolEffect { pending, .. }
+                    if pending.effect == "sys/host.session.open@1"
+            )
+        }));
+        assert!(
+            state
+                .current_run
+                .as_ref()
+                .and_then(|run| run.turn_plan.as_ref())
+                .is_some_and(|plan| plan
+                    .report
+                    .unresolved
+                    .iter()
+                    .any(|item| item == "host_session_not_ready"))
+        );
+    }
+
+    #[test]
+    fn run_request_auto_opens_sandbox_host_session_from_config() {
+        let registry = ToolRegistryBuilder::new()
+            .with_bundle(tool_bundle_host_sandbox())
+            .build()
+            .expect("registry");
+        let profile = ToolProfileBuilder::new()
+            .with_tool_id("host.exec")
+            .build_for_registry(&registry)
+            .expect("profile");
+
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        state.lifecycle = SessionLifecycle::Running;
+        state.tool_registry = registry;
+        state.tool_profiles.insert("sandbox".into(), profile);
+        state.tool_profile = "sandbox".into();
+        state.session_config.default_host_session_open = Some(sandbox_host_session_open_config());
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+        let params_json = out
+            .effects
             .iter()
-            .map(|tool| tool.tool_name.as_str())
-            .collect();
-        assert!(tools.contains(&"inspect_world"));
-        assert!(tools.contains(&"inspect_workflow"));
-        assert!(state.effective_tools.profile_requires_host_session);
+            .find_map(|effect| match effect {
+                SessionEffectCommand::ToolEffect {
+                    params_json,
+                    pending,
+                    ..
+                } if pending.effect == "sys/host.session.open@1" => Some(params_json.as_str()),
+                _ => None,
+            })
+            .expect("host session open effect");
+        let params: serde_json::Value = serde_json::from_str(params_json).expect("params json");
+
+        assert_eq!(params["target"]["$tag"], "sandbox");
+        assert_eq!(params["target"]["$value"]["image"], "aos-agent-test:latest");
+        assert_eq!(params["target"]["$value"]["runtime_class"], "fabric");
+        assert_eq!(params["target"]["$value"]["workdir"], "/workspace");
+        assert_eq!(params["session_ttl_ns"], 60_000_000_000_u64);
+    }
+
+    #[test]
+    fn run_request_with_empty_registry_is_chat_only() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+
+        assert!(!out.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                SessionEffectCommand::ToolEffect { pending, .. }
+                    if pending.effect == "sys/host.session.open@1"
+            )
+        }));
+        assert!(out.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                SessionEffectCommand::LlmGenerate { params, .. }
+                    if params.runtime.tool_refs.is_none()
+            )
+        }));
+    }
+
+    #[test]
+    fn run_request_records_turn_plan_and_preserves_prompt_refs() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        let prompt_ref = fake_hash('b');
+        let input_ref = fake_hash('a');
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                1,
+                SessionInputKind::RunRequested {
+                    input_ref: input_ref.clone(),
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: Some(vec![prompt_ref.clone()]),
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )
+        .expect("reduce");
+
+        let params = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { params, .. } => Some(params),
+                _ => None,
+            })
+            .expect("expected llm.generate");
+        let message_refs = params
+            .window_items
+            .iter()
+            .map(|item| item.ref_.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(message_refs, vec![prompt_ref.clone(), input_ref.clone()]);
+
+        let plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.as_ref())
+            .expect("turn plan");
+        assert_eq!(
+            active_window_refs(&plan.active_window_items),
+            vec![prompt_ref, input_ref]
+        );
+        assert_eq!(plan.report.planner, "aos.agent/default-turn");
+        assert_eq!(state.turn_state.last_report.as_ref(), Some(&plan.report));
+    }
+
+    #[test]
+    fn run_request_records_turn_and_llm_trace_entries() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+
+        let trace = &state.current_run.as_ref().expect("current run").trace;
+        let kinds = trace
+            .entries
+            .iter()
+            .map(|entry| entry.kind.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                RunTraceEntryKind::RunStarted,
+                RunTraceEntryKind::TurnPlanned,
+                RunTraceEntryKind::LlmRequested,
+            ]
+        );
+        assert!(trace.entries.iter().any(|entry| {
+            matches!(entry.kind, RunTraceEntryKind::LlmRequested)
+                && entry
+                    .refs
+                    .iter()
+                    .any(|trace_ref| trace_ref.kind == "window_item_ref")
+        }));
+    }
+
+    #[test]
+    fn run_request_blocks_llm_when_context_needs_compaction() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                0,
+                SessionInputKind::ContextOperationUpdated {
+                    operation: Some(ContextOperationState::needs_compaction(
+                        "ctx-op-1",
+                        ContextPressureReason::UsageHighWater,
+                        CompactionStrategy::AosSummary,
+                        Some(TranscriptRange {
+                            start_seq: 0,
+                            end_seq: 1,
+                        }),
+                        0,
+                    )),
+                },
+            ),
+        )
+        .expect("context operation update");
+        assert_eq!(
+            state
+                .context_state
+                .pending_context_operation
+                .as_ref()
+                .map(|operation| operation.operation_id.as_str()),
+            Some("ctx-op-1")
+        );
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+
+        assert_eq!(out.effects.len(), 1, "compaction effect must be emitted");
+        assert!(matches!(
+            out.effects.first(),
+            Some(SessionEffectCommand::LlmCompact { pending, .. })
+                if pending.effect == "sys/llm.compact@1"
+        ));
+        assert!(state.pending_llm_turn_items.is_some());
+        let run = state.current_run.as_ref().expect("current run");
+        assert_eq!(
+            run.blocked_on_context_operation.as_deref(),
+            Some("ctx-op-1")
+        );
+        let plan = run.turn_plan.as_ref().expect("turn plan");
+        assert!(plan.prerequisites.iter().any(|prerequisite| {
+            matches!(prerequisite.kind, TurnPrerequisiteKind::CompactContext)
+                && prerequisite.prerequisite_id == "context_operation:ctx-op-1"
+        }));
+        assert!(
+            run.trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::ContextOperationStateChanged))
+        );
+        assert!(
+            run.trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::CompactionRequested))
+        );
+        assert!(
+            !run.trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::LlmRequested))
+        );
+    }
+
+    #[test]
+    fn llm_compact_receipt_replaces_active_window_and_unblocks_llm() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                0,
+                SessionInputKind::ContextOperationUpdated {
+                    operation: Some(ContextOperationState::needs_compaction(
+                        "ctx-op-1",
+                        ContextPressureReason::UsageHighWater,
+                        CompactionStrategy::AosSummary,
+                        Some(TranscriptRange {
+                            start_seq: 0,
+                            end_seq: 1,
+                        }),
+                        0,
+                    )),
+                },
+            ),
+        )
+        .expect("context operation update");
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let compact_pending = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmCompact { pending, .. } => Some(pending.clone()),
+                _ => None,
+            })
+            .expect("llm.compact emitted");
+        let summary_ref = fake_hash('e');
+        let receipt = LlmCompactReceipt {
+            operation_id: "ctx-op-1".into(),
+            artifact_kind: LlmCompactionArtifactKind::AosSummary,
+            artifact_refs: vec![HashRef::new(summary_ref.clone()).expect("summary ref")],
+            source_range: Some(LlmTranscriptRange {
+                start_seq: 0,
+                end_seq: 1,
+            }),
+            compacted_through: Some(1),
+            active_window_items: vec![LlmWindowItem {
+                item_id: "compact:ctx-op-1:summary".into(),
+                kind: LlmWindowItemKind::AosSummaryRef,
+                ref_: HashRef::new(summary_ref.clone()).expect("summary ref"),
+                lane: Some("Summary".into()),
+                source_range: Some(LlmTranscriptRange {
+                    start_seq: 0,
+                    end_seq: 1,
+                }),
+                source_refs: vec![hash_ref('a')],
+                provider_compatibility: None,
+                estimated_tokens: Some(32),
+                metadata: Default::default(),
+            }],
+            token_usage: Some(TokenUsage {
+                prompt: 10,
+                completion: 5,
+                total: Some(15),
+            }),
+            provider_metadata_ref: None,
+            warnings_ref: None,
+            provider_id: "llm.mock".into(),
+        };
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                2,
+                "sys/llm.compact@1",
+                Some(compact_pending.params_hash),
+                "ok",
+                &receipt,
+            ),
+        )
+        .expect("compact receipt");
+
+        assert!(state.context_state.pending_context_operation.is_none());
+        assert_eq!(state.context_state.compaction_records.len(), 1);
+        assert_eq!(
+            active_window_refs(&state.context_state.active_window_items),
+            vec![summary_ref.clone()]
+        );
+        assert!(matches!(
+            out.effects.first(),
+            Some(SessionEffectCommand::LlmGenerate { params, .. })
+                if params.window_items.iter().map(|item| item.ref_.to_string()).collect::<Vec<_>>() == vec![summary_ref.clone()]
+        ));
+        let trace = &state.current_run.as_ref().expect("current run").trace;
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::CompactionReceived))
+        );
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::ActiveWindowUpdated))
+        );
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::LlmRequested))
+        );
+    }
+
+    #[test]
+    fn llm_count_tokens_receipt_records_count_and_unblocks_llm() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        let mut operation = ContextOperationState::needs_compaction(
+            "ctx-op-count",
+            ContextPressureReason::Manual,
+            CompactionStrategy::Auto,
+            None,
+            0,
+        );
+        operation.phase = ContextOperationPhase::CountingTokens;
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                0,
+                SessionInputKind::ContextOperationUpdated {
+                    operation: Some(operation),
+                },
+            ),
+        )
+        .expect("context operation update");
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let count_pending = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmCountTokens { pending, params } => {
+                    assert_eq!(params.candidate_plan_id.is_some(), true);
+                    Some(pending.clone())
+                }
+                _ => None,
+            })
+            .expect("llm.count_tokens emitted");
+
+        let receipt = LlmCountTokensReceipt {
+            input_tokens: Some(123),
+            original_input_tokens: Some(123),
+            counts_by_ref: Vec::new(),
+            tool_tokens: Some(0),
+            response_format_tokens: None,
+            quality: LlmTokenCountQuality::LocalEstimate,
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            candidate_plan_id: None,
+            provider_metadata_ref: None,
+            warnings_ref: None,
+        };
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                2,
+                "sys/llm.count_tokens@1",
+                Some(count_pending.params_hash),
+                "ok",
+                &receipt,
+            ),
+        )
+        .expect("count receipt");
+
+        assert!(state.context_state.pending_context_operation.is_none());
+        assert_eq!(
+            state
+                .context_state
+                .last_token_count
+                .as_ref()
+                .and_then(|count| count.input_tokens),
+            Some(123)
+        );
+        assert!(matches!(
+            out.effects.first(),
+            Some(SessionEffectCommand::LlmGenerate { .. })
+        ));
+        let trace = &state.current_run.as_ref().expect("current run").trace;
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::TokenCountRequested))
+        );
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::TokenCountReceived))
+        );
+    }
+
+    #[test]
+    fn completed_run_keeps_bounded_trace_summary() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        if let Some(run) = state.current_run.as_mut() {
+            run.trace.max_entries = 2;
+        }
+        push_run_trace(
+            &mut state,
+            RunTraceEntryKind::Custom {
+                kind: "test/extra".into(),
+            },
+            "extra trace entry",
+            Vec::new(),
+            BTreeMap::new(),
+        );
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(2, SessionInputKind::RunCompleted),
+        )
+        .expect("complete");
+
+        let record = state.run_history.first().expect("run record");
+        assert_eq!(record.trace_summary.entry_count, 2);
+        assert!(record.trace_summary.dropped_entries > 0);
+        assert!(matches!(
+            record.trace_summary.last_kind,
+            Some(RunTraceEntryKind::RunFinished)
+        ));
+    }
+
+    fn pending_llm_turn_state(input_ref: String) -> SessionState {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        let run_id = RunId {
+            session_id: state.session_id.clone(),
+            run_seq: 1,
+        };
+        let config = RunConfig {
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            max_tokens: Some(512),
+            ..RunConfig::default()
+        };
+        state.active_run_id = Some(run_id.clone());
+        state.active_run_config = Some(config.clone());
+        state.lifecycle = SessionLifecycle::Running;
+        state.current_run = Some(RunState {
+            run_id,
+            lifecycle: RunLifecycle::Running,
+            cause: RunCause::direct_input(input_ref.clone()),
+            config,
+            input_refs: vec![input_ref.clone()],
+            pending_llm_turn_items: Some(vec![ActiveWindowItem::message_ref(
+                "test:pending",
+                input_ref.clone(),
+                Some(TurnInputLane::Conversation),
+                None,
+                None,
+            )]),
+            ..RunState::default()
+        });
+        state
+            .context_state
+            .append_message_refs(vec![input_ref.clone()], "test", state.updated_at);
+        state.pending_llm_turn_items = Some(state.context_state.active_window_items.clone());
+        state
+    }
+
+    #[test]
+    fn steer_ref_is_injected_into_next_llm_turn() {
+        let input_ref = fake_hash('a');
+        let steer_ref = fake_hash('b');
+        let mut state = pending_llm_turn_state(input_ref.clone());
+
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                1,
+                SessionInputKind::RunSteerRequested {
+                    instruction_ref: steer_ref.clone(),
+                },
+            ),
+        )
+        .expect("steer");
+        let mut out = SessionWorkflowOutput::default();
+        dispatch_pending_llm_turn(&mut state, &mut out).expect("dispatch");
+
+        let message_refs = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { params, .. } => Some(
+                    params
+                        .window_items
+                        .iter()
+                        .map(|item| item.ref_.to_string())
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .expect("llm params");
+        assert_eq!(message_refs, vec![input_ref, steer_ref]);
+        assert!(state.queued_steer_refs.is_empty());
+        assert!(state.current_run.as_ref().is_some_and(|run| {
+            run.trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::InterventionApplied))
+        }));
+    }
+
+    #[test]
+    fn follow_up_input_queues_and_starts_after_current_run() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let follow_up = fake_hash('b');
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                2,
+                SessionInputKind::FollowUpInputAppended {
+                    input_ref: follow_up.clone(),
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: None,
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )
+        .expect("queue follow-up");
+        assert_eq!(state.queued_follow_up_runs.len(), 1);
+
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(3, SessionInputKind::RunCompleted),
+        )
+        .expect("complete and start next");
+
+        assert_eq!(state.queued_follow_up_runs.len(), 0);
+        assert_eq!(state.run_history.len(), 1);
+        assert_eq!(
+            state.current_run.as_ref().map(|run| run.run_id.run_seq),
+            Some(2)
+        );
+        assert_eq!(
+            state.context_state.ledger_message_refs(),
+            vec![fake_hash('a'), follow_up]
+        );
+    }
+
+    #[test]
+    fn interrupt_blocks_pending_llm_turn_and_finishes_when_quiescent() {
+        let input_ref = fake_hash('a');
+        let reason_ref = fake_hash('b');
+        let mut state = pending_llm_turn_state(input_ref);
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                1,
+                SessionInputKind::RunInterruptRequested {
+                    reason_ref: Some(reason_ref.clone()),
+                },
+            ),
+        )
+        .expect("interrupt");
+
+        assert!(out.effects.is_empty());
+        assert!(state.current_run.is_none());
+        let record = state.run_history.first().expect("run record");
+        assert_eq!(record.lifecycle, RunLifecycle::Interrupted);
+        assert_eq!(
+            record
+                .outcome
+                .as_ref()
+                .and_then(|outcome| outcome.interrupted_reason_ref.as_ref()),
+            Some(&reason_ref)
+        );
+    }
+
+    struct RepoBootstrapFirstPlanner;
+
+    impl TurnPlanner for RepoBootstrapFirstPlanner {
+        fn build_turn(&self, request: TurnRequest<'_>) -> Result<TurnPlan, TurnPlanError> {
+            let mut selected_refs = Vec::new();
+            let mut selected_count = 0_u64;
+            let mut dropped_count = 0_u64;
+
+            for input in &request.state.pinned_inputs {
+                let is_repo_bootstrap = input.source_kind.as_deref() == Some("repo_bootstrap")
+                    || matches!(
+                        &input.lane,
+                        TurnInputLane::Custom { kind } if kind == "repo_bootstrap"
+                    );
+                if is_repo_bootstrap {
+                    selected_refs.push(input.content_ref.clone());
+                    selected_count = selected_count.saturating_add(1);
+                    break;
+                }
+            }
+
+            for input in request.inputs {
+                if matches!(input.lane, TurnInputLane::Conversation)
+                    && matches!(input.priority, TurnPriority::Required)
+                {
+                    selected_refs.push(input.content_ref.clone());
+                    selected_count = selected_count.saturating_add(1);
+                } else if matches!(input.lane, TurnInputLane::Conversation) {
+                    dropped_count = dropped_count.saturating_add(1);
+                }
+            }
+
+            if selected_refs.is_empty() {
+                return Err(TurnPlanError::EmptySelection);
+            }
+
+            Ok(TurnPlan {
+                active_window_items: selected_refs
+                    .into_iter()
+                    .map(|ref_| {
+                        ActiveWindowItem::message_ref(
+                            alloc::format!("selected:{ref_}"),
+                            ref_,
+                            Some(TurnInputLane::Conversation),
+                            None,
+                            None,
+                        )
+                    })
+                    .collect(),
+                selected_tool_ids: request
+                    .tools
+                    .iter()
+                    .take(1)
+                    .map(|tool| tool.tool_id.clone())
+                    .collect(),
+                tool_choice: Some(TurnToolChoice::Auto),
+                response_format_ref: None,
+                provider_options_ref: None,
+                prerequisites: Vec::new(),
+                state_updates: Vec::new(),
+                report: TurnReport {
+                    planner: "test/repo-bootstrap-first".into(),
+                    selected_message_count: selected_count,
+                    dropped_message_count: dropped_count,
+                    selected_tool_count: request.tools.iter().take(1).count() as u64,
+                    dropped_tool_count: request.tools.len().saturating_sub(1) as u64,
+                    token_estimate: Default::default(),
+                    budget: request.budget,
+                    decision_codes: vec!["selected repo bootstrap before current turn".into()],
+                    unresolved: Vec::new(),
+                },
+            })
+        }
+    }
+
+    #[test]
+    fn custom_turn_planner_can_reuse_llm_dispatch() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        let bootstrap_ref = fake_hash('b');
+        let transcript_ref = fake_hash('c');
+        let input_ref = fake_hash('a');
+        state.turn_state.pinned_inputs.push(TurnInput {
+            input_id: "repo-bootstrap".into(),
+            kind: TurnInputKind::MessageRef,
+            lane: TurnInputLane::Custom {
+                kind: "repo_bootstrap".into(),
+            },
+            priority: TurnPriority::Required,
+            content_ref: bootstrap_ref.clone(),
+            estimated_tokens: None,
+            source_kind: Some("repo_bootstrap".into()),
+            source_id: Some("repo://main".into()),
+            correlation_id: None,
+            tags: Vec::new(),
+        });
+
+        let run_config = RunConfig {
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            max_tokens: Some(512),
+            ..RunConfig::default()
+        };
+        let run_id = RunId {
+            session_id: state.session_id.clone(),
+            run_seq: 1,
+        };
+        let cause = RunCause::direct_input(input_ref.clone());
+        state.active_run_id = Some(run_id.clone());
+        state.active_run_config = Some(run_config.clone());
+        state.current_run = Some(RunState {
+            run_id,
+            lifecycle: RunLifecycle::Running,
+            cause,
+            config: run_config,
+            input_refs: vec![input_ref.clone()],
+            ..RunState::default()
+        });
+        state.context_state.append_message_refs(
+            vec![transcript_ref.clone(), input_ref.clone()],
+            "test",
+            state.updated_at,
+        );
+        state.pending_llm_turn_items = Some(vec![ActiveWindowItem::message_ref(
+            "test:pending",
+            input_ref.clone(),
+            Some(TurnInputLane::Conversation),
+            None,
+            None,
+        )]);
+
+        let mut out = SessionWorkflowOutput::default();
+        dispatch_pending_llm_turn_with_planner(
+            &mut state,
+            &mut out,
+            &RepoBootstrapFirstPlanner,
+            TurnBudget {
+                max_message_refs: Some(2),
+                reserve_output_tokens: Some(128),
+                max_input_tokens: None,
+                max_tool_refs: Some(1),
+            },
+        )
+        .expect("dispatch");
+
+        let params = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { params, .. } => Some(params),
+                _ => None,
+            })
+            .expect("expected llm.generate");
+        let message_refs = params
+            .window_items
+            .iter()
+            .map(|item| item.ref_.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(message_refs, vec![bootstrap_ref.clone(), input_ref.clone()]);
+
+        let plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.as_ref())
+            .expect("turn plan");
+        assert_eq!(
+            active_window_refs(&plan.active_window_items),
+            vec![bootstrap_ref, input_ref.clone()]
+        );
+        assert_eq!(plan.report.planner, "test/repo-bootstrap-first");
+        assert_eq!(plan.report.dropped_message_count, 1);
+        assert_eq!(state.turn_state.last_report.as_ref(), Some(&plan.report));
+        assert_eq!(
+            state.context_state.ledger_message_refs(),
+            vec![transcript_ref, input_ref]
+        );
+    }
+
+    #[test]
+    fn session_can_exist_with_no_runs() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(1, SessionInputKind::SessionOpened { config: None }),
+        )
+        .expect("open session");
+
+        assert_eq!(state.status, SessionStatus::Open);
+        assert!(state.current_run.is_none());
+        assert!(state.run_history.is_empty());
+        assert!(state.context_state.ledger_message_refs().is_empty());
+    }
+
+    #[test]
+    fn session_preserves_transcript_across_sequential_runs() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("first run");
+        assert_eq!(
+            state.context_state.ledger_message_refs(),
+            vec![fake_hash('a')]
+        );
+        assert!(state.current_run.is_some());
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(2, SessionInputKind::RunCompleted),
+        )
+        .expect("complete first run");
+
+        let second_input = fake_hash('b');
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                3,
+                SessionInputKind::RunRequested {
+                    input_ref: second_input.clone(),
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: None,
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )
+        .expect("second run");
+
+        assert_eq!(state.run_history.len(), 1);
+        assert_eq!(state.next_run_seq, 2);
+        assert_eq!(
+            state.context_state.ledger_message_refs(),
+            vec![fake_hash('a'), second_input]
+        );
+        assert_eq!(
+            state.current_run.as_ref().map(|run| run.run_id.run_seq),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn failed_run_can_be_followed_by_later_run() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                2,
+                SessionInputKind::RunFailed {
+                    code: "boom".into(),
+                    detail: "failed".into(),
+                },
+            ),
+        )
+        .expect("fail run");
+        assert!(state.current_run.is_none());
+        assert_eq!(state.run_history[0].lifecycle, RunLifecycle::Failed);
+
+        apply_session_workflow_event(&mut state, &run_request_event(3)).expect("later run");
+        assert_eq!(state.status, SessionStatus::Open);
+        assert_eq!(
+            state.current_run.as_ref().map(|run| run.run_id.run_seq),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn paused_and_closed_session_boundaries_are_separate_from_runs() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(1, SessionInputKind::SessionPaused),
+        )
+        .expect("pause");
+        assert_eq!(state.status, SessionStatus::Paused);
+        assert!(state.current_run.is_none());
+        assert!(apply_session_workflow_event(&mut state, &run_request_event(2)).is_err());
+
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(3, SessionInputKind::SessionResumed),
+        )
+        .expect("resume");
+        apply_session_workflow_event(&mut state, &run_request_event(4)).expect("run");
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(5, SessionInputKind::RunCompleted),
+        )
+        .expect("complete");
+
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(6, SessionInputKind::SessionClosed),
+        )
+        .expect("close");
+        assert_eq!(state.status, SessionStatus::Closed);
+        assert!(apply_session_workflow_event(&mut state, &run_request_event(7)).is_err());
+    }
+
+    #[test]
+    fn domain_event_cause_starts_normal_run() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        let input_ref = fake_hash('d');
+        let event_ref = fake_hash('e');
+
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                1,
+                SessionInputKind::RunStartRequested {
+                    cause: RunCause {
+                        kind: "example/work_item_ready".into(),
+                        origin: RunCauseOrigin::DomainEvent {
+                            schema: "example/WorkItemReady@1".into(),
+                            event_ref: Some(event_ref.clone()),
+                            key: Some("work-1".into()),
+                        },
+                        input_refs: vec![input_ref.clone()],
+                        payload_schema: Some("example/WorkItemReady@1".into()),
+                        payload_ref: Some(event_ref),
+                        subject_refs: vec![CauseRef {
+                            kind: "example/work_item".into(),
+                            id: "work-1".into(),
+                            ref_: None,
+                        }],
+                    },
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: None,
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )
+        .expect("domain run");
+
+        let run = state.current_run.as_ref().expect("current run");
+        assert_eq!(run.cause.kind, "example/work_item_ready");
+        assert_eq!(run.input_refs, vec![input_ref]);
+        assert_eq!(state.lifecycle, SessionLifecycle::Running);
     }
 
     #[test]
     fn host_session_ready_enables_host_fs_and_exec_tools() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 1,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -1204,24 +4175,25 @@ mod tests {
 
         apply_session_workflow_event(&mut state, &run_request_event(2)).expect("run");
 
-        let tools: Vec<&str> = state
-            .effective_tools
-            .ordered_tools
-            .iter()
-            .map(|tool| tool.tool_name.as_str())
-            .collect();
-        assert!(tools.contains(&"shell"));
-        assert!(tools.contains(&"apply_patch"));
+        let tools = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.as_ref())
+            .map(|plan| plan.selected_tool_ids.clone())
+            .expect("turn plan");
+        assert!(tools.contains(&"host.exec".into()));
+        assert!(tools.contains(&"host.fs.apply_patch".into()));
     }
 
     #[test]
     fn tool_calls_observed_builds_deterministic_plan_and_ignores_disabled() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
+        state.session_config.default_tool_disable = Some(vec!["host.exec".into()]);
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 1,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -1229,21 +4201,6 @@ mod tests {
         )
         .expect("host session ready");
         apply_session_workflow_event(&mut state, &run_request_event(2)).expect("run");
-
-        // Deny exec so it gets ignored even when host session is ready.
-        apply_session_workflow_event(
-            &mut state,
-            &ingress(
-                3,
-                SessionIngressKind::ToolOverridesSet {
-                    scope: ToolOverrideScope::Run,
-                    enable: None,
-                    disable: Some(vec!["host.exec".into()]),
-                    force: None,
-                },
-            ),
-        )
-        .expect("overrides");
 
         let calls = vec![
             ToolCallObserved {
@@ -1269,7 +4226,7 @@ mod tests {
             },
         ];
 
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         let params_hash = fake_hash('h');
         let started = run_tool_batch(
             &mut state,
@@ -1296,13 +4253,13 @@ mod tests {
 
     #[test]
     fn run_request_materializes_tool_refs_before_llm_generate() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -1319,7 +4276,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!blob_put_hashes.is_empty(), "expected blob.put effects");
 
-        let mut last_out = SessionReduceOutput::default();
+        let mut last_out = SessionWorkflowOutput::default();
         for (idx, hash) in blob_put_hashes.iter().enumerate() {
             last_out = apply_session_workflow_event(
                 &mut state,
@@ -1348,14 +4305,224 @@ mod tests {
     }
 
     #[test]
-    fn llm_receipt_settles_by_issuer_ref_when_params_hash_differs() {
-        let mut state = SessionState::default();
+    fn deterministic_fixture_asserts_turn_plan_end_to_end() {
+        let first = run_turn_plan_fixture().expect("first fixture run");
+        let second = run_turn_plan_fixture().expect("second fixture run");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first.initial_message_refs,
+            vec![fake_hash('b'), fake_hash('a')]
+        );
+        assert!(
+            first
+                .initial_selected_tool_ids
+                .contains(&"host.exec".into())
+        );
+        assert!(
+            first
+                .initial_selected_tool_ids
+                .contains(&"host.fs.apply_patch".into())
+        );
+        assert!(first.initial_prerequisite_kinds.contains(&alloc::format!(
+            "{:?}",
+            TurnPrerequisiteKind::MaterializeToolDefinitions
+        )));
+        assert_eq!(first.final_message_refs, first.initial_message_refs);
+        assert_eq!(
+            first.final_selected_tool_ids,
+            first.initial_selected_tool_ids
+        );
+        assert!(first.final_prerequisite_kinds.is_empty());
+        assert_eq!(first.llm_message_refs, first.final_message_refs);
+        assert_eq!(
+            first.llm_tool_ref_count,
+            first.final_selected_tool_ids.len()
+        );
+        assert_eq!(
+            first.trace_kinds,
+            vec!["RunStarted", "TurnPlanned", "TurnPlanned", "LlmRequested"]
+        );
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct TurnPlanFixtureObservation {
+        initial_message_refs: Vec<String>,
+        initial_selected_tool_ids: Vec<String>,
+        initial_prerequisite_kinds: Vec<String>,
+        final_message_refs: Vec<String>,
+        final_selected_tool_ids: Vec<String>,
+        final_prerequisite_kinds: Vec<String>,
+        llm_message_refs: Vec<String>,
+        llm_tool_ref_count: usize,
+        trace_kinds: Vec<&'static str>,
+    }
+
+    fn run_turn_plan_fixture() -> Result<TurnPlanFixtureObservation, SessionWorkflowError> {
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )?;
+
+        let prompt_ref = fake_hash('b');
+        let input_ref = fake_hash('a');
+        let out = apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                1,
+                SessionInputKind::RunRequested {
+                    input_ref,
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: Some(vec![prompt_ref]),
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )?;
+        let initial_plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.clone())
+            .expect("initial turn plan");
+        let blob_put_hashes = out
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. }))
+            .map(|effect| effect.params_hash().to_string())
+            .collect::<Vec<_>>();
+        assert!(!blob_put_hashes.is_empty(), "expected tool definition puts");
+
+        let mut last_out = SessionWorkflowOutput::default();
+        for (idx, hash) in blob_put_hashes.iter().enumerate() {
+            last_out = apply_session_workflow_event(
+                &mut state,
+                &receipt_event(
+                    2 + idx as u64,
+                    "sys/blob.put@1",
+                    Some(hash.clone()),
+                    "ok",
+                    &BlobPutReceipt {
+                        blob_ref: hash_ref_for_index(idx),
+                        edge_ref: hash_ref_for_index(idx + 1),
+                        size: 42,
+                    },
+                ),
+            )?;
+        }
+
+        let final_plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.clone())
+            .expect("final turn plan");
+        let (llm_message_refs, llm_tool_ref_count) = last_out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { params, .. } => Some((
+                    params
+                        .window_items
+                        .iter()
+                        .map(|item| item.ref_.to_string())
+                        .collect::<Vec<_>>(),
+                    params.runtime.tool_refs.as_ref().map_or(0, Vec::len),
+                )),
+                _ => None,
+            })
+            .expect("llm.generate emitted after materialization");
+        let trace_kinds = state
+            .current_run
+            .as_ref()
+            .expect("current run")
+            .trace
+            .entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.kind,
+                    RunTraceEntryKind::RunStarted
+                        | RunTraceEntryKind::TurnPlanned
+                        | RunTraceEntryKind::LlmRequested
+                )
+            })
+            .map(|entry| trace_kind_name(&entry.kind))
+            .collect::<Vec<_>>();
+
+        Ok(TurnPlanFixtureObservation {
+            initial_message_refs: active_window_refs(&initial_plan.active_window_items),
+            initial_selected_tool_ids: initial_plan.selected_tool_ids,
+            initial_prerequisite_kinds: initial_plan
+                .prerequisites
+                .iter()
+                .map(|item| alloc::format!("{:?}", item.kind))
+                .collect(),
+            final_message_refs: active_window_refs(&final_plan.active_window_items),
+            final_selected_tool_ids: final_plan.selected_tool_ids,
+            final_prerequisite_kinds: final_plan
+                .prerequisites
+                .iter()
+                .map(|item| alloc::format!("{:?}", item.kind))
+                .collect(),
+            llm_message_refs,
+            llm_tool_ref_count,
+            trace_kinds,
+        })
+    }
+
+    fn trace_kind_name(kind: &RunTraceEntryKind) -> &'static str {
+        match kind {
+            RunTraceEntryKind::RunStarted => "RunStarted",
+            RunTraceEntryKind::TurnPlanned => "TurnPlanned",
+            RunTraceEntryKind::LlmRequested => "LlmRequested",
+            RunTraceEntryKind::LlmReceived => "LlmReceived",
+            RunTraceEntryKind::ToolCallsObserved => "ToolCallsObserved",
+            RunTraceEntryKind::ToolBatchPlanned => "ToolBatchPlanned",
+            RunTraceEntryKind::EffectEmitted => "EffectEmitted",
+            RunTraceEntryKind::DomainEventEmitted => "DomainEventEmitted",
+            RunTraceEntryKind::StreamFrameObserved => "StreamFrameObserved",
+            RunTraceEntryKind::ReceiptSettled => "ReceiptSettled",
+            RunTraceEntryKind::InterventionRequested => "InterventionRequested",
+            RunTraceEntryKind::InterventionApplied => "InterventionApplied",
+            RunTraceEntryKind::ContextOperationStateChanged => "ContextOperationStateChanged",
+            RunTraceEntryKind::ContextPressureObserved => "ContextPressureObserved",
+            RunTraceEntryKind::ProviderContextArtifactsObserved => {
+                "ProviderContextArtifactsObserved"
+            }
+            RunTraceEntryKind::CompactionRequested => "CompactionRequested",
+            RunTraceEntryKind::CompactionReceived => "CompactionReceived",
+            RunTraceEntryKind::TokenCountRequested => "TokenCountRequested",
+            RunTraceEntryKind::TokenCountReceived => "TokenCountReceived",
+            RunTraceEntryKind::ActiveWindowUpdated => "ActiveWindowUpdated",
+            RunTraceEntryKind::RunFinished => "RunFinished",
+            RunTraceEntryKind::Custom { .. } => "Custom",
+        }
+    }
+
+    #[test]
+    fn llm_receipt_settles_by_issuer_ref_when_params_hash_differs() {
+        let mut state = local_coding_state();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                0,
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -1413,16 +4580,21 @@ mod tests {
                     output_ref: hash_ref('e'),
                     raw_output_ref: None,
                     provider_response_id: None,
+                    provider_context_items: Vec::new(),
                     finish_reason: LlmFinishReason {
                         reason: "stop".into(),
                         raw: None,
                     },
                     token_usage: TokenUsage {
-                        prompt: 0,
-                        completion: 0,
-                        total: Some(0),
+                        prompt: 123,
+                        completion: 45,
+                        total: Some(168),
                     },
-                    usage_details: None,
+                    usage_details: Some(LlmUsageDetails {
+                        reasoning_tokens: Some(12),
+                        cache_read_tokens: Some(34),
+                        cache_write_tokens: Some(56),
+                    }),
                     warnings_ref: None,
                     rate_limit_ref: None,
                     cost_cents: None,
@@ -1437,6 +4609,40 @@ mod tests {
             state.last_output_ref.as_deref(),
             Some(hash_ref('e').as_str())
         );
+        let usage = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.last_llm_usage.as_ref())
+            .expect("last llm usage");
+        assert_eq!(usage.prompt_tokens, 123);
+        assert_eq!(usage.completion_tokens, 45);
+        assert_eq!(usage.total_tokens, Some(168));
+        assert_eq!(usage.reasoning_tokens, Some(12));
+        assert_eq!(usage.cache_read_tokens, Some(34));
+        assert_eq!(usage.cache_write_tokens, Some(56));
+        let llm_received = state
+            .current_run
+            .as_ref()
+            .expect("current run")
+            .trace
+            .entries
+            .iter()
+            .find(|entry| matches!(entry.kind, RunTraceEntryKind::LlmReceived))
+            .expect("llm received trace");
+        assert_eq!(
+            llm_received
+                .metadata
+                .get("prompt_tokens")
+                .map(String::as_str),
+            Some("123")
+        );
+        assert_eq!(
+            llm_received
+                .metadata
+                .get("cache_read_tokens")
+                .map(String::as_str),
+            Some("34")
+        );
         assert!(matches!(
             out.effects.first(),
             Some(SessionEffectCommand::BlobGet { .. })
@@ -1444,14 +4650,249 @@ mod tests {
     }
 
     #[test]
+    fn llm_generate_context_limit_failure_schedules_compaction_and_retries() {
+        let mut state = local_coding_state();
+        let (llm_params_hash, llm_issuer_ref) = ready_state_with_llm_generate(&mut state);
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                3,
+                "sys/llm.generate@1",
+                Some(llm_params_hash),
+                llm_issuer_ref,
+                "error",
+                &LlmGenerateReceipt {
+                    output_ref: hash_ref('e'),
+                    raw_output_ref: Some(hash_ref('d')),
+                    provider_response_id: None,
+                    provider_context_items: Vec::new(),
+                    finish_reason: LlmFinishReason {
+                        reason: "error".into(),
+                        raw: Some("context length exceeded: too many input tokens".into()),
+                    },
+                    token_usage: TokenUsage {
+                        prompt: 128_000,
+                        completion: 0,
+                        total: Some(128_000),
+                    },
+                    usage_details: None,
+                    warnings_ref: None,
+                    rate_limit_ref: None,
+                    cost_cents: None,
+                    provider_id: "openai".into(),
+                },
+            ),
+        )
+        .expect("llm context-limit receipt");
+
+        let operation = state
+            .context_state
+            .pending_context_operation
+            .as_ref()
+            .expect("pending context operation");
+        assert!(matches!(
+            operation.reason,
+            ContextPressureReason::ProviderContextLimit
+        ));
+        assert!(state.pending_llm_turn_items.is_some());
+        assert!(
+            out.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::LlmCompact { .. }))
+        );
+        assert!(
+            state
+                .current_run
+                .as_ref()
+                .is_some_and(|run| matches!(run.lifecycle, RunLifecycle::Running))
+        );
+        let trace_kinds = state
+            .current_run
+            .as_ref()
+            .expect("current run")
+            .trace
+            .entries
+            .iter()
+            .map(|entry| trace_kind_name(&entry.kind))
+            .collect::<Vec<_>>();
+        assert!(trace_kinds.contains(&"ContextPressureObserved"));
+        assert!(trace_kinds.contains(&"CompactionRequested"));
+    }
+
+    #[test]
+    fn llm_generate_high_water_usage_schedules_lazy_compaction() {
+        let mut state = local_coding_state();
+        let (llm_params_hash, llm_issuer_ref) = ready_state_with_llm_generate(&mut state);
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                3,
+                "sys/llm.generate@1",
+                Some(llm_params_hash),
+                llm_issuer_ref,
+                "ok",
+                &LlmGenerateReceipt {
+                    output_ref: hash_ref('e'),
+                    raw_output_ref: None,
+                    provider_response_id: None,
+                    provider_context_items: Vec::new(),
+                    finish_reason: LlmFinishReason {
+                        reason: "stop".into(),
+                        raw: None,
+                    },
+                    token_usage: TokenUsage {
+                        prompt: USAGE_HIGH_WATER_INPUT_TOKENS,
+                        completion: 64,
+                        total: Some(USAGE_HIGH_WATER_INPUT_TOKENS + 64),
+                    },
+                    usage_details: None,
+                    warnings_ref: None,
+                    rate_limit_ref: None,
+                    cost_cents: None,
+                    provider_id: "openai".into(),
+                },
+            ),
+        )
+        .expect("llm high-water receipt");
+
+        let operation = state
+            .context_state
+            .pending_context_operation
+            .as_ref()
+            .expect("pending context operation");
+        assert!(matches!(
+            operation.reason,
+            ContextPressureReason::UsageHighWater
+        ));
+        assert!(
+            out.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::BlobGet { .. }))
+        );
+        assert!(
+            !out.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::LlmCompact { .. }))
+        );
+        assert!(
+            state
+                .current_run
+                .as_ref()
+                .expect("current run")
+                .trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::ContextPressureObserved))
+        );
+    }
+
+    #[test]
+    fn llm_generate_provider_context_items_are_traced() {
+        let mut state = local_coding_state();
+        let (llm_params_hash, llm_issuer_ref) = ready_state_with_llm_generate(&mut state);
+        let provider_item = LlmWindowItem {
+            item_id: "provider-item-1".into(),
+            kind: LlmWindowItemKind::ProviderNativeArtifactRef,
+            ref_: hash_ref('f'),
+            lane: Some("Summary".into()),
+            source_range: None,
+            source_refs: vec![hash_ref('0')],
+            provider_compatibility: Some(LlmProviderCompatibility {
+                provider: "openai-responses".into(),
+                api_kind: "responses".into(),
+                model: Some("gpt-5.2".into()),
+                model_family: None,
+                artifact_type: "compaction".into(),
+                opaque: true,
+                encrypted: true,
+            }),
+            estimated_tokens: None,
+            metadata: BTreeMap::new(),
+        };
+
+        let _out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                3,
+                "sys/llm.generate@1",
+                Some(llm_params_hash),
+                llm_issuer_ref,
+                "ok",
+                &LlmGenerateReceipt {
+                    output_ref: hash_ref('e'),
+                    raw_output_ref: None,
+                    provider_response_id: Some("resp_1".into()),
+                    provider_context_items: vec![provider_item],
+                    finish_reason: LlmFinishReason {
+                        reason: "stop".into(),
+                        raw: None,
+                    },
+                    token_usage: TokenUsage {
+                        prompt: 120,
+                        completion: 20,
+                        total: Some(140),
+                    },
+                    usage_details: None,
+                    warnings_ref: None,
+                    rate_limit_ref: None,
+                    cost_cents: None,
+                    provider_id: "openai-responses".into(),
+                },
+            ),
+        )
+        .expect("llm provider context item receipt");
+
+        let run = state.current_run.as_ref().expect("current run");
+        let llm_received = run
+            .trace
+            .entries
+            .iter()
+            .find(|entry| matches!(entry.kind, RunTraceEntryKind::LlmReceived))
+            .expect("llm received trace");
+        assert_eq!(
+            llm_received
+                .metadata
+                .get("provider_context_item_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        let provider_trace = run
+            .trace
+            .entries
+            .iter()
+            .find(|entry| {
+                matches!(
+                    entry.kind,
+                    RunTraceEntryKind::ProviderContextArtifactsObserved
+                )
+            })
+            .expect("provider context artifacts trace");
+        assert_eq!(
+            provider_trace
+                .metadata
+                .get("provider_context_item_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert!(
+            provider_trace
+                .refs
+                .iter()
+                .any(|trace_ref| trace_ref.kind == "provider_context_item_ref")
+        );
+    }
+
+    #[test]
     fn llm_tool_calls_are_resolved_executed_and_queued_for_follow_up() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -1470,7 +4911,7 @@ mod tests {
             !tool_def_put_hashes.is_empty(),
             "expected initial blob.put effects"
         );
-        let mut out2 = SessionReduceOutput::default();
+        let mut out2 = SessionWorkflowOutput::default();
         for (idx, hash) in tool_def_put_hashes.iter().enumerate() {
             out2 = apply_session_workflow_event(
                 &mut state,
@@ -1506,16 +4947,21 @@ mod tests {
                     output_ref: hash_ref('e'),
                     raw_output_ref: None,
                     provider_response_id: None,
+                    provider_context_items: Vec::new(),
                     finish_reason: LlmFinishReason {
                         reason: "tool_calls".into(),
                         raw: None,
                     },
                     token_usage: TokenUsage {
-                        prompt: 0,
-                        completion: 0,
-                        total: Some(0),
+                        prompt: 200,
+                        completion: 30,
+                        total: Some(230),
                     },
-                    usage_details: None,
+                    usage_details: Some(LlmUsageDetails {
+                        reasoning_tokens: Some(7),
+                        cache_read_tokens: Some(11),
+                        cache_write_tokens: None,
+                    }),
                     warnings_ref: None,
                     rate_limit_ref: None,
                     cost_cents: None,
@@ -1678,13 +5124,13 @@ mod tests {
 
     #[test]
     fn llm_no_tools_completion_keeps_last_output_ref_for_lifecycle_event() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -1704,7 +5150,7 @@ mod tests {
             "expected initial blob.put effects"
         );
 
-        let mut out2 = SessionReduceOutput::default();
+        let mut out2 = SessionWorkflowOutput::default();
         for (idx, hash) in tool_def_put_hashes.iter().enumerate() {
             out2 = apply_session_workflow_event(
                 &mut state,
@@ -1741,16 +5187,21 @@ mod tests {
                     output_ref: hash_ref('e'),
                     raw_output_ref: None,
                     provider_response_id: None,
+                    provider_context_items: Vec::new(),
                     finish_reason: LlmFinishReason {
                         reason: "stop".into(),
                         raw: None,
                     },
                     token_usage: TokenUsage {
-                        prompt: 0,
-                        completion: 0,
-                        total: Some(0),
+                        prompt: 200,
+                        completion: 30,
+                        total: Some(230),
                     },
-                    usage_details: None,
+                    usage_details: Some(LlmUsageDetails {
+                        reasoning_tokens: Some(7),
+                        cache_read_tokens: Some(11),
+                        cache_write_tokens: None,
+                    }),
                     warnings_ref: None,
                     rate_limit_ref: None,
                     cost_cents: None,
@@ -1811,17 +5262,33 @@ mod tests {
         )
         .expect("lifecycle payload");
         assert_eq!(changed.output_ref.as_deref(), Some(hash_ref('e').as_str()));
+
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(5, SessionInputKind::RunCompleted),
+        )
+        .expect("complete run");
+        let usage = state
+            .run_history
+            .first()
+            .and_then(|record| record.last_llm_usage.as_ref())
+            .expect("run record llm usage");
+        assert_eq!(usage.prompt_tokens, 200);
+        assert_eq!(usage.completion_tokens, 30);
+        assert_eq!(usage.total_tokens, Some(230));
+        assert_eq!(usage.reasoning_tokens, Some(7));
+        assert_eq!(usage.cache_read_tokens, Some(11));
     }
 
     #[test]
     fn workspace_apply_composite_tool_runs_to_completion() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -1853,7 +5320,7 @@ mod tests {
             provider_call_id: None,
         }];
         let params_hash = fake_hash('h');
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         let started = run_tool_batch(
             &mut state,
             RunToolBatch {
@@ -2024,7 +5491,7 @@ mod tests {
 
     #[test]
     fn workspace_commit_immediate_tool_allows_next_group_to_run() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
 
@@ -2054,7 +5521,7 @@ mod tests {
             },
         ];
         let params_hash = fake_hash('h');
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         let started = run_tool_batch(
             &mut state,
             RunToolBatch {
@@ -2087,13 +5554,13 @@ mod tests {
 
     #[test]
     fn workspace_commit_with_arguments_ref_rewinds_into_next_group() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -2126,7 +5593,7 @@ mod tests {
             },
         ];
         let params_hash = fake_hash('h');
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         run_tool_batch(
             &mut state,
             RunToolBatch {

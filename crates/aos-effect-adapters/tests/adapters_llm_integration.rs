@@ -1,13 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use aos_air_types::HashRef;
-use aos_effect_adapters::adapters::llm::LlmAdapter;
+use aos_effect_adapters::adapters::llm::{LlmAdapter, LlmCompactAdapter};
 use aos_effect_adapters::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_effect_adapters::traits::AsyncEffectAdapter;
-use aos_effects::builtins::{LlmGenerateParams, LlmRuntimeArgs};
+use aos_effects::builtins::{
+    LlmCompactParams, LlmCompactReceipt, LlmCompactStrategy, LlmCompactionArtifactKind,
+    LlmGenerateParams, LlmProviderCompatibility, LlmRuntimeArgs, LlmWindowItem, LlmWindowItemKind,
+};
 use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::{MemStore, Store};
 use serde_cbor;
@@ -145,7 +148,9 @@ async fn llm_errors_missing_api_key() {
         correlation_id: None,
         provider: "openai".into(),
         model: "gpt-5.2".into(),
-        message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
+        window_items: vec![LlmWindowItem::message_ref(
+            HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap(),
+        )],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,
@@ -181,7 +186,9 @@ async fn llm_unknown_provider_errors() {
         correlation_id: None,
         provider: "missing".into(),
         model: "gpt".into(),
-        message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
+        window_items: vec![LlmWindowItem::message_ref(
+            HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap(),
+        )],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,
@@ -230,7 +237,7 @@ async fn llm_message_ref_missing_errors() {
         correlation_id: None,
         provider: "openai".into(),
         model: "gpt".into(),
-        message_refs: vec![missing_ref],
+        window_items: vec![LlmWindowItem::message_ref(missing_ref)],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,
@@ -249,6 +256,77 @@ async fn llm_message_ref_missing_errors() {
         effect_ops::LLM_GENERATE,
         serde_cbor::to_vec(&params).unwrap(),
     );
+    let receipt = adapter.execute(&intent).await.unwrap();
+    assert_eq!(receipt.status, ReceiptStatus::Error);
+}
+
+#[tokio::test]
+async fn llm_rejects_incompatible_provider_native_window_item() {
+    let store = Arc::new(MemStore::new());
+    let mut providers = HashMap::new();
+    providers.insert(
+        "openai".into(),
+        ProviderConfig {
+            base_url: "http://127.0.0.1:0".into(),
+            timeout: Duration::from_secs(5),
+            api_kind: LlmApiKind::ChatCompletions,
+        },
+    );
+    let cfg = LlmAdapterConfig {
+        providers,
+        default_provider: "openai".into(),
+    };
+    let adapter = LlmAdapter::new(store.clone(), cfg);
+
+    let artifact_ref = HashRef::new(
+        store
+            .put_blob(b"opaque-provider-artifact")
+            .unwrap()
+            .to_hex(),
+    )
+    .expect("artifact ref");
+    let params = LlmGenerateParams {
+        correlation_id: None,
+        provider: "openai".into(),
+        model: "gpt".into(),
+        window_items: vec![LlmWindowItem {
+            item_id: "provider-native:anthropic:1".into(),
+            kind: LlmWindowItemKind::ProviderNativeArtifactRef,
+            ref_: artifact_ref,
+            lane: Some("Summary".into()),
+            source_range: None,
+            source_refs: Vec::new(),
+            provider_compatibility: Some(LlmProviderCompatibility {
+                provider: "anthropic".into(),
+                api_kind: "messages".into(),
+                model: None,
+                model_family: Some("claude".into()),
+                artifact_type: "context_management_block".into(),
+                opaque: true,
+                encrypted: false,
+            }),
+            estimated_tokens: Some(12),
+            metadata: BTreeMap::new(),
+        }],
+        runtime: LlmRuntimeArgs {
+            temperature: Some("0".into()),
+            top_p: None,
+            max_tokens: Some(16),
+            tool_refs: None,
+            tool_choice: None,
+            reasoning_effort: None,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
+        },
+        api_key: Some("key".into()),
+    };
+    let intent = build_intent(
+        effect_ops::LLM_GENERATE,
+        serde_cbor::to_vec(&params).unwrap(),
+    );
+
     let receipt = adapter.execute(&intent).await.unwrap();
     assert_eq!(receipt.status, ReceiptStatus::Error);
 }
@@ -292,7 +370,7 @@ async fn llm_happy_path_ok_receipt() {
         correlation_id: None,
         provider: "mock".into(),
         model: "gpt-mock".into(),
-        message_refs: vec![message_ref],
+        window_items: vec![LlmWindowItem::message_ref(message_ref)],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,
@@ -318,6 +396,220 @@ async fn llm_happy_path_ok_receipt() {
     let payload: aos_effects::builtins::LlmGenerateReceipt =
         serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
     assert!(!payload.output_ref.as_str().is_empty());
+}
+
+#[tokio::test]
+async fn llm_generate_surfaces_provider_context_items_from_responses() {
+    if !loopback_available().await {
+        eprintln!(
+            "skipping llm_generate_surfaces_provider_context_items_from_responses: loopback bind not permitted"
+        );
+        return;
+    }
+
+    let store = Arc::new(MemStore::new());
+    let message = serde_json::to_vec(&json!({"role":"user","content":"hi"})).unwrap();
+    let message_ref = HashRef::new(store.put_blob(&message).unwrap().to_hex()).unwrap();
+
+    let body = br#"{
+      "id": "resp_generate_1",
+      "model": "gpt-5.2",
+      "status": "completed",
+      "output": [
+        {
+          "id": "msg_001",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [{ "type": "output_text", "text": "hello" }]
+        },
+        {
+          "id": "cmp_001",
+          "type": "compaction",
+          "encrypted_content": "encrypted-summary"
+        }
+      ],
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 5,
+        "total_tokens": 25
+      }
+    }"#;
+    let addr = start_test_server(body, "200 OK", None).await;
+
+    let mut providers = HashMap::new();
+    providers.insert(
+        "openai-responses".into(),
+        ProviderConfig {
+            base_url: format!("http://{}", addr),
+            timeout: Duration::from_secs(2),
+            api_kind: LlmApiKind::Responses,
+        },
+    );
+    let cfg = LlmAdapterConfig {
+        providers,
+        default_provider: "openai-responses".into(),
+    };
+    let adapter = LlmAdapter::new(store.clone(), cfg);
+
+    let params = LlmGenerateParams {
+        correlation_id: None,
+        provider: "openai-responses".into(),
+        model: "gpt-5.2".into(),
+        window_items: vec![LlmWindowItem::message_ref(message_ref.clone())],
+        runtime: LlmRuntimeArgs {
+            temperature: Some("0".into()),
+            top_p: None,
+            max_tokens: Some(8),
+            tool_refs: None,
+            tool_choice: None,
+            reasoning_effort: None,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
+        },
+        api_key: Some("key".into()),
+    };
+    let intent = build_intent(
+        effect_ops::LLM_GENERATE,
+        serde_cbor::to_vec(&params).unwrap(),
+    );
+
+    let receipt = adapter.execute(&intent).await.unwrap();
+    assert_eq!(receipt.status, ReceiptStatus::Ok);
+    let payload: aos_effects::builtins::LlmGenerateReceipt =
+        serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    assert_eq!(payload.provider_context_items.len(), 1);
+    let item = payload.provider_context_items.first().unwrap();
+    assert!(matches!(
+        item.kind,
+        LlmWindowItemKind::ProviderNativeArtifactRef
+    ));
+    assert_eq!(item.source_refs, vec![message_ref]);
+    let compat = item
+        .provider_compatibility
+        .as_ref()
+        .expect("provider compatibility");
+    assert_eq!(compat.provider, "openai-responses");
+    assert_eq!(compat.api_kind, "responses");
+    assert_eq!(compat.artifact_type, "compaction");
+    assert!(compat.encrypted);
+}
+
+#[tokio::test]
+async fn llm_compact_adapter_returns_provider_native_window_items() {
+    if !loopback_available().await {
+        eprintln!(
+            "skipping llm_compact_adapter_returns_provider_native_window_items: loopback bind not permitted"
+        );
+        return;
+    }
+
+    let store = Arc::new(MemStore::new());
+    let message = serde_json::to_vec(&json!({"role":"user","content":"compact me"})).unwrap();
+    let message_ref = HashRef::new(store.put_blob(&message).unwrap().to_hex()).unwrap();
+
+    let body = br#"{
+      "id": "resp_compact_1",
+      "object": "response.compaction",
+      "created_at": 1764967971,
+      "output": [
+        {
+          "id": "msg_000",
+          "type": "message",
+          "status": "completed",
+          "role": "user",
+          "content": [{ "type": "input_text", "text": "compact me" }]
+        },
+        {
+          "id": "cmp_001",
+          "type": "compaction",
+          "encrypted_content": "encrypted-summary"
+        }
+      ],
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 4,
+        "total_tokens": 14
+      }
+    }"#;
+    let (addr, capture_rx) = start_test_server_with_capture(body, "200 OK").await;
+
+    let mut providers = HashMap::new();
+    providers.insert(
+        "openai-responses".into(),
+        ProviderConfig {
+            base_url: format!("http://{}", addr),
+            timeout: Duration::from_secs(2),
+            api_kind: LlmApiKind::Responses,
+        },
+    );
+    let cfg = LlmAdapterConfig {
+        providers,
+        default_provider: "openai-responses".into(),
+    };
+    let adapter = LlmCompactAdapter::new(store.clone(), cfg);
+
+    let params = LlmCompactParams {
+        correlation_id: None,
+        operation_id: "ctx-op-1".into(),
+        provider: "openai-responses".into(),
+        model: "gpt-5.2".into(),
+        strategy: LlmCompactStrategy::ProviderNative,
+        source_window_items: vec![LlmWindowItem::message_ref(message_ref.clone())],
+        preserve_window_items: Vec::new(),
+        recent_tail_items: Vec::new(),
+        source_range: Some(aos_effects::builtins::LlmTranscriptRange {
+            start_seq: 0,
+            end_seq: 1,
+        }),
+        target_tokens: Some(1024),
+        provider_options_ref: None,
+        api_key: Some("key".into()),
+    };
+    let intent = build_intent(
+        effect_ops::LLM_COMPACT,
+        serde_cbor::to_vec(&params).unwrap(),
+    );
+
+    let receipt = adapter.execute(&intent).await.unwrap();
+    assert_eq!(receipt.status, ReceiptStatus::Ok);
+    let raw_request = capture_rx.await.expect("captured request");
+    assert!(
+        String::from_utf8_lossy(&raw_request)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .contains("/responses/compact")
+    );
+    let request_body: serde_json::Value =
+        serde_json::from_slice(extract_http_body(&raw_request)).expect("request body JSON");
+    assert_eq!(
+        request_body.get("model").and_then(|v| v.as_str()),
+        Some("gpt-5.2")
+    );
+    assert!(request_body.get("input").is_some());
+
+    let payload: LlmCompactReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    assert_eq!(payload.operation_id, "ctx-op-1");
+    assert!(matches!(
+        payload.artifact_kind,
+        LlmCompactionArtifactKind::ProviderNative
+    ));
+    assert_eq!(payload.artifact_refs.len(), 1);
+    assert_eq!(payload.active_window_items.len(), 2);
+    assert!(payload.active_window_items.iter().any(|item| {
+        matches!(item.kind, LlmWindowItemKind::ProviderNativeArtifactRef)
+            && item
+                .provider_compatibility
+                .as_ref()
+                .is_some_and(|compat| compat.provider == "openai-responses")
+    }));
+    assert_eq!(
+        payload.token_usage.as_ref().map(|usage| usage.total),
+        Some(Some(14))
+    );
 }
 
 #[tokio::test]
@@ -382,7 +674,7 @@ async fn llm_runtime_refs_roundtrip_into_provider_request_body() {
         correlation_id: Some("run-1".into()),
         provider: "mock".into(),
         model: "gpt-mock".into(),
-        message_refs: vec![message_ref],
+        window_items: vec![LlmWindowItem::message_ref(message_ref)],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,

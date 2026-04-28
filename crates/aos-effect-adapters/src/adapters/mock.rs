@@ -12,8 +12,10 @@ use aos_air_exec::Value as ExprValue;
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_effects::builtins::{
-    HeaderMap, HttpRequestParams, HttpRequestReceipt, LlmGenerateParams, LlmRuntimeArgs,
-    RequestTimings, TextOrSecretRef,
+    HeaderMap, HttpRequestParams, HttpRequestReceipt, LlmCompactParams, LlmCompactReceipt,
+    LlmCompactionArtifactKind, LlmCountTokensParams, LlmCountTokensReceipt, LlmGenerateParams,
+    LlmTokenCountByRef, LlmTokenCountQuality, LlmWindowItem, LlmWindowItemKind, RequestTimings,
+    TextOrSecretRef, TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::Kernel;
@@ -199,6 +201,18 @@ pub struct LlmRequestContext {
     pub params: LlmGenerateParams,
 }
 
+#[derive(Debug, Clone)]
+pub struct LlmCompactRequestContext {
+    pub intent: EffectIntent,
+    pub params: LlmCompactParams,
+}
+
+#[derive(Debug, Clone)]
+pub struct LlmCountTokensRequestContext {
+    pub intent: EffectIntent,
+    pub params: LlmCountTokensParams,
+}
+
 /// Mock LLM harness for testing LLM effect flows.
 ///
 /// This harness intercepts `llm.generate` effects, validates parameters,
@@ -246,13 +260,68 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         Ok(out)
     }
 
+    pub fn collect_compact_requests(
+        &mut self,
+        kernel: &mut Kernel<S>,
+    ) -> Result<Vec<LlmCompactRequestContext>> {
+        let mut out = Vec::new();
+        loop {
+            let intents = kernel.drain_effects()?;
+            if intents.is_empty() {
+                break;
+            }
+            for intent in intents {
+                match intent.effect.as_str() {
+                    effect_ops::LLM_COMPACT => {
+                        let params: LlmCompactParams = serde_cbor::from_slice(&intent.params_cbor)
+                            .context("decode llm.compact params")?;
+                        out.push(LlmCompactRequestContext { intent, params });
+                    }
+                    other => {
+                        return Err(anyhow!("unexpected effect kind {other}"));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn collect_count_tokens_requests(
+        &mut self,
+        kernel: &mut Kernel<S>,
+    ) -> Result<Vec<LlmCountTokensRequestContext>> {
+        let mut out = Vec::new();
+        loop {
+            let intents = kernel.drain_effects()?;
+            if intents.is_empty() {
+                break;
+            }
+            for intent in intents {
+                match intent.effect.as_str() {
+                    effect_ops::LLM_COUNT_TOKENS => {
+                        let params: LlmCountTokensParams =
+                            serde_cbor::from_slice(&intent.params_cbor)
+                                .context("decode llm.count_tokens params")?;
+                        out.push(LlmCountTokensRequestContext { intent, params });
+                    }
+                    other => {
+                        return Err(anyhow!("unexpected effect kind {other}"));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Respond to an LLM request with a synthetic response.
     pub fn respond_with(&self, kernel: &mut Kernel<S>, ctx: LlmRequestContext) -> Result<()> {
-        if ctx.params.message_refs.is_empty() {
-            return Err(anyhow!("llm.mock missing message_refs"));
-        }
-        let mut prompt_parts = Vec::with_capacity(ctx.params.message_refs.len());
-        for reference in &ctx.params.message_refs {
+        let message_refs = render_window_item_refs(
+            &ctx.params.window_items,
+            ctx.params.provider.as_str(),
+            ctx.params.model.as_str(),
+        )?;
+        let mut prompt_parts = Vec::with_capacity(message_refs.len());
+        for reference in &message_refs {
             let prompt_hash = hash_from_ref(reference)?;
             let prompt_bytes = self
                 .store
@@ -324,213 +393,150 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         kernel.tick_until_idle()?;
         Ok(())
     }
+
+    pub fn respond_compact_with_summary(
+        &self,
+        kernel: &mut Kernel<S>,
+        ctx: LlmCompactRequestContext,
+    ) -> Result<()> {
+        let message_refs = render_window_item_refs(
+            &ctx.params.source_window_items,
+            ctx.params.provider.as_str(),
+            ctx.params.model.as_str(),
+        )?;
+        let mut prompt_parts = Vec::with_capacity(message_refs.len());
+        for reference in &message_refs {
+            let prompt_hash = hash_from_ref(reference)?;
+            let prompt_bytes = self
+                .store
+                .get_blob(prompt_hash)
+                .context("load message blob for llm.compact")?;
+            prompt_parts.push(message_text_from_bytes(&prompt_bytes)?);
+        }
+        let summary_text = summarize(&prompt_parts.join("\n"));
+        let summary_message = serde_json::json!({
+            "role": "user",
+            "content": format!("Compacted context summary: {summary_text}")
+        });
+        let summary_bytes =
+            serde_json::to_vec(&summary_message).context("encode llm.compact summary message")?;
+        let summary_hash = self
+            .store
+            .put_blob(&summary_bytes)
+            .context("store llm.compact summary blob")?;
+        let summary_ref = HashRef::new(summary_hash.to_hex())?;
+        let summary_item = LlmWindowItem {
+            item_id: format!("compact:{}:summary", ctx.params.operation_id),
+            kind: LlmWindowItemKind::AosSummaryRef,
+            ref_: summary_ref.clone(),
+            lane: Some("Summary".into()),
+            source_range: ctx.params.source_range.clone(),
+            source_refs: message_refs,
+            provider_compatibility: None,
+            estimated_tokens: ctx.params.target_tokens,
+            metadata: Default::default(),
+        };
+        let receipt = LlmCompactReceipt {
+            operation_id: ctx.params.operation_id,
+            artifact_kind: LlmCompactionArtifactKind::AosSummary,
+            artifact_refs: vec![summary_ref],
+            source_range: ctx.params.source_range,
+            compacted_through: None,
+            active_window_items: vec![summary_item],
+            token_usage: Some(TokenUsage {
+                prompt: 120,
+                completion: 42,
+                total: Some(162),
+            }),
+            provider_metadata_ref: None,
+            warnings_ref: None,
+            provider_id: MOCK_LLM_ROUTE_ID.into(),
+        };
+        let receipt = EffectReceipt {
+            intent_hash: ctx.intent.intent_hash,
+            status: ReceiptStatus::Ok,
+            payload_cbor: serde_cbor::to_vec(&receipt)?,
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        };
+        kernel.handle_receipt(receipt)?;
+        kernel.tick_until_idle()?;
+        Ok(())
+    }
+
+    pub fn respond_count_tokens_with_estimate(
+        &self,
+        kernel: &mut Kernel<S>,
+        ctx: LlmCountTokensRequestContext,
+        input_tokens: u64,
+    ) -> Result<()> {
+        let receipt = LlmCountTokensReceipt {
+            input_tokens: Some(input_tokens),
+            original_input_tokens: Some(input_tokens),
+            counts_by_ref: ctx
+                .params
+                .window_items
+                .iter()
+                .map(|item| LlmTokenCountByRef {
+                    ref_: item.ref_.clone(),
+                    tokens: item.estimated_tokens.unwrap_or(0),
+                    quality: LlmTokenCountQuality::LocalEstimate,
+                })
+                .collect(),
+            tool_tokens: None,
+            response_format_tokens: None,
+            quality: LlmTokenCountQuality::LocalEstimate,
+            provider: MOCK_LLM_ROUTE_ID.into(),
+            model: ctx.params.model,
+            candidate_plan_id: ctx.params.candidate_plan_id,
+            provider_metadata_ref: None,
+            warnings_ref: None,
+        };
+        let receipt = EffectReceipt {
+            intent_hash: ctx.intent.intent_hash,
+            status: ReceiptStatus::Ok,
+            payload_cbor: serde_cbor::to_vec(&receipt)?,
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        };
+        kernel.handle_receipt(receipt)?;
+        kernel.tick_until_idle()?;
+        Ok(())
+    }
 }
 
 fn summarize(prompt: &str) -> String {
     let prefix: String = prompt.chars().take(120).collect();
     let digest = Sha256::digest(prompt.as_bytes());
     let suffix = hex::encode(digest)[..8].to_string();
-    format!("{prefix} …{suffix}")
+    format!("{prefix} ...{suffix}")
 }
 
 fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
-    let map = match value {
-        serde_cbor::Value::Map(m) => m,
-        other => {
-            return Err(anyhow!(
-                "llm.generate params must be a map, got {:?}",
-                other
-            ));
-        }
-    };
-    let text = |field: &str| -> Result<String> {
-        match map.get(&serde_cbor::Value::Text(field.into())) {
-            Some(serde_cbor::Value::Text(t)) => Ok(t.clone()),
-            Some(other) => Err(anyhow!("field '{field}' must be text, got {:?}", other)),
-            None => Err(anyhow!("field '{field}' missing from llm.generate params")),
-        }
-    };
-    let opt_text = |field: &str| -> Result<Option<String>> {
-        match map.get(&serde_cbor::Value::Text(field.into())) {
-            Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
-            Some(serde_cbor::Value::Null) | None => Ok(None),
-            Some(other) => Err(anyhow!(
-                "field '{field}' must be text or null, got {:?}",
-                other
-            )),
-        }
-    };
-    let message_refs = match map.get(&serde_cbor::Value::Text("message_refs".into())) {
-        Some(serde_cbor::Value::Array(items)) => items
-            .iter()
-            .map(|v| match v {
-                serde_cbor::Value::Text(t) => HashRef::new(t.clone()).context("parse hash ref"),
-                other => Err(anyhow!(
-                    "message_refs entries must be hash text, got {:?}",
-                    other
-                )),
-            })
-            .collect::<Result<Vec<_>>>()?,
-        Some(other) => {
-            return Err(anyhow!(
-                "field 'message_refs' must be list<hash>, got {:?}",
-                other
-            ));
-        }
-        None => {
-            return Err(anyhow!(
-                "field 'message_refs' missing from llm.generate params"
-            ));
-        }
-    };
-    let runtime_map = match map.get(&serde_cbor::Value::Text("runtime".into())) {
-        Some(serde_cbor::Value::Map(m)) => m,
-        Some(other) => {
-            return Err(anyhow!(
-                "field 'runtime' must be record/map, got {:?}",
-                other
-            ));
-        }
-        None => {
-            return Err(anyhow!("field 'runtime' missing from llm.generate params"));
-        }
-    };
-    let runtime_opt_nat = |field: &str| -> Result<Option<u64>> {
-        match runtime_map.get(&serde_cbor::Value::Text(field.into())) {
-            Some(serde_cbor::Value::Integer(n)) if *n >= 0 => Ok(Some(*n as u64)),
-            Some(serde_cbor::Value::Null) | None => Ok(None),
-            Some(other) => Err(anyhow!(
-                "runtime field '{field}' must be nat or null, got {:?}",
-                other
-            )),
-        }
-    };
-    let runtime_opt_text = |field: &str| -> Result<Option<String>> {
-        match runtime_map.get(&serde_cbor::Value::Text(field.into())) {
-            Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
-            Some(serde_cbor::Value::Null) | None => Ok(None),
-            Some(other) => Err(anyhow!(
-                "runtime field '{field}' must be text or null, got {:?}",
-                other
-            )),
-        }
-    };
-    let tool_refs = match runtime_map.get(&serde_cbor::Value::Text("tool_refs".into())) {
-        Some(serde_cbor::Value::Array(items)) => items
-            .iter()
-            .map(|v| match v {
-                serde_cbor::Value::Text(t) => Ok(HashRef::new(t.clone())?),
-                other => Err(anyhow!(
-                    "tool_refs entries must be hash text, got {:?}",
-                    other
-                )),
-            })
-            .collect::<Result<Vec<_>>>()?,
-        Some(serde_cbor::Value::Null) | None => Vec::new(),
-        Some(other) => {
-            return Err(anyhow!(
-                "field 'tool_refs' must be list<hash> or null, got {:?}",
-                other
-            ));
-        }
-    };
-    let api_key = decode_api_key(map.get(&serde_cbor::Value::Text("api_key".into())))?;
-
-    Ok(LlmGenerateParams {
-        correlation_id: opt_text("correlation_id")?,
-        provider: text("provider")?,
-        model: text("model")?,
-        message_refs,
-        runtime: LlmRuntimeArgs {
-            temperature: runtime_opt_text("temperature")?,
-            top_p: runtime_opt_text("top_p")?,
-            max_tokens: runtime_opt_nat("max_tokens")?,
-            tool_refs: if tool_refs.is_empty() {
-                None
-            } else {
-                Some(tool_refs)
-            },
-            tool_choice: None,
-            reasoning_effort: runtime_opt_text("reasoning_effort")?,
-            stop_sequences: None,
-            metadata: None,
-            provider_options_ref: None,
-            response_format_ref: None,
-        },
-        api_key,
-    })
+    serde_cbor::value::from_value(value).context("decode LlmGenerateParams")
 }
 
-fn decode_api_key(value: Option<&serde_cbor::Value>) -> Result<Option<TextOrSecretRef>> {
-    match value {
-        None => Ok(None),
-        Some(serde_cbor::Value::Null) => Ok(None),
-        Some(serde_cbor::Value::Text(t)) => Ok(Some(TextOrSecretRef::literal(t.clone()))),
-        Some(serde_cbor::Value::Map(m))
-            if m.get(&serde_cbor::Value::Text("$tag".into()))
-                == Some(&serde_cbor::Value::Text("secret".into())) =>
-        {
-            let secret = decode_secret_ref(
-                m.get(&serde_cbor::Value::Text("$value".into()))
-                    .ok_or_else(|| anyhow!("secret variant missing $value"))?,
-            )?;
-            Ok(Some(TextOrSecretRef::Secret(secret)))
-        }
-        Some(serde_cbor::Value::Map(m))
-            if m.get(&serde_cbor::Value::Text("$tag".into()))
-                == Some(&serde_cbor::Value::Text("literal".into())) =>
-        {
-            match m.get(&serde_cbor::Value::Text("$value".into())) {
-                Some(serde_cbor::Value::Text(t)) => Ok(Some(TextOrSecretRef::literal(t.clone()))),
-                Some(serde_cbor::Value::Bytes(b)) => Ok(Some(TextOrSecretRef::literal(
-                    std::str::from_utf8(b)
-                        .map_err(|e| anyhow!("api_key bytes not utf8: {e}"))?
-                        .to_string(),
-                ))),
-                _ => Ok(None),
-            }
-        }
-        Some(serde_cbor::Value::Map(m)) if m.len() == 1 => {
-            if let Some((serde_cbor::Value::Text(tag), val)) = m.iter().next() {
-                if tag == "literal" {
-                    return match val {
-                        serde_cbor::Value::Text(t) => Ok(Some(TextOrSecretRef::literal(t.clone()))),
-                        serde_cbor::Value::Bytes(b) => Ok(Some(TextOrSecretRef::literal(
-                            std::str::from_utf8(b)
-                                .map_err(|e| anyhow!("api_key bytes not utf8: {e}"))?
-                                .to_string(),
-                        ))),
-                        _ => Ok(None),
-                    };
-                }
-                if tag == "secret" {
-                    return Ok(Some(TextOrSecretRef::Secret(decode_secret_ref(val)?)));
-                }
-            }
-            Ok(None)
-        }
-        Some(other) => Err(anyhow!(
-            "field 'api_key' must be text/secret/null, got {:?}",
-            other
-        )),
+fn render_window_item_refs(
+    items: &[LlmWindowItem],
+    provider: &str,
+    model: &str,
+) -> Result<Vec<HashRef>> {
+    let mut refs = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(ref_) = item.renderable_message_ref(provider, model) else {
+            return Err(anyhow!(
+                "window item '{}' is not renderable for provider '{}' model '{}'",
+                item.item_id,
+                provider,
+                model
+            ));
+        };
+        refs.push(ref_.clone());
     }
-}
-
-fn decode_secret_ref(value: &serde_cbor::Value) -> Result<aos_air_types::SecretRef> {
-    let serde_cbor::Value::Map(map) = value else {
-        return Err(anyhow!("secret payload must be a map"));
-    };
-    let alias = match map.get(&serde_cbor::Value::Text("alias".into())) {
-        Some(serde_cbor::Value::Text(alias)) => alias.clone(),
-        Some(other) => return Err(anyhow!("secret alias must be text, got {:?}", other)),
-        None => return Err(anyhow!("secret payload missing alias")),
-    };
-    let version = match map.get(&serde_cbor::Value::Text("version".into())) {
-        Some(serde_cbor::Value::Integer(version)) if *version >= 0 => *version as u64,
-        Some(other) => return Err(anyhow!("secret version must be nat, got {:?}", other)),
-        None => return Err(anyhow!("secret payload missing version")),
-    };
-    Ok(aos_air_types::SecretRef { alias, version })
+    if refs.is_empty() {
+        return Err(anyhow!("llm.mock missing window_items"));
+    }
+    Ok(refs)
 }
 
 fn hash_key(key: &str) -> String {

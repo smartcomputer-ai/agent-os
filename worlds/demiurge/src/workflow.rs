@@ -4,13 +4,14 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_agent::{
-    EffectReceiptRejected, ReasoningEffort, RunId, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, SessionNoop,
-    default_tool_registry,
+    CauseRef, EffectReceiptRejected, ReasoningEffort, RunCause, RunCauseOrigin, RunId,
+    SessionConfig, SessionId, SessionInput, SessionInputKind, SessionLifecycle,
+    SessionLifecycleChanged, SessionNoop,
     helpers::{
         LocalSessionSpawnRequest, SessionHandoffRequest, SpawnOrHandoffSessionPlan,
-        SpawnOrHandoffSessionRequest, emit_session_ingresses, spawn_or_handoff_session,
+        SpawnOrHandoffSessionRequest, emit_session_inputs, spawn_or_handoff_session,
     },
+    local_coding_agent_tool_registry,
 };
 use aos_effects::builtins::{BlobPutReceipt, HostSessionOpenReceipt};
 use aos_wasm_sdk::{
@@ -415,14 +416,32 @@ fn emit_session_bootstrap(
         default_tool_enable: cfg.tool_enable,
         default_tool_disable: cfg.tool_disable,
         default_tool_force: cfg.tool_force,
+        default_host_session_open: None,
     };
 
     let first_observed_at_ns = next_observed_at_ns(&mut ctx.state);
+    let run_cause = RunCause {
+        kind: "demiurge/task_submitted".into(),
+        origin: RunCauseOrigin::DomainEvent {
+            schema: "demiurge/TaskSubmitted@1".into(),
+            event_ref: None,
+            key: Some(ctx.state.task_id.0.clone()),
+        },
+        input_refs: alloc::vec![input_ref.clone()],
+        payload_schema: Some("demiurge/TaskSubmitted@1".into()),
+        payload_ref: None,
+        subject_refs: alloc::vec![CauseRef {
+            kind: "demiurge/task".into(),
+            id: ctx.state.task_id.0.clone(),
+            ref_: None,
+        }],
+    };
     let plan = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::Handoff(
         SessionHandoffRequest {
             first_observed_at_ns,
             session_id: ctx.state.task_id.clone(),
             input_ref,
+            run_cause: Some(run_cause),
             host_session_id: host_session_id.into(),
             run_overrides,
             allowed_tools: cfg.allowed_tools,
@@ -431,7 +450,7 @@ fn emit_session_bootstrap(
         SpawnOrHandoffSessionPlan::Handoff(plan) => plan,
         SpawnOrHandoffSessionPlan::OpenHostSession(_) => unreachable!(),
     };
-    emit_session_ingresses(ctx, &plan.ingresses);
+    emit_session_inputs(ctx, &plan.inputs);
     ctx.state.next_observed_at_ns = plan.next_observed_at_ns;
 
     Ok(())
@@ -481,6 +500,14 @@ fn on_session_lifecycle_changed(
             changed.run_id,
             changed.output_ref,
         ),
+        SessionLifecycle::Interrupted => finish_task(
+            ctx,
+            changed.observed_at_ns,
+            TaskStatus::Cancelled,
+            None,
+            changed.run_id,
+            changed.output_ref,
+        ),
         SessionLifecycle::Idle | SessionLifecycle::Paused | SessionLifecycle::Cancelling => Ok(()),
     }
 }
@@ -499,12 +526,12 @@ fn request_run_completion(
     ctx.state.output_ref = changed.output_ref.clone();
     ctx.state.pending_stage = Some(PendingStage::AwaitRunCompletion);
     let observed_at_ns = next_observed_at_ns(&mut ctx.state);
-    emit_session_ingresses(
+    emit_session_inputs(
         ctx,
-        &[SessionIngress {
+        &[SessionInput {
             session_id: changed.session_id,
             observed_at_ns,
-            ingress: SessionIngressKind::RunCompleted,
+            input: SessionInputKind::RunCompleted,
         }],
     );
     Ok(())
@@ -583,7 +610,7 @@ fn validate_allowed_tools(allowed_tools: Option<&[String]>) -> Option<TaskFailur
         });
     }
 
-    let registry = default_tool_registry();
+    let registry = local_coding_agent_tool_registry();
     for tool_id in allowed_tools {
         if !registry.contains_key(tool_id) {
             return Some(TaskFailure {

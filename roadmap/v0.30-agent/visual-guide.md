@@ -1,0 +1,1978 @@
+# aos-agent Visual Guide
+
+This guide explains how `aos-agent` fits together as a deterministic agent SDK layer on top of AOS.
+
+It starts with the high-level shape and then zooms into the relevant state machines:
+
+1. session workflow event reduction,
+2. session status,
+3. session lifecycle,
+4. run lifecycle,
+5. LLM turn dispatch,
+6. turn planning,
+7. tool batch execution,
+8. blob indirection,
+9. interventions,
+10. traces,
+11. context compaction and token counting,
+12. host session readiness.
+
+The diagrams describe the current v0.30 first-cut shape after P4-P11 of `roadmap/v0.30-agent/`.
+
+## High-Level Model
+
+`aos-agent` is not the software factory and is not Fabric-specific. It defines core agent session primitives:
+
+1. sessions,
+2. runs,
+3. run causes,
+4. turn planning,
+5. LLM turn dispatch,
+6. tool execution batches,
+7. intervention state,
+8. run traces,
+9. context ledger and active model window management,
+10. typed session inputs and emitted lifecycle events.
+
+The SDK workflow helpers are deterministic. External work is always represented as effects and later admitted receipts, receipt rejections, or stream frames.
+
+```mermaid
+flowchart TD
+  Domain[AOS domain events] --> Input[SessionInput]
+  Operator[Operator/UI/workflow] --> Input
+  Receipts[Effect receipts/rejections/stream frames] --> Event[SessionWorkflowEvent]
+  Input --> Event
+
+  Event --> Workflow[aos-agent session workflow]
+  Workflow --> State[SessionState]
+  Workflow --> Effects[Effect commands]
+  Workflow --> Events[Domain events]
+
+  Effects --> LLM[sys/llm.generate]
+  Effects --> LlmCompact[sys/llm.compact]
+  Effects --> LlmCount[sys/llm.count_tokens]
+  Effects --> Blob[sys/blob.get / sys/blob.put]
+  Effects --> ToolEffects[tool-mapped effects]
+  Events --> LifecycleEvents[aos.agent lifecycle events]
+  Events --> ToolDomainEvents[tool-mapped domain events]
+
+  LLM --> Receipts
+  LlmCompact --> Receipts
+  LlmCount --> Receipts
+  Blob --> Receipts
+  ToolEffects --> Receipts
+
+  State --> CurrentRun[RunState]
+  State --> Context[ContextState]
+  State --> RunHistory[RunRecord history]
+  CurrentRun --> TurnPlan[TurnPlan]
+  CurrentRun --> Trace[RunTrace]
+  RunHistory --> TraceSummary[RunTraceSummary]
+```
+
+The key point is that all meaningful external progress re-enters through `SessionWorkflowEvent`.
+
+```rust
+pub enum SessionWorkflowEvent {
+    Input(SessionInput),
+    Receipt(EffectReceiptEnvelope),
+    ReceiptRejected(EffectReceiptRejected),
+    StreamFrame(EffectStreamFrameEnvelope),
+    Noop,
+}
+```
+
+## State Ownership
+
+`SessionState` owns session-level state, and while a run is active it mirrors active execution fields into `current_run: Option<RunState>`.
+
+The mirror is deliberate:
+
+1. workflow code can access current pending effects and tool batches directly on `SessionState`,
+2. `RunState` keeps a run-scoped copy for inspection, replay, and trace/debug views,
+3. completed runs are compacted into `RunRecord` with `RunTraceSummary`.
+
+```mermaid
+flowchart TD
+  SessionState --> Identity[session_id]
+  SessionState --> Status[status]
+  SessionState --> Lifecycle[lifecycle]
+  SessionState --> Config[session_config]
+  SessionState --> TurnState[turn_state]
+  SessionState --> ContextState[context_state ledger / active window / pending context op]
+  SessionState --> Tools[tool_registry / tool_profiles / tool_runtime_context]
+  SessionState --> Runtime[active pending effects/blob gets/blob puts/tool batch]
+  SessionState --> Intervention[queued_steer_refs / queued_follow_up_runs / run_interrupt]
+  SessionState --> CurrentRun[current_run]
+  SessionState --> History[run_history]
+
+  CurrentRun --> RunIdentity[run_id]
+  CurrentRun --> RunCause[cause]
+  CurrentRun --> RunConfig[config]
+  CurrentRun --> TurnPlan[turn_plan]
+  CurrentRun --> RunRuntime[pending effects / active tool batch / queued LLM turn]
+  CurrentRun --> RunIntervention[queued_steer_refs / interrupt]
+  CurrentRun --> Usage[last_llm_usage]
+  ContextState --> Ledger[transcript_ledger]
+  ContextState --> ActiveWindow[active_window_items]
+  ContextState --> ContextOps[pending_context_operation]
+  ContextState --> Compactions[compaction_records]
+  ContextState --> Counts[last_token_count]
+  CurrentRun --> Trace[trace]
+  CurrentRun --> Outcome[outcome]
+
+  History --> RunRecord[RunRecord]
+  RunRecord --> TraceSummary[trace_summary]
+```
+
+Important fields:
+
+```rust
+pub struct SessionState {
+    pub session_id: SessionId,
+    pub status: SessionStatus,
+    pub lifecycle: SessionLifecycle,
+    pub turn_state: SessionTurnState,
+    pub context_state: ContextState,
+    pub current_run: Option<RunState>,
+    pub run_history: Vec<RunRecord>,
+    pub pending_llm_turn_items: Option<Vec<ActiveWindowItem>>,
+    pub active_tool_batch: Option<ActiveToolBatch>,
+    pub pending_effects: PendingEffects,
+    pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
+    pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
+    pub staged_tool_follow_up_turn: Option<StagedToolFollowUpTurn>,
+    pub tool_refs_materialized: bool,
+    pub tool_registry: BTreeMap<String, ToolSpec>,
+    pub tool_profiles: BTreeMap<String, Vec<String>>,
+    pub tool_profile: String,
+    pub tool_runtime_context: ToolRuntimeContext,
+    pub queued_steer_refs: Vec<String>,
+    pub queued_follow_up_runs: Vec<QueuedRunStart>,
+    pub run_interrupt: Option<RunInterrupt>,
+}
+```
+
+`ContextState` owns the durable transcript ledger and the current model window separately. The transcript ledger is append-only audit history; `active_window_items` is the provider-renderable window selected for the next model call and may be replaced by compaction.
+
+```rust
+pub struct ContextState {
+    pub transcript_ledger: TranscriptLedger,
+    pub active_window_items: Vec<ActiveWindowItem>,
+    pub compaction_records: Vec<CompactionRecord>,
+    pub compacted_through: Option<u64>,
+    pub pending_context_operation: Option<ContextOperationState>,
+    pub last_llm_usage: Option<LlmUsageRecord>,
+    pub last_context_pressure: Option<ContextPressureRecord>,
+    pub last_token_count: Option<LlmTokenCountRecord>,
+    pub last_compaction: Option<CompactionRecord>,
+}
+```
+
+Active-window items are typed so the workflow can distinguish normal message refs, AOS-owned summaries, provider-native compaction artifacts, and provider raw window items:
+
+```rust
+pub struct ActiveWindowItem {
+    pub item_id: String,
+    pub kind: ActiveWindowItemKind,
+    pub ref_: String,
+    pub lane: Option<TurnInputLane>,
+    pub source_range: Option<TranscriptRange>,
+    pub source_refs: Vec<String>,
+    pub provider_compatibility: Option<ProviderCompatibility>,
+    pub estimated_tokens: Option<u64>,
+    pub metadata: Vec<ContextMetadataEntry>,
+}
+```
+
+```rust
+pub struct RunState {
+    pub run_id: RunId,
+    pub lifecycle: RunLifecycle,
+    pub cause: RunCause,
+    pub config: RunConfig,
+    pub input_refs: Vec<String>,
+    pub turn_plan: Option<TurnPlan>,
+    pub trace: RunTrace,
+    pub queued_steer_refs: Vec<String>,
+    pub interrupt: Option<RunInterrupt>,
+    pub active_tool_batch: Option<ActiveToolBatch>,
+    pub pending_effects: PendingEffects,
+    pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
+    pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
+    pub staged_tool_follow_up_turn: Option<StagedToolFollowUpTurn>,
+    pub pending_llm_turn_items: Option<Vec<ActiveWindowItem>>,
+    pub blocked_on_context_operation: Option<String>,
+    pub last_output_ref: Option<String>,
+    pub last_llm_usage: Option<LlmUsageRecord>,
+    pub tool_refs_materialized: bool,
+    pub in_flight_effects: u64,
+    pub outcome: Option<RunOutcome>,
+}
+```
+
+## Workflow Event Loop
+
+The session workflow follows the same pattern for every admitted event:
+
+1. remember previous status/lifecycle/run lifecycle,
+2. apply one event deterministically,
+3. append trace entries,
+4. recompute in-flight runtime work,
+5. emit lifecycle/status events if transitions occurred,
+6. emit effects/domain events returned by the workflow.
+
+```mermaid
+sequenceDiagram
+  participant AOS as AOS workflow runtime
+  participant R as aos-agent session workflow
+  participant S as SessionState
+  participant E as Effects/domain events
+
+  AOS->>R: SessionWorkflowEvent
+  R->>S: snapshot previous status/lifecycle/run lifecycle
+  R->>R: match Input / Receipt / Rejection / StreamFrame
+  R->>S: mutate deterministic state
+  R->>S: push bounded RunTrace entries
+  R->>S: recompute in_flight_effects
+  R->>E: lifecycle/status events if changed
+  R->>E: effect commands and tool domain events
+  R-->>AOS: SessionWorkflowOutput
+```
+
+The workflow event envelope is intentionally small:
+
+```json
+{
+  "$tag": "Input",
+  "$value": {
+    "session_id": { "0": "session-123" },
+    "observed_at_ns": 1710000000000000000,
+    "input": {
+      "$tag": "RunRequested",
+      "$value": {
+        "input_ref": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "run_overrides": null
+      }
+    }
+  }
+}
+```
+
+Receipts and stream frames are not special side channels. They are admitted through the same workflow:
+
+```json
+{
+  "$tag": "Receipt",
+  "$value": {
+    "effect": "sys/llm.generate@1",
+    "params_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "issuer_ref": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "receipt": {
+      "output_ref": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "raw_output_ref": null,
+      "provider_response_id": "resp_123",
+      "provider_context_items": [],
+      "finish_reason": { "reason": "tool_calls", "raw": null },
+      "token_usage": { "prompt": 1200, "completion": 180, "total": 1380 },
+      "provider_id": "openai"
+    }
+  }
+}
+```
+
+## Session Status State Machine
+
+`SessionStatus` is the session availability/control state. It is separate from the run lifecycle.
+
+Only `Open` accepts new runs.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Open
+
+  Open --> Paused: SessionPaused / HostCommand Pause
+  Paused --> Open: SessionResumed / HostCommand Resume
+
+  Open --> Archived: SessionArchived
+  Paused --> Archived: SessionArchived
+  Archived --> [*]
+
+  Open --> Expired: SessionExpired
+  Paused --> Expired: SessionExpired
+  Expired --> [*]
+
+  Open --> Closed: SessionClosed
+  Paused --> Closed: SessionClosed
+  Closed --> [*]
+```
+
+Status answers: "Can this session accept new work?"
+
+Lifecycle answers: "What is the current run-level activity state?"
+
+## Session Lifecycle State Machine
+
+`SessionLifecycle` tracks the current run-shaped activity of the session.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+
+  Idle --> Running: RunStartRequested / RunRequested / queued follow-up starts
+
+  Running --> WaitingInput: LLM completed without tool calls
+  WaitingInput --> Running: next run starts
+
+  Running --> Paused: HostCommand Pause
+  WaitingInput --> Paused: HostCommand Pause
+  Paused --> Running: HostCommand Resume
+
+  Running --> Cancelling: cancel requested
+  WaitingInput --> Cancelling: cancel requested
+  Paused --> Cancelling: cancel requested
+  Cancelling --> Cancelled: cancellation settled
+
+  Running --> Completed: RunCompleted
+  WaitingInput --> Completed: RunCompleted
+
+  Running --> Failed: RunFailed / workflow failure
+  WaitingInput --> Failed: RunFailed
+
+  Running --> Cancelled: RunCancelled / HostCommand Cancel
+  WaitingInput --> Cancelled: RunCancelled / HostCommand Cancel
+
+  Running --> Interrupted: RunInterruptRequested and runtime quiescent
+  WaitingInput --> Interrupted: RunInterruptRequested and runtime quiescent
+
+  Completed --> Running: later queued/fresh run
+  Failed --> Running: later queued/fresh run
+  Cancelled --> Running: later queued/fresh run
+  Interrupted --> Running: later queued/fresh run
+```
+
+Terminal lifecycle states are terminal for the current run, not necessarily for the session forever. A later run may move the session back to `Running` if `SessionStatus` still accepts new runs.
+
+Relevant event emitted on transition:
+
+```rust
+pub struct SessionLifecycleChanged {
+    pub session_id: SessionId,
+    pub observed_at_ns: u64,
+    pub from: SessionLifecycle,
+    pub to: SessionLifecycle,
+    pub run_id: Option<RunId>,
+    pub output_ref: Option<String>,
+    pub in_flight_effects: u64,
+}
+```
+
+Example:
+
+```json
+{
+  "session_id": { "0": "session-123" },
+  "observed_at_ns": 1710000000000000100,
+  "from": { "$tag": "Running" },
+  "to": { "$tag": "WaitingInput" },
+  "run_id": {
+    "session_id": { "0": "session-123" },
+    "run_seq": 1
+  },
+  "output_ref": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "in_flight_effects": 0
+}
+```
+
+## Run Lifecycle State Machine
+
+`RunLifecycle` is scoped to one run.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Running: run allocated
+
+  Running --> WaitingInput: LLM output has no tool calls
+  WaitingInput --> Completed: RunCompleted
+
+  Running --> Completed: RunCompleted
+  Running --> Failed: RunFailed / effect failure / invalid output
+  Running --> Cancelled: RunCancelled / host cancel
+  Running --> Interrupted: run interrupt resolved
+
+  WaitingInput --> Running: follow-up starts as a new run, not same run
+  WaitingInput --> Failed: RunFailed
+  WaitingInput --> Cancelled: RunCancelled
+  WaitingInput --> Interrupted: RunInterruptRequested
+
+  Completed --> [*]
+  Failed --> [*]
+  Cancelled --> [*]
+  Interrupted --> [*]
+```
+
+The `Queued` variant exists in the contract, but the current workflow allocates a run when it starts. Follow-up work waiting behind an active run is represented as `QueuedRunStart`, not as a `RunState` with `Queued` lifecycle.
+
+Completed run history:
+
+```rust
+pub struct RunRecord {
+    pub run_id: RunId,
+    pub lifecycle: RunLifecycle,
+    pub cause: RunCause,
+    pub input_refs: Vec<String>,
+    pub outcome: Option<RunOutcome>,
+    pub last_llm_usage: Option<LlmUsageRecord>,
+    pub trace_summary: RunTraceSummary,
+    pub started_at: u64,
+    pub ended_at: u64,
+}
+```
+
+Outcome examples:
+
+```json
+{
+  "output_ref": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "failure": null,
+  "cancelled_reason": null,
+  "interrupted_reason_ref": null
+}
+```
+
+```json
+{
+  "output_ref": null,
+  "failure": {
+    "code": "llm_output_decode_failed",
+    "detail": "LLM output envelope was not valid JSON"
+  },
+  "cancelled_reason": null,
+  "interrupted_reason_ref": null
+}
+```
+
+```json
+{
+  "output_ref": null,
+  "failure": null,
+  "cancelled_reason": null,
+  "interrupted_reason_ref": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+}
+```
+
+## Starting Runs
+
+There are two run-start input shapes:
+
+1. `RunRequested`: convenience input with one user message ref.
+2. `RunStartRequested`: full cause/provenance shape.
+
+```mermaid
+flowchart TD
+  RunRequested[RunRequested input_ref] --> DirectCause[RunCause::direct_input]
+  RunStartRequested[RunStartRequested cause] --> Cause[RunCause]
+  DirectCause --> Validate[validate config/provider/model/tool overrides]
+  Cause --> Validate
+  Validate --> Allocate[allocate RunId]
+  Allocate --> Running[SessionLifecycle::Running / RunLifecycle::Running]
+  Running --> Transcript[append input_refs to context_state transcript ledger]
+  Running --> TraceStart[trace RunStarted]
+  TraceStart --> QueueLLM[pending_llm_turn_items = initial active-window items]
+```
+
+`RunRequested` and `RunStartRequested` append message refs to `context_state.transcript_ledger`, create matching `ActiveWindowItem::MessageRef` entries, and queue those active-window items for turn planning. Later compaction can replace the active window without deleting transcript history.
+
+The full cause object is the key open-ended primitive. It avoids hard-coding "chat" or "software factory" into the SDK.
+
+```rust
+pub struct RunCause {
+    pub kind: String,
+    pub origin: RunCauseOrigin,
+    pub input_refs: Vec<String>,
+    pub payload_schema: Option<String>,
+    pub payload_ref: Option<String>,
+    pub subject_refs: Vec<CauseRef>,
+}
+```
+
+Example direct user input:
+
+```json
+{
+  "kind": "aos.agent/user_input",
+  "origin": {
+    "$tag": "DirectIngress",
+    "$value": {
+      "source": "aos.agent/RunRequested",
+      "request_ref": null
+    }
+  },
+  "input_refs": [
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  ],
+  "payload_schema": null,
+  "payload_ref": null,
+  "subject_refs": []
+}
+```
+
+Example domain event cause:
+
+```json
+{
+  "kind": "demo/triage_alert",
+  "origin": {
+    "$tag": "DomainEvent",
+    "$value": {
+      "schema": "demo/AlertRaised@1",
+      "event_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "key": "alert-42"
+    }
+  },
+  "input_refs": [
+    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "payload_schema": "demo/AlertRaised@1",
+  "payload_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "subject_refs": [
+    {
+      "kind": "demo/alert",
+      "id": "alert-42",
+      "ref_": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}
+```
+
+## Config Selection
+
+`SessionConfig` holds defaults. `RunConfig` is the selected per-run config.
+
+```mermaid
+flowchart LR
+  SessionConfig --> Select[select_run_config]
+  RunOverrides[run_overrides] --> Select
+  Select --> RunConfig
+  RunConfig --> LLM[LLM params]
+  RunConfig --> Tools[tool profile and overrides]
+  RunConfig --> HostOpen[optional default host session open]
+```
+
+Session default:
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-5.2",
+  "reasoning_effort": { "$tag": "Medium" },
+  "max_tokens": 1200,
+  "default_prompt_refs": [
+    "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+  ],
+  "default_tool_profile": "local_coding",
+  "default_tool_enable": null,
+  "default_tool_disable": null,
+  "default_tool_force": null,
+  "default_host_session_open": {
+    "target": {
+      "$tag": "Local",
+      "$value": {
+        "mounts": null,
+        "workdir": "/repo",
+        "env": null,
+        "network_mode": "none"
+      }
+    },
+    "session_ttl_ns": null,
+    "labels": null
+  }
+}
+```
+
+Selected run config:
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-5.2",
+  "reasoning_effort": { "$tag": "Medium" },
+  "max_tokens": 1200,
+  "prompt_refs": [
+    "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+  ],
+  "tool_profile": "local_coding",
+  "tool_enable": null,
+  "tool_disable": null,
+  "tool_force": null,
+  "host_session_open": null
+}
+```
+
+## Turn Planning
+
+The turn planner selects the complete next model request shape. It owns active-window items, selected tool ids, response-format refs, provider-options refs, budget decisions, planner state updates, and prerequisites such as opening a host session, materializing tool definitions, token counting, or compaction.
+
+Sources include:
+
+1. run prompt refs,
+2. transcript refs,
+3. current turn refs,
+4. queued steer refs,
+5. run-cause payload and subject refs,
+6. session-level pinned and durable turn inputs,
+7. summaries, memory, skill, domain, artifact, and runtime-hint refs supplied by embedding workflows.
+8. any pending context operation that must block generation until token counting or compaction finishes.
+
+```mermaid
+flowchart TD
+  PromptRefs[prompt refs] --> Inputs[TurnInput candidates]
+  Transcript[context_state transcript ledger] --> Inputs
+  TurnRefs[pending_llm_turn_items] --> Inputs
+  Steer[queued_steer_refs] --> Inputs
+  Cause[RunCause payload/subjects] --> Inputs
+  SessionTurnState[pinned_inputs / durable_inputs] --> Planner
+
+  Registry[tool_registry] --> ToolInputs[TurnToolInput candidates]
+  Profiles[tool_profiles + selected profile] --> ToolInputs
+  Overrides[session/run enable-disable-force] --> ToolInputs
+  Runtime[ToolRuntimeContext] --> Planner
+
+  Inputs --> Planner[DefaultTurnPlanner or custom TurnPlanner]
+  ToolInputs --> Planner
+  Planner --> Plan[TurnPlan]
+  Plan --> Window[active_window_items]
+  Plan --> Tools[selected_tool_ids]
+  Plan --> Controls[tool_choice / response_format_ref / provider_options_ref]
+  Plan --> Prereqs[prerequisites]
+  Plan --> Report[TurnReport]
+  Window --> LLM[sys/llm.generate window_items]
+  Tools --> ToolRefs[tool_refs for LLM runtime]
+  Prereqs --> ContextOps[CompactContext / CountTokens]
+  Report --> Trace[TurnPlanned trace entry]
+```
+
+Turn inputs are lane-aware and priority-aware:
+
+```rust
+pub struct TurnInput {
+    pub input_id: String,
+    pub lane: TurnInputLane,
+    pub kind: TurnInputKind,
+    pub priority: TurnPriority,
+    pub content_ref: String,
+    pub estimated_tokens: Option<u64>,
+    pub source_kind: Option<String>,
+    pub source_id: Option<String>,
+    pub correlation_id: Option<String>,
+    pub tags: Vec<String>,
+}
+```
+
+Turn plan:
+
+```rust
+pub struct TurnPlan {
+    pub active_window_items: Vec<ActiveWindowItem>,
+    pub selected_tool_ids: Vec<String>,
+    pub tool_choice: Option<TurnToolChoice>,
+    pub response_format_ref: Option<String>,
+    pub provider_options_ref: Option<String>,
+    pub prerequisites: Vec<TurnPrerequisite>,
+    pub state_updates: Vec<TurnStateUpdate>,
+    pub report: TurnReport,
+}
+```
+
+Example:
+
+```json
+{
+  "active_window_items": [
+    {
+      "item_id": "ledger:0",
+      "kind": { "$tag": "MessageRef" },
+      "ref_": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "lane": { "$tag": "System" },
+      "source_range": { "start_seq": 0, "end_seq": 1 },
+      "source_refs": [
+        "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": []
+    },
+    {
+      "item_id": "ledger:1",
+      "kind": { "$tag": "MessageRef" },
+      "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "lane": { "$tag": "Conversation" },
+      "source_range": { "start_seq": 1, "end_seq": 2 },
+      "source_refs": [
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": []
+    }
+  ],
+  "selected_tool_ids": [
+    "host.fs.read_file"
+  ],
+  "tool_choice": { "$tag": "Auto" },
+  "response_format_ref": null,
+  "provider_options_ref": null,
+  "prerequisites": [],
+  "state_updates": [],
+  "report": {
+    "planner": "aos.agent/default-turn",
+    "selected_message_count": 2,
+    "dropped_message_count": 0,
+    "selected_tool_count": 1,
+    "dropped_tool_count": 0,
+    "token_estimate": {
+      "message_tokens": 0,
+      "tool_tokens": 0,
+      "total_input_tokens": 0,
+      "unknown_message_count": 2,
+      "unknown_tool_count": 1
+    },
+    "budget": {
+      "max_input_tokens": null,
+      "reserve_output_tokens": 1200,
+      "max_message_refs": null,
+      "max_tool_refs": null
+    },
+    "decision_codes": [
+      "selected_turn:session=session-123:run=1"
+    ],
+    "unresolved": []
+  }
+}
+```
+
+If selected tools are not yet materialized, the workflow adds a technical `MaterializeToolDefinitions` prerequisite after planning. If host-backed tool candidates need a host session and `host_session_open` config exists, the planner returns an `OpenHostSession` prerequisite before dispatching the LLM turn. If `context_state.pending_context_operation` blocks generation, the planner returns `CompactContext` or `CountTokens`; the workflow emits `sys/llm.compact@1` or `sys/llm.count_tokens@1` and retries the pending turn after the receipt is applied.
+
+Embedding workflows can update planner state through `SessionInputKind::TurnObserved`. The current contract supports observed inputs, input removal, and custom planner-state refs:
+
+```rust
+pub enum TurnObservation {
+    InputObserved(TurnInput),
+    InputRemoved { input_id: String },
+    CustomStateRefUpdated(PlannerStateRef),
+    CustomStateRefRemoved { planner_id: String, key: String },
+    Noop,
+}
+```
+
+## LLM Turn State Machine
+
+An LLM turn is a queued intent inside an active run. It is dispatched only when the workflow has no conflicting runtime work.
+
+```mermaid
+stateDiagram-v2
+  [*] --> NoQueuedTurn
+
+  NoQueuedTurn --> QueuedTurn: set_pending_llm_turn(active_window_items)
+
+  QueuedTurn --> TurnPlanning: dispatch_pending_llm_turn_with_planner
+  TurnPlanning --> WaitingHostSession: OpenHostSession prerequisite
+  WaitingHostSession --> QueuedTurn: HostSessionUpdated Ready
+  TurnPlanning --> WaitingToolRefs: MaterializeToolDefinitions prerequisite
+  WaitingToolRefs --> QueuedTurn: tool definition blobs materialized
+  TurnPlanning --> WaitingContext: CompactContext / CountTokens prerequisite
+  WaitingContext --> QueuedTurn: llm.compact / llm.count_tokens receipt applied
+  TurnPlanning --> LlmEffectPending: sys/llm.generate emitted
+  LlmEffectPending --> LlmReceiptAdmitted: LLM receipt admitted
+  LlmEffectPending --> WaitingContext: context-limit error receipt
+  LlmReceiptAdmitted --> OutputBlobPending: sys/blob.get output_ref
+  OutputBlobPending --> WaitingInput: output has no tool_calls_ref
+  OutputBlobPending --> ToolCallsBlobPending: output has tool_calls_ref
+  ToolCallsBlobPending --> ToolBatchActive: tool calls decoded and batch started
+  ToolBatchActive --> QueuedTurn: tool results produce follow-up active-window items
+
+  QueuedTurn --> Interrupted: run_interrupt present before dispatch
+  LlmEffectPending --> Interrupted: receipt admitted, then no follow-up dispatch
+```
+
+Dispatch guards:
+
+1. there must be an active run,
+2. `pending_llm_turn_items` must be present,
+3. no interrupt may be pending,
+4. pending effects/blob gets/blob puts must be empty,
+5. no active unsettled tool batch or staged tool follow-up may exist,
+6. the turn planner must produce at least one renderable active-window item,
+7. host-backed selected tools require a ready host session or an `OpenHostSession` prerequisite,
+8. selected tool definitions must be materialized before LLM dispatch,
+9. pending context operations must complete before generation.
+
+LLM step before mapping:
+
+```rust
+pub struct LlmStepContext {
+    pub correlation_id: Option<String>,
+    pub window_items: Vec<ActiveWindowItem>,
+    pub temperature: Option<String>,
+    pub top_p: Option<String>,
+    pub tool_refs: Option<Vec<String>>,
+    pub tool_choice: Option<LlmToolChoice>,
+    pub stop_sequences: Option<Vec<String>>,
+    pub metadata: Option<BTreeMap<String, String>>,
+    pub provider_options_ref: Option<String>,
+    pub response_format_ref: Option<String>,
+    pub api_key: Option<TextOrSecretRef>,
+}
+```
+
+Effect params sent to `sys/llm.generate@1`:
+
+```json
+{
+  "correlation_id": "session-123/run/1/llm/1",
+  "provider": "openai",
+  "model": "gpt-5.2",
+  "window_items": [
+    {
+      "item_id": "ledger:0",
+      "kind": { "$tag": "MessageRef" },
+      "ref_": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "lane": "System",
+      "source_range": { "start_seq": 0, "end_seq": 1 },
+      "source_refs": [
+        "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": {}
+    },
+    {
+      "item_id": "ledger:1",
+      "kind": { "$tag": "MessageRef" },
+      "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "lane": "Conversation",
+      "source_range": { "start_seq": 1, "end_seq": 2 },
+      "source_refs": [
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": {}
+    }
+  ],
+  "runtime": {
+    "temperature": null,
+    "top_p": null,
+    "max_tokens": 1200,
+    "tool_refs": [
+      "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    ],
+    "tool_choice": null,
+    "reasoning_effort": "medium",
+    "stop_sequences": null,
+    "metadata": {
+      "session_id": "session-123",
+      "run_seq": "1"
+    },
+    "provider_options_ref": null,
+    "response_format_ref": null
+  },
+  "api_key": null
+}
+```
+
+LLM receipt:
+
+```json
+{
+  "output_ref": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "raw_output_ref": null,
+  "provider_response_id": "resp_123",
+  "provider_context_items": [],
+  "finish_reason": {
+    "reason": "tool_calls",
+    "raw": null
+  },
+  "token_usage": {
+    "prompt": 1200,
+    "completion": 180,
+    "total": 1380
+  },
+  "usage_details": {
+    "reasoning_tokens": 20,
+    "cache_read_tokens": null,
+    "cache_write_tokens": null
+  },
+  "warnings_ref": null,
+  "rate_limit_ref": null,
+  "cost_cents": null,
+  "provider_id": "openai"
+}
+```
+
+The workflow records aggregate usage from the receipt in `current_run.last_llm_usage` and `context_state.last_llm_usage`, copies it into `RunRecord.last_llm_usage` when the run finishes, and also exposes usage fields on the `LlmReceived` trace metadata.
+
+If `provider_context_items` is non-empty, those provider-native artifacts are preserved as typed window items in the receipt and traced with `ProviderContextArtifactsObserved`. The workflow does not implicitly mutate `context_state.active_window_items` from an ordinary generate receipt; active-window replacement still happens through an explicit compaction operation.
+
+The receipt points to an output blob:
+
+```json
+{
+  "assistant_text": "I will inspect the workspace and then apply the change.",
+  "tool_calls_ref": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "reasoning_ref": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+}
+```
+
+If `tool_calls_ref` is absent, the run enters `WaitingInput`.
+
+If `tool_calls_ref` is present, the workflow fetches the tool call list blob and starts a tool batch.
+
+## Context Window, Compaction, And Token Counting
+
+Context management is explicit workflow state, not hidden adapter behavior. The workflow keeps two separate concepts:
+
+1. `transcript_ledger`: append-only audit history of message, summary, and provider artifact refs.
+2. `active_window_items`: the typed context window sent to the next model call.
+
+```mermaid
+flowchart TD
+  Inputs[Run input refs / tool follow-up refs] --> Ledger[transcript_ledger append]
+  Ledger --> Active[active_window_items]
+  Active --> Planner[TurnPlanner]
+  Planner --> Generate[sys/llm.generate window_items]
+
+  Generate --> Usage[LlmGenerateReceipt usage]
+  Generate --> ProviderItems[provider_context_items]
+  Generate --> ContextError[context-limit error]
+
+  Usage --> HighWater{prompt_tokens >= high-water?}
+  HighWater -->|yes| Pressure[ContextPressureObserved]
+  ProviderItems --> ArtifactTrace[ProviderContextArtifactsObserved]
+  ContextError --> Pressure
+
+  Pressure --> PendingOp[pending_context_operation]
+  PendingOp --> Prereq[CompactContext prerequisite]
+  Prereq --> Compact[sys/llm.compact]
+  Compact --> CompactReceipt[LlmCompactReceipt]
+  CompactReceipt --> Records[compaction_records append]
+  CompactReceipt --> Replace[replace active_window_items]
+  Replace --> Retry[retry blocked LLM turn]
+
+  CountReq[explicit CountTokens prerequisite] --> Count[sys/llm.count_tokens]
+  Count --> CountReceipt[LlmCountTokensReceipt]
+  CountReceipt --> LastCount[last_token_count]
+```
+
+Context pressure can come from:
+
+1. provider context-limit or provider-required compaction failures on `sys/llm.generate@1`,
+2. successful generation usage crossing the high-water mark,
+3. provider-returned context-management metadata or artifacts,
+4. manual/operator context-operation inputs,
+5. explicit token-count results that show the candidate turn is over budget.
+
+Provider context-limit failures are not terminal run failures. If the admitted error receipt decodes as an `LlmGenerateReceipt` with context-limit text in `finish_reason`, the workflow records `ContextPressureRecord`, creates a `ContextOperationState` in `NeedsCompaction`, restores the blocked LLM turn, and emits `sys/llm.compact@1`.
+
+High-water usage is intentionally lazy. A successful `sys/llm.generate@1` receipt can set `pending_context_operation`, but the workflow still fetches and applies the output normally. Compaction is requested only when a later LLM turn is about to dispatch and the planner sees the pending `CompactContext` prerequisite.
+
+```rust
+pub struct ContextPressureRecord {
+    pub reason: ContextPressureReason,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub candidate_plan_id: Option<String>,
+    pub observed_usage: Option<LlmUsageRecord>,
+    pub error_kind: Option<String>,
+    pub error_ref: Option<String>,
+    pub recommended_strategy: Option<CompactionStrategy>,
+    pub observed_at_ns: u64,
+}
+```
+
+```rust
+pub struct ContextOperationState {
+    pub operation_id: String,
+    pub phase: ContextOperationPhase,
+    pub reason: ContextPressureReason,
+    pub candidate_plan_id: Option<String>,
+    pub strategy: CompactionStrategy,
+    pub source_range: Option<TranscriptRange>,
+    pub source_items_ref: Option<String>,
+    pub effect_intent_id: Option<String>,
+    pub params_hash: Option<String>,
+    pub failure: Option<String>,
+    pub started_at_ns: u64,
+    pub updated_at_ns: u64,
+}
+```
+
+Compaction params:
+
+```json
+{
+  "correlation_id": "run-1-compact",
+  "operation_id": "ctx-op:usage-high-water:run-1:1710000000000000200",
+  "provider": "openai",
+  "model": "gpt-5.2",
+  "strategy": { "$tag": "Auto" },
+  "source_window_items": [
+    {
+      "item_id": "ledger:0",
+      "kind": { "$tag": "MessageRef" },
+      "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "source_refs": [
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    }
+  ],
+  "preserve_window_items": [],
+  "recent_tail_items": [],
+  "source_range": { "start_seq": 0, "end_seq": 1 },
+  "target_tokens": null,
+  "provider_options_ref": null,
+  "api_key": null
+}
+```
+
+Compaction receipt:
+
+```json
+{
+  "operation_id": "ctx-op:usage-high-water:run-1:1710000000000000200",
+  "artifact_kind": { "$tag": "AosSummary" },
+  "artifact_refs": [
+    "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+  ],
+  "source_range": { "start_seq": 0, "end_seq": 1 },
+  "compacted_through": 1,
+  "active_window_items": [
+    {
+      "item_id": "compact:ctx-op:summary",
+      "kind": { "$tag": "AosSummaryRef" },
+      "ref_": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "lane": { "$tag": "Summary" },
+      "source_range": { "start_seq": 0, "end_seq": 1 },
+      "source_refs": [
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": []
+    }
+  ],
+  "token_usage": { "prompt": 100, "completion": 20, "total": 120 },
+  "provider_metadata_ref": null,
+  "warnings_ref": null,
+  "provider_id": "openai"
+}
+```
+
+Token counting is optional and non-mutating. `sys/llm.count_tokens@1` can use provider token-count APIs when configured, or local estimates otherwise. Its receipt updates `context_state.last_token_count` and emits `TokenCountReceived`; it is not required on the default generation path.
+
+## Tool Candidate Selection
+
+There is no separate `EffectiveToolSet` state now. Tool candidates are built from registry/profile/config, and the turn planner decides which tool ids are selected for the next LLM turn.
+
+Tools are sourced from:
+
+1. `tool_registry`,
+2. the configured run profile, session default profile, or current `tool_profile`,
+3. session/run enable-disable-force overrides,
+4. `ToolRuntimeContext`, especially host session readiness,
+5. the turn budget.
+
+```mermaid
+flowchart TD
+  Registry[tool_registry] --> Candidates[TurnToolInput candidates]
+  Profiles[tool_profiles + selected profile] --> Candidates
+  Overrides[session/run enable-disable-force] --> Candidates
+  Runtime[ToolRuntimeContext] --> Planner[TurnPlanner]
+  Budget[TurnBudget] --> Planner
+  Candidates --> Planner
+  Planner --> Selected[selected_tool_ids]
+  Planner --> Dropped[dropped/unresolved tool candidates]
+  Planner --> Prereqs[OpenHostSession / MaterializeToolDefinitions]
+  Selected --> ToolRefs[tool_refs for LLM runtime]
+```
+
+Tool spec:
+
+```rust
+pub struct ToolSpec {
+    pub tool_id: String,
+    pub tool_name: String,
+    pub tool_ref: String,
+    pub description: String,
+    pub args_schema_json: String,
+    pub mapper: ToolMapper,
+    pub executor: ToolExecutor,
+    pub parallelism_hint: ToolParallelismHint,
+}
+```
+
+Example:
+
+```json
+{
+  "tool_id": "host.fs.read_file",
+  "tool_name": "read_file",
+  "tool_ref": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "description": "Read a UTF-8 file from the active host session.",
+  "args_schema_json": "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}",
+  "mapper": { "$tag": "HostFsReadFile" },
+  "executor": {
+    "$tag": "Effect",
+    "$value": {
+      "effect": "sys/host.fs.read_file@1"
+    }
+  },
+  "parallelism_hint": {
+    "parallel_safe": true,
+    "resource_key": null
+  }
+}
+```
+
+Selected tool ids live on the turn plan:
+
+```json
+{
+  "selected_tool_ids": [
+    "host.fs.read_file"
+  ],
+  "tool_choice": { "$tag": "Auto" },
+  "prerequisites": [],
+  "report": {
+    "selected_tool_count": 1,
+    "dropped_tool_count": 0,
+    "decision_codes": [
+      "selected_turn:session=session-123:run=1"
+    ],
+    "unresolved": []
+  }
+}
+```
+
+Host-backed effect tools are blocked until `ToolRuntimeContext.host_session_status == Ready`. If a host-open config exists, the planner returns `OpenHostSession`; otherwise it drops those tools and records `host_session_not_ready` as unresolved. `HostLoop` tools do not require an AOS host session.
+
+## Tool Batch State Machine
+
+A tool batch starts when the LLM output contains tool calls.
+
+```mermaid
+stateDiagram-v2
+  [*] --> NoBatch
+
+  NoBatch --> Planning: tool calls blob decoded
+  Planning --> Active: ToolBatchPlan built
+
+  Active --> EmitGroup: next execution group ready
+  EmitGroup --> PendingEffects: effect/domain-event calls emitted
+  EmitGroup --> ImmediateResults: ignored/immediate calls settled
+
+  PendingEffects --> Active: receipts/rejections/stream frames admitted
+  ImmediateResults --> Active: statuses updated
+
+  Active --> ResultsBlobPut: all calls terminal
+  ResultsBlobPut --> ToolFollowUpMessageBlobPut: results_ref available
+  ToolFollowUpMessageBlobPut --> QueueNextLLM: follow-up message refs ready
+  QueueNextLLM --> NoBatch: active batch cleared
+```
+
+Tool call list blob:
+
+```json
+[
+  {
+    "call_id": "call-1",
+    "tool_name": "read_file",
+    "arguments_json": "{\"path\":\"Cargo.toml\"}",
+    "arguments_ref": null,
+    "provider_call_id": "provider-call-1"
+  },
+  {
+    "call_id": "call-2",
+    "tool_name": "apply_patch",
+    "arguments_json": "",
+    "arguments_ref": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+    "provider_call_id": "provider-call-2"
+  }
+]
+```
+
+Planned batch:
+
+```rust
+pub struct ToolBatchPlan {
+    pub observed_calls: Vec<ToolCallObserved>,
+    pub planned_calls: Vec<PlannedToolCall>,
+    pub execution_plan: ToolExecutionPlan,
+}
+```
+
+Example:
+
+```json
+{
+  "observed_calls": [
+    {
+      "call_id": "call-1",
+      "tool_name": "read_file",
+      "arguments_json": "{\"path\":\"Cargo.toml\"}",
+      "arguments_ref": null,
+      "provider_call_id": "provider-call-1"
+    }
+  ],
+  "planned_calls": [
+    {
+      "call_id": "call-1",
+      "tool_id": "host.fs.read_file",
+      "tool_name": "read_file",
+      "arguments_json": "{\"path\":\"Cargo.toml\"}",
+      "arguments_ref": null,
+      "provider_call_id": "provider-call-1",
+      "mapper": { "$tag": "HostFsReadFile" },
+      "executor": {
+        "$tag": "Effect",
+        "$value": {
+          "effect": "sys/host.fs.read_file@1"
+        }
+      },
+      "parallel_safe": true,
+      "resource_key": null,
+      "accepted": true
+    }
+  ],
+  "execution_plan": {
+    "groups": [
+      ["call-1"]
+    ]
+  }
+}
+```
+
+Active batch:
+
+```rust
+pub struct ActiveToolBatch {
+    pub tool_batch_id: ToolBatchId,
+    pub intent_id: String,
+    pub params_hash: Option<String>,
+    pub plan: ToolBatchPlan,
+    pub call_status: BTreeMap<String, ToolCallStatus>,
+    pub pending_effects: PendingEffectSet<String>,
+    pub execution: PendingBatch<String>,
+    pub llm_results: BTreeMap<String, ToolCallLlmResult>,
+    pub results_ref: Option<String>,
+}
+```
+
+Tool call statuses:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Queued
+  Queued --> Pending: effect/domain event emitted
+  Queued --> Ignored: unknown/disabled/unavailable tool
+  Pending --> Succeeded: receipt accepted
+  Pending --> Failed: receipt rejected or mapped failure
+  Pending --> Cancelled: batch/run cancellation
+  Succeeded --> [*]
+  Failed --> [*]
+  Ignored --> [*]
+  Cancelled --> [*]
+```
+
+Tool result sent back to the next LLM turn:
+
+```json
+{
+  "call_id": "call-1",
+  "tool_id": "host.fs.read_file",
+  "tool_name": "read_file",
+  "is_error": false,
+  "output_json": "{\"contents\":\"[workspace]\\nmembers = [...]\"}"
+}
+```
+
+## Blob Indirection State Machine
+
+Large payloads stay behind hash refs. The workflow uses blob effects to materialize or store payloads.
+
+```mermaid
+flowchart TD
+  LlmReceipt[LLM receipt output_ref] --> BlobGetOutput[sys/blob.get LlmOutputEnvelope]
+  BlobGetOutput --> OutputEnvelope[LlmOutputEnvelope]
+  OutputEnvelope -->|tool_calls_ref present| BlobGetCalls[sys/blob.get LlmToolCallList]
+  OutputEnvelope -->|no tool_calls_ref| WaitingInput[WaitingInput]
+
+  ToolCalls[Tool results] --> BlobPutResults[sys/blob.put results list]
+  BlobPutResults --> ResultsRef[results_ref]
+  ResultsRef --> BlobPutFollowUp[sys/blob.put follow-up message]
+  BlobPutFollowUp --> FollowUpRef[follow-up message ref]
+  FollowUpRef --> QueueNext[queue next LLM turn]
+
+  ToolDefs[Tool definitions] --> BlobPutTools[sys/blob.put tool definitions]
+  BlobPutTools --> ToolRefs[tool_refs for LLM runtime]
+```
+
+Pending blob get kinds:
+
+```rust
+pub enum PendingBlobGetKind {
+    LlmOutputEnvelope,
+    LlmToolCalls,
+    ToolCallArguments { tool_batch_id: ToolBatchId, call_id: String },
+    ToolResultBlob { tool_batch_id: ToolBatchId, call_id: String, blob_ref: String },
+}
+```
+
+Pending blob put kinds:
+
+```rust
+pub enum PendingBlobPutKind {
+    ToolDefinition { tool_id: String },
+    ToolFollowUpMessage { index: u64 },
+}
+```
+
+## Interventions
+
+Interventions stay at the agent/LLM level. Host/Fabric session signaling, especially exec cancellation, is modeled through host effects and admitted receipts rather than hidden side channels.
+
+The ref-based intervention input variants are:
+
+```rust
+pub enum SessionInputKind {
+    FollowUpInputAppended {
+        input_ref: String,
+        run_overrides: Option<SessionConfig>,
+    },
+    RunSteerRequested {
+        instruction_ref: String,
+    },
+    RunInterruptRequested {
+        reason_ref: Option<String>,
+    },
+}
+```
+
+```mermaid
+flowchart TD
+  FollowUp[FollowUpInputAppended input_ref] --> ActiveCheck{active run?}
+  ActiveCheck -->|no| StartNow[start run immediately]
+  ActiveCheck -->|yes| QueueFollowUp[queued_follow_up_runs]
+  QueueFollowUp --> TraceFollowUp[trace InterventionRequested]
+  QueueFollowUp --> Later[start after current run terminal]
+
+  Steer[RunSteerRequested instruction_ref] --> ActiveRun{active run?}
+  ActiveRun -->|no| Reject[RunNotActive]
+  ActiveRun -->|yes| QueueSteer[queued_steer_refs]
+  QueueSteer --> TraceSteer[trace InterventionRequested]
+  QueueSteer --> NextLLM[injected into next active-window items]
+  NextLLM --> TraceApplied[trace InterventionApplied]
+
+  Interrupt[RunInterruptRequested reason_ref] --> ActiveRun2{active run?}
+  ActiveRun2 -->|no| Reject2[RunNotActive]
+  ActiveRun2 -->|yes| MarkInterrupt[run_interrupt]
+  MarkInterrupt --> BlockDispatch[clear pending_llm_turn_items / block further dispatch]
+  BlockDispatch --> Quiescent{runtime work quiescent?}
+  Quiescent -->|no| WaitReceipts[wait for receipts/rejections/stream frames]
+  WaitReceipts --> Quiescent
+  Quiescent -->|yes| FinishInterrupted[RunLifecycle::Interrupted]
+```
+
+Follow-up example:
+
+```json
+{
+  "$tag": "FollowUpInputAppended",
+  "$value": {
+    "input_ref": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "run_overrides": null
+  }
+}
+```
+
+Queued follow-up:
+
+```json
+{
+  "cause": {
+    "kind": "aos.agent/user_input",
+    "origin": {
+      "$tag": "DirectIngress",
+      "$value": {
+        "source": "aos.agent/RunRequested",
+        "request_ref": null
+      }
+    },
+    "input_refs": [
+      "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+    ],
+    "payload_schema": null,
+    "payload_ref": null,
+    "subject_refs": []
+  },
+  "run_overrides": null,
+  "queued_at": 1710000000000000200
+}
+```
+
+Steer example:
+
+```json
+{
+  "$tag": "RunSteerRequested",
+  "$value": {
+    "instruction_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}
+```
+
+If the next planned LLM active-window refs were:
+
+```json
+[
+  "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+]
+```
+
+then the steer instruction is appended to the next turn as another active-window item:
+
+```json
+[
+  "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+]
+```
+
+Interrupt example:
+
+```json
+{
+  "$tag": "RunInterruptRequested",
+  "$value": {
+    "reason_ref": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}
+```
+
+Stored interrupt:
+
+```json
+{
+  "reason_ref": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "requested_at": 1710000000000000300
+}
+```
+
+Interrupted outcome:
+
+```json
+{
+  "output_ref": null,
+  "failure": null,
+  "cancelled_reason": null,
+  "interrupted_reason_ref": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}
+```
+
+Text-based host steer/follow-up commands have been removed from the SDK contract. The SDK queues refs, not raw operator strings.
+
+## Run Traces
+
+Run traces are deterministic state, not debug logs. They are built from admitted input, receipts, rejections, stream frames, and deterministic workflow decisions.
+
+```mermaid
+flowchart TD
+  RunStarted --> TurnPlanned
+  TurnPlanned --> LlmRequested
+  LlmRequested --> LlmReceived
+  LlmReceived --> ToolCallsObserved
+  ToolCallsObserved --> ToolBatchPlanned
+  ToolBatchPlanned --> EffectEmitted
+  ToolBatchPlanned --> DomainEventEmitted
+  EffectEmitted --> StreamFrameObserved
+  EffectEmitted --> ReceiptSettled
+  DomainEventEmitted --> ReceiptSettled
+  ReceiptSettled --> TurnPlanned
+  LlmReceived --> ContextPressureObserved
+  ContextPressureObserved --> ContextOperationStateChanged
+  ContextOperationStateChanged --> CompactionRequested
+  CompactionRequested --> CompactionReceived
+  CompactionReceived --> ActiveWindowUpdated
+  TokenCountRequested --> TokenCountReceived
+  LlmReceived --> ProviderContextArtifactsObserved
+  LlmReceived --> RunFinished
+  InterventionRequested --> InterventionApplied
+  InterventionRequested --> RunFinished
+```
+
+Trace kind enum:
+
+```rust
+pub enum RunTraceEntryKind {
+    RunStarted,
+    TurnPlanned,
+    LlmRequested,
+    LlmReceived,
+    ToolCallsObserved,
+    ToolBatchPlanned,
+    EffectEmitted,
+    DomainEventEmitted,
+    StreamFrameObserved,
+    ReceiptSettled,
+    InterventionRequested,
+    InterventionApplied,
+    ContextOperationStateChanged,
+    ContextPressureObserved,
+    ProviderContextArtifactsObserved,
+    CompactionRequested,
+    CompactionReceived,
+    TokenCountRequested,
+    TokenCountReceived,
+    ActiveWindowUpdated,
+    RunFinished,
+    Custom { kind: String },
+}
+```
+
+Trace entry:
+
+```rust
+pub struct RunTraceEntry {
+    pub seq: u64,
+    pub observed_at_ns: u64,
+    pub kind: RunTraceEntryKind,
+    pub summary: String,
+    pub refs: Vec<RunTraceRef>,
+    pub metadata: BTreeMap<String, String>,
+}
+```
+
+Example trace:
+
+```json
+{
+  "max_entries": 256,
+  "dropped_entries": 0,
+  "next_seq": 5,
+  "entries": [
+    {
+      "seq": 0,
+      "observed_at_ns": 1710000000000000000,
+      "kind": { "$tag": "RunStarted" },
+      "summary": "run started",
+      "refs": [
+        {
+          "kind": "input_ref",
+          "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "value": null
+        }
+      ],
+      "metadata": {
+        "cause_kind": "aos.agent/user_input"
+      }
+    },
+    {
+      "seq": 1,
+      "observed_at_ns": 1710000000000000000,
+      "kind": { "$tag": "TurnPlanned" },
+      "summary": "turn plan selected model inputs and tools",
+      "refs": [
+        {
+          "kind": "selected_ref",
+          "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "value": null
+        }
+      ],
+      "metadata": {
+        "planner": "aos.agent/default-turn",
+        "selected_message_count": "1",
+        "dropped_message_count": "0",
+        "selected_tool_count": "0"
+      }
+    },
+    {
+      "seq": 2,
+      "observed_at_ns": 1710000000000000000,
+      "kind": { "$tag": "LlmRequested" },
+      "summary": "LLM turn requested",
+      "refs": [
+        {
+          "kind": "window_item_ref",
+          "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "value": null
+        }
+      ],
+      "metadata": {
+        "provider": "openai",
+        "model": "gpt-5.2"
+      }
+    },
+    {
+      "seq": 3,
+      "observed_at_ns": 1710000000000000100,
+      "kind": { "$tag": "LlmReceived" },
+      "summary": "LLM receipt admitted",
+      "refs": [
+        {
+          "kind": "output_ref",
+          "ref_": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+          "value": null
+        }
+      ],
+      "metadata": {
+        "finish_reason": "stop",
+        "provider_id": "openai"
+      }
+    },
+    {
+      "seq": 4,
+      "observed_at_ns": 1710000000000000200,
+      "kind": { "$tag": "RunFinished" },
+      "summary": "run finished",
+      "refs": [
+        {
+          "kind": "output_ref",
+          "ref_": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+          "value": null
+        }
+      ],
+      "metadata": {
+        "lifecycle": "Completed"
+      }
+    }
+  ]
+}
+```
+
+Completed runs retain a summary:
+
+```json
+{
+  "entry_count": 5,
+  "dropped_entries": 0,
+  "first_seq": 0,
+  "last_seq": 4,
+  "last_kind": { "$tag": "RunFinished" },
+  "last_summary": "run finished",
+  "last_observed_at_ns": 1710000000000000200
+}
+```
+
+## Host Session Readiness
+
+Host sessions are an edge capability. `aos-agent` tracks enough state to decide whether host-backed tools are available.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Unknown
+  Unknown --> Ready: HostSessionUpdated Ready with host_session_id
+  Unknown --> Closed: HostSessionUpdated Closed
+  Ready --> Closed: HostSessionUpdated Closed
+  Ready --> Expired: HostSessionUpdated Expired
+  Ready --> Error: HostSessionUpdated Error
+  Closed --> Ready: new HostSessionUpdated Ready
+  Expired --> Ready: new HostSessionUpdated Ready
+  Error --> Ready: new HostSessionUpdated Ready
+```
+
+Input:
+
+```json
+{
+  "$tag": "HostSessionUpdated",
+  "$value": {
+    "host_session_id": "host-session-123",
+    "host_session_status": { "$tag": "Ready" }
+  }
+}
+```
+
+Runtime context:
+
+```json
+{
+  "host_session_id": "host-session-123",
+  "host_session_status": { "$tag": "Ready" }
+}
+```
+
+The turn planner uses this to decide whether host-backed effect tools can be selected. If host-backed tool candidates are blocked and the selected run config has `host_session_open` available, the planner returns an `OpenHostSession` prerequisite and the workflow emits `sys/host.session.open@1` before re-planning.
+
+Host session open config:
+
+```json
+{
+  "target": {
+    "$tag": "Sandbox",
+    "$value": {
+      "image": "ghcr.io/example/agent:latest",
+      "runtime_class": null,
+      "workdir": "/workspace",
+      "env": {
+        "CI": "1"
+      },
+      "network_mode": "none",
+      "mounts": null,
+      "cpu_limit_millis": 4000,
+      "memory_limit_bytes": 4294967296
+    }
+  },
+  "session_ttl_ns": 3600000000000,
+  "labels": {
+    "purpose": "coding-agent"
+  }
+}
+```
+
+Host/Fabric signaling is intentionally not part of the core intervention primitive. The agent state has the run-level interrupt primitive that host effects, Fabric sessions, exec progress, and receipts can connect to from the edge.
+
+## End-to-End Example: Direct Chat Run
+
+```mermaid
+sequenceDiagram
+  participant UI
+  participant Agent as aos-agent session workflow
+  participant LLM as sys/llm.generate
+  participant Blob as sys/blob
+
+  UI->>Agent: RunRequested(input_ref)
+  Agent->>Agent: allocate RunState
+  Agent->>Agent: trace RunStarted
+  Agent->>Agent: build TurnPlan
+  Agent->>Agent: trace TurnPlanned
+  Agent->>LLM: sys/llm.generate(window_items)
+  Agent->>Agent: trace LlmRequested
+  LLM-->>Agent: LlmGenerateReceipt(output_ref)
+  Agent->>Agent: trace LlmReceived
+  Agent->>Blob: sys/blob.get(output_ref)
+  Blob-->>Agent: LlmOutputEnvelope(no tool_calls_ref)
+  Agent->>Agent: lifecycle Running -> WaitingInput
+  UI->>Agent: RunCompleted
+  Agent->>Agent: RunRecord with trace summary
+```
+
+State path:
+
+```text
+SessionLifecycle: Idle -> Running -> WaitingInput -> Completed
+RunLifecycle:     Running -> WaitingInput -> Completed
+SessionStatus:    Open throughout
+```
+
+## End-to-End Example: Tool-Using Run
+
+```mermaid
+sequenceDiagram
+  participant UI
+  participant Agent as aos-agent session workflow
+  participant LLM as sys/llm.generate
+  participant Blob as sys/blob
+  participant Tool as tool effect/domain event
+
+  UI->>Agent: RunRequested(input_ref)
+  Agent->>Agent: build TurnPlan with selected_tool_ids
+  Agent->>Blob: sys/blob.put(tool definitions) if needed
+  Blob-->>Agent: tool_ref receipts
+  Agent->>LLM: sys/llm.generate(window_items, tool_refs)
+  LLM-->>Agent: LlmGenerateReceipt(output_ref)
+  Agent->>Blob: sys/blob.get(output_ref)
+  Blob-->>Agent: LlmOutputEnvelope(tool_calls_ref)
+  Agent->>Blob: sys/blob.get(tool_calls_ref)
+  Blob-->>Agent: LlmToolCallList
+  Agent->>Agent: build ToolBatchPlan
+  Agent->>Tool: emit mapped effects/domain events
+  Tool-->>Agent: receipts/rejections/stream frames
+  Agent->>Blob: sys/blob.put(tool results)
+  Blob-->>Agent: results_ref
+  Agent->>Blob: sys/blob.put(follow-up message)
+  Blob-->>Agent: follow-up message ref
+  Agent->>Agent: build next TurnPlan
+  Agent->>LLM: sys/llm.generate(active window + follow-up)
+```
+
+Trace path:
+
+```text
+RunStarted
+TurnPlanned
+LlmRequested
+LlmReceived
+ToolCallsObserved
+ToolBatchPlanned
+EffectEmitted / DomainEventEmitted
+StreamFrameObserved
+ReceiptSettled
+TurnPlanned
+LlmRequested
+...
+RunFinished
+```
+
+## End-to-End Example: Context-Limit Retry Through Compaction
+
+```mermaid
+sequenceDiagram
+  participant Agent as aos-agent session workflow
+  participant LLM as sys/llm.generate
+  participant Compact as sys/llm.compact
+
+  Agent->>LLM: sys/llm.generate(window_items)
+  LLM-->>Agent: error LlmGenerateReceipt(context length exceeded)
+  Agent->>Agent: trace ContextPressureObserved
+  Agent->>Agent: pending_context_operation = NeedsCompaction
+  Agent->>Agent: restore pending_llm_turn_items
+  Agent->>Compact: sys/llm.compact(source_window_items)
+  Agent->>Agent: trace CompactionRequested
+  Compact-->>Agent: LlmCompactReceipt(active_window_items)
+  Agent->>Agent: append CompactionRecord
+  Agent->>Agent: replace context_state.active_window_items
+  Agent->>Agent: clear pending_context_operation
+  Agent->>LLM: retry sys/llm.generate(compacted window)
+```
+
+Trace path:
+
+```text
+LlmRequested
+ReceiptSettled
+ContextPressureObserved
+ContextOperationStateChanged
+CompactionRequested
+CompactionReceived
+ActiveWindowUpdated
+TurnPlanned
+LlmRequested
+```
+
+## End-to-End Example: Usage High-Water Lazy Compaction
+
+```mermaid
+sequenceDiagram
+  participant Agent as aos-agent session workflow
+  participant LLM as sys/llm.generate
+  participant Blob as sys/blob
+  participant Compact as sys/llm.compact
+  participant UI
+
+  Agent->>LLM: sys/llm.generate(window_items)
+  LLM-->>Agent: LlmGenerateReceipt(prompt_tokens over high-water)
+  Agent->>Agent: record UsageHighWater context pressure
+  Agent->>Blob: sys/blob.get(output_ref)
+  Blob-->>Agent: LlmOutputEnvelope(no tool_calls_ref)
+  Agent->>Agent: Running -> WaitingInput
+  UI->>Agent: later RunRequested / FollowUpInputAppended
+  Agent->>Agent: planner sees pending CompactContext
+  Agent->>Compact: sys/llm.compact(source_window_items)
+```
+
+The high-water receipt does not cause compaction at the end of the triggering turn. It schedules a context prerequisite for the next LLM turn.
+
+## End-to-End Example: Steer During Active Run
+
+```mermaid
+sequenceDiagram
+  participant Operator
+  participant Agent as aos-agent session workflow
+  participant LLM as sys/llm.generate
+
+  Operator->>Agent: RunSteerRequested(instruction_ref)
+  Agent->>Agent: queued_steer_refs += instruction_ref
+  Agent->>Agent: trace InterventionRequested
+  Agent->>Agent: next dispatch builds TurnPlan
+  Agent->>Agent: planner includes steer ref in active_window_items
+  Agent->>Agent: trace InterventionApplied
+  Agent->>LLM: sys/llm.generate(window_items + instruction_ref)
+```
+
+This is not a host/session signal. It is an instruction ref inserted into the next model turn.
+
+## End-to-End Example: Interrupt Before Next LLM Turn
+
+```mermaid
+sequenceDiagram
+  participant Operator
+  participant Agent as aos-agent session workflow
+  participant Runtime as effects/receipts
+
+  Operator->>Agent: RunInterruptRequested(reason_ref)
+  Agent->>Agent: run_interrupt = Some(...)
+  Agent->>Agent: pending_llm_turn_items = None
+  Agent->>Agent: trace InterventionRequested
+  Agent->>Agent: check pending effects/blob/tool work
+  alt no open runtime work
+    Agent->>Agent: RunLifecycle::Interrupted
+    Agent->>Agent: SessionLifecycle::Interrupted
+    Agent->>Agent: RunOutcome.interrupted_reason_ref = reason_ref
+  else open runtime work
+    Runtime-->>Agent: receipts/rejections/stream frames admitted
+    Agent->>Agent: when quiescent, finish Interrupted
+  end
+```
+
+The workflow does not claim external work stopped unless admitted runtime state has become quiescent. Host/Fabric signal effects can attempt to stop external work earlier, but their result must still come back through admitted receipts or stream frames.
+
+## How To Read aos-agent State
+
+For live inspection, the most useful fields are:
+
+1. `status`: whether the session is open, paused, archived, expired, or closed.
+2. `lifecycle`: current run-shaped state of the session.
+3. `current_run.lifecycle`: active run lifecycle.
+4. `current_run.cause`: why the run exists.
+5. `context_state.transcript_ledger`: durable session message history.
+6. `context_state.active_window_items`: current model window, after any explicit compaction.
+7. `context_state.pending_context_operation`: whether generation is blocked on token counting or compaction.
+8. `context_state.last_context_pressure`, `last_token_count`, and `last_compaction`: latest context-maintenance diagnostics.
+9. `turn_state`: pinned/durable inputs and the last turn-planner report.
+10. `current_run.turn_plan.active_window_items`: what the next/last LLM turn actually saw.
+11. `current_run.turn_plan.selected_tool_ids`: which tools were exposed to that turn.
+12. `current_run.last_llm_usage`: aggregate usage from the last admitted LLM receipt.
+13. `pending_llm_turn_items`: whether an LLM turn is waiting to dispatch.
+14. `active_tool_batch`: current tool execution, statuses, and results.
+15. `pending_effects`, `pending_blob_gets`, `pending_blob_puts`: runtime work still open.
+16. `queued_steer_refs`, `queued_follow_up_runs`, `run_interrupt`: interventions waiting or applied.
+17. `current_run.trace.entries`: active diagnostic trace.
+18. `run_history[*].trace_summary`: compact completed run trace summary.
+
+## Mental Model Summary
+
+```mermaid
+flowchart TD
+  Session[Session] --> Runs[Runs]
+  Runs --> Cause[Cause/provenance]
+  Runs --> TurnPlan[Turn plan]
+  Runs --> Context[Transcript ledger / active window]
+  Runs --> LLM[LLM turns]
+  LLM --> Tools[Tool batches]
+  LLM --> ContextOps[Context pressure / token count / compaction]
+  ContextOps --> Context
+  Context --> TurnPlan
+  Tools --> Effects[Effects/domain events]
+  Effects --> Receipts[Receipts/rejections/stream frames]
+  Receipts --> Session
+
+  Session --> Interventions[Follow-up / steer / interrupt]
+  Interventions --> Runs
+
+  Runs --> Trace[Run trace]
+  Trace --> Operators[Operators/tests/evals]
+  Trace --> Products[Embedding workflows]
+```
+
+The core SDK stays small by making most axes open-ended:
+
+1. `RunCause.kind` and `RunCauseOrigin` describe why a run exists without adding a new API for every product.
+2. `TurnInputLane::Custom` and `TurnInputKind::Custom` allow embedding workflows to add context domains.
+3. `ActiveWindowItemKind::{ProviderNativeArtifactRef, ProviderRawWindowRef, Custom}` lets providers preserve context artifacts without making them portable by accident.
+4. `RunTraceEntryKind::Custom` allows product-specific trace points without changing the core trace contract.
+5. `ToolExecutor::{Effect, DomainEvent, HostLoop}` lets tools target AOS effects, native workflows, or host loops.
+6. Intervention payloads are refs, so the SDK does not own raw UI text, policy, or host cancellation semantics.
+
+That is the desired boundary: `aos-agent` provides deterministic agent primitives; AOS workflows and adapters compose those primitives into chat agents, long-running agents, self-improving agents, hosted coding agents, and future Fabric-backed execution.
