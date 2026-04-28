@@ -210,8 +210,11 @@ Required surfaces:
 
 1. last context plan/report per run,
 2. deterministic unit tests for planning behavior,
-3. a world-level test proving source-agnostic inputs,
+3. an `aos-harness-py` workflow fixture proving source-agnostic inputs,
 4. a fixture proving prompt-ref compatibility through the default engine.
+
+The Python fixture should script LLM and blob receipts rather than depending on live provider
+output. See `roadmap/v0.30-agent/p10-agent-sdk-testing.md` for the harness direction.
 
 ### [ ] 6) Prove override
 
@@ -241,4 +244,5 @@ P6 does **not** attempt:
 3. Context state is session-scoped and context plans are run-scoped.
 4. Each run records an inspectable context report.
 5. Budgeted selection and dropped-input reasoning are deterministic and testable.
-6. A direct-wrapper fixture or Demiurge proves custom context policy without forking tool/session control flow.
+6. A deterministic `aos-harness-py` fixture proves prompt-ref compatibility and report inspection.
+7. A direct-wrapper fixture or Demiurge proves custom context policy without forking tool/session control flow.

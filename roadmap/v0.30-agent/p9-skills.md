@@ -159,7 +159,8 @@ The first proof should demonstrate:
 4. tool/profile effects remaining explicit,
 5. trace inspection of skill decisions.
 
-This can be Demiurge or a focused fixture.
+This should preferably be an `aos-harness-py` deterministic fixture, with Demiurge integration as
+a later consumer proof if needed.
 
 ## Non-Goals
 
@@ -178,4 +179,4 @@ P9 does **not** attempt:
 3. Workspace-backed skills remain possible without reintroducing workspace coupling.
 4. Skill resolution feeds the context engine through normalized contributions.
 5. Tool/profile contributions are explicit and inspectable.
-6. A representative world or fixture proves end-to-end skill activation and trace visibility.
+6. A deterministic `aos-harness-py` fixture proves end-to-end skill activation and trace visibility.

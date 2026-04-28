@@ -618,6 +618,13 @@ This means Demiurge currently treats one task as one session/run story. P5 chang
 
 ## Eval Harness Today
 
+There are two relevant harnesses today:
+
+1. `aos-agent-eval`,
+2. `aos-harness-py`.
+
+They should not be treated as competing implementations of the same long-term role.
+
 `aos-agent-eval` tests current live behavior.
 
 Each attempt:
@@ -633,9 +640,32 @@ Each attempt:
 9. collects conversation observations from blob refs and active batch state,
 10. asserts expected tools, output content, and file state.
 
-This proves live provider/tool behavior but is not deterministic in the model-output sense.
+This proves live provider/tool behavior, but it is not deterministic in the model-output sense.
+It should remain available as a live provider/tool acceptance lane, not become the main SDK
+correctness framework.
+
+`aos-harness-py` is the intended direction for deterministic SDK and workflow integration tests.
+
+It already provides:
+
+1. `WorkflowHarness` for isolated workflow tests,
+2. scripted effect choreography through `pull_effects()` and `apply_receipt_object()`,
+3. helper receipts for LLM, blob, HTTP, and timer effects,
+4. state, blob, trace, snapshot, and reopen inspection,
+5. `WorldHarness` for realistic unified-node/SQLite world tests.
 
 A deterministic scripted-LLM eval would replace the live LLM provider with a fake adapter whose responses are scripted by test case and turn. That would let tests verify reducer behavior, context planning, tool batching, traces, and replay without depending on model choices.
+
+In practical terms, a scripted LLM eval drives the workflow until it emits `sys/llm.generate@1`,
+inspects the request, admits a known `LlmGenerateReceipt`, answers the follow-up `sys/blob.get@1`
+with a fixed `LlmOutputEnvelope`, scripts any tool-call argument blobs and tool receipts, then
+asserts final state and trace output.
+
+The migration direction is captured in `p10-agent-sdk-testing.md`:
+
+1. keep Rust unit tests for low-level reducer invariants,
+2. use `aos-harness-py` for deterministic SDK/workflow tests,
+3. keep `aos-agent-eval` for live provider/tool acceptance during the transition.
 
 ## Effect Adapters and Fabric
 

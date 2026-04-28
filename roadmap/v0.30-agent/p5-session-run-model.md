@@ -169,6 +169,10 @@ Add focused tests for:
 5. archived/closed session rejecting new run starts,
 6. replay from genesis producing byte-identical state.
 
+Use Rust unit tests for reducer transition invariants and `aos-harness-py` workflow fixtures for
+end-to-end session/run stories. Live `aos-agent-eval` coverage should only prove provider/tool
+acceptance still works.
+
 ### [ ] 5) Update telemetry
 
 Add separate events for:
@@ -208,4 +212,5 @@ P5 does **not** attempt:
 3. Transcript/history is explicitly session-scoped.
 4. Active effects and tool batches are explicitly run-scoped.
 5. Demiurge or a focused fixture proves session continuity across multiple runs.
-6. Existing one-shot agent evals still work through the new model.
+6. A deterministic `aos-harness-py` fixture proves multi-run session continuity without provider credentials.
+7. Existing one-shot live agent evals still work through the new model.

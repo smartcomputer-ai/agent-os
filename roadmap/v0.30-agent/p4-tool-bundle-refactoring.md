@@ -192,9 +192,10 @@ Required outcome:
 Update:
 
 1. Demiurge to select bundles explicitly,
-2. `aos-agent-eval` cases to install explicit bundles/profiles,
-3. one local-coding fixture proving host plus inspect,
-4. one hosted-style fixture proving workspace without host.
+2. `aos-agent-eval` cases to install explicit bundles/profiles for live acceptance,
+3. `aos-harness-py` agent fixtures to install explicit bundles/profiles for deterministic SDK tests,
+4. one local-coding fixture proving host plus inspect,
+5. one hosted-style fixture proving workspace without host.
 
 ## Non-Goals
 
@@ -213,6 +214,7 @@ P4 does **not** attempt:
 1. `aos-agent` can build an empty/no-tool registry.
 2. Built-in host, workspace, and inspect bundles can be selected independently.
 3. Existing local coding eval behavior survives through explicit bundle selection.
-4. Workspace composite behavior is no longer hardwired into generic tool-batch planning.
-5. Host target policy is explicit enough that local and Fabric-backed sessions do not require different core agent semantics.
-6. Generated AIR remains deterministic and checked in sync with Rust source.
+4. Deterministic Python harness fixtures can select the same explicit bundles without live provider credentials.
+5. Workspace composite behavior is no longer hardwired into generic tool-batch planning.
+6. Host target policy is explicit enough that local and Fabric-backed sessions do not require different core agent semantics.
+7. Generated AIR remains deterministic and checked in sync with Rust source.

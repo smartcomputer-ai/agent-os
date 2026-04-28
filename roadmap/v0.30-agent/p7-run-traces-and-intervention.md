@@ -180,17 +180,18 @@ Integrate host signaling with run interruption:
 
 Required outcome:
 
-1. `aos-agent-eval` can assert trace events without live provider nondeterminism where possible,
+1. `aos-harness-py` deterministic fixtures can assert trace events without live provider nondeterminism,
 2. Demiurge task status includes current run lifecycle and last meaningful trace event,
 3. failure output includes typed cause and relevant output refs,
-4. existing live eval behavior still works.
+4. existing `aos-agent-eval` live behavior still works as the provider/tool acceptance lane,
+5. trace fixture requirements align with `roadmap/v0.30-agent/p10-agent-sdk-testing.md`.
 
 ## Non-Goals
 
 P7 does **not** attempt:
 
 1. final UI design,
-2. full deterministic scripted-LLM eval harness,
+2. full deterministic scripted-LLM eval harness beyond the trace hooks needed by P10,
 3. subagent supervision,
 4. semantic memory,
 5. marketplace/package concepts.

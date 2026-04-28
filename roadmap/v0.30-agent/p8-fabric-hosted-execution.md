@@ -122,6 +122,9 @@ Add a focused fixture that proves:
 5. failure behavior is typed and deterministic.
 
 This can use a fake controller for deterministic tests and live Fabric tests behind explicit feature/env flags.
+The deterministic path should be expressed through `aos-harness-py` as described in
+`roadmap/v0.30-agent/p10-agent-sdk-testing.md`; live Fabric coverage should remain an explicit
+gated acceptance lane.
 
 ### [ ] 4) Verify intervention against Fabric
 
@@ -159,4 +162,5 @@ P8 does **not** attempt:
 3. Host target policy can express local and sandbox targets explicitly.
 4. Run traces show Fabric-backed exec progress and receipts.
 5. Interrupt/cancel can signal a Fabric-backed host session where supported.
-6. Demiurge has a documented path to choose Fabric later without changing core session semantics.
+6. Deterministic Fabric adapter behavior is covered through `aos-harness-py` with live Fabric tests gated separately.
+7. Demiurge has a documented path to choose Fabric later without changing core session semantics.
