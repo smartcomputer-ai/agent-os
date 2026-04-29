@@ -7,14 +7,17 @@ use crate::contracts::{
     ContextBudget, ContextObservation, ContextPlan, EffectiveTool, EffectiveToolSet,
     HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
     PendingBlobPutKind, PendingFollowUpTurn, RunCause, RunConfig, RunFailure, RunLifecycle,
-    RunOutcome, RunRecord, RunState, SessionConfig, SessionIngressKind, SessionLifecycle,
-    SessionState, SessionStatus, SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan,
-    ToolCallStatus, ToolOverrideScope, ToolSpec,
+    RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry, RunTraceEntryKind, RunTraceRef,
+    RunTraceSummary, SessionConfig, SessionIngressKind, SessionLifecycle, SessionState,
+    SessionStatus, SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallStatus,
+    ToolOverrideScope, ToolSpec,
 };
 use crate::helpers::ContextEngine;
 use crate::tools::{ToolEffectOp, map_tool_receipt_to_llm_result};
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec;
 use alloc::vec::Vec;
 use aos_effects::builtins::{
     HostLocalTarget, HostMount, HostSandboxTarget, HostSessionOpenParams, HostTarget,
@@ -37,6 +40,92 @@ pub use self::types::{
 };
 
 const TOOL_RESULT_BLOB_MAX_BYTES: usize = 8 * 1024;
+
+pub(super) fn trace_ref(kind: impl Into<String>, value: impl Into<String>) -> RunTraceRef {
+    let value = value.into();
+    if value.starts_with("sha256:") {
+        RunTraceRef {
+            kind: kind.into(),
+            ref_: Some(value),
+            value: None,
+        }
+    } else {
+        RunTraceRef {
+            kind: kind.into(),
+            ref_: None,
+            value: Some(value),
+        }
+    }
+}
+
+pub(super) fn push_run_trace(
+    state: &mut SessionState,
+    kind: RunTraceEntryKind,
+    summary: impl Into<String>,
+    refs: Vec<RunTraceRef>,
+    metadata: BTreeMap<String, String>,
+) {
+    let observed_at_ns = state.updated_at;
+    let Some(run) = state.current_run.as_mut() else {
+        return;
+    };
+    push_trace_entry(
+        &mut run.trace,
+        observed_at_ns,
+        kind,
+        summary.into(),
+        refs,
+        metadata,
+    );
+    run.updated_at = observed_at_ns;
+}
+
+fn push_trace_entry(
+    trace: &mut RunTrace,
+    observed_at_ns: u64,
+    kind: RunTraceEntryKind,
+    summary: String,
+    refs: Vec<RunTraceRef>,
+    metadata: BTreeMap<String, String>,
+) {
+    let max_entries = if trace.max_entries == 0 {
+        crate::contracts::DEFAULT_RUN_TRACE_MAX_ENTRIES
+    } else {
+        trace.max_entries
+    } as usize;
+    let seq = trace.next_seq;
+    trace.next_seq = trace.next_seq.saturating_add(1);
+    if max_entries > 0 {
+        while trace.entries.len() >= max_entries {
+            trace.entries.remove(0);
+            trace.dropped_entries = trace.dropped_entries.saturating_add(1);
+        }
+        trace.entries.push(RunTraceEntry {
+            seq,
+            observed_at_ns,
+            kind,
+            summary,
+            refs,
+            metadata,
+        });
+    } else {
+        trace.dropped_entries = trace.dropped_entries.saturating_add(1);
+    }
+}
+
+fn summarize_trace(trace: &RunTrace) -> RunTraceSummary {
+    let first = trace.entries.first();
+    let last = trace.entries.last();
+    RunTraceSummary {
+        entry_count: trace.entries.len() as u64,
+        dropped_entries: trace.dropped_entries,
+        first_seq: first.map(|entry| entry.seq),
+        last_seq: last.map(|entry| entry.seq),
+        last_kind: last.map(|entry| entry.kind.clone()),
+        last_summary: last.map(|entry| entry.summary.clone()),
+        last_observed_at_ns: last.map(|entry| entry.observed_at_ns),
+    }
+}
 
 pub fn run_tool_batch(
     state: &mut SessionState,
@@ -272,10 +361,12 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
         }
         SessionWorkflowEvent::StreamFrame(frame) => {
             let _ = state.pending_effects.observe(frame.into());
+            trace_stream_frame(state, frame);
         }
         SessionWorkflowEvent::Noop => {}
     }
 
+    trace_reduce_output(state, &out);
     recompute_in_flight_effects(state);
     enforce_runtime_limits(state, limits)?;
     Ok(out)
@@ -420,9 +511,28 @@ fn on_run_start_requested(
         tool_refs_materialized: false,
         in_flight_effects: 0,
         outcome: None,
+        trace: RunTrace::default(),
         started_at: state.updated_at,
         updated_at: state.updated_at,
     });
+    let mut refs = cause
+        .input_refs
+        .iter()
+        .cloned()
+        .map(|value| trace_ref("input_ref", value))
+        .collect::<Vec<_>>();
+    if let Some(payload_ref) = cause.payload_ref.as_ref() {
+        refs.push(trace_ref("payload_ref", payload_ref.clone()));
+    }
+    let mut metadata = BTreeMap::new();
+    metadata.insert("cause_kind".into(), cause.kind.clone());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::RunStarted,
+        "run started",
+        refs,
+        metadata,
+    );
     state.active_tool_batch = None;
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
@@ -435,8 +545,7 @@ fn on_run_start_requested(
     state
         .transcript_message_refs
         .extend(cause.input_refs.iter().cloned());
-    state.conversation_message_refs = state.transcript_message_refs.clone();
-    queue_llm_turn(state, state.conversation_message_refs.clone(), out)
+    queue_llm_turn(state, state.transcript_message_refs.clone(), out)
 }
 
 fn on_host_command(
@@ -446,6 +555,18 @@ fn on_host_command(
     if !can_apply_host_command(state, &command.command) {
         return Err(SessionReduceError::HostCommandRejected);
     }
+
+    let mut metadata = BTreeMap::new();
+    metadata.insert("command_id".into(), command.command_id.clone());
+    metadata.insert("issued_at".into(), command.issued_at.to_string());
+    metadata.insert("command".into(), alloc::format!("{:?}", command.command));
+    push_run_trace(
+        state,
+        RunTraceEntryKind::InterventionRequested,
+        "host command received",
+        Vec::new(),
+        metadata,
+    );
 
     enqueue_host_text(state, &command.command);
 
@@ -667,6 +788,18 @@ fn handle_llm_generate_receipt(
     };
 
     state.last_output_ref = Some(receipt.output_ref.as_str().into());
+    let refs = vec![trace_ref("output_ref", receipt.output_ref.to_string())];
+    let mut metadata = BTreeMap::new();
+    metadata.insert("provider_id".into(), receipt.provider_id.clone());
+    metadata.insert("finish_reason".into(), receipt.finish_reason.reason.clone());
+    metadata.insert("status".into(), envelope.status.clone());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::LlmReceived,
+        "llm receipt received",
+        refs,
+        metadata,
+    );
 
     if enqueue_blob_get(
         state,
@@ -714,6 +847,7 @@ fn on_receipt_envelope(
     envelope: &EffectReceiptEnvelope,
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
+    trace_receipt_envelope(state, envelope);
     if handle_pending_blob_get_receipt(state, envelope, out)?
         || handle_pending_blob_put_receipt(state, envelope, out)?
     {
@@ -750,6 +884,7 @@ fn on_receipt_rejected(
     rejected: &EffectReceiptRejected,
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
+    trace_receipt_rejected(state, rejected);
     let envelope = rejected_as_error_envelope(rejected);
     if handle_pending_blob_get_receipt(state, &envelope, out)?
         || handle_pending_blob_put_receipt(state, &envelope, out)?
@@ -871,7 +1006,7 @@ fn handle_completed_tool_batch(
     }
     state.pending_follow_up_turn = Some(PendingFollowUpTurn {
         tool_batch_id: completion.tool_batch_id.clone(),
-        base_message_refs: state.conversation_message_refs.clone(),
+        base_message_refs: state.transcript_message_refs.clone(),
         expected_messages,
         blob_refs_by_index: BTreeMap::new(),
     });
@@ -1064,6 +1199,33 @@ fn apply_context_plan_to_state(
     }
     let selected_refs = plan.selected_refs.clone();
     state.context_state.last_report = Some(plan.report.clone());
+    let refs = plan
+        .selected_refs
+        .iter()
+        .cloned()
+        .map(|value| trace_ref("selected_ref", value))
+        .collect::<Vec<_>>();
+    let mut metadata = BTreeMap::new();
+    metadata.insert("engine".into(), plan.report.engine.clone());
+    metadata.insert(
+        "selected_count".into(),
+        plan.report.selected_count.to_string(),
+    );
+    metadata.insert(
+        "dropped_count".into(),
+        plan.report.dropped_count.to_string(),
+    );
+    metadata.insert(
+        "compaction_recommended".into(),
+        plan.report.compaction_recommended.to_string(),
+    );
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ContextPlanned,
+        "context plan selected model inputs",
+        refs,
+        metadata,
+    );
     if let Some(run) = state.current_run.as_mut() {
         run.context_plan = Some(plan);
     }
@@ -1362,12 +1524,37 @@ fn finish_current_run(
     run.lifecycle = lifecycle;
     run.updated_at = state.updated_at;
     run.outcome = outcome.clone();
+    let mut refs = Vec::new();
+    if let Some(output_ref) = outcome.as_ref().and_then(|value| value.output_ref.as_ref()) {
+        refs.push(trace_ref("output_ref", output_ref.clone()));
+    }
+    let mut metadata = BTreeMap::new();
+    metadata.insert("lifecycle".into(), alloc::format!("{lifecycle:?}"));
+    if let Some(failure) = outcome.as_ref().and_then(|value| value.failure.as_ref()) {
+        metadata.insert("failure_code".into(), failure.code.clone());
+    }
+    if let Some(reason) = outcome
+        .as_ref()
+        .and_then(|value| value.cancelled_reason.as_ref())
+    {
+        metadata.insert("cancelled_reason".into(), reason.clone());
+    }
+    push_trace_entry(
+        &mut run.trace,
+        state.updated_at,
+        RunTraceEntryKind::RunFinished,
+        "run finished".into(),
+        refs,
+        metadata,
+    );
+    let trace_summary = summarize_trace(&run.trace);
     state.run_history.push(RunRecord {
         run_id: run.run_id,
         lifecycle,
         cause: run.cause,
         input_refs: run.input_refs,
         outcome,
+        trace_summary,
         started_at: run.started_at,
         ended_at: state.updated_at,
     });
@@ -1423,6 +1610,174 @@ fn hash_tool_plan(plan: &ToolBatchPlan) -> String {
 
 fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
     aos_wasm_sdk::effect_params_hash(value).unwrap_or_default()
+}
+
+fn trace_reduce_output(state: &mut SessionState, out: &SessionReduceOutput) {
+    for effect in &out.effects {
+        match effect {
+            SessionEffectCommand::LlmGenerate { params, pending } => {
+                let mut refs = Vec::new();
+                refs.push(trace_ref("params_hash", pending.params_hash.clone()));
+                if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+                    refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+                }
+                refs.extend(
+                    params
+                        .message_refs
+                        .iter()
+                        .map(|value| trace_ref("message_ref", value.to_string())),
+                );
+                if let Some(tool_refs) = params.runtime.tool_refs.as_ref() {
+                    refs.extend(
+                        tool_refs
+                            .iter()
+                            .map(|value| trace_ref("tool_ref", value.to_string())),
+                    );
+                }
+                let mut metadata = BTreeMap::new();
+                metadata.insert("provider".into(), params.provider.clone());
+                metadata.insert("model".into(), params.model.clone());
+                if let Some(correlation_id) = params.correlation_id.as_ref() {
+                    metadata.insert("correlation_id".into(), correlation_id.clone());
+                }
+                push_run_trace(
+                    state,
+                    RunTraceEntryKind::LlmRequested,
+                    "llm turn requested",
+                    refs,
+                    metadata,
+                );
+            }
+            SessionEffectCommand::ToolEffect { kind, pending, .. } => {
+                let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
+                if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+                    refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+                }
+                let mut metadata = BTreeMap::new();
+                metadata.insert("effect".into(), kind.as_str().into());
+                push_run_trace(
+                    state,
+                    RunTraceEntryKind::EffectEmitted,
+                    "tool effect emitted",
+                    refs,
+                    metadata,
+                );
+            }
+            SessionEffectCommand::BlobPut { pending, .. } => {
+                trace_effect_command(state, "sys/blob.put@1", pending);
+            }
+            SessionEffectCommand::BlobGet { pending, .. } => {
+                trace_effect_command(state, "sys/blob.get@1", pending);
+            }
+        }
+    }
+
+    for event in &out.domain_events {
+        let mut refs = Vec::new();
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload_json) {
+            refs.push(trace_ref("payload_hash", hash_cbor(&payload)));
+        }
+        let mut metadata = BTreeMap::new();
+        metadata.insert("schema".into(), event.schema.into());
+        push_run_trace(
+            state,
+            RunTraceEntryKind::DomainEventEmitted,
+            "domain event emitted",
+            refs,
+            metadata,
+        );
+    }
+}
+
+fn trace_effect_command(
+    state: &mut SessionState,
+    effect: &str,
+    pending: &aos_wasm_sdk::PendingEffect,
+) {
+    let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
+    if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+        refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+    }
+    let mut metadata = BTreeMap::new();
+    metadata.insert("effect".into(), effect.into());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::EffectEmitted,
+        "effect emitted",
+        refs,
+        metadata,
+    );
+}
+
+fn trace_receipt_envelope(state: &mut SessionState, envelope: &EffectReceiptEnvelope) {
+    let mut refs = Vec::new();
+    if let Some(params_hash) = envelope.params_hash.as_ref() {
+        refs.push(trace_ref("params_hash", params_hash.clone()));
+    }
+    if let Some(issuer_ref) = envelope.issuer_ref.as_ref() {
+        refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+    }
+    refs.push(trace_ref("intent_id", envelope.intent_id.clone()));
+    let mut metadata = BTreeMap::new();
+    metadata.insert("effect".into(), envelope.effect.clone());
+    metadata.insert("status".into(), envelope.status.clone());
+    metadata.insert("emitted_at_seq".into(), envelope.emitted_at_seq.to_string());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ReceiptSettled,
+        "effect receipt admitted",
+        refs,
+        metadata,
+    );
+}
+
+fn trace_receipt_rejected(state: &mut SessionState, rejected: &EffectReceiptRejected) {
+    let mut refs = Vec::new();
+    if let Some(params_hash) = rejected.params_hash.as_ref() {
+        refs.push(trace_ref("params_hash", params_hash.clone()));
+    }
+    if let Some(issuer_ref) = rejected.issuer_ref.as_ref() {
+        refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+    }
+    refs.push(trace_ref("intent_id", rejected.intent_id.clone()));
+    let mut metadata = BTreeMap::new();
+    metadata.insert("effect".into(), rejected.effect.clone());
+    metadata.insert("status".into(), rejected.status.clone());
+    metadata.insert("error_code".into(), rejected.error_code.clone());
+    metadata.insert("emitted_at_seq".into(), rejected.emitted_at_seq.to_string());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ReceiptSettled,
+        "effect receipt rejected",
+        refs,
+        metadata,
+    );
+}
+
+fn trace_stream_frame(state: &mut SessionState, frame: &aos_wasm_sdk::EffectStreamFrameEnvelope) {
+    let mut refs = Vec::new();
+    if let Some(params_hash) = frame.params_hash.as_ref() {
+        refs.push(trace_ref("params_hash", params_hash.clone()));
+    }
+    if let Some(issuer_ref) = frame.issuer_ref.as_ref() {
+        refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+    }
+    if let Some(payload_ref) = frame.payload_ref.as_ref() {
+        refs.push(trace_ref("payload_ref", payload_ref.clone()));
+    }
+    refs.push(trace_ref("intent_id", frame.intent_id.clone()));
+    let mut metadata = BTreeMap::new();
+    metadata.insert("effect".into(), frame.effect.clone());
+    metadata.insert("kind".into(), frame.kind.clone());
+    metadata.insert("seq".into(), frame.seq.to_string());
+    metadata.insert("payload_size".into(), frame.payload.len().to_string());
+    push_run_trace(
+        state,
+        RunTraceEntryKind::StreamFrameObserved,
+        "effect stream frame observed",
+        refs,
+        metadata,
+    );
 }
 
 #[cfg(test)]
@@ -1739,6 +2094,66 @@ mod tests {
         assert_eq!(state.context_state.last_report.as_ref(), Some(&plan.report));
     }
 
+    #[test]
+    fn run_request_records_context_and_llm_trace_entries() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+
+        let trace = &state.current_run.as_ref().expect("current run").trace;
+        let kinds = trace
+            .entries
+            .iter()
+            .map(|entry| entry.kind.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                RunTraceEntryKind::RunStarted,
+                RunTraceEntryKind::ContextPlanned,
+                RunTraceEntryKind::LlmRequested,
+            ]
+        );
+        assert!(trace.entries.iter().any(|entry| {
+            matches!(entry.kind, RunTraceEntryKind::LlmRequested)
+                && entry
+                    .refs
+                    .iter()
+                    .any(|trace_ref| trace_ref.kind == "message_ref")
+        }));
+    }
+
+    #[test]
+    fn completed_run_keeps_bounded_trace_summary() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        if let Some(run) = state.current_run.as_mut() {
+            run.trace.max_entries = 2;
+        }
+        push_run_trace(
+            &mut state,
+            RunTraceEntryKind::Custom {
+                kind: "test/extra".into(),
+            },
+            "extra trace entry",
+            Vec::new(),
+            BTreeMap::new(),
+        );
+        apply_session_workflow_event(&mut state, &ingress(2, SessionIngressKind::RunCompleted))
+            .expect("complete");
+
+        let record = state.run_history.first().expect("run record");
+        assert_eq!(record.trace_summary.entry_count, 2);
+        assert!(record.trace_summary.dropped_entries > 0);
+        assert!(matches!(
+            record.trace_summary.last_kind,
+            Some(RunTraceEntryKind::RunFinished)
+        ));
+    }
+
     struct RepoBootstrapFirstEngine;
 
     impl ContextEngine for RepoBootstrapFirstEngine {
@@ -1956,10 +2371,6 @@ mod tests {
         assert_eq!(
             state.transcript_message_refs,
             vec![fake_hash('a'), second_input]
-        );
-        assert_eq!(
-            state.conversation_message_refs,
-            state.transcript_message_refs
         );
         assert_eq!(
             state.current_run.as_ref().map(|run| run.run_id.run_seq),

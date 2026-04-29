@@ -8,17 +8,18 @@ use aos_effects::builtins::{
 use aos_wasm_sdk::PendingEffect;
 
 use crate::contracts::{
-    PendingBlobGet, PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, SessionState,
-    ToolCallObserved, ToolCallStatus,
+    PendingBlobGet, PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, RunTraceEntryKind,
+    SessionState, ToolCallObserved, ToolCallStatus,
 };
 use crate::helpers::{SessionEffectCommand, SessionReduceOutput};
 
 use super::tool_batch::{fail_tool_call, set_tool_call_status};
 use super::{
     RunToolBatch, SessionReduceError, TOOL_RESULT_BLOB_MAX_BYTES, continue_tool_batch,
-    dispatch_queued_llm_turn, fail_run, queue_llm_turn, run_tool_batch,
+    dispatch_queued_llm_turn, fail_run, push_run_trace, queue_llm_turn, run_tool_batch, trace_ref,
     transition_to_waiting_input_if_running,
 };
+use alloc::collections::BTreeMap;
 
 pub(super) fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
     state.pending_blob_puts.values().any(|shared| {
@@ -253,6 +254,22 @@ fn on_llm_tool_calls_blob(
             provider_call_id: call.provider_call_id,
         })
         .collect::<Vec<_>>();
+    let mut refs = Vec::new();
+    let mut metadata = BTreeMap::new();
+    metadata.insert("call_count".into(), observed.len().to_string());
+    for call in &observed {
+        refs.push(trace_ref("tool_call_id", call.call_id.clone()));
+        if let Some(arguments_ref) = call.arguments_ref.as_ref() {
+            refs.push(trace_ref("arguments_ref", arguments_ref.clone()));
+        }
+    }
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ToolCallsObserved,
+        "llm tool calls observed",
+        refs,
+        metadata,
+    );
     run_tool_batch(
         state,
         RunToolBatch {
@@ -489,7 +506,6 @@ pub(super) fn handle_pending_blob_put_receipt(
                         }
                         let mut next_refs = turn.base_message_refs.clone();
                         next_refs.extend(refs);
-                        state.conversation_message_refs = next_refs.clone();
                         state.transcript_message_refs = next_refs.clone();
                         state.pending_follow_up_turn = None;
                         queue_llm_turn(state, next_refs, out)?;

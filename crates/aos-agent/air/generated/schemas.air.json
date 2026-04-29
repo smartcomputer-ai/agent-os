@@ -1128,6 +1128,9 @@
         },
         "started_at": {
           "time": {}
+        },
+        "trace_summary": {
+          "ref": "aos.agent/RunTraceSummary@1"
         }
       }
     }
@@ -1225,8 +1228,182 @@
         "tool_refs_materialized": {
           "bool": {}
         },
+        "trace": {
+          "ref": "aos.agent/RunTrace@1"
+        },
         "updated_at": {
           "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTrace@1",
+    "type": {
+      "record": {
+        "dropped_entries": {
+          "nat": {}
+        },
+        "entries": {
+          "list": {
+            "ref": "aos.agent/RunTraceEntry@1"
+          }
+        },
+        "max_entries": {
+          "nat": {}
+        },
+        "next_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTraceEntry@1",
+    "type": {
+      "record": {
+        "kind": {
+          "ref": "aos.agent/RunTraceEntryKind@1"
+        },
+        "metadata": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "text": {}
+            }
+          }
+        },
+        "observed_at_ns": {
+          "time": {}
+        },
+        "refs": {
+          "list": {
+            "ref": "aos.agent/RunTraceRef@1"
+          }
+        },
+        "seq": {
+          "nat": {}
+        },
+        "summary": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTraceEntryKind@1",
+    "type": {
+      "variant": {
+        "ContextPlanned": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "DomainEventEmitted": {
+          "unit": {}
+        },
+        "EffectEmitted": {
+          "unit": {}
+        },
+        "InterventionApplied": {
+          "unit": {}
+        },
+        "InterventionRequested": {
+          "unit": {}
+        },
+        "LlmReceived": {
+          "unit": {}
+        },
+        "LlmRequested": {
+          "unit": {}
+        },
+        "ReceiptSettled": {
+          "unit": {}
+        },
+        "RunFinished": {
+          "unit": {}
+        },
+        "RunStarted": {
+          "unit": {}
+        },
+        "StreamFrameObserved": {
+          "unit": {}
+        },
+        "ToolBatchPlanned": {
+          "unit": {}
+        },
+        "ToolCallsObserved": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTraceRef@1",
+    "type": {
+      "record": {
+        "kind": {
+          "text": {}
+        },
+        "ref_": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "value": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTraceSummary@1",
+    "type": {
+      "record": {
+        "dropped_entries": {
+          "nat": {}
+        },
+        "entry_count": {
+          "nat": {}
+        },
+        "first_seq": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "last_kind": {
+          "option": {
+            "ref": "aos.agent/RunTraceEntryKind@1"
+          }
+        },
+        "last_observed_at_ns": {
+          "option": {
+            "time": {}
+          }
+        },
+        "last_seq": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "last_summary": {
+          "option": {
+            "text": {}
+          }
         }
       }
     }
@@ -1610,11 +1787,6 @@
         },
         "context_state": {
           "ref": "aos.agent/SessionContextState@1"
-        },
-        "conversation_message_refs": {
-          "list": {
-            "hash": {}
-          }
         },
         "created_at": {
           "time": {}

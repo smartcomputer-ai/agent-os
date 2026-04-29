@@ -9,8 +9,8 @@ use aos_effects::builtins::{BlobGetParams, BlobPutParams};
 use aos_wasm_sdk::{PendingBatch, PendingEffect, PendingEffectSet};
 
 use crate::contracts::{
-    ActiveToolBatch, PendingBlobGetKind, PlannedToolCall, SessionState, ToolBatchPlan,
-    ToolCallObserved, ToolCallStatus, ToolExecutionPlan, ToolExecutor,
+    ActiveToolBatch, PendingBlobGetKind, PlannedToolCall, RunTraceEntryKind, SessionState,
+    ToolBatchPlan, ToolCallObserved, ToolCallStatus, ToolExecutionPlan, ToolExecutor,
 };
 use crate::helpers::{SessionEffectCommand, SessionReduceOutput, allocate_tool_batch_id};
 use crate::tools::{
@@ -22,8 +22,8 @@ use crate::tools::{
 use super::blob_effects::enqueue_blob_get;
 use super::{
     CompletedToolBatch, RunToolBatch, SessionReduceError, StartedToolBatch, ToolBatchReceiptMatch,
-    hash_cbor, hash_tool_plan, pending_effect_lookup_err_to_session_err,
-    recompute_in_flight_effects, refresh_effective_tools,
+    hash_cbor, hash_tool_plan, pending_effect_lookup_err_to_session_err, push_run_trace,
+    recompute_in_flight_effects, refresh_effective_tools, trace_ref,
 };
 
 pub(super) fn build_tool_execution(
@@ -104,6 +104,39 @@ pub(super) fn run_tool_batch(
         llm_results: BTreeMap::new(),
         results_ref: None,
     });
+    let mut refs = vec![trace_ref(
+        "tool_plan_hash",
+        state.last_tool_plan_hash.clone().unwrap_or_default(),
+    )];
+    refs.extend(
+        started
+            .plan
+            .planned_calls
+            .iter()
+            .map(|call| trace_ref("tool_call_id", call.call_id.clone())),
+    );
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "accepted_count".into(),
+        started
+            .plan
+            .planned_calls
+            .iter()
+            .filter(|call| call.accepted)
+            .count()
+            .to_string(),
+    );
+    metadata.insert(
+        "group_count".into(),
+        started.plan.execution_plan.groups.len().to_string(),
+    );
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ToolBatchPlanned,
+        "tool batch planned",
+        refs,
+        metadata,
+    );
 
     advance_tool_batch(state, out)?;
     Ok(started)

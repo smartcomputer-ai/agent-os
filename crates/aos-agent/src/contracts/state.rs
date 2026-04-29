@@ -1,7 +1,7 @@
 use super::{
-    ActiveToolBatch, ContextPlan, EffectiveToolSet, RunConfig, RunId, RunLifecycle, SessionConfig,
-    SessionContextState, SessionId, SessionLifecycle, SessionStatus, ToolBatchId,
-    ToolRuntimeContext, ToolSpec,
+    ActiveToolBatch, ContextPlan, EffectiveToolSet, RunConfig, RunId, RunLifecycle, RunTrace,
+    RunTraceSummary, SessionConfig, SessionContextState, SessionId, SessionLifecycle,
+    SessionStatus, ToolBatchId, ToolRuntimeContext, ToolSpec,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -180,6 +180,7 @@ pub struct RunState {
     #[aos(air_type = "hash")]
     pub input_refs: Vec<String>,
     pub context_plan: Option<ContextPlan>,
+    pub trace: RunTrace,
     pub active_tool_batch: Option<ActiveToolBatch>,
     #[aos(map_key_air_type = "hash", schema_ref = PendingEffect)]
     pub pending_effects: PendingEffects,
@@ -210,6 +211,7 @@ pub struct RunRecord {
     #[aos(air_type = "hash")]
     pub input_refs: Vec<String>,
     pub outcome: Option<RunOutcome>,
+    pub trace_summary: RunTraceSummary,
     #[aos(air_type = "time")]
     pub started_at: u64,
     #[aos(air_type = "time")]
@@ -242,8 +244,6 @@ pub struct SessionState {
     pub queued_llm_message_refs: Option<Vec<String>>,
     #[aos(air_type = "hash")]
     pub transcript_message_refs: Vec<String>,
-    #[aos(air_type = "hash")]
-    pub conversation_message_refs: Vec<String>,
     #[aos(air_type = "hash")]
     pub last_output_ref: Option<String>,
     pub tool_refs_materialized: bool,
@@ -284,7 +284,6 @@ impl Default for SessionState {
             pending_follow_up_turn: None,
             queued_llm_message_refs: None,
             transcript_message_refs: Vec::new(),
-            conversation_message_refs: Vec::new(),
             last_output_ref: None,
             tool_refs_materialized: false,
             in_flight_effects: 0,

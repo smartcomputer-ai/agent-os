@@ -798,7 +798,7 @@ fn collect_conversation_observations(
     let mut tool_outputs = Vec::new();
     let mut tool_arguments = Vec::new();
 
-    for blob_ref in &state.conversation_message_refs {
+    for blob_ref in &state.transcript_message_refs {
         let Ok(value) = load_json_blob(store, blob_ref) else {
             continue;
         };

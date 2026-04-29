@@ -9,6 +9,7 @@ mod lifecycle;
 mod llm;
 mod state;
 mod tooling;
+mod trace;
 
 pub use batch::*;
 pub use config::*;
@@ -21,3 +22,4 @@ pub use lifecycle::*;
 pub use llm::*;
 pub use state::*;
 pub use tooling::*;
+pub use trace::*;
