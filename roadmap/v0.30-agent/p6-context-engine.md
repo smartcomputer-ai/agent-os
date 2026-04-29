@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: High  
 **Risk if deferred**: High (skills, memories, repo instructions, and world-specific behavior will keep accreting around ad hoc prompt refs)  
-**Status**: Core contracts, default engine, and session reducer wiring complete; override and `aos-harness-py` fixtures still pending  
+**Status**: Core SDK work complete; `aos-harness-py` E2E fixture deferred  
 **Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p5-session-run-model.md`
 
 ## Goal
@@ -263,13 +263,14 @@ Done:
 1. pure context-engine tests cover prompt-ref ordering, domain cause refs, budget drops, and compaction recommendations.
 2. reducer tests cover prompt-ref compatibility through the default context engine.
 3. run-level context plans and session-level last reports are inspectable in state.
+4. a reducer-level custom-engine proof covers source-agnostic pinned inputs and report inspection through normal LLM dispatch.
 
 Remaining:
 
-1. add an `aos-harness-py` workflow fixture for prompt-ref compatibility and report inspection.
-2. add a source-agnostic fixture that scripts LLM/blob receipts end to end.
+1. deferred: add an `aos-harness-py` workflow fixture for prompt-ref compatibility and report inspection.
+2. deferred: add an E2E source-agnostic fixture that scripts LLM/blob receipts end to end.
 
-### [ ] 6) Prove override
+### [x] 6) Prove override
 
 Prove that a consumer can:
 
@@ -279,6 +280,13 @@ Prove that a consumer can:
 4. still reuse base session/run and tool orchestration helpers.
 
 This can be Demiurge or a focused linked-library fixture.
+
+Done:
+
+1. added `dispatch_queued_llm_turn_with_engine` so direct library consumers can reuse queued-turn LLM/tool orchestration with a custom `ContextEngine`.
+2. added `build_context_for_turn_with_engine` so wrapper workflows can build/apply a custom context plan while preserving session/run state updates.
+3. added a focused `RepoBootstrapFirstEngine` reducer test that selects a pinned repo bootstrap input, drops transcript refs, records a custom context report, and emits a normal `sys/llm.generate@1` request with the selected refs.
+4. the proof uses generic context input metadata only; no Demiurge or software-factory-specific SDK variants were added.
 
 ## Non-Goals
 
@@ -294,11 +302,11 @@ P6 does **not** attempt:
 
 ## Acceptance Criteria
 
-1. Context inputs are source-agnostic.
-2. The default engine preserves legacy prompt-ref behavior.
-3. Context state is session-scoped and context plans are run-scoped.
-4. Each run records an inspectable context report.
-5. Budgeted selection and dropped-input reasoning are deterministic and testable.
-6. Run cause and domain/artifact refs can be supplied as normalized inputs without adding product-specific SDK variants.
-7. A deterministic `aos-harness-py` fixture proves prompt-ref compatibility and report inspection.
-8. A direct-wrapper fixture or Demiurge proves custom context selection without forking tool/session control flow.
+1. [x] Context inputs are source-agnostic.
+2. [x] The default engine preserves legacy prompt-ref behavior.
+3. [x] Context state is session-scoped and context plans are run-scoped.
+4. [x] Each run records an inspectable context report.
+5. [x] Budgeted selection and dropped-input reasoning are deterministic and testable.
+6. [x] Run cause and domain/artifact refs can be supplied as normalized inputs without adding product-specific SDK variants.
+7. [ ] Deferred: a deterministic `aos-harness-py` fixture proves prompt-ref compatibility and report inspection.
+8. [x] A direct-wrapper fixture or Demiurge proves custom context selection without forking tool/session control flow.

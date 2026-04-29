@@ -926,6 +926,23 @@ fn dispatch_queued_llm_turn(
     state: &mut SessionState,
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
+    dispatch_queued_llm_turn_with_engine(
+        state,
+        out,
+        &DefaultContextEngine,
+        ContextBudget {
+            max_refs: None,
+            reserve_output_tokens: None,
+        },
+    )
+}
+
+pub fn dispatch_queued_llm_turn_with_engine<E: ContextEngine>(
+    state: &mut SessionState,
+    out: &mut SessionReduceOutput,
+    engine: &E,
+    budget: ContextBudget,
+) -> Result<(), SessionReduceError> {
     if state.queued_llm_message_refs.is_none() {
         return Ok(());
     }
@@ -972,7 +989,8 @@ fn dispatch_queued_llm_turn(
         .as_ref()
         .map(|id| id.run_seq)
         .unwrap_or(0);
-    let planned_message_refs = build_default_context_for_turn(state, message_refs)?;
+    let planned_message_refs =
+        build_context_for_turn_with_engine(state, message_refs, engine, budget)?;
 
     request_llm(
         state,
@@ -999,9 +1017,11 @@ fn dispatch_queued_llm_turn(
     Ok(())
 }
 
-fn build_default_context_for_turn(
+pub fn build_context_for_turn_with_engine<E: ContextEngine>(
     state: &mut SessionState,
     turn_refs: Vec<String>,
+    engine: &E,
+    budget: ContextBudget,
 ) -> Result<Vec<String>, SessionReduceError> {
     let (run_id, prompt_refs, cause) = {
         let run = state
@@ -1020,15 +1040,12 @@ fn build_default_context_for_turn(
         .filter(|value| !turn_refs.iter().any(|turn| turn == *value))
         .cloned()
         .collect::<Vec<_>>();
-    let plan = DefaultContextEngine
+    let plan = engine
         .build_plan(ContextRequest {
             session_id: &state.session_id,
             run_id: &run_id,
             run_cause: Some(&cause),
-            budget: ContextBudget {
-                max_refs: None,
-                reserve_output_tokens: None,
-            },
+            budget,
             session_context: &state.context_state,
             prompt_refs: &prompt_refs,
             transcript_refs: &transcript_refs,
@@ -1412,11 +1429,12 @@ fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
 mod tests {
     use super::*;
     use crate::contracts::{
-        CauseRef, HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, RunCauseOrigin,
-        SessionId, SessionIngress, ToolCallObserved, ToolOverrideScope, ToolProfileBuilder,
-        ToolRegistryBuilder, local_coding_agent_tool_profile_for_provider,
-        local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
-        tool_bundle_host_sandbox,
+        CauseRef, ContextInput, ContextInputKind, ContextInputScope, ContextPriority,
+        ContextReport, ContextSelection, HostSessionOpenConfig, HostSessionStatus,
+        HostTargetConfig, RunCauseOrigin, RunId, SessionId, SessionIngress, ToolCallObserved,
+        ToolOverrideScope, ToolProfileBuilder, ToolRegistryBuilder,
+        local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
+        local_coding_agent_tool_registry, tool_bundle_host_sandbox,
     };
     use alloc::string::ToString;
     use alloc::vec;
@@ -1718,6 +1736,166 @@ mod tests {
             .expect("context plan");
         assert_eq!(plan.selected_refs, vec![prompt_ref, input_ref]);
         assert_eq!(plan.report.engine, "aos.agent/default");
+        assert_eq!(state.context_state.last_report.as_ref(), Some(&plan.report));
+    }
+
+    struct RepoBootstrapFirstEngine;
+
+    impl ContextEngine for RepoBootstrapFirstEngine {
+        fn build_plan(&self, request: ContextRequest<'_>) -> Result<ContextPlan, ContextError> {
+            let mut selected_refs = Vec::new();
+            let mut selections = Vec::new();
+            let mut selected_count = 0_u64;
+            let mut dropped_count = 0_u64;
+
+            for input in &request.session_context.pinned_inputs {
+                let is_repo_bootstrap = input.source_kind.as_deref() == Some("repo_bootstrap")
+                    || matches!(
+                        &input.scope,
+                        ContextInputScope::Custom { kind } if kind == "repo_bootstrap"
+                    );
+                if is_repo_bootstrap {
+                    selected_refs.push(input.content_ref.clone());
+                    selected_count = selected_count.saturating_add(1);
+                    selections.push(ContextSelection {
+                        input_id: input.input_id.clone(),
+                        selected: true,
+                        reason: "repo_bootstrap_first".into(),
+                        content_ref: input.content_ref.clone(),
+                    });
+                    break;
+                }
+            }
+
+            for (idx, value) in request.transcript_refs.iter().enumerate() {
+                dropped_count = dropped_count.saturating_add(1);
+                selections.push(ContextSelection {
+                    input_id: alloc::format!("transcript:{idx}"),
+                    selected: false,
+                    reason: "custom_engine_ignored_transcript".into(),
+                    content_ref: value.clone(),
+                });
+            }
+
+            for (idx, value) in request.turn_refs.iter().enumerate() {
+                selected_refs.push(value.clone());
+                selected_count = selected_count.saturating_add(1);
+                selections.push(ContextSelection {
+                    input_id: alloc::format!("turn:{idx}"),
+                    selected: true,
+                    reason: "current_turn_required".into(),
+                    content_ref: value.clone(),
+                });
+            }
+
+            if selected_refs.is_empty() {
+                return Err(ContextError::EmptySelection);
+            }
+
+            Ok(ContextPlan {
+                selected_refs,
+                selections,
+                actions: Vec::new(),
+                report: ContextReport {
+                    engine: "test/repo-bootstrap-first".into(),
+                    selected_count,
+                    dropped_count,
+                    budget: request.budget,
+                    decisions: vec!["selected repo bootstrap before current turn".into()],
+                    unresolved: Vec::new(),
+                    compaction_recommended: false,
+                    compaction_required: false,
+                },
+            })
+        }
+    }
+
+    #[test]
+    fn custom_context_engine_can_reuse_llm_dispatch() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        let bootstrap_ref = fake_hash('b');
+        let transcript_ref = fake_hash('c');
+        let input_ref = fake_hash('a');
+        state.context_state.pinned_inputs.push(ContextInput {
+            input_id: "repo-bootstrap".into(),
+            kind: ContextInputKind::WorkspaceRef,
+            scope: ContextInputScope::Custom {
+                kind: "repo_bootstrap".into(),
+            },
+            priority: ContextPriority::Required,
+            content_ref: bootstrap_ref.clone(),
+            label: Some("repo bootstrap".into()),
+            source_kind: Some("repo_bootstrap".into()),
+            source_id: Some("repo://main".into()),
+            correlation_id: None,
+        });
+
+        let run_config = RunConfig {
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            max_tokens: Some(512),
+            ..RunConfig::default()
+        };
+        let run_id = RunId {
+            session_id: state.session_id.clone(),
+            run_seq: 1,
+        };
+        let cause = RunCause::direct_input(input_ref.clone());
+        state.active_run_id = Some(run_id.clone());
+        state.active_run_config = Some(run_config.clone());
+        state.current_run = Some(RunState {
+            run_id,
+            lifecycle: RunLifecycle::Running,
+            cause,
+            config: run_config,
+            input_refs: vec![input_ref.clone()],
+            ..RunState::default()
+        });
+        state.transcript_message_refs = vec![transcript_ref.clone(), input_ref.clone()];
+        state.queued_llm_message_refs = Some(vec![input_ref.clone()]);
+
+        let mut out = SessionReduceOutput::default();
+        dispatch_queued_llm_turn_with_engine(
+            &mut state,
+            &mut out,
+            &RepoBootstrapFirstEngine,
+            ContextBudget {
+                max_refs: Some(2),
+                reserve_output_tokens: Some(128),
+            },
+        )
+        .expect("dispatch");
+
+        let params = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { params, .. } => Some(params),
+                _ => None,
+            })
+            .expect("expected llm.generate");
+        let message_refs = params
+            .message_refs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(message_refs, vec![bootstrap_ref.clone(), input_ref.clone()]);
+
+        let plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.context_plan.as_ref())
+            .expect("context plan");
+        assert_eq!(plan.selected_refs, vec![bootstrap_ref, input_ref]);
+        assert_eq!(plan.report.engine, "test/repo-bootstrap-first");
+        assert_eq!(plan.report.dropped_count, 1);
+        assert!(plan.selections.iter().any(|selection| {
+            selection.content_ref == transcript_ref
+                && !selection.selected
+                && selection.reason == "custom_engine_ignored_transcript"
+        }));
         assert_eq!(state.context_state.last_report.as_ref(), Some(&plan.report));
     }
 
