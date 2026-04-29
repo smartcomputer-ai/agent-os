@@ -718,20 +718,6 @@ fn on_host_command(
             clear_active_run(state);
             start_next_queued_run(state, out)?;
         }
-        HostCommandKind::Steer { .. } | HostCommandKind::FollowUp { .. } => {
-            let mut metadata = BTreeMap::new();
-            metadata.insert(
-                "legacy_text_command".into(),
-                "unsupported_ref_required".into(),
-            );
-            push_run_trace(
-                state,
-                RunTraceEntryKind::InterventionApplied,
-                "legacy text host command ignored; use ref-based session input",
-                Vec::new(),
-                metadata,
-            );
-        }
         HostCommandKind::Noop => {}
     }
 

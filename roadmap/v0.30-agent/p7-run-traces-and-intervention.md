@@ -210,7 +210,7 @@ Done:
 5. interrupt requests block further LLM dispatch and finish the run as `Interrupted` once runtime work is quiescent.
 6. `RunOutcome` records `interrupted_reason_ref` by hash ref.
 7. intervention requests and applied steer injection are recorded in the run trace.
-8. legacy text host steer/follow-up commands are traced as unsupported; the core model is now ref-based.
+8. text-based host steer/follow-up commands were removed from the SDK contract; the core model is ref-based.
 
 ### [ ] 6) Defer host/Fabric signal integration to P8
 

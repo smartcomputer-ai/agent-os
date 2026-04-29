@@ -472,13 +472,6 @@
                 }
               }
             },
-            "FollowUp": {
-              "record": {
-                "text": {
-                  "text": {}
-                }
-              }
-            },
             "Noop": {
               "unit": {}
             },
@@ -487,13 +480,6 @@
             },
             "Resume": {
               "unit": {}
-            },
-            "Steer": {
-              "record": {
-                "text": {
-                  "text": {}
-                }
-              }
             }
           }
         },

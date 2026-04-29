@@ -1168,7 +1168,7 @@ Interrupted outcome:
 }
 ```
 
-Legacy `HostCommandKind::Steer { text }` and `HostCommandKind::FollowUp { text }` are no longer the preferred core shape. They are traced as unsupported legacy text commands because the SDK should queue refs, not raw operator strings.
+Text-based host steer/follow-up commands have been removed from the SDK contract. The SDK queues refs, not raw operator strings.
 
 ## Run Traces
 

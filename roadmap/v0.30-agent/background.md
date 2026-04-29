@@ -538,27 +538,26 @@ Currently stream frames are not exposed as a first-class run trace. They mainly 
 
 P7 changes this by making progress frames traceable.
 
-## Host Commands and Intervention
+## Host Commands and Ref-Based Intervention
 
 Current host commands are:
 
-1. `Steer { text }`,
-2. `FollowUp { text }`,
-3. `Pause`,
-4. `Resume`,
-5. `Cancel { reason }`,
-6. `Noop`.
+1. `Pause`,
+2. `Resume`,
+3. `Cancel { reason }`,
+4. `Noop`.
 
-The current behavior is limited:
+Host commands are session lifecycle controls only. LLM-level intervention is modeled as
+ref-based `SessionInputKind` variants:
 
-1. `Steer` pushes text into `queued_steer`.
-2. `FollowUp` pushes text into `queued_follow_up`.
-3. pause/resume/cancel transition the combined lifecycle.
-4. cancel immediately transitions through `Cancelling` to `Cancelled` and clears active run state.
+1. `FollowUpInputAppended { input_ref, run_overrides }`,
+2. `RunSteerRequested { instruction_ref }`,
+3. `RunInterruptRequested { reason_ref }`.
 
-The pending steer/follow-up queues are not integrated deeply into the LLM turn flow yet.
+The old text-based steer/follow-up host commands were removed from the SDK contract. The SDK
+queues refs, not raw operator strings.
 
-There is no clear distinction between:
+This keeps a clear distinction between:
 
 1. follow-up input for a later run,
 2. steer text for the next model turn,
@@ -566,7 +565,7 @@ There is no clear distinction between:
 4. cancelling a run while external effects are active,
 5. pausing a durable session.
 
-P7 adds that distinction.
+Host/Fabric cancellation semantics remain deferred to P8.
 
 ## Context Model Today
 
