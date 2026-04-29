@@ -16,7 +16,8 @@ Primary outcome:
 2. host, workspace, inspect, and future domain tools become optional bundles,
 3. bundle selection is explicit in library composition and evented `SessionWorkflow` composition,
 4. AIR v2 emitted-effect surfaces are explicit and do not imply accidental host or workspace access,
-5. Demiurge and eval fixtures stop depending on the current implicit coding-agent preset.
+5. domain-event tools can be assembled without baking any factory-specific API into the core SDK,
+6. Demiurge and eval fixtures stop depending on the current implicit coding-agent preset.
 
 ## Current Fit
 
@@ -36,7 +37,7 @@ But the tool boundary is still too broad:
 3. `SessionState::default()` installs that registry and `openai` profile by default.
 4. `SessionWorkflow` declares all optional host, inspect, and workspace effects in one workflow allowlist.
 5. workspace composite tools are special-cased inside the generic tool runner.
-6. host-session auto-open assumes one host target story instead of an explicit local/sandbox policy.
+6. host-session auto-open assumes one host target story instead of explicit local/sandbox config.
 
 That is the wrong default for the next agent work.
 
@@ -47,7 +48,7 @@ The core session kernel should not care whether a world chooses:
 3. local host tools,
 4. Fabric-backed sandbox host tools,
 5. workspace tools,
-6. a world-specific domain bundle.
+6. a world-specific domain-event bundle.
 
 ## Design Stance
 
@@ -62,6 +63,10 @@ The core session kernel should not care whether a world chooses:
 5. extension seams for bundle-specific execution.
 
 It should not assume that host tools, workspace tools, or any other bundle are present.
+
+Domain-event tools are part of the same generic seam. The core runner can support tools that emit
+typed domain events, but it should not know whether those events represent factory work items,
+review requests, chat handoff, or another world-specific process.
 
 ### 2) Keep built-in bundles inside `aos-agent` for now
 
@@ -100,7 +105,7 @@ Equivalent map-based helpers are acceptable if they keep the same properties:
 
 ### 4) Treat local host, Fabric host, and workspace as distinct choices
 
-Host tools are not a single policy.
+Host tools are not a single target model.
 
 At minimum the roadmap needs to distinguish:
 
@@ -108,7 +113,9 @@ At minimum the roadmap needs to distinguish:
 2. Fabric-backed sandbox host tools against a controller-selected session,
 3. workspace tools against versioned AOS workspace trees.
 
-The same LLM-facing tool names may be reused, but session/run configuration must make the target policy explicit. The current auto-open path that emits a default local target is not enough for Fabric-backed agents.
+The same LLM-facing tool names may be reused, but session/run configuration must make the target
+explicit. The current auto-open path that emits a default local target is not enough for
+Fabric-backed agents.
 
 ### 5) Keep AIR v2 effect surfaces honest
 
@@ -145,6 +152,9 @@ Add bundle constructors for at least:
 3. host-sandbox/Fabric-ready,
 4. workspace.
 
+Also make sure custom/domain-event bundles can be assembled through the same registry/profile API.
+This does not require shipping a factory bundle in `aos-agent`.
+
 Add registry/profile builders that support:
 
 1. bundle merge,
@@ -160,12 +170,13 @@ Required outcome:
 
 1. workspace composite tools run behind a workspace runner/hook,
 2. future domain composite tools can use the same seam,
-3. host-specific behavior such as auto-open is expressed through a host bundle policy,
-4. core planning remains generic over accepted tool calls, parallelism hints, and receipts.
+3. host-specific behavior such as auto-open is expressed through host bundle config,
+4. domain-event tools can emit typed domain events without becoming host or workspace effects,
+5. core planning remains generic over accepted tool calls, parallelism hints, domain events, and receipts.
 
-### [ ] 4) Make host target policy explicit
+### [ ] 4) Make host target config explicit
 
-Represent host-session target policy at assembly/config time.
+Represent host-session target config at assembly/config time.
 
 Required outcome:
 
@@ -207,7 +218,8 @@ P4 does **not** attempt:
 4. final Fabric hosted-agent product flow,
 5. subagent/session-tree semantics,
 6. splitting bundles into separate crates,
-7. skill packaging or marketplace design.
+7. factory work-item or worker-invocation workflows,
+8. skill packaging or marketplace design.
 
 ## Acceptance Criteria
 
@@ -216,5 +228,6 @@ P4 does **not** attempt:
 3. Existing local coding eval behavior survives through explicit bundle selection.
 4. Deterministic Python harness fixtures can select the same explicit bundles without live provider credentials.
 5. Workspace composite behavior is no longer hardwired into generic tool-batch planning.
-6. Host target policy is explicit enough that local and Fabric-backed sessions do not require different core agent semantics.
-7. Generated AIR remains deterministic and checked in sync with Rust source.
+6. A custom/domain-event bundle can map tool calls to typed domain events without changing core session semantics.
+7. Host target config is explicit enough that local and Fabric-backed sessions do not require different core agent semantics.
+8. Generated AIR remains deterministic and checked in sync with Rust source.

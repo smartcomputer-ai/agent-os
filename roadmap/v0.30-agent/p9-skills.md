@@ -18,9 +18,14 @@ Primary outcome:
 4. tool/profile effects remain explicit and inspectable,
 5. `aos-agent` core can run without any skill model.
 
+For the v0.30 core push, do not expand this into a required SDK subsystem. Repo-local instruction
+files, workspace context packs, and factory playbooks can first participate as ordinary P6 context
+inputs. Full skill descriptors, activation, versioning, and contribution reporting can follow after
+the core seams are stable.
+
 ## Problem Statement
 
-The system needs reusable agent capability bundles:
+The system needs reusable agent behavior bundles:
 
 1. coding instructions,
 2. repo-local guidance such as `AGENTS.md`,
@@ -48,7 +53,7 @@ Skills belong to:
 
 1. embedding worlds,
 2. context-source loaders,
-3. context-engine policy,
+3. context-engine selection,
 4. optional tool/profile bundle assembly,
 5. operator/debug surfaces.
 
@@ -59,7 +64,7 @@ A resolved skill should contribute structured data such as:
 1. context refs,
 2. tool-profile hints,
 3. tool enable/disable suggestions,
-4. guardrail/policy refs,
+4. advisory instruction refs,
 5. examples,
 6. inspection metadata,
 7. activation reasoning.
@@ -78,7 +83,7 @@ Possible sources include:
 
 No one source should be privileged by core contracts.
 
-### 4) Activation is world policy
+### 4) Activation is world-owned logic
 
 Activation may come from:
 
@@ -88,7 +93,7 @@ Activation may come from:
 4. repo detection,
 5. explicit operator input.
 
-The policy belongs above the core session kernel.
+The activation logic belongs above the core session kernel.
 
 ### 5) Skills integrate through context and tools
 
@@ -170,7 +175,8 @@ P9 does **not** attempt:
 2. skill version negotiation across universes,
 3. subagent skill inheritance,
 4. a new package manager,
-5. hidden skill effects outside context/run config.
+5. policy/capability gating or approval semantics,
+6. hidden skill effects outside context/run config.
 
 ## Acceptance Criteria
 

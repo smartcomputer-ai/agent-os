@@ -71,7 +71,8 @@ The Python harness should own:
 5. scripted tool batches and receipts,
 6. intervention flows such as steer, interrupt, cancel, pause, and resume,
 7. replay/reopen assertions,
-8. Fabric fake-controller and live-gated fixtures.
+8. non-user/domain-event run-cause fixtures,
+9. Fabric fake-controller and live-gated fixtures.
 
 ### 3) Keep `aos-agent-eval` during migration
 
@@ -134,7 +135,8 @@ Add Python helpers for:
 4. sending session ingress events,
 5. installing explicit tool registries and profiles,
 6. opening or faking host session state,
-7. reading keyed `SessionState` by session id.
+7. reading keyed `SessionState` by session id,
+8. constructing `RunCause` payloads for direct ingress and domain-event-origin runs.
 
 These helpers should be small wrappers over the existing `WorkflowHarness` and `WorldHarness` primitives.
 
@@ -167,12 +169,13 @@ The goal is not to duplicate every live eval immediately. The goal is to prove t
 As P7 lands, Python fixtures should assert:
 
 1. run started/completed/failed trace entries,
-2. context planned entries,
-3. LLM turn entries,
-4. tool batch entries,
-5. effect and receipt summaries,
-6. steer/follow-up/interrupt/cancel entries,
-7. replay/reopen preserving the same trace state.
+2. run cause/provenance trace entries,
+3. context planned entries,
+4. LLM turn entries,
+5. tool batch entries,
+6. effect, domain-event, and receipt summaries,
+7. steer/follow-up/interrupt/cancel entries,
+8. replay/reopen preserving the same trace state.
 
 ### [ ] 6) Add Fabric test modes
 
@@ -181,7 +184,7 @@ As P8 lands, Python fixtures should support:
 1. fake Fabric controller tests for deterministic adapter behavior,
 2. live Fabric tests behind explicit env/feature gates,
 3. host signal and exec progress assertions through run traces,
-4. local and Fabric target policy comparisons using the same agent-level contracts.
+4. local and Fabric target config comparisons using the same agent-level contracts.
 
 ### [ ] 7) Decide the future of `aos-agent-eval`
 
@@ -201,13 +204,15 @@ P10 does **not** attempt:
 2. making live LLM/provider evals deterministic,
 3. building a benchmark leaderboard,
 4. final product telemetry or UI,
-5. requiring Fabric for ordinary SDK tests.
+5. testing full scheduler/heartbeat or factory work-item workflows as part of `aos-agent` SDK correctness,
+6. requiring Fabric for ordinary SDK tests.
 
 ## Acceptance Criteria
 
 1. New SDK integration tests can run through `aos-harness-py` without provider credentials.
 2. At least three current `aos-agent-eval` behaviors have deterministic Python harness equivalents.
 3. The Python harness can script an LLM turn and its follow-up blob reads.
-4. The Python harness can assert session/run state, trace summaries, and replay/reopen stability.
-5. `aos-agent-eval` remains available for live provider/tool acceptance during migration.
-6. P7/P8 trace, intervention, and Fabric fixtures have a clear deterministic test lane.
+4. The Python harness can start a run with a non-user/domain-event `RunCause`.
+5. The Python harness can assert session/run state, trace summaries, and replay/reopen stability.
+6. `aos-agent-eval` remains available for live provider/tool acceptance during migration.
+7. P7/P8 trace, intervention, and Fabric fixtures have a clear deterministic test lane.

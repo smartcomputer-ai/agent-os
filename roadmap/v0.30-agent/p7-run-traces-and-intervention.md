@@ -46,16 +46,17 @@ The trace can store bounded summaries directly and put large payloads behind blo
 Trace entries should cover:
 
 1. run started,
-2. context planned,
-3. LLM turn requested,
-4. LLM receipt received,
-5. tool calls observed,
-6. tool batch planned,
-7. tool effect emitted,
-8. stream/progress frame observed,
-9. tool receipt settled,
-10. intervention requested/applied,
-11. run completed/failed/cancelled/interrupted.
+2. run cause/provenance,
+3. context planned,
+4. LLM turn requested,
+5. LLM receipt received,
+6. tool calls observed,
+7. tool batch planned,
+8. tool effect or domain event emitted,
+9. stream/progress frame observed,
+10. tool receipt settled,
+11. intervention requested/applied,
+12. run completed/failed/cancelled/interrupted.
 
 ### 2) Keep trace payloads bounded
 
@@ -66,7 +67,8 @@ Recommended shape:
 1. compact trace entries in run state,
 2. large message/tool/effect payloads by hash ref,
 3. full receipts already remain journaled,
-4. trace report views reconstruct detail by following refs when needed.
+4. open correlation refs for embedding workflows,
+5. trace report views reconstruct detail by following refs when needed.
 
 ### 3) Steer is not the same as interrupt
 
@@ -112,12 +114,14 @@ Add contracts for:
 
 1. run trace entry,
 2. trace entry kind,
-3. context report reference,
-4. LLM turn summary,
-5. tool batch summary,
-6. effect/receipt summary,
-7. intervention summary,
-8. run outcome summary.
+3. run cause/provenance reference,
+4. context report reference,
+5. LLM turn summary,
+6. tool batch summary,
+7. effect/domain-event/receipt summary,
+8. intervention summary,
+9. run outcome summary,
+10. open correlation refs for embedding workflows.
 
 Keep the first schema small and extensible.
 
@@ -128,7 +132,8 @@ Required outcome:
 1. current run exposes a bounded trace,
 2. completed runs keep a bounded trace summary or trace ref,
 3. large payloads remain by hash ref,
-4. trace entries are replay-identical.
+4. product-specific correlation is stored in open metadata/refs rather than new trace variants,
+5. trace entries are replay-identical.
 
 ### [ ] 3) Record context and LLM turn trace entries
 
@@ -146,8 +151,9 @@ Required outcome:
 1. observed tool calls are recorded,
 2. tool batch plan hash/ref is recorded,
 3. each emitted tool effect records effect kind, params hash, issuer ref, and call id,
-4. stream frames/progress frames are recorded as bounded summaries,
-5. receipts update the trace with status and output refs.
+4. each emitted domain event records schema, payload hash/ref, key when present, and call id,
+5. stream frames/progress frames are recorded as bounded summaries,
+6. receipts update the trace with status and output refs.
 
 ### [ ] 5) Replace ad hoc steer/follow-up queues
 
@@ -194,13 +200,17 @@ P7 does **not** attempt:
 2. full deterministic scripted-LLM eval harness beyond the trace hooks needed by P10,
 3. subagent supervision,
 4. semantic memory,
-5. marketplace/package concepts.
+5. factory-specific work ledger trace schemas,
+6. policy/capability gating or approval semantics,
+7. marketplace/package concepts.
 
 ## Acceptance Criteria
 
 1. A run exposes a deterministic trace containing context, LLM, tool, effect, receipt, and intervention summaries.
 2. Trace storage is bounded and large payloads stay behind refs.
-3. Steer, follow-up, interrupt, cancel, pause, and resume have distinct semantics.
-4. Interrupt/cancel does not claim external work stopped until an admitted receipt/rejection supports the transition.
-5. Local and Fabric-backed host signaling can share the same agent-level intervention model.
-6. Demiurge or a focused fixture proves live intervention and trace inspection.
+3. Run cause/provenance and open correlation refs are visible without product-specific trace variants.
+4. Domain-event tool emissions are traceable alongside effect emissions.
+5. Steer, follow-up, interrupt, cancel, pause, and resume have distinct semantics.
+6. Interrupt/cancel does not claim external work stopped until an admitted receipt/rejection supports the transition.
+7. Local and Fabric-backed host signaling can share the same agent-level intervention model.
+8. Demiurge or a focused fixture proves live intervention and trace inspection.

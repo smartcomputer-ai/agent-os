@@ -15,7 +15,7 @@ Primary outcome:
 1. context is assembled explicitly and deterministically for each run,
 2. source-specific concerns feed the engine through normalized inputs,
 3. context plans and reports are visible for tests and operators,
-4. worlds that link `aos-agent` can replace or extend context policy,
+4. worlds that link `aos-agent` can replace or extend context selection,
 5. legacy prompt-ref behavior survives as the smallest default engine.
 
 ## Current Fit
@@ -38,7 +38,7 @@ It is not enough for:
 3. deterministic compaction decisions,
 4. repo/bootstrap file loading,
 5. skill and memory integration,
-6. world-specific policy over what the model may see.
+6. world-specific selection of what the model may see.
 
 This item now depends on P5 because context needs the session/run split first:
 
@@ -55,8 +55,9 @@ The engine should build a run-scoped plan from:
 1. world-level pinned inputs,
 2. session-level durable state,
 3. current run input,
-4. transcript/history state,
-5. optional implementation-level sources such as repo files, workspace refs, memory refs, or resolved skills.
+4. run cause/provenance,
+5. transcript/history state,
+6. optional implementation-level sources such as domain state summaries, repo files, workspace refs, memory refs, or resolved skills.
 
 The plan is per-run. The state informing it can live longer.
 
@@ -78,14 +79,19 @@ must be explicit runtime work. The context engine can request or consume already
 The engine should accept normalized inputs such as:
 
 1. pinned refs,
-2. transcript segments,
-3. summary refs,
-4. extracted facts,
-5. repo/bootstrap file refs,
-6. memory refs,
-7. skill-provided refs.
+2. run cause refs,
+3. transcript segments,
+4. summary refs,
+5. extracted facts,
+6. domain-event or workflow-state summary refs,
+7. workspace/artifact refs,
+8. repo/bootstrap file refs,
+9. memory refs,
+10. skill-provided refs.
 
 It should not care whether those came from local files, workspaces, CAS blobs, static assets, or future registries.
+It also should not care whether a domain-state summary represents a work item, review, test run,
+chat channel, or another application workflow.
 
 ### 4) Support override without pretending WASM is dynamic
 
@@ -109,7 +115,7 @@ At minimum the report should include:
 3. budget reasoning,
 4. compaction recommendations,
 5. unresolved prerequisites,
-6. policy decisions that affected visibility.
+6. selection decisions that affected visibility.
 
 ## Proposed Contracts
 
@@ -119,6 +125,7 @@ Illustrative shapes:
 pub struct ContextRequest<'a> {
     pub session_id: &'a SessionId,
     pub run_id: &'a RunId,
+    pub run_cause: Option<&'a RunCause>,
     pub budget: ContextBudget,
     pub world_inputs: &'a [ContextInput],
     pub session_context: &'a SessionContextState,
@@ -164,7 +171,8 @@ Add core types for:
 5. context action requests,
 6. context report payloads,
 7. observation events,
-8. session-scoped context state.
+8. open input kind/correlation metadata for domain workflows,
+9. session-scoped context state.
 
 These should be source-agnostic and live in the `aos-agent` library surface.
 
@@ -178,18 +186,20 @@ Required outcome:
 2. tool follow-up turns call the context engine,
 3. selected refs feed `llm.generate`,
 4. context reports are recorded for inspection and P7 traces,
-5. old prompt refs become inputs to the default engine.
+5. run cause/provenance can be presented as an input,
+6. old prompt refs become inputs to the default engine.
 
 ### [ ] 3) Provide a minimal default engine
 
 The default engine should be deliberately conservative:
 
 1. include pinned/default prompt refs,
-2. include current run input refs,
-3. include recent transcript refs,
-4. include completed summary refs if present,
-5. respect simple budget bounds,
-6. report dropped inputs.
+2. include run cause refs when present,
+3. include current run input refs,
+4. include recent transcript refs,
+5. include completed summary refs if present,
+6. respect simple budget bounds,
+7. report dropped inputs.
 
 This is a reference implementation, not the final factory brain.
 
@@ -221,8 +231,8 @@ output. See `roadmap/v0.30-agent/p10-agent-sdk-testing.md` for the harness direc
 Prove that a consumer can:
 
 1. link `aos-agent`,
-2. provide a custom context policy,
-3. add implementation-specific inputs such as repo bootstrap files,
+2. provide a custom context selection implementation,
+3. add implementation-specific inputs such as repo bootstrap files and domain-state summary refs,
 4. still reuse base session/run and tool orchestration helpers.
 
 This can be Demiurge or a focused linked-library fixture.
@@ -235,7 +245,9 @@ P6 does **not** attempt:
 2. subagent context sharing,
 3. semantic search or embeddings infrastructure,
 4. hidden automatic LLM summarization,
-5. final run trace UI.
+5. policy/capability gating or approval semantics,
+6. factory work-item or scheduler workflows,
+7. final run trace UI.
 
 ## Acceptance Criteria
 
@@ -244,5 +256,6 @@ P6 does **not** attempt:
 3. Context state is session-scoped and context plans are run-scoped.
 4. Each run records an inspectable context report.
 5. Budgeted selection and dropped-input reasoning are deterministic and testable.
-6. A deterministic `aos-harness-py` fixture proves prompt-ref compatibility and report inspection.
-7. A direct-wrapper fixture or Demiurge proves custom context policy without forking tool/session control flow.
+6. Run cause and domain/artifact refs can be supplied as normalized inputs without adding product-specific SDK variants.
+7. A deterministic `aos-harness-py` fixture proves prompt-ref compatibility and report inspection.
+8. A direct-wrapper fixture or Demiurge proves custom context selection without forking tool/session control flow.

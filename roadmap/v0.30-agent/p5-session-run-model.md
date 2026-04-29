@@ -16,7 +16,8 @@ Primary outcome:
 2. one session can own zero or more runs over time,
 3. transcript and future context state live at session scope,
 4. tool batches, active effects, context plans, and output live at run scope,
-5. evented `SessionWorkflow` and direct library wrapping preserve the same semantics.
+5. every run records an extensible cause/provenance envelope,
+6. evented `SessionWorkflow` and direct library wrapping preserve the same semantics.
 
 ## Current Fit
 
@@ -31,7 +32,8 @@ Today:
 5. `clear_active_run()` clears run fields and transcript refs together.
 6. Demiurge still treats task id as the whole session story and converts `WaitingInput` into `RunCompleted`.
 
-That shape works for narrow one-shot task launchers. It is not good enough for multi-run sessions, context state, traces, or interruption.
+That shape works for narrow one-shot task launchers. It is not good enough for multi-run sessions,
+context state, non-user run triggers, traces, or interruption.
 
 ## Design Stance
 
@@ -43,7 +45,7 @@ Session state should own:
 2. session status,
 3. durable transcript/history,
 4. durable context state,
-5. policy/config defaults,
+5. config/defaults,
 6. attached resources such as host session handles,
 7. run roster or bounded run history.
 
@@ -63,12 +65,13 @@ Run state should own:
 
 1. run id,
 2. run lifecycle,
-3. active input refs,
-4. selected context plan,
-5. current tool batch state,
-6. active pending effects,
-7. final output and outcome,
-8. trace/report refs.
+3. run cause/provenance,
+4. active input refs,
+5. selected context plan,
+6. current tool batch state,
+7. active pending effects,
+8. final output and outcome,
+9. trace/report refs.
 
 Example run lifecycles:
 
@@ -80,7 +83,48 @@ Example run lifecycles:
 6. cancelled,
 7. interrupted.
 
-### 3) Transcript is durable session state
+### 3) Run cause records provenance, not product semantics
+
+`RunRequested { input_ref }` is too chat-shaped as the only start story.
+
+The SDK should add a stable `RunCause` contract, but it should not add a closed enum of every
+possible product trigger. Native AOS workflows already route domain events through
+`routing.subscriptions`; `RunCause` records why a run exists so context planning, traces, and
+operators can inspect provenance.
+
+Illustrative shape:
+
+```rust
+pub struct RunCause {
+    pub kind: String,
+    pub origin: RunCauseOrigin,
+    pub input_refs: Vec<String>,
+    pub payload_schema: Option<String>,
+    pub payload_ref: Option<String>,
+    pub subject_refs: Vec<CauseRef>,
+}
+
+pub enum RunCauseOrigin {
+    DirectIngress { source: String, request_ref: Option<String> },
+    DomainEvent { schema: String, event_ref: Option<String>, key: Option<String> },
+    Internal { reason: String, ref_: Option<String> },
+}
+
+pub struct CauseRef {
+    pub kind: String,
+    pub id: String,
+    pub ref_: Option<String>,
+}
+```
+
+Names can change. The important part is that cause `kind` and `CauseRef.kind` are namespaced/open
+strings, so worlds can attach causes such as user input, work item readiness, timer wake, review
+request, or operator action without expanding the SDK API.
+
+Core reducer behavior should only depend on generic properties such as input refs and whether a run
+can start. Product-specific cause kinds belong to embedding workflows.
+
+### 4) Transcript is durable session state
 
 The current run-start behavior that clears `conversation_message_refs` is the wrong long-term default.
 
@@ -92,7 +136,7 @@ The new model should distinguish:
 4. run-produced output refs,
 5. compaction/summary refs.
 
-### 4) Keep evented and direct composition aligned
+### 5) Keep evented and direct composition aligned
 
 Worlds should be able to choose:
 
@@ -101,7 +145,7 @@ Worlds should be able to choose:
 
 Both paths should use the same contract semantics.
 
-### 5) Migrate Demiurge without preserving the old confusion
+### 6) Migrate Demiurge without preserving the old confusion
 
 Demiurge can keep task submission as public sugar, but internally it should map a task onto:
 
@@ -111,7 +155,9 @@ Demiurge can keep task submission as public sugar, but internally it should map 
 4. run completion observation,
 5. task completion.
 
-`task_id == session_id` may remain as a compatibility convenience for now, but the code should stop assuming that a task is the only thing a session can ever represent.
+`task_id == session_id` may remain as a compatibility convenience for now, but the code should stop
+assuming that a task is the only thing a session can ever represent. Demiurge task ingress should
+populate `RunCause` rather than relying on implicit user-turn semantics.
 
 ## Scope
 
@@ -123,7 +169,8 @@ Add separate contracts for:
 2. `RunLifecycle`,
 3. durable `SessionState` fields,
 4. active/current `RunState` fields,
-5. run outcome/failure details.
+5. open-ended `RunCause`, `RunCauseOrigin`, and `CauseRef` fields,
+6. run outcome/failure details.
 
 Retire or narrow `SessionLifecycle` once migration is complete.
 
@@ -135,7 +182,7 @@ Add first-class ingress operations for:
 2. update session config/defaults,
 3. attach/update host session resource,
 4. append user input,
-5. start run,
+5. start run with an explicit `RunCause`,
 6. continue run,
 7. complete/fail/cancel run,
 8. pause/resume session,
@@ -167,7 +214,8 @@ Add focused tests for:
 3. failed run followed by a later run in the same open session,
 4. paused session with no active run,
 5. archived/closed session rejecting new run starts,
-6. replay from genesis producing byte-identical state.
+6. a run started from a non-user domain-event cause,
+7. replay from genesis producing byte-identical state.
 
 Use Rust unit tests for reducer transition invariants and `aos-harness-py` workflow fixtures for
 end-to-end session/run stories. Live `aos-agent-eval` coverage should only prove provider/tool
@@ -179,9 +227,10 @@ Add separate events for:
 
 1. session update/status changes,
 2. run lifecycle changes,
-3. run outcome,
-4. current run inspection,
-5. bounded run history inspection.
+3. run cause/provenance,
+4. run outcome,
+5. current run inspection,
+6. bounded run history inspection.
 
 This prepares the ground for P7 run traces.
 
@@ -191,8 +240,9 @@ Required outcome:
 
 1. Demiurge task ingress maps onto explicit session/run operations,
 2. existing task-driven behavior remains functional,
-3. a fixture proves one durable session can run multiple turns/tasks,
-4. evented and direct reducer helper paths preserve the same model.
+3. Demiurge populates `RunCause` explicitly,
+4. a fixture proves one durable session can run multiple turns/tasks,
+5. evented and direct reducer helper paths preserve the same model.
 
 ## Non-Goals
 
@@ -202,8 +252,11 @@ P5 does **not** attempt:
 2. run traces beyond the fields needed to attach them later,
 3. final interrupt/steer behavior,
 4. subagent trees,
-5. multi-tenant server API design,
-6. final UI/operator product decisions.
+5. timer-chain scheduling, heartbeat semantics, or external trigger services,
+6. factory work-item, agenda, worker-invocation, review, or test workflows,
+7. policy/capability gating or approval semantics,
+8. multi-tenant server API design,
+9. final UI/operator product decisions.
 
 ## Acceptance Criteria
 
@@ -211,6 +264,8 @@ P5 does **not** attempt:
 2. Run lifecycle transitions no longer double as session status transitions.
 3. Transcript/history is explicitly session-scoped.
 4. Active effects and tool batches are explicitly run-scoped.
-5. Demiurge or a focused fixture proves session continuity across multiple runs.
-6. A deterministic `aos-harness-py` fixture proves multi-run session continuity without provider credentials.
-7. Existing one-shot live agent evals still work through the new model.
+5. Every run records an open-ended `RunCause` without requiring SDK changes for product-specific triggers.
+6. A deterministic fixture proves a non-user/domain-event cause can start a run through normal session ingress.
+7. Demiurge or a focused fixture proves session continuity across multiple runs.
+8. A deterministic `aos-harness-py` fixture proves multi-run session continuity without provider credentials.
+9. Existing one-shot live agent evals still work through the new model.
