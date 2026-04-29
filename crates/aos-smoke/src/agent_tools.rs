@@ -3,9 +3,9 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use aos_agent::{
-    HostSessionStatus, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, ToolCallStatus, ToolRegistryBuilder, tool_bundle_host_local,
-    tool_bundle_inspect, tool_bundle_workspace,
+    HostSessionStatus, SessionConfig, SessionId, SessionInput, SessionInputKind, SessionLifecycle,
+    SessionState, ToolCallStatus, ToolRegistryBuilder, tool_bundle_host_local, tool_bundle_inspect,
+    tool_bundle_workspace,
 };
 use aos_air_types::{HashRef, Manifest};
 use aos_cbor::{Hash, to_canonical_cbor};
@@ -38,7 +38,7 @@ use serde_json::{Value, json};
 use crate::example_host::{ExampleHost, ExampleHostConfig, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
+const EVENT_SCHEMA: &str = "aos.agent/SessionInput@1";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
@@ -145,7 +145,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     send_session_event(
         &mut host,
         &mut clock,
-        SessionIngressKind::HostSessionUpdated {
+        SessionInputKind::HostSessionUpdated {
             host_session_id: Some(SEEDED_SESSION_ID.into()),
             host_session_status: Some(HostSessionStatus::Ready),
         },
@@ -162,7 +162,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     send_session_event(
         &mut host,
         &mut clock,
-        SessionIngressKind::RunRequested {
+        SessionInputKind::RunRequested {
             input_ref: input_ref.as_str().to_string(),
             run_overrides: Some(SessionConfig {
                 provider: "openai-responses".into(),
@@ -288,7 +288,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         script.llm_turn
     );
 
-    send_session_event(&mut host, &mut clock, SessionIngressKind::RunCompleted)?;
+    send_session_event(&mut host, &mut clock, SessionInputKind::RunCompleted)?;
     let final_state: SessionState = host.read_state()?;
     ensure!(
         final_state.lifecycle == SessionLifecycle::Completed,
@@ -1042,7 +1042,7 @@ fn configure_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()
     send_session_event(
         host,
         clock,
-        SessionIngressKind::ToolRegistrySet {
+        SessionInputKind::ToolRegistrySet {
             registry,
             profiles: Some(profiles),
             default_profile: Some(TOOL_PROFILE.into()),
@@ -1053,13 +1053,13 @@ fn configure_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()
 fn send_session_event(
     host: &mut ExampleHost,
     clock: &mut u64,
-    kind: SessionIngressKind,
+    kind: SessionInputKind,
 ) -> Result<()> {
     *clock = clock.saturating_add(1);
-    host.send_event(&SessionIngress {
+    host.send_event(&SessionInput {
         session_id: SessionId(SESSION_ID.into()),
         observed_at_ns: *clock,
-        ingress: kind,
+        input: kind,
     })
 }
 

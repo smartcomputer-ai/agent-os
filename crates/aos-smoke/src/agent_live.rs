@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent::{
-    LlmToolCallList, SessionConfig, SessionId, SessionIngress, SessionIngressKind, SessionState,
+    LlmToolCallList, SessionConfig, SessionId, SessionInput, SessionInputKind, SessionState,
     ToolAvailabilityRule, ToolExecutor, ToolParallelismHint, ToolSpec,
 };
 use aos_air_types::HashRef;
@@ -28,7 +28,7 @@ use tokio::runtime::Builder;
 use crate::example_host::{ExampleHost, ExampleHostConfig, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
+const EVENT_SCHEMA: &str = "aos.agent/SessionInput@1";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
@@ -169,7 +169,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     send_session_event(
         &mut host,
         &mut event_clock,
-        SessionIngressKind::RunRequested {
+        SessionInputKind::RunRequested {
             input_ref: fake_hash('a'),
             run_overrides: Some(SessionConfig {
                 provider: provider.provider_id.clone(),
@@ -363,11 +363,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         stats.tool_calls
     );
 
-    send_session_event(
-        &mut host,
-        &mut event_clock,
-        SessionIngressKind::RunCompleted,
-    )?;
+    send_session_event(&mut host, &mut event_clock, SessionInputKind::RunCompleted)?;
 
     let final_state: SessionState = host.read_state()?;
     ensure!(
@@ -400,13 +396,13 @@ fn tool_call_args_json(host: &ExampleHost, call: &aos_agent::ToolCallObserved) -
 fn send_session_event(
     host: &mut ExampleHost,
     clock: &mut u64,
-    kind: SessionIngressKind,
+    kind: SessionInputKind,
 ) -> Result<()> {
     *clock = clock.saturating_add(1);
-    let event = SessionIngress {
+    let event = SessionInput {
         session_id: SessionId(SESSION_ID.into()),
         observed_at_ns: *clock,
-        ingress: kind,
+        input: kind,
     };
     host.send_event(&event)
 }
@@ -446,7 +442,7 @@ fn configure_search_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Re
     send_session_event(
         host,
         clock,
-        SessionIngressKind::ToolRegistrySet {
+        SessionInputKind::ToolRegistrySet {
             registry,
             profiles: Some(profiles),
             default_profile: Some(SEARCH_TOOL_PROFILE.into()),

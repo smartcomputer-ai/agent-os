@@ -2,7 +2,7 @@ use crate::{
     SessionId, SessionState, SessionWorkflowEvent,
     helpers::{
         apply_session_workflow_event, emit_run_lifecycle_changed, emit_session_lifecycle_changed,
-        emit_session_status_changed, map_reduce_error,
+        emit_session_status_changed, map_workflow_error,
     },
 };
 use aos_wasm_sdk::{ReduceError, Value, Workflow, WorkflowCtx};
@@ -61,7 +61,8 @@ impl Workflow for SessionWorkflow {
         let prev_lifecycle = ctx.state.lifecycle;
         let prev_run = ctx.state.current_run.clone();
         let prev_run_id = ctx.state.active_run_id.clone();
-        let out = apply_session_workflow_event(&mut ctx.state, &event).map_err(map_reduce_error)?;
+        let out =
+            apply_session_workflow_event(&mut ctx.state, &event).map_err(map_workflow_error)?;
         for domain_event in out.domain_events {
             domain_event.emit(ctx);
         }

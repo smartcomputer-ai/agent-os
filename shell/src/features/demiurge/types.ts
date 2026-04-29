@@ -40,7 +40,7 @@ export interface DemiurgeState {
   pending_tool_call?: unknown | null;
 }
 
-export type SessionIngressKind =
+export type SessionInputKind =
   | {
       $tag: "RunRequested";
       $value: {
@@ -50,10 +50,10 @@ export type SessionIngressKind =
     }
   | { $tag: "Noop"; $value?: null };
 
-export interface SessionIngress {
+export interface SessionInput {
   session_id: string;
   observed_at_ns: number;
-  ingress: SessionIngressKind;
+  input: SessionInputKind;
 }
 
 export interface ChatSettings {

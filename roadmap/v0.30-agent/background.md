@@ -75,7 +75,7 @@ It is a task-ingress orchestrator around `aos.agent/SessionWorkflow@1`:
 1. accepts `demiurge/TaskSubmitted@1`,
 2. writes the task text as a user message blob,
 3. opens a host session for the submitted workdir,
-4. emits `aos.agent/SessionIngress@1` events to configure and start the session workflow,
+4. emits `aos.agent/SessionInput@1` events to configure and start the session workflow,
 5. watches `aos.agent/SessionLifecycleChanged@1`,
 6. emits `demiurge/TaskFinished@1` when the agent run reaches a terminal task outcome.
 
@@ -91,7 +91,7 @@ It:
 2. imports the generated `aos-agent` AIR,
 3. compiles and patches the `session_workflow` WASM module,
 4. seeds files into a per-attempt host workdir,
-5. sends `SessionIngress` events,
+5. sends `SessionInput` events,
 6. dispatches real host tools and live `llm.generate` calls,
 7. asserts tool use, assistant output, and filesystem outcomes.
 
@@ -137,7 +137,7 @@ The generated package includes:
 1. schemas for IDs, config, state, tool specs, batch state, events, etc.,
 2. the workflow definition,
 3. the workflow module definition,
-4. routing for `aos.agent/SessionIngress@1` into `SessionWorkflow`,
+4. routing for `aos.agent/SessionInput@1` into `SessionWorkflow`,
 5. routing for `sys/WorkspaceCommit@1` into `sys/Workspace@1`.
 
 The generated output is checked into `crates/aos-agent/air/generated/`.
@@ -164,10 +164,10 @@ The important public contracts are:
    - current combined session/run lifecycle enum.
 7. `SessionState`
    - keyed workflow state for one session.
-8. `SessionIngress` and `SessionIngressKind`
+8. `SessionInput` and `SessionInputKind`
    - external/control input into the session workflow.
 9. `SessionWorkflowEvent`
-   - reducer event enum covering ingress, receipts, receipt rejections, stream frames, noop.
+   - reducer event enum covering input, receipts, receipt rejections, stream frames, noop.
 10. `SessionLifecycleChanged`
    - domain event emitted when lifecycle changes.
 11. Tool contracts
@@ -238,7 +238,7 @@ That means terminal states are terminal for one run, not for the durable session
 
 ## Session Ingress Events
 
-`SessionIngressKind` currently includes:
+`SessionInputKind` currently includes:
 
 1. `RunRequested { input_ref, run_overrides }`,
 2. `HostCommandReceived(HostCommand)`,
@@ -251,7 +251,7 @@ That means terminal states are terminal for one run, not for the durable session
 9. `RunCancelled { reason }`,
 10. `Noop`.
 
-The workflow routes direct `SessionIngress` events by `session_id`.
+The workflow routes direct `SessionInput` events by `session_id`.
 
 Receipts and stream frames are not ordinary domain ingress in the same sense. They re-enter through effect continuation handling and are represented in `SessionWorkflowEvent` so the reducer can settle pending effects.
 
@@ -260,7 +260,7 @@ Receipts and stream frames are not ordinary domain ingress in the same sense. Th
 The current run start path is:
 
 1. An embedding world or client stores a user message blob.
-2. It sends `SessionIngressKind::RunRequested { input_ref, run_overrides }`.
+2. It sends `SessionInputKind::RunRequested { input_ref, run_overrides }`.
 3. The reducer validates provider/model config.
 4. It transitions lifecycle to `Running`.
 5. It allocates a `RunId` by incrementing `next_run_seq`.
@@ -603,7 +603,7 @@ On task submission:
 2. validates allowed tools against `default_tool_registry()`,
 3. stores task text as a user message blob,
 4. opens a local host session for the workdir,
-5. emits a sequence of `SessionIngress` events:
+5. emits a sequence of `SessionInput` events:
    - optional `ToolRegistrySet`,
    - `HostSessionUpdated`,
    - `RunRequested`.

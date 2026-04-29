@@ -11,7 +11,7 @@ import {
   DEFAULT_CHAT_SETTINGS,
   type ChatSettings,
   type DemiurgeState,
-  type SessionIngress,
+  type SessionInput,
 } from "../types";
 
 export function UnifiedChatPage() {
@@ -56,15 +56,15 @@ export function UnifiedChatPage() {
   const handleNewChat = async () => {
     try {
       const chatId = generateSessionId();
-      const ingress: SessionIngress = {
+      const input: SessionInput = {
         session_id: chatId,
         observed_at_ns: Date.now(),
-        ingress: { $tag: "Noop" },
+        input: { $tag: "Noop" },
       };
 
       await eventsPostMutation.mutateAsync({
-        schema: "aos.agent/SessionIngress@1",
-        value: ingress,
+        schema: "aos.agent/SessionInput@1",
+        value: input,
       });
 
       navigate(`/chat?id=${chatId}`);

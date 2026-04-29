@@ -1,10 +1,10 @@
 use crate::contracts::{
     HostSessionStatus, RunCause, RunId, RunLifecycleChanged, RunState, SessionConfig, SessionId,
-    SessionIngress, SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, SessionState,
+    SessionInput, SessionInputKind, SessionLifecycle, SessionLifecycleChanged, SessionState,
     SessionStatus, SessionStatusChanged, local_coding_agent_tool_profile_for_provider,
     local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
 };
-use crate::helpers::workflow::SessionReduceError;
+use crate::helpers::workflow::SessionWorkflowError;
 use crate::{helpers::llm::LlmMappingError, tools::ToolEffectOp};
 use alloc::format;
 use alloc::string::String;
@@ -107,7 +107,7 @@ impl SessionDomainEventCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SessionReduceOutput {
+pub struct SessionWorkflowOutput {
     pub effects: alloc::vec::Vec<SessionEffectCommand>,
     pub domain_events: alloc::vec::Vec<SessionDomainEventCommand>,
 }
@@ -131,7 +131,7 @@ pub struct SessionHandoffRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionHandoffPlan {
-    pub ingresses: Vec<SessionIngress>,
+    pub inputs: Vec<SessionInput>,
     pub next_observed_at_ns: u64,
 }
 
@@ -160,13 +160,13 @@ pub struct RequestedLlm {
 
 pub fn request_llm(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
+    out: &mut SessionWorkflowOutput,
     mut request: RequestLlm,
-) -> Result<RequestedLlm, SessionReduceError> {
+) -> Result<RequestedLlm, SessionWorkflowError> {
     let run_config = state
         .active_run_config
         .clone()
-        .ok_or(SessionReduceError::RunNotActive)?;
+        .ok_or(SessionWorkflowError::RunNotActive)?;
     if request.step.api_key.is_none() {
         request.step.api_key = provider_secret_ref(run_config.provider.as_str());
     }
@@ -344,7 +344,7 @@ pub fn local_session_open_params(request: &LocalSessionSpawnRequest) -> HostSess
 }
 
 pub fn build_session_handoff_plan(request: &SessionHandoffRequest) -> SessionHandoffPlan {
-    let mut ingresses = Vec::new();
+    let mut inputs = Vec::new();
     let mut observed_at_ns = request.first_observed_at_ns;
     let mut run_overrides = request.run_overrides.clone();
 
@@ -360,10 +360,10 @@ pub fn build_session_handoff_plan(request: &SessionHandoffRequest) -> SessionHan
         let registry = local_coding_agent_tool_registry();
         let mut profiles = local_coding_agent_tool_profiles();
         profiles.insert(tool_profile.clone(), allowed_tools);
-        ingresses.push(SessionIngress {
+        inputs.push(SessionInput {
             session_id: request.session_id.clone(),
             observed_at_ns,
-            ingress: SessionIngressKind::ToolRegistrySet {
+            input: SessionInputKind::ToolRegistrySet {
                 registry,
                 profiles: Some(profiles),
                 default_profile: Some(tool_profile.clone()),
@@ -372,20 +372,20 @@ pub fn build_session_handoff_plan(request: &SessionHandoffRequest) -> SessionHan
         observed_at_ns = observed_at_ns.saturating_add(1);
     }
 
-    ingresses.push(SessionIngress {
+    inputs.push(SessionInput {
         session_id: request.session_id.clone(),
         observed_at_ns,
-        ingress: SessionIngressKind::HostSessionUpdated {
+        input: SessionInputKind::HostSessionUpdated {
             host_session_id: Some(request.host_session_id.clone()),
             host_session_status: Some(HostSessionStatus::Ready),
         },
     });
     observed_at_ns = observed_at_ns.saturating_add(1);
 
-    ingresses.push(SessionIngress {
+    inputs.push(SessionInput {
         session_id: request.session_id.clone(),
         observed_at_ns,
-        ingress: SessionIngressKind::RunStartRequested {
+        input: SessionInputKind::RunStartRequested {
             cause: request
                 .run_cause
                 .clone()
@@ -396,16 +396,14 @@ pub fn build_session_handoff_plan(request: &SessionHandoffRequest) -> SessionHan
     observed_at_ns = observed_at_ns.saturating_add(1);
 
     SessionHandoffPlan {
-        ingresses,
+        inputs,
         next_observed_at_ns: observed_at_ns,
     }
 }
 
-pub fn emit_session_ingresses<S>(ctx: &mut WorkflowCtx<S, Value>, ingresses: &[SessionIngress]) {
-    for ingress in ingresses {
-        ctx.intent("aos.agent/SessionIngress@1")
-            .payload(ingress)
-            .send();
+pub fn emit_session_inputs<S>(ctx: &mut WorkflowCtx<S, Value>, inputs: &[SessionInput]) {
+    for input in inputs {
+        ctx.intent("aos.agent/SessionInput@1").payload(input).send();
     }
 }
 
@@ -460,12 +458,12 @@ fn synthesize_pending_issuer_ref(state: &SessionState, effect: &str) -> String {
     }
 }
 
-fn map_llm_mapping_error(err: LlmMappingError) -> SessionReduceError {
+fn map_llm_mapping_error(err: LlmMappingError) -> SessionWorkflowError {
     match err {
-        LlmMappingError::MissingProvider => SessionReduceError::MissingProvider,
-        LlmMappingError::MissingModel => SessionReduceError::MissingModel,
-        LlmMappingError::EmptyMessageRefs => SessionReduceError::EmptyMessageRefs,
-        LlmMappingError::InvalidHashRef => SessionReduceError::InvalidHashRef,
+        LlmMappingError::MissingProvider => SessionWorkflowError::MissingProvider,
+        LlmMappingError::MissingModel => SessionWorkflowError::MissingModel,
+        LlmMappingError::EmptyMessageRefs => SessionWorkflowError::EmptyMessageRefs,
+        LlmMappingError::InvalidHashRef => SessionWorkflowError::InvalidHashRef,
     }
 }
 
@@ -480,28 +478,30 @@ fn provider_secret_ref(provider: &str) -> Option<TextOrSecretRef> {
     None
 }
 
-pub fn map_reduce_error(err: SessionReduceError) -> ReduceError {
+pub fn map_workflow_error(err: SessionWorkflowError) -> ReduceError {
     match err {
-        SessionReduceError::InvalidLifecycleTransition => {
+        SessionWorkflowError::InvalidLifecycleTransition => {
             ReduceError::new("invalid lifecycle transition")
         }
-        SessionReduceError::HostCommandRejected => ReduceError::new("host command rejected"),
-        SessionReduceError::ToolBatchAlreadyActive => ReduceError::new("tool batch already active"),
-        SessionReduceError::MissingProvider => ReduceError::new("run config provider missing"),
-        SessionReduceError::MissingModel => ReduceError::new("run config model missing"),
-        SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),
-        SessionReduceError::UnknownModel => ReduceError::new("run config model unknown"),
-        SessionReduceError::RunAlreadyActive => ReduceError::new("run already active"),
-        SessionReduceError::RunNotActive => ReduceError::new("run not active"),
-        SessionReduceError::EmptyMessageRefs => {
+        SessionWorkflowError::HostCommandRejected => ReduceError::new("host command rejected"),
+        SessionWorkflowError::ToolBatchAlreadyActive => {
+            ReduceError::new("tool batch already active")
+        }
+        SessionWorkflowError::MissingProvider => ReduceError::new("run config provider missing"),
+        SessionWorkflowError::MissingModel => ReduceError::new("run config model missing"),
+        SessionWorkflowError::UnknownProvider => ReduceError::new("run config provider unknown"),
+        SessionWorkflowError::UnknownModel => ReduceError::new("run config model unknown"),
+        SessionWorkflowError::RunAlreadyActive => ReduceError::new("run already active"),
+        SessionWorkflowError::RunNotActive => ReduceError::new("run not active"),
+        SessionWorkflowError::EmptyMessageRefs => {
             ReduceError::new("llm message_refs must not be empty")
         }
-        SessionReduceError::TooManyPendingEffects => ReduceError::new("too many pending effects"),
-        SessionReduceError::InvalidHashRef => ReduceError::new("invalid hash ref"),
-        SessionReduceError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
-        SessionReduceError::UnknownToolOverride => ReduceError::new("unknown tool override"),
-        SessionReduceError::InvalidToolRegistry => ReduceError::new("invalid tool registry"),
-        SessionReduceError::AmbiguousPendingToolEffect => {
+        SessionWorkflowError::TooManyPendingEffects => ReduceError::new("too many pending effects"),
+        SessionWorkflowError::InvalidHashRef => ReduceError::new("invalid hash ref"),
+        SessionWorkflowError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
+        SessionWorkflowError::UnknownToolOverride => ReduceError::new("unknown tool override"),
+        SessionWorkflowError::InvalidToolRegistry => ReduceError::new("invalid tool registry"),
+        SessionWorkflowError::AmbiguousPendingToolEffect => {
             ReduceError::new("ambiguous pending tool effect")
         }
     }
@@ -626,19 +626,19 @@ mod tests {
             other => panic!("unexpected plan: {other:?}"),
         };
 
-        assert_eq!(plan.ingresses.len(), 3);
+        assert_eq!(plan.inputs.len(), 3);
         assert_eq!(plan.next_observed_at_ns, 13);
         assert!(matches!(
-            plan.ingresses[0].ingress,
-            SessionIngressKind::ToolRegistrySet { .. }
+            plan.inputs[0].input,
+            SessionInputKind::ToolRegistrySet { .. }
         ));
         assert!(matches!(
-            plan.ingresses[1].ingress,
-            SessionIngressKind::HostSessionUpdated { .. }
+            plan.inputs[1].input,
+            SessionInputKind::HostSessionUpdated { .. }
         ));
         assert!(matches!(
-            plan.ingresses[2].ingress,
-            SessionIngressKind::RunStartRequested { .. }
+            plan.inputs[2].input,
+            SessionInputKind::RunStartRequested { .. }
         ));
     }
 }

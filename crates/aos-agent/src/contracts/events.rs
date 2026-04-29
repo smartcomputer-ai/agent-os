@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 pub use aos_wasm_sdk::{EffectReceiptRejected, EffectStreamFrameEnvelope};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
-#[aos(schema = "aos.agent/SessionIngressKind@1")]
+#[aos(schema = "aos.agent/SessionInputKind@1")]
 #[serde(tag = "$tag", content = "$value")]
-pub enum SessionIngressKind {
+pub enum SessionInputKind {
     RunRequested {
         #[aos(air_type = "hash")]
         input_ref: String,
@@ -81,12 +81,12 @@ pub enum SessionIngressKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
-#[aos(schema = "aos.agent/SessionIngress@1")]
-pub struct SessionIngress {
+#[aos(schema = "aos.agent/SessionInput@1")]
+pub struct SessionInput {
     pub session_id: SessionId,
     #[aos(air_type = "time")]
     pub observed_at_ns: u64,
-    pub ingress: SessionIngressKind,
+    pub input: SessionInputKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
@@ -131,7 +131,7 @@ pub struct RunLifecycleChanged {
 #[aos(schema = "aos.agent/SessionWorkflowEvent@1")]
 #[serde(tag = "$tag", content = "$value")]
 pub enum SessionWorkflowEvent {
-    Ingress(SessionIngress),
+    Input(SessionInput),
     Receipt(EffectReceiptEnvelope),
     ReceiptRejected(EffectReceiptRejected),
     StreamFrame(EffectStreamFrameEnvelope),
@@ -150,7 +150,7 @@ impl SessionWorkflowEvent {
             Self::Receipt(value) => Some(value.into()),
             Self::ReceiptRejected(value) => Some(value.into()),
             Self::StreamFrame(value) => Some(value.into()),
-            Self::Ingress(_) | Self::Noop => None,
+            Self::Input(_) | Self::Noop => None,
         }
     }
 }

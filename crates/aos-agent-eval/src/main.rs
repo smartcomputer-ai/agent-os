@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use aos_agent::{
-    HostSessionStatus, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, local_coding_agent_tool_profile_for_provider,
-    local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
+    HostSessionStatus, SessionConfig, SessionId, SessionInput, SessionInputKind, SessionLifecycle,
+    SessionState, local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
+    local_coding_agent_tool_registry,
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
@@ -33,7 +33,7 @@ use tempfile::TempDir;
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const WORKFLOW_MODULE_NAME: &str = "aos.agent/SessionWorkflow_wasm@1";
-const DIRECT_EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
+const DIRECT_EVENT_SCHEMA: &str = "aos.agent/SessionInput@1";
 const EVAL_ASSETS_ROOT: &str = "crates/aos-agent-eval/fixtures/eval-world/air";
 const CASES_ROOT: &str = "crates/aos-agent-eval/cases";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
@@ -374,7 +374,7 @@ fn run_attempt(
             &mut invocation.host,
             &mut invocation.clock,
             &session_id,
-            SessionIngressKind::HostSessionUpdated {
+            SessionInputKind::HostSessionUpdated {
                 host_session_id: Some(host_session_id),
                 host_session_status: Some(HostSessionStatus::Ready),
             },
@@ -393,7 +393,7 @@ fn run_attempt(
         &mut invocation.host,
         &mut invocation.clock,
         &session_id,
-        SessionIngressKind::RunRequested {
+        SessionInputKind::RunRequested {
             input_ref: input_ref.as_str().to_string(),
             run_overrides: Some(SessionConfig {
                 provider: provider.provider_id.clone(),
@@ -568,13 +568,13 @@ fn send_session_event(
     host: &mut EvalHost,
     clock: &mut u64,
     session_id: &SessionId,
-    kind: SessionIngressKind,
+    kind: SessionInputKind,
 ) -> Result<()> {
     *clock = clock.saturating_add(1);
-    host.send_event(&SessionIngress {
+    host.send_event(&SessionInput {
         session_id: session_id.clone(),
         observed_at_ns: *clock,
-        ingress: kind,
+        input: kind,
     })
 }
 
@@ -610,7 +610,7 @@ fn install_tool_registry(
         host,
         clock,
         session_id,
-        SessionIngressKind::ToolRegistrySet {
+        SessionInputKind::ToolRegistrySet {
             registry,
             profiles: Some(profiles),
             default_profile: Some(default_profile.to_string()),

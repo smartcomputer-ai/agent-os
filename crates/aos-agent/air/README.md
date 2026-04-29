@@ -9,7 +9,7 @@ This directory holds reusable AIR assets for the workflow-native agent package.
 `aos-agent` is a core session/run SDK, not a preconfigured software-factory agent. The default
 session state has no tools, no tool profiles, and no host auto-open target. Embedding worlds choose
 the tool surface explicitly by installing a registry/profile through Rust helpers or
-`aos.agent/SessionIngress@1`.
+`aos.agent/SessionInput@1`.
 
 Built-in SDK bundles are optional:
 

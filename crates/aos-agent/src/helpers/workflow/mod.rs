@@ -1,6 +1,6 @@
 use super::{
     ContextError, ContextRequest, DefaultContextEngine, LlmStepContext, RequestLlm,
-    SessionEffectCommand, SessionReduceOutput, allocate_run_id, can_apply_host_command,
+    SessionEffectCommand, SessionWorkflowOutput, allocate_run_id, can_apply_host_command,
     pop_follow_up_if_ready, request_llm, transition_lifecycle,
 };
 use crate::contracts::{
@@ -8,7 +8,7 @@ use crate::contracts::{
     HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
     PendingBlobPutKind, PendingFollowUpTurn, QueuedRunStart, RunCause, RunConfig, RunFailure,
     RunInterrupt, RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry,
-    RunTraceEntryKind, RunTraceRef, RunTraceSummary, SessionConfig, SessionIngressKind,
+    RunTraceEntryKind, RunTraceRef, RunTraceSummary, SessionConfig, SessionInputKind,
     SessionLifecycle, SessionState, SessionStatus, SessionWorkflowEvent, ToolAvailabilityRule,
     ToolBatchPlan, ToolCallStatus, ToolOverrideScope, ToolSpec,
 };
@@ -35,8 +35,8 @@ use self::blob_effects::{
 };
 use self::types::pending_effect_lookup_err_to_session_err;
 pub use self::types::{
-    CompletedToolBatch, RunToolBatch, RunToolBatchResult, SessionReduceError, SessionRuntimeLimits,
-    StartedToolBatch, ToolBatchReceiptMatch,
+    CompletedToolBatch, RunToolBatch, RunToolBatchResult, SessionRuntimeLimits,
+    SessionWorkflowError, StartedToolBatch, ToolBatchReceiptMatch,
 };
 
 const TOOL_RESULT_BLOB_MAX_BYTES: usize = 8 * 1024;
@@ -130,8 +130,8 @@ fn summarize_trace(trace: &RunTrace) -> RunTraceSummary {
 pub fn run_tool_batch(
     state: &mut SessionState,
     request: RunToolBatch<'_>,
-    out: &mut SessionReduceOutput,
-) -> Result<RunToolBatchResult, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<RunToolBatchResult, SessionWorkflowError> {
     let started = tool_batch::run_tool_batch(state, request, out)?;
     let completed = tool_batch::take_completed_tool_batch(state);
     let completion = handle_completed_tool_batch(state, completed, out)?;
@@ -143,8 +143,8 @@ pub fn run_tool_batch(
 
 pub fn continue_tool_batch(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
-) -> Result<Option<CompletedToolBatch>, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<Option<CompletedToolBatch>, SessionWorkflowError> {
     let completion = tool_batch::advance_tool_batch(state, out)?;
     handle_completed_tool_batch(state, completion, out)
 }
@@ -152,8 +152,8 @@ pub fn continue_tool_batch(
 pub fn settle_tool_batch_receipt(
     state: &mut SessionState,
     envelope: &EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<ToolBatchReceiptMatch, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<ToolBatchReceiptMatch, SessionWorkflowError> {
     match tool_batch::settle_tool_batch_receipt(state, envelope, out)? {
         ToolBatchReceiptMatch::Unmatched => Ok(ToolBatchReceiptMatch::Unmatched),
         ToolBatchReceiptMatch::Matched { completion } => Ok(ToolBatchReceiptMatch::Matched {
@@ -164,10 +164,10 @@ pub fn settle_tool_batch_receipt(
 
 fn transition_to_waiting_input_if_running(
     state: &mut SessionState,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if matches!(state.lifecycle, SessionLifecycle::Running) {
         transition_lifecycle(state, SessionLifecycle::WaitingInput)
-            .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+            .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
     }
     if let Some(run) = state.current_run.as_mut()
         && matches!(run.lifecycle, RunLifecycle::Running)
@@ -181,7 +181,7 @@ fn transition_to_waiting_input_if_running(
 pub fn apply_session_workflow_event(
     state: &mut SessionState,
     event: &SessionWorkflowEvent,
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event_with_catalog_and_limits(
         state,
         event,
@@ -196,7 +196,7 @@ pub fn apply_session_workflow_event_with_catalog(
     event: &SessionWorkflowEvent,
     allowed_providers: &[&str],
     allowed_models: &[&str],
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event_with_catalog_and_limits(
         state,
         event,
@@ -212,17 +212,17 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
     allowed_providers: &[&str],
     allowed_models: &[&str],
     limits: SessionRuntimeLimits,
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     stamp_timestamps(state, event);
 
-    let mut out = SessionReduceOutput::default();
+    let mut out = SessionWorkflowOutput::default();
     match event {
-        SessionWorkflowEvent::Ingress(ingress) => {
+        SessionWorkflowEvent::Input(input) => {
             if state.session_id.0.is_empty() {
-                state.session_id = ingress.session_id.clone();
+                state.session_id = input.session_id.clone();
             }
-            match &ingress.ingress {
-                SessionIngressKind::RunRequested {
+            match &input.input {
+                SessionInputKind::RunRequested {
                     input_ref,
                     run_overrides,
                 } => {
@@ -235,7 +235,7 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     )?;
                     on_run_start_requested(state, &cause, run_overrides.as_ref(), &mut out)?;
                 }
-                SessionIngressKind::RunStartRequested {
+                SessionInputKind::RunStartRequested {
                     cause,
                     run_overrides,
                 } => {
@@ -247,7 +247,7 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     )?;
                     on_run_start_requested(state, cause, run_overrides.as_ref(), &mut out)?;
                 }
-                SessionIngressKind::FollowUpInputAppended {
+                SessionInputKind::FollowUpInputAppended {
                     input_ref,
                     run_overrides,
                 } => {
@@ -264,39 +264,39 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                         &mut out,
                     )?;
                 }
-                SessionIngressKind::RunSteerRequested { instruction_ref } => {
+                SessionInputKind::RunSteerRequested { instruction_ref } => {
                     on_run_steer_requested(state, instruction_ref)?;
                 }
-                SessionIngressKind::RunInterruptRequested { reason_ref } => {
+                SessionInputKind::RunInterruptRequested { reason_ref } => {
                     on_run_interrupt_requested(state, reason_ref.clone(), &mut out)?;
                 }
-                SessionIngressKind::SessionOpened { config } => {
+                SessionInputKind::SessionOpened { config } => {
                     on_session_opened(state, config.as_ref())?;
                 }
-                SessionIngressKind::SessionConfigUpdated { config } => {
+                SessionInputKind::SessionConfigUpdated { config } => {
                     state.session_config = config.clone();
                     let active = state.active_run_config.clone();
                     refresh_effective_tools(state, active.as_ref())?;
                 }
-                SessionIngressKind::SessionPaused => {
+                SessionInputKind::SessionPaused => {
                     transition_session_status(state, SessionStatus::Paused)?;
                 }
-                SessionIngressKind::SessionResumed => {
+                SessionInputKind::SessionResumed => {
                     transition_session_status(state, SessionStatus::Open)?;
                 }
-                SessionIngressKind::SessionArchived => {
+                SessionInputKind::SessionArchived => {
                     transition_session_status(state, SessionStatus::Archived)?;
                 }
-                SessionIngressKind::SessionExpired => {
+                SessionInputKind::SessionExpired => {
                     transition_session_status(state, SessionStatus::Expired)?;
                 }
-                SessionIngressKind::SessionClosed => {
+                SessionInputKind::SessionClosed => {
                     transition_session_status(state, SessionStatus::Closed)?;
                 }
-                SessionIngressKind::HostCommandReceived(command) => {
+                SessionInputKind::HostCommandReceived(command) => {
                     on_host_command(state, command, &mut out)?
                 }
-                SessionIngressKind::ToolRegistrySet {
+                SessionInputKind::ToolRegistrySet {
                     registry,
                     profiles,
                     default_profile,
@@ -306,10 +306,10 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     profiles.as_ref(),
                     default_profile.as_ref(),
                 )?,
-                SessionIngressKind::ToolProfileSelected { profile_id } => {
+                SessionInputKind::ToolProfileSelected { profile_id } => {
                     on_tool_profile_selected(state, profile_id)?
                 }
-                SessionIngressKind::ToolOverridesSet {
+                SessionInputKind::ToolOverridesSet {
                     scope,
                     enable,
                     disable,
@@ -321,16 +321,16 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     disable.as_deref(),
                     force.as_deref(),
                 )?,
-                SessionIngressKind::ContextObserved(observation) => {
+                SessionInputKind::ContextObserved(observation) => {
                     on_context_observed(state, observation);
                 }
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id,
                     host_session_status,
                 } => {
                     on_host_session_updated(state, host_session_id.as_ref(), *host_session_status)?
                 }
-                SessionIngressKind::RunCompleted => {
+                SessionInputKind::RunCompleted => {
                     finish_current_run(
                         state,
                         RunLifecycle::Completed,
@@ -342,11 +342,11 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                         }),
                     );
                     transition_lifecycle(state, SessionLifecycle::Completed)
-                        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
                     start_next_queued_run(state, &mut out)?;
                 }
-                SessionIngressKind::RunFailed { code, detail } => {
+                SessionInputKind::RunFailed { code, detail } => {
                     finish_current_run(
                         state,
                         RunLifecycle::Failed,
@@ -361,11 +361,11 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                         }),
                     );
                     transition_lifecycle(state, SessionLifecycle::Failed)
-                        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
                     start_next_queued_run(state, &mut out)?;
                 }
-                SessionIngressKind::RunCancelled { reason } => {
+                SessionInputKind::RunCancelled { reason } => {
                     finish_current_run(
                         state,
                         RunLifecycle::Cancelled,
@@ -377,11 +377,11 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                         }),
                     );
                     transition_lifecycle(state, SessionLifecycle::Cancelled)
-                        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
                     start_next_queued_run(state, &mut out)?;
                 }
-                SessionIngressKind::Noop => {}
+                SessionInputKind::Noop => {}
             }
         }
         SessionWorkflowEvent::Receipt(receipt) => on_receipt_envelope(state, receipt, &mut out)?,
@@ -395,7 +395,7 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
         SessionWorkflowEvent::Noop => {}
     }
 
-    trace_reduce_output(state, &out);
+    trace_workflow_output(state, &out);
     recompute_in_flight_effects(state);
     finish_interrupted_run_if_quiescent(state, &mut out)?;
     recompute_in_flight_effects(state);
@@ -406,7 +406,7 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
 pub fn apply_session_event(
     state: &mut SessionState,
     event: &SessionWorkflowEvent,
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event(state, event)
 }
 
@@ -415,7 +415,7 @@ pub fn apply_session_event_with_catalog(
     event: &SessionWorkflowEvent,
     allowed_providers: &[&str],
     allowed_models: &[&str],
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event_with_catalog(state, event, allowed_providers, allowed_models)
 }
 
@@ -425,7 +425,7 @@ pub fn apply_session_event_with_catalog_and_limits(
     allowed_providers: &[&str],
     allowed_models: &[&str],
     limits: SessionRuntimeLimits,
-) -> Result<SessionReduceOutput, SessionReduceError> {
+) -> Result<SessionWorkflowOutput, SessionWorkflowError> {
     apply_session_workflow_event_with_catalog_and_limits(
         state,
         event,
@@ -440,7 +440,7 @@ pub fn validate_run_request_catalog(
     run_overrides: Option<&SessionConfig>,
     allowed_providers: &[&str],
     allowed_models: &[&str],
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     let requested = select_run_config(&state.session_config, run_overrides);
     validate_run_catalog(&requested, allowed_providers, allowed_models)
 }
@@ -449,7 +449,7 @@ pub fn validate_run_catalog(
     config: &RunConfig,
     allowed_providers: &[&str],
     allowed_models: &[&str],
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     validate_run_config(config)?;
 
     if !allowed_providers.is_empty()
@@ -457,7 +457,7 @@ pub fn validate_run_catalog(
             .iter()
             .any(|value| config.provider.trim() == value.trim())
     {
-        return Err(SessionReduceError::UnknownProvider);
+        return Err(SessionWorkflowError::UnknownProvider);
     }
 
     if !allowed_models.is_empty()
@@ -465,7 +465,7 @@ pub fn validate_run_catalog(
             .iter()
             .any(|value| config.model.trim() == value.trim())
     {
-        return Err(SessionReduceError::UnknownModel);
+        return Err(SessionWorkflowError::UnknownModel);
     }
 
     Ok(())
@@ -474,7 +474,7 @@ pub fn validate_run_catalog(
 fn on_session_opened(
     state: &mut SessionState,
     config: Option<&SessionConfig>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if let Some(config) = config {
         state.session_config = config.clone();
     }
@@ -484,7 +484,7 @@ fn on_session_opened(
 fn transition_session_status(
     state: &mut SessionState,
     next: SessionStatus,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if state.status == next {
         return Ok(());
     }
@@ -494,7 +494,7 @@ fn transition_session_status(
             SessionStatus::Archived | SessionStatus::Expired | SessionStatus::Closed
         )
     {
-        return Err(SessionReduceError::RunAlreadyActive);
+        return Err(SessionWorkflowError::RunAlreadyActive);
     }
     state.status = next;
     Ok(())
@@ -504,23 +504,23 @@ fn on_run_start_requested(
     state: &mut SessionState,
     cause: &RunCause,
     run_overrides: Option<&SessionConfig>,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     if !state.status.accepts_new_runs() {
-        return Err(SessionReduceError::InvalidLifecycleTransition);
+        return Err(SessionWorkflowError::InvalidLifecycleTransition);
     }
     if state.active_run_id.is_some() {
-        return Err(SessionReduceError::RunAlreadyActive);
+        return Err(SessionWorkflowError::RunAlreadyActive);
     }
     if cause.input_refs.is_empty() {
-        return Err(SessionReduceError::EmptyMessageRefs);
+        return Err(SessionWorkflowError::EmptyMessageRefs);
     }
 
     let requested = select_run_config(&state.session_config, run_overrides);
     validate_run_config(&requested)?;
 
     transition_lifecycle(state, SessionLifecycle::Running)
-        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
 
     let run_id = allocate_run_id(state);
     state.active_run_id = Some(run_id.clone());
@@ -587,8 +587,8 @@ fn on_follow_up_input_appended(
     state: &mut SessionState,
     input_ref: &str,
     run_overrides: Option<&SessionConfig>,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     let queued = QueuedRunStart {
         cause: RunCause::direct_input(input_ref.into()),
         run_overrides: run_overrides.cloned(),
@@ -620,9 +620,9 @@ fn on_follow_up_input_appended(
 fn on_run_steer_requested(
     state: &mut SessionState,
     instruction_ref: &str,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if state.active_run_id.is_none() {
-        return Err(SessionReduceError::RunNotActive);
+        return Err(SessionWorkflowError::RunNotActive);
     }
     let refs = vec![trace_ref("instruction_ref", instruction_ref.to_string())];
     push_run_trace(
@@ -640,10 +640,10 @@ fn on_run_steer_requested(
 fn on_run_interrupt_requested(
     state: &mut SessionState,
     reason_ref: Option<String>,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     if state.active_run_id.is_none() {
-        return Err(SessionReduceError::RunNotActive);
+        return Err(SessionWorkflowError::RunNotActive);
     }
     let interrupt = RunInterrupt {
         reason_ref,
@@ -671,10 +671,10 @@ fn on_run_interrupt_requested(
 fn on_host_command(
     state: &mut SessionState,
     command: &crate::contracts::HostCommand,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     if !can_apply_host_command(state, &command.command) {
-        return Err(SessionReduceError::HostCommandRejected);
+        return Err(SessionWorkflowError::HostCommandRejected);
     }
 
     let mut metadata = BTreeMap::new();
@@ -693,16 +693,16 @@ fn on_host_command(
         HostCommandKind::Pause => {
             transition_session_status(state, SessionStatus::Paused)?;
             transition_lifecycle(state, SessionLifecycle::Paused)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
         }
         HostCommandKind::Resume => {
             transition_session_status(state, SessionStatus::Open)?;
             transition_lifecycle(state, SessionLifecycle::Running)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
         }
         HostCommandKind::Cancel { .. } => {
             transition_lifecycle(state, SessionLifecycle::Cancelling)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
             finish_current_run(
                 state,
                 RunLifecycle::Cancelled,
@@ -714,7 +714,7 @@ fn on_host_command(
                 }),
             );
             transition_lifecycle(state, SessionLifecycle::Cancelled)
-                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+                .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
             clear_active_run(state);
             start_next_queued_run(state, out)?;
         }
@@ -727,7 +727,7 @@ fn on_host_command(
             push_run_trace(
                 state,
                 RunTraceEntryKind::InterventionApplied,
-                "legacy text host command ignored; use ref-based session ingress",
+                "legacy text host command ignored; use ref-based session input",
                 Vec::new(),
                 metadata,
             );
@@ -742,22 +742,22 @@ fn validate_tool_registry_payload(
     registry: &BTreeMap<String, ToolSpec>,
     profiles: Option<&BTreeMap<String, Vec<String>>>,
     default_profile: Option<&String>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     crate::tools::registry::validate_tool_registry(registry)
-        .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
+        .map_err(|_| SessionWorkflowError::InvalidToolRegistry)?;
 
     if let Some(profiles) = profiles {
         for tool_ids in profiles.values() {
             for tool_id in tool_ids {
                 if !registry.contains_key(tool_id) {
-                    return Err(SessionReduceError::InvalidToolRegistry);
+                    return Err(SessionWorkflowError::InvalidToolRegistry);
                 }
             }
         }
         if let Some(profile) = default_profile
             && !profiles.contains_key(profile)
         {
-            return Err(SessionReduceError::InvalidToolRegistry);
+            return Err(SessionWorkflowError::InvalidToolRegistry);
         }
     }
     Ok(())
@@ -768,7 +768,7 @@ fn on_tool_registry_set(
     registry: &BTreeMap<String, ToolSpec>,
     profiles: Option<&BTreeMap<String, Vec<String>>>,
     default_profile: Option<&String>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     validate_tool_registry_payload(registry, profiles, default_profile)?;
     state.tool_registry = registry.clone();
     if let Some(profiles) = profiles {
@@ -785,9 +785,9 @@ fn on_tool_registry_set(
 fn on_tool_profile_selected(
     state: &mut SessionState,
     profile_id: &str,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if !state.tool_profiles.contains_key(profile_id) {
-        return Err(SessionReduceError::ToolProfileUnknown);
+        return Err(SessionWorkflowError::ToolProfileUnknown);
     }
     state.tool_profile = profile_id.into();
     let active = state.active_run_config.clone();
@@ -800,7 +800,7 @@ fn on_tool_overrides_set(
     enable: Option<&[String]>,
     disable: Option<&[String]>,
     force: Option<&[String]>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     validate_known_tool_names(state, enable)?;
     validate_known_tool_names(state, disable)?;
     validate_known_tool_names(state, force)?;
@@ -815,7 +815,7 @@ fn on_tool_overrides_set(
             let active = state
                 .active_run_config
                 .as_mut()
-                .ok_or(SessionReduceError::RunNotActive)?;
+                .ok_or(SessionWorkflowError::RunNotActive)?;
             active.tool_enable = enable.map(|items| items.to_vec());
             active.tool_disable = disable.map(|items| items.to_vec());
             active.tool_force = force.map(|items| items.to_vec());
@@ -830,7 +830,7 @@ fn on_host_session_updated(
     state: &mut SessionState,
     host_session_id: Option<&String>,
     host_session_status: Option<crate::contracts::HostSessionStatus>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     state.tool_runtime_context.host_session_id = host_session_id.cloned();
     state.tool_runtime_context.host_session_status = host_session_status;
 
@@ -873,8 +873,8 @@ fn on_context_observed(state: &mut SessionState, observation: &ContextObservatio
 fn handle_standalone_host_session_open_receipt(
     state: &mut SessionState,
     envelope: &EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<bool, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<bool, SessionWorkflowError> {
     if envelope.effect != "sys/host.session.open@1" {
         return Ok(false);
     }
@@ -906,8 +906,8 @@ fn handle_standalone_host_session_open_receipt(
 fn handle_llm_generate_receipt(
     state: &mut SessionState,
     envelope: &EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     if envelope.status != "ok" {
         fail_run(state)?;
         return Ok(());
@@ -976,8 +976,8 @@ fn rejected_as_error_envelope(rejected: &EffectReceiptRejected) -> EffectReceipt
 fn on_receipt_envelope(
     state: &mut SessionState,
     envelope: &EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     trace_receipt_envelope(state, envelope);
     if handle_pending_blob_get_receipt(state, envelope, out)?
         || handle_pending_blob_put_receipt(state, envelope, out)?
@@ -1013,8 +1013,8 @@ fn on_receipt_envelope(
 fn on_receipt_rejected(
     state: &mut SessionState,
     rejected: &EffectReceiptRejected,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     trace_receipt_rejected(state, rejected);
     let envelope = rejected_as_error_envelope(rejected);
     if handle_pending_blob_get_receipt(state, &envelope, out)?
@@ -1092,7 +1092,7 @@ fn sync_current_run_execution(state: &mut SessionState) {
     run.updated_at = state.updated_at;
 }
 
-fn fail_run(state: &mut SessionState) -> Result<(), SessionReduceError> {
+fn fail_run(state: &mut SessionState) -> Result<(), SessionWorkflowError> {
     finish_current_run(
         state,
         RunLifecycle::Failed,
@@ -1107,7 +1107,7 @@ fn fail_run(state: &mut SessionState) -> Result<(), SessionReduceError> {
         }),
     );
     transition_lifecycle(state, SessionLifecycle::Failed)
-        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
     clear_active_run(state);
     Ok(())
 }
@@ -1115,15 +1115,15 @@ fn fail_run(state: &mut SessionState) -> Result<(), SessionReduceError> {
 fn start_queued_run(
     state: &mut SessionState,
     queued: QueuedRunStart,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     on_run_start_requested(state, &queued.cause, queued.run_overrides.as_ref(), out)
 }
 
 fn start_next_queued_run(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     let Some(queued) = pop_follow_up_if_ready(state) else {
         return Ok(());
     };
@@ -1143,8 +1143,8 @@ fn has_open_runtime_work(state: &SessionState) -> bool {
 
 pub(super) fn finish_interrupted_run_if_quiescent(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     if state.run_interrupt.is_none() || has_open_runtime_work(state) {
         return Ok(());
     }
@@ -1163,7 +1163,7 @@ pub(super) fn finish_interrupted_run_if_quiescent(
         }),
     );
     transition_lifecycle(state, SessionLifecycle::Interrupted)
-        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+        .map_err(|_| SessionWorkflowError::InvalidLifecycleTransition)?;
     clear_active_run(state);
     start_next_queued_run(state, out)
 }
@@ -1171,8 +1171,8 @@ pub(super) fn finish_interrupted_run_if_quiescent(
 fn handle_completed_tool_batch(
     state: &mut SessionState,
     completion: Option<CompletedToolBatch>,
-    out: &mut SessionReduceOutput,
-) -> Result<Option<CompletedToolBatch>, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<Option<CompletedToolBatch>, SessionWorkflowError> {
     let Some(completion) = completion else {
         return Ok(None);
     };
@@ -1241,16 +1241,16 @@ fn build_tool_batch_follow_up_messages(completion: &CompletedToolBatch) -> Vec<s
 fn queue_llm_turn(
     state: &mut SessionState,
     message_refs: Vec<String>,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     state.queued_llm_message_refs = Some(message_refs);
     dispatch_queued_llm_turn(state, out)
 }
 
 fn dispatch_queued_llm_turn(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
     dispatch_queued_llm_turn_with_engine(
         state,
         out,
@@ -1264,10 +1264,10 @@ fn dispatch_queued_llm_turn(
 
 pub fn dispatch_queued_llm_turn_with_engine<E: ContextEngine>(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
+    out: &mut SessionWorkflowOutput,
     engine: &E,
     budget: ContextBudget,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if state.queued_llm_message_refs.is_none() {
         return Ok(());
     }
@@ -1370,12 +1370,12 @@ pub fn build_context_for_turn_with_engine<E: ContextEngine>(
     turn_refs: Vec<String>,
     engine: &E,
     budget: ContextBudget,
-) -> Result<Vec<String>, SessionReduceError> {
+) -> Result<Vec<String>, SessionWorkflowError> {
     let (run_id, prompt_refs, cause) = {
         let run = state
             .current_run
             .as_ref()
-            .ok_or(SessionReduceError::RunNotActive)?;
+            .ok_or(SessionWorkflowError::RunNotActive)?;
         (
             run.run_id.clone(),
             run.config.prompt_refs.clone().unwrap_or_default(),
@@ -1399,16 +1399,16 @@ pub fn build_context_for_turn_with_engine<E: ContextEngine>(
             transcript_refs: &transcript_refs,
             turn_refs: &turn_refs,
         })
-        .map_err(context_error_to_reduce_error)?;
+        .map_err(context_error_to_workflow_error)?;
     apply_context_plan_to_state(state, plan)
 }
 
 fn apply_context_plan_to_state(
     state: &mut SessionState,
     plan: ContextPlan,
-) -> Result<Vec<String>, SessionReduceError> {
+) -> Result<Vec<String>, SessionWorkflowError> {
     if plan.selected_refs.is_empty() {
-        return Err(SessionReduceError::EmptyMessageRefs);
+        return Err(SessionWorkflowError::EmptyMessageRefs);
     }
     let selected_refs = plan.selected_refs.clone();
     state.context_state.last_report = Some(plan.report.clone());
@@ -1445,9 +1445,9 @@ fn apply_context_plan_to_state(
     Ok(selected_refs)
 }
 
-fn context_error_to_reduce_error(err: ContextError) -> SessionReduceError {
+fn context_error_to_workflow_error(err: ContextError) -> SessionWorkflowError {
     match err {
-        ContextError::EmptySelection => SessionReduceError::EmptyMessageRefs,
+        ContextError::EmptySelection => SessionWorkflowError::EmptyMessageRefs,
     }
 }
 
@@ -1473,13 +1473,13 @@ fn should_auto_open_host_session(state: &SessionState) -> bool {
 
 fn emit_auto_host_session_open(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
-) -> Result<(), SessionReduceError> {
-    let config =
-        effective_host_session_open_config(state).ok_or(SessionReduceError::InvalidToolRegistry)?;
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    let config = effective_host_session_open_config(state)
+        .ok_or(SessionWorkflowError::InvalidToolRegistry)?;
     let params = host_session_open_params_from_config(config);
     let params_json =
-        serde_json::to_value(&params).map_err(|_| SessionReduceError::InvalidToolRegistry)?;
+        serde_json::to_value(&params).map_err(|_| SessionWorkflowError::InvalidToolRegistry)?;
     out.effects.push(SessionEffectCommand::ToolEffect {
         kind: ToolEffectOp::HostSessionOpen,
         params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
@@ -1560,7 +1560,7 @@ fn host_target_from_config(config: &HostTargetConfig) -> HostTarget {
 fn refresh_effective_tools(
     state: &mut SessionState,
     run_config: Option<&RunConfig>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     let configured_profile_id = run_config
         .and_then(|cfg| cfg.tool_profile.clone())
         .or_else(|| state.session_config.default_tool_profile.clone())
@@ -1576,7 +1576,7 @@ fn refresh_effective_tools(
         let base_profile = state
             .tool_profiles
             .get(profile_id)
-            .ok_or(SessionReduceError::ToolProfileUnknown)?;
+            .ok_or(SessionWorkflowError::ToolProfileUnknown)?;
         validate_known_tool_names(state, Some(base_profile.as_slice()))?;
         base_profile.as_slice()
     } else {
@@ -1637,7 +1637,7 @@ fn refresh_effective_tools(
     let mut profile_requires_host_session = false;
     for tool_id in ordered_names {
         let Some(spec) = state.tool_registry.get(&tool_id) else {
-            return Err(SessionReduceError::UnknownToolOverride);
+            return Err(SessionWorkflowError::UnknownToolOverride);
         };
         if spec
             .availability_rules
@@ -1689,11 +1689,11 @@ fn is_tool_available(spec: &ToolSpec, runtime: &crate::contracts::ToolRuntimeCon
 fn validate_known_tool_names(
     state: &SessionState,
     names: Option<&[String]>,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if let Some(names) = names {
         for tool_name in names {
             if !state.tool_registry.contains_key(tool_name) {
-                return Err(SessionReduceError::UnknownToolOverride);
+                return Err(SessionWorkflowError::UnknownToolOverride);
             }
         }
     }
@@ -1716,12 +1716,12 @@ fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfi
     }
 }
 
-fn validate_run_config(config: &RunConfig) -> Result<(), SessionReduceError> {
+fn validate_run_config(config: &RunConfig) -> Result<(), SessionWorkflowError> {
     if config.provider.trim().is_empty() {
-        return Err(SessionReduceError::MissingProvider);
+        return Err(SessionWorkflowError::MissingProvider);
     }
     if config.model.trim().is_empty() {
-        return Err(SessionReduceError::MissingModel);
+        return Err(SessionWorkflowError::MissingModel);
     }
     Ok(())
 }
@@ -1798,13 +1798,13 @@ fn clear_active_run(state: &mut SessionState) {
 fn enforce_runtime_limits(
     state: &SessionState,
     limits: SessionRuntimeLimits,
-) -> Result<(), SessionReduceError> {
+) -> Result<(), SessionWorkflowError> {
     if let Some(max) = limits.max_pending_effects {
         let total_pending = state.pending_effects.len()
             + state.pending_blob_gets.len()
             + state.pending_blob_puts.len();
         if total_pending as u64 > max {
-            return Err(SessionReduceError::TooManyPendingEffects);
+            return Err(SessionWorkflowError::TooManyPendingEffects);
         }
     }
     Ok(())
@@ -1812,7 +1812,7 @@ fn enforce_runtime_limits(
 
 fn stamp_timestamps(state: &mut SessionState, event: &SessionWorkflowEvent) {
     let ts = match event {
-        SessionWorkflowEvent::Ingress(ingress) => ingress.observed_at_ns,
+        SessionWorkflowEvent::Input(input) => input.observed_at_ns,
         SessionWorkflowEvent::Receipt(receipt) => receipt.emitted_at_seq,
         SessionWorkflowEvent::ReceiptRejected(rejected) => rejected.emitted_at_seq,
         SessionWorkflowEvent::StreamFrame(frame) => frame.emitted_at_seq,
@@ -1833,7 +1833,7 @@ fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
     aos_wasm_sdk::effect_params_hash(value).unwrap_or_default()
 }
 
-fn trace_reduce_output(state: &mut SessionState, out: &SessionReduceOutput) {
+fn trace_workflow_output(state: &mut SessionState, out: &SessionWorkflowOutput) {
     for effect in &out.effects {
         match effect {
             SessionEffectCommand::LlmGenerate { params, pending } => {
@@ -2007,7 +2007,7 @@ mod tests {
     use crate::contracts::{
         CauseRef, ContextInput, ContextInputKind, ContextInputScope, ContextPriority,
         ContextReport, ContextSelection, HostSessionOpenConfig, HostSessionStatus,
-        HostTargetConfig, RunCauseOrigin, RunId, SessionId, SessionIngress, ToolCallObserved,
+        HostTargetConfig, RunCauseOrigin, RunId, SessionId, SessionInput, ToolCallObserved,
         ToolOverrideScope, ToolProfileBuilder, ToolRegistryBuilder,
         local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
         local_coding_agent_tool_registry, tool_bundle_host_sandbox,
@@ -2031,11 +2031,11 @@ mod tests {
         out
     }
 
-    fn ingress(observed_at_ns: u64, ingress: SessionIngressKind) -> SessionWorkflowEvent {
-        SessionWorkflowEvent::Ingress(SessionIngress {
+    fn session_input(observed_at_ns: u64, input: SessionInputKind) -> SessionWorkflowEvent {
+        SessionWorkflowEvent::Input(SessionInput {
             session_id: SessionId("s-1".into()),
             observed_at_ns,
-            ingress,
+            input,
         })
     }
 
@@ -2089,9 +2089,9 @@ mod tests {
     }
 
     fn run_request_event(ts: u64) -> SessionWorkflowEvent {
-        ingress(
+        session_input(
             ts,
-            SessionIngressKind::RunRequested {
+            SessionInputKind::RunRequested {
                 input_ref: fake_hash('a'),
                 run_overrides: Some(SessionConfig {
                     provider: "openai".into(),
@@ -2270,9 +2270,9 @@ mod tests {
 
         let out = apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 1,
-                SessionIngressKind::RunRequested {
+                SessionInputKind::RunRequested {
                     input_ref: input_ref.clone(),
                     run_overrides: Some(SessionConfig {
                         provider: "openai".into(),
@@ -2364,8 +2364,11 @@ mod tests {
             Vec::new(),
             BTreeMap::new(),
         );
-        apply_session_workflow_event(&mut state, &ingress(2, SessionIngressKind::RunCompleted))
-            .expect("complete");
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(2, SessionInputKind::RunCompleted),
+        )
+        .expect("complete");
 
         let record = state.run_history.first().expect("run record");
         assert_eq!(record.trace_summary.entry_count, 2);
@@ -2414,15 +2417,15 @@ mod tests {
 
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 1,
-                SessionIngressKind::RunSteerRequested {
+                SessionInputKind::RunSteerRequested {
                     instruction_ref: steer_ref.clone(),
                 },
             ),
         )
         .expect("steer");
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         dispatch_queued_llm_turn(&mut state, &mut out).expect("dispatch");
 
         let message_refs = out
@@ -2458,9 +2461,9 @@ mod tests {
         let follow_up = fake_hash('b');
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 2,
-                SessionIngressKind::FollowUpInputAppended {
+                SessionInputKind::FollowUpInputAppended {
                     input_ref: follow_up.clone(),
                     run_overrides: Some(SessionConfig {
                         provider: "openai".into(),
@@ -2480,8 +2483,11 @@ mod tests {
         .expect("queue follow-up");
         assert_eq!(state.queued_follow_up_runs.len(), 1);
 
-        apply_session_workflow_event(&mut state, &ingress(3, SessionIngressKind::RunCompleted))
-            .expect("complete and start next");
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(3, SessionInputKind::RunCompleted),
+        )
+        .expect("complete and start next");
 
         assert_eq!(state.queued_follow_up_runs.len(), 0);
         assert_eq!(state.run_history.len(), 1);
@@ -2503,9 +2509,9 @@ mod tests {
 
         let out = apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 1,
-                SessionIngressKind::RunInterruptRequested {
+                SessionInputKind::RunInterruptRequested {
                     reason_ref: Some(reason_ref.clone()),
                 },
             ),
@@ -2642,7 +2648,7 @@ mod tests {
         state.transcript_message_refs = vec![transcript_ref.clone(), input_ref.clone()];
         state.queued_llm_message_refs = Some(vec![input_ref.clone()]);
 
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         dispatch_queued_llm_turn_with_engine(
             &mut state,
             &mut out,
@@ -2692,7 +2698,7 @@ mod tests {
 
         apply_session_workflow_event(
             &mut state,
-            &ingress(1, SessionIngressKind::SessionOpened { config: None }),
+            &session_input(1, SessionInputKind::SessionOpened { config: None }),
         )
         .expect("open session");
 
@@ -2710,15 +2716,18 @@ mod tests {
         apply_session_workflow_event(&mut state, &run_request_event(1)).expect("first run");
         assert_eq!(state.transcript_message_refs, vec![fake_hash('a')]);
         assert!(state.current_run.is_some());
-        apply_session_workflow_event(&mut state, &ingress(2, SessionIngressKind::RunCompleted))
-            .expect("complete first run");
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(2, SessionInputKind::RunCompleted),
+        )
+        .expect("complete first run");
 
         let second_input = fake_hash('b');
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 3,
-                SessionIngressKind::RunRequested {
+                SessionInputKind::RunRequested {
                     input_ref: second_input.clone(),
                     run_overrides: Some(SessionConfig {
                         provider: "openai".into(),
@@ -2757,9 +2766,9 @@ mod tests {
         apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 2,
-                SessionIngressKind::RunFailed {
+                SessionInputKind::RunFailed {
                     code: "boom".into(),
                     detail: "failed".into(),
                 },
@@ -2782,20 +2791,32 @@ mod tests {
         let mut state = SessionState::default();
         state.session_id = SessionId("s-1".into());
 
-        apply_session_workflow_event(&mut state, &ingress(1, SessionIngressKind::SessionPaused))
-            .expect("pause");
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(1, SessionInputKind::SessionPaused),
+        )
+        .expect("pause");
         assert_eq!(state.status, SessionStatus::Paused);
         assert!(state.current_run.is_none());
         assert!(apply_session_workflow_event(&mut state, &run_request_event(2)).is_err());
 
-        apply_session_workflow_event(&mut state, &ingress(3, SessionIngressKind::SessionResumed))
-            .expect("resume");
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(3, SessionInputKind::SessionResumed),
+        )
+        .expect("resume");
         apply_session_workflow_event(&mut state, &run_request_event(4)).expect("run");
-        apply_session_workflow_event(&mut state, &ingress(5, SessionIngressKind::RunCompleted))
-            .expect("complete");
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(5, SessionInputKind::RunCompleted),
+        )
+        .expect("complete");
 
-        apply_session_workflow_event(&mut state, &ingress(6, SessionIngressKind::SessionClosed))
-            .expect("close");
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(6, SessionInputKind::SessionClosed),
+        )
+        .expect("close");
         assert_eq!(state.status, SessionStatus::Closed);
         assert!(apply_session_workflow_event(&mut state, &run_request_event(7)).is_err());
     }
@@ -2809,9 +2830,9 @@ mod tests {
 
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 1,
-                SessionIngressKind::RunStartRequested {
+                SessionInputKind::RunStartRequested {
                     cause: RunCause {
                         kind: "example/work_item_ready".into(),
                         origin: RunCauseOrigin::DomainEvent {
@@ -2856,9 +2877,9 @@ mod tests {
         let mut state = local_coding_state();
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 1,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -2883,9 +2904,9 @@ mod tests {
         let mut state = local_coding_state();
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 1,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -2897,9 +2918,9 @@ mod tests {
         // Deny exec so it gets ignored even when host session is ready.
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 3,
-                SessionIngressKind::ToolOverridesSet {
+                SessionInputKind::ToolOverridesSet {
                     scope: ToolOverrideScope::Run,
                     enable: None,
                     disable: Some(vec!["host.exec".into()]),
@@ -2933,7 +2954,7 @@ mod tests {
             },
         ];
 
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         let params_hash = fake_hash('h');
         let started = run_tool_batch(
             &mut state,
@@ -2964,9 +2985,9 @@ mod tests {
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -2983,7 +3004,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!blob_put_hashes.is_empty(), "expected blob.put effects");
 
-        let mut last_out = SessionReduceOutput::default();
+        let mut last_out = SessionWorkflowOutput::default();
         for (idx, hash) in blob_put_hashes.iter().enumerate() {
             last_out = apply_session_workflow_event(
                 &mut state,
@@ -3017,9 +3038,9 @@ mod tests {
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -3113,9 +3134,9 @@ mod tests {
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -3134,7 +3155,7 @@ mod tests {
             !tool_def_put_hashes.is_empty(),
             "expected initial blob.put effects"
         );
-        let mut out2 = SessionReduceOutput::default();
+        let mut out2 = SessionWorkflowOutput::default();
         for (idx, hash) in tool_def_put_hashes.iter().enumerate() {
             out2 = apply_session_workflow_event(
                 &mut state,
@@ -3346,9 +3367,9 @@ mod tests {
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -3368,7 +3389,7 @@ mod tests {
             "expected initial blob.put effects"
         );
 
-        let mut out2 = SessionReduceOutput::default();
+        let mut out2 = SessionWorkflowOutput::default();
         for (idx, hash) in tool_def_put_hashes.iter().enumerate() {
             out2 = apply_session_workflow_event(
                 &mut state,
@@ -3483,9 +3504,9 @@ mod tests {
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -3517,7 +3538,7 @@ mod tests {
             provider_call_id: None,
         }];
         let params_hash = fake_hash('h');
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         let started = run_tool_batch(
             &mut state,
             RunToolBatch {
@@ -3718,7 +3739,7 @@ mod tests {
             },
         ];
         let params_hash = fake_hash('h');
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         let started = run_tool_batch(
             &mut state,
             RunToolBatch {
@@ -3755,9 +3776,9 @@ mod tests {
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
-            &ingress(
+            &session_input(
                 0,
-                SessionIngressKind::HostSessionUpdated {
+                SessionInputKind::HostSessionUpdated {
                     host_session_id: Some("hs_1".into()),
                     host_session_status: Some(HostSessionStatus::Ready),
                 },
@@ -3790,7 +3811,7 @@ mod tests {
             },
         ];
         let params_hash = fake_hash('h');
-        let mut out = SessionReduceOutput::default();
+        let mut out = SessionWorkflowOutput::default();
         run_tool_batch(
             &mut state,
             RunToolBatch {

@@ -92,7 +92,7 @@ Once Python fixtures cover the deterministic cases, `aos-agent-eval` can shrink 
 
 A deterministic scripted-LLM eval means:
 
-1. send session/run ingress,
+1. send session/run input,
 2. run the workflow until it emits `sys/llm.generate@1`,
 3. inspect the emitted LLM params,
 4. create a known LLM output blob or scripted output ref,

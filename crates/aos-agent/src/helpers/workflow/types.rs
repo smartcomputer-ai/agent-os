@@ -46,7 +46,7 @@ pub enum ToolBatchReceiptMatch {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionReduceError {
+pub enum SessionWorkflowError {
     InvalidLifecycleTransition,
     HostCommandRejected,
     ToolBatchAlreadyActive,
@@ -65,7 +65,7 @@ pub enum SessionReduceError {
     AmbiguousPendingToolEffect,
 }
 
-impl SessionReduceError {
+impl SessionWorkflowError {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::InvalidLifecycleTransition => "invalid lifecycle transition",
@@ -88,16 +88,16 @@ impl SessionReduceError {
     }
 }
 
-impl core::fmt::Display for SessionReduceError {
+impl core::fmt::Display for SessionWorkflowError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl core::error::Error for SessionReduceError {}
+impl core::error::Error for SessionWorkflowError {}
 
 pub(super) fn pending_effect_lookup_err_to_session_err(
     _err: PendingEffectLookupError,
-) -> SessionReduceError {
-    SessionReduceError::AmbiguousPendingToolEffect
+) -> SessionWorkflowError {
+    SessionWorkflowError::AmbiguousPendingToolEffect
 }

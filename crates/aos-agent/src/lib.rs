@@ -12,7 +12,7 @@
 //! declares the full host, workspace, introspect, blob, and LLM effect surface so it can host
 //! multiple agent shapes, but importing this crate or creating a default state does not grant any
 //! tool access. Tools become visible only through the registry/profile installed by the embedding
-//! world or by `aos.agent/SessionIngress@1` events.
+//! world or by `aos.agent/SessionInput@1` events.
 //!
 //! Host auto-open is also opt-in. A session or run must provide `HostSessionOpenConfig`; local and
 //! sandbox targets both flow through the same `sys/host.session.open@1` path.
@@ -42,7 +42,7 @@
 //! state.session_config.default_host_session_open = Some(local_host_config);
 //! ```
 //!
-//! Helper reducers/mappers remain available under `helpers` for internal/runtime use.
+//! Workflow helpers/mappers remain available under `helpers` for internal/runtime use.
 
 #![no_std]
 

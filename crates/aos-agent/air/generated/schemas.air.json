@@ -1552,11 +1552,11 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/SessionIngress@1",
+    "name": "aos.agent/SessionInput@1",
     "type": {
       "record": {
-        "ingress": {
-          "ref": "aos.agent/SessionIngressKind@1"
+        "input": {
+          "ref": "aos.agent/SessionInputKind@1"
         },
         "observed_at_ns": {
           "time": {}
@@ -1569,7 +1569,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/SessionIngressKind@1",
+    "name": "aos.agent/SessionInputKind@1",
     "type": {
       "variant": {
         "ContextObserved": {
@@ -2063,8 +2063,8 @@
     "name": "aos.agent/SessionWorkflowEvent@1",
     "type": {
       "variant": {
-        "Ingress": {
-          "ref": "aos.agent/SessionIngress@1"
+        "Input": {
+          "ref": "aos.agent/SessionInput@1"
         },
         "Noop": {
           "ref": "aos.agent/SessionNoop@1"

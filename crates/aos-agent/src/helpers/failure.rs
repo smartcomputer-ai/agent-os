@@ -1,4 +1,4 @@
-use crate::contracts::{FailureCode, SessionIngressKind, ToolCallStatus};
+use crate::contracts::{FailureCode, SessionInputKind, ToolCallStatus};
 use alloc::string::String;
 
 /// Retry owner for a given failure path. The contract is single-owner.
@@ -23,9 +23,9 @@ pub const fn retry_owner_for_failure(code: FailureCode) -> RetryOwner {
     }
 }
 
-/// Deterministic helper for `RunFailed` ingress payloads using canonical codes.
-pub fn run_failed_ingress(code: FailureCode, detail: impl Into<String>) -> SessionIngressKind {
-    SessionIngressKind::RunFailed {
+/// Deterministic helper for `RunFailed` input payloads using canonical codes.
+pub fn run_failed_input(code: FailureCode, detail: impl Into<String>) -> SessionInputKind {
+    SessionInputKind::RunFailed {
         code: code.as_str().into(),
         detail: detail.into(),
     }

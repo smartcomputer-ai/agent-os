@@ -5,11 +5,11 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use aos_agent::{
     CauseRef, EffectReceiptRejected, ReasoningEffort, RunCause, RunCauseOrigin, RunId,
-    SessionConfig, SessionId, SessionIngress, SessionIngressKind, SessionLifecycle,
+    SessionConfig, SessionId, SessionInput, SessionInputKind, SessionLifecycle,
     SessionLifecycleChanged, SessionNoop,
     helpers::{
         LocalSessionSpawnRequest, SessionHandoffRequest, SpawnOrHandoffSessionPlan,
-        SpawnOrHandoffSessionRequest, emit_session_ingresses, spawn_or_handoff_session,
+        SpawnOrHandoffSessionRequest, emit_session_inputs, spawn_or_handoff_session,
     },
     local_coding_agent_tool_registry,
 };
@@ -450,7 +450,7 @@ fn emit_session_bootstrap(
         SpawnOrHandoffSessionPlan::Handoff(plan) => plan,
         SpawnOrHandoffSessionPlan::OpenHostSession(_) => unreachable!(),
     };
-    emit_session_ingresses(ctx, &plan.ingresses);
+    emit_session_inputs(ctx, &plan.inputs);
     ctx.state.next_observed_at_ns = plan.next_observed_at_ns;
 
     Ok(())
@@ -526,12 +526,12 @@ fn request_run_completion(
     ctx.state.output_ref = changed.output_ref.clone();
     ctx.state.pending_stage = Some(PendingStage::AwaitRunCompletion);
     let observed_at_ns = next_observed_at_ns(&mut ctx.state);
-    emit_session_ingresses(
+    emit_session_inputs(
         ctx,
-        &[SessionIngress {
+        &[SessionInput {
             session_id: changed.session_id,
             observed_at_ns,
-            ingress: SessionIngressKind::RunCompleted,
+            input: SessionInputKind::RunCompleted,
         }],
     );
     Ok(())

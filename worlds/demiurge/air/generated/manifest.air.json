@@ -48,7 +48,7 @@
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/SessionIngress@1",
+        "name": "aos.agent/SessionInput@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
@@ -112,7 +112,7 @@
           "key_field": "session_id"
         },
         {
-          "event": "aos.agent/SessionIngress@1",
+          "event": "aos.agent/SessionInput@1",
           "workflow": "aos.agent/SessionWorkflow@1",
           "key_field": "session_id"
         }

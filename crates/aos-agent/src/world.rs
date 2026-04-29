@@ -7,7 +7,7 @@ use crate::{
     ReasoningEffort, RunCause, RunCauseOrigin, RunConfig, RunFailure, RunId, RunInterrupt,
     RunLifecycle, RunLifecycleChanged, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry,
     RunTraceEntryKind, RunTraceRef, RunTraceSummary, SessionConfig, SessionContextState, SessionId,
-    SessionIngress, SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, SessionNoop,
+    SessionInput, SessionInputKind, SessionLifecycle, SessionLifecycleChanged, SessionNoop,
     SessionState, SessionStatus, SessionStatusChanged, SessionWorkflow, SessionWorkflowEvent,
     SharedPendingBlobGet, SharedPendingBlobPut, ToolAvailabilityRule, ToolBatchId, ToolBatchPlan,
     ToolCallLlmResult, ToolCallObserved, ToolCallStatus, ToolExecutionPlan, ToolExecutor,
@@ -74,8 +74,8 @@ aos_wasm_sdk::aos_air_world! {
             RunState,
             RunRecord,
             HostCommand,
-            SessionIngressKind,
-            SessionIngress,
+            SessionInputKind,
+            SessionInput,
             SessionLifecycleChanged,
             SessionStatusChanged,
             RunLifecycleChanged,
@@ -93,7 +93,7 @@ aos_wasm_sdk::aos_air_world! {
         workflows: [SessionWorkflow],
         routing: [
             {
-                event_schema: SessionIngress,
+                event_schema: SessionInput,
                 workflow: SessionWorkflow,
                 key_field: "session_id",
             },
