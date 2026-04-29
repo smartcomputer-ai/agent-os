@@ -35,7 +35,10 @@ pub enum RunLifecycle {
 
 impl RunLifecycle {
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted
+        )
     }
 }
 
@@ -52,10 +55,14 @@ pub enum SessionLifecycle {
     Completed,
     Failed,
     Cancelled,
+    Interrupted,
 }
 
 impl SessionLifecycle {
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted
+        )
     }
 }

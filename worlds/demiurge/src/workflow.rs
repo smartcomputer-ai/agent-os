@@ -500,6 +500,14 @@ fn on_session_lifecycle_changed(
             changed.run_id,
             changed.output_ref,
         ),
+        SessionLifecycle::Interrupted => finish_task(
+            ctx,
+            changed.observed_at_ns,
+            TaskStatus::Cancelled,
+            None,
+            changed.run_id,
+            changed.output_ref,
+        ),
         SessionLifecycle::Idle | SessionLifecycle::Paused | SessionLifecycle::Cancelling => Ok(()),
     }
 }

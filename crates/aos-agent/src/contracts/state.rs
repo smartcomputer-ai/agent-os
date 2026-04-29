@@ -168,6 +168,26 @@ pub struct RunOutcome {
     pub output_ref: Option<String>,
     pub failure: Option<RunFailure>,
     pub cancelled_reason: Option<String>,
+    #[aos(air_type = "hash")]
+    pub interrupted_reason_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/QueuedRunStart@1")]
+pub struct QueuedRunStart {
+    pub cause: RunCause,
+    pub run_overrides: Option<SessionConfig>,
+    #[aos(air_type = "time")]
+    pub queued_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/RunInterrupt@1")]
+pub struct RunInterrupt {
+    #[aos(air_type = "hash")]
+    pub reason_ref: Option<String>,
+    #[aos(air_type = "time")]
+    pub requested_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
@@ -181,6 +201,9 @@ pub struct RunState {
     pub input_refs: Vec<String>,
     pub context_plan: Option<ContextPlan>,
     pub trace: RunTrace,
+    #[aos(air_type = "hash")]
+    pub pending_steer_refs: Vec<String>,
+    pub interrupt: Option<RunInterrupt>,
     pub active_tool_batch: Option<ActiveToolBatch>,
     #[aos(map_key_air_type = "hash", schema_ref = PendingEffect)]
     pub pending_effects: PendingEffects,
@@ -255,8 +278,10 @@ pub struct SessionState {
     pub effective_tools: EffectiveToolSet,
     #[aos(air_type = "hash")]
     pub last_tool_plan_hash: Option<String>,
-    pub pending_steer: Vec<String>,
-    pub pending_follow_up: Vec<String>,
+    #[aos(air_type = "hash")]
+    pub pending_steer_refs: Vec<String>,
+    pub queued_follow_up_runs: Vec<QueuedRunStart>,
+    pub run_interrupt: Option<RunInterrupt>,
     #[aos(air_type = "time")]
     pub created_at: u64,
     #[aos(air_type = "time")]
@@ -293,8 +318,9 @@ impl Default for SessionState {
             tool_runtime_context: ToolRuntimeContext::default(),
             effective_tools: EffectiveToolSet::default(),
             last_tool_plan_hash: None,
-            pending_steer: Vec::new(),
-            pending_follow_up: Vec::new(),
+            pending_steer_refs: Vec::new(),
+            queued_follow_up_runs: Vec::new(),
+            run_interrupt: None,
             created_at: 0,
             updated_at: 0,
         }

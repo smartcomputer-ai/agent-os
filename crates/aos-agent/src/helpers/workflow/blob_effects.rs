@@ -16,8 +16,8 @@ use crate::helpers::{SessionEffectCommand, SessionReduceOutput};
 use super::tool_batch::{fail_tool_call, set_tool_call_status};
 use super::{
     RunToolBatch, SessionReduceError, TOOL_RESULT_BLOB_MAX_BYTES, continue_tool_batch,
-    dispatch_queued_llm_turn, fail_run, push_run_trace, queue_llm_turn, run_tool_batch, trace_ref,
-    transition_to_waiting_input_if_running,
+    dispatch_queued_llm_turn, fail_run, finish_interrupted_run_if_quiescent, push_run_trace,
+    queue_llm_turn, run_tool_batch, trace_ref, transition_to_waiting_input_if_running,
 };
 use alloc::collections::BTreeMap;
 
@@ -219,6 +219,10 @@ fn on_llm_output_blob(
             return Ok(true);
         }
     };
+    if state.run_interrupt.is_some() {
+        finish_interrupted_run_if_quiescent(state, out)?;
+        return Ok(true);
+    }
     if let Some(tool_calls_ref) = output.tool_calls_ref {
         enqueue_blob_get(state, tool_calls_ref, PendingBlobGetKind::LlmToolCalls, out)?;
     } else {

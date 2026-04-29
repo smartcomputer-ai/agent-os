@@ -1,16 +1,16 @@
 use super::{
     ContextError, ContextRequest, DefaultContextEngine, LlmStepContext, RequestLlm,
     SessionEffectCommand, SessionReduceOutput, allocate_run_id, can_apply_host_command,
-    enqueue_host_text, pop_follow_up_if_ready, request_llm, transition_lifecycle,
+    pop_follow_up_if_ready, request_llm, transition_lifecycle,
 };
 use crate::contracts::{
     ContextBudget, ContextObservation, ContextPlan, EffectiveTool, EffectiveToolSet,
     HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
-    PendingBlobPutKind, PendingFollowUpTurn, RunCause, RunConfig, RunFailure, RunLifecycle,
-    RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry, RunTraceEntryKind, RunTraceRef,
-    RunTraceSummary, SessionConfig, SessionIngressKind, SessionLifecycle, SessionState,
-    SessionStatus, SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallStatus,
-    ToolOverrideScope, ToolSpec,
+    PendingBlobPutKind, PendingFollowUpTurn, QueuedRunStart, RunCause, RunConfig, RunFailure,
+    RunInterrupt, RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry,
+    RunTraceEntryKind, RunTraceRef, RunTraceSummary, SessionConfig, SessionIngressKind,
+    SessionLifecycle, SessionState, SessionStatus, SessionWorkflowEvent, ToolAvailabilityRule,
+    ToolBatchPlan, ToolCallStatus, ToolOverrideScope, ToolSpec,
 };
 use crate::helpers::ContextEngine;
 use crate::tools::{ToolEffectOp, map_tool_receipt_to_llm_result};
@@ -247,6 +247,29 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     )?;
                     on_run_start_requested(state, cause, run_overrides.as_ref(), &mut out)?;
                 }
+                SessionIngressKind::FollowUpInputAppended {
+                    input_ref,
+                    run_overrides,
+                } => {
+                    validate_run_request_catalog(
+                        state,
+                        run_overrides.as_ref(),
+                        allowed_providers,
+                        allowed_models,
+                    )?;
+                    on_follow_up_input_appended(
+                        state,
+                        input_ref,
+                        run_overrides.as_ref(),
+                        &mut out,
+                    )?;
+                }
+                SessionIngressKind::RunSteerRequested { instruction_ref } => {
+                    on_run_steer_requested(state, instruction_ref)?;
+                }
+                SessionIngressKind::RunInterruptRequested { reason_ref } => {
+                    on_run_interrupt_requested(state, reason_ref.clone(), &mut out)?;
+                }
                 SessionIngressKind::SessionOpened { config } => {
                     on_session_opened(state, config.as_ref())?;
                 }
@@ -271,7 +294,7 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     transition_session_status(state, SessionStatus::Closed)?;
                 }
                 SessionIngressKind::HostCommandReceived(command) => {
-                    on_host_command(state, command)?
+                    on_host_command(state, command, &mut out)?
                 }
                 SessionIngressKind::ToolRegistrySet {
                     registry,
@@ -315,11 +338,13 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                             output_ref: state.last_output_ref.clone(),
                             failure: None,
                             cancelled_reason: None,
+                            interrupted_reason_ref: None,
                         }),
                     );
                     transition_lifecycle(state, SessionLifecycle::Completed)
                         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
+                    start_next_queued_run(state, &mut out)?;
                 }
                 SessionIngressKind::RunFailed { code, detail } => {
                     finish_current_run(
@@ -332,11 +357,13 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                                 detail: detail.clone(),
                             }),
                             cancelled_reason: None,
+                            interrupted_reason_ref: None,
                         }),
                     );
                     transition_lifecycle(state, SessionLifecycle::Failed)
                         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
+                    start_next_queued_run(state, &mut out)?;
                 }
                 SessionIngressKind::RunCancelled { reason } => {
                     finish_current_run(
@@ -346,11 +373,13 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                             output_ref: state.last_output_ref.clone(),
                             failure: None,
                             cancelled_reason: reason.clone(),
+                            interrupted_reason_ref: None,
                         }),
                     );
                     transition_lifecycle(state, SessionLifecycle::Cancelled)
                         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
+                    start_next_queued_run(state, &mut out)?;
                 }
                 SessionIngressKind::Noop => {}
             }
@@ -367,6 +396,8 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
     }
 
     trace_reduce_output(state, &out);
+    recompute_in_flight_effects(state);
+    finish_interrupted_run_if_quiescent(state, &mut out)?;
     recompute_in_flight_effects(state);
     enforce_runtime_limits(state, limits)?;
     Ok(out)
@@ -501,6 +532,8 @@ fn on_run_start_requested(
         config: requested.clone(),
         input_refs: cause.input_refs.clone(),
         context_plan: None,
+        pending_steer_refs: Vec::new(),
+        interrupt: None,
         active_tool_batch: None,
         pending_effects: aos_wasm_sdk::PendingEffects::new(),
         pending_blob_gets: aos_wasm_sdk::SharedBlobGets::new(),
@@ -538,6 +571,8 @@ fn on_run_start_requested(
     state.pending_blob_puts.clear();
     state.pending_follow_up_turn = None;
     state.queued_llm_message_refs = None;
+    state.pending_steer_refs.clear();
+    state.run_interrupt = None;
     state.last_output_ref = None;
     state.tool_refs_materialized = false;
 
@@ -548,9 +583,95 @@ fn on_run_start_requested(
     queue_llm_turn(state, state.transcript_message_refs.clone(), out)
 }
 
+fn on_follow_up_input_appended(
+    state: &mut SessionState,
+    input_ref: &str,
+    run_overrides: Option<&SessionConfig>,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    let queued = QueuedRunStart {
+        cause: RunCause::direct_input(input_ref.into()),
+        run_overrides: run_overrides.cloned(),
+        queued_at: state.updated_at,
+    };
+    if state.active_run_id.is_none() {
+        return start_queued_run(state, queued, out);
+    }
+
+    let mut refs = queued
+        .cause
+        .input_refs
+        .iter()
+        .cloned()
+        .map(|value| trace_ref("input_ref", value))
+        .collect::<Vec<_>>();
+    refs.push(trace_ref("queue", "follow_up"));
+    push_run_trace(
+        state,
+        RunTraceEntryKind::InterventionRequested,
+        "follow-up input queued",
+        refs,
+        BTreeMap::new(),
+    );
+    state.queued_follow_up_runs.push(queued);
+    Ok(())
+}
+
+fn on_run_steer_requested(
+    state: &mut SessionState,
+    instruction_ref: &str,
+) -> Result<(), SessionReduceError> {
+    if state.active_run_id.is_none() {
+        return Err(SessionReduceError::RunNotActive);
+    }
+    let refs = vec![trace_ref("instruction_ref", instruction_ref.to_string())];
+    push_run_trace(
+        state,
+        RunTraceEntryKind::InterventionRequested,
+        "steer instruction queued for next LLM turn",
+        refs,
+        BTreeMap::new(),
+    );
+    state.pending_steer_refs.push(instruction_ref.into());
+    sync_current_run_execution(state);
+    Ok(())
+}
+
+fn on_run_interrupt_requested(
+    state: &mut SessionState,
+    reason_ref: Option<String>,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    if state.active_run_id.is_none() {
+        return Err(SessionReduceError::RunNotActive);
+    }
+    let interrupt = RunInterrupt {
+        reason_ref,
+        requested_at: state.updated_at,
+    };
+    let refs = interrupt
+        .reason_ref
+        .iter()
+        .cloned()
+        .map(|value| trace_ref("reason_ref", value))
+        .collect::<Vec<_>>();
+    push_run_trace(
+        state,
+        RunTraceEntryKind::InterventionRequested,
+        "run interrupt requested",
+        refs,
+        BTreeMap::new(),
+    );
+    state.run_interrupt = Some(interrupt);
+    state.queued_llm_message_refs = None;
+    sync_current_run_execution(state);
+    finish_interrupted_run_if_quiescent(state, out)
+}
+
 fn on_host_command(
     state: &mut SessionState,
     command: &crate::contracts::HostCommand,
+    out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
     if !can_apply_host_command(state, &command.command) {
         return Err(SessionReduceError::HostCommandRejected);
@@ -567,8 +688,6 @@ fn on_host_command(
         Vec::new(),
         metadata,
     );
-
-    enqueue_host_text(state, &command.command);
 
     match &command.command {
         HostCommandKind::Pause => {
@@ -591,17 +710,29 @@ fn on_host_command(
                     output_ref: state.last_output_ref.clone(),
                     failure: None,
                     cancelled_reason: Some("host command cancel".into()),
+                    interrupted_reason_ref: None,
                 }),
             );
             transition_lifecycle(state, SessionLifecycle::Cancelled)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
             clear_active_run(state);
+            start_next_queued_run(state, out)?;
         }
-        HostCommandKind::Steer { .. }
-        | HostCommandKind::FollowUp { .. }
-        | HostCommandKind::Noop => {
-            let _ = pop_follow_up_if_ready(state);
+        HostCommandKind::Steer { .. } | HostCommandKind::FollowUp { .. } => {
+            let mut metadata = BTreeMap::new();
+            metadata.insert(
+                "legacy_text_command".into(),
+                "unsupported_ref_required".into(),
+            );
+            push_run_trace(
+                state,
+                RunTraceEntryKind::InterventionApplied,
+                "legacy text host command ignored; use ref-based session ingress",
+                Vec::new(),
+                metadata,
+            );
         }
+        HostCommandKind::Noop => {}
     }
 
     Ok(())
@@ -953,6 +1084,8 @@ fn sync_current_run_execution(state: &mut SessionState) {
     run.pending_blob_puts = state.pending_blob_puts.clone();
     run.pending_follow_up_turn = state.pending_follow_up_turn.clone();
     run.queued_llm_message_refs = state.queued_llm_message_refs.clone();
+    run.pending_steer_refs = state.pending_steer_refs.clone();
+    run.interrupt = state.run_interrupt.clone();
     run.last_output_ref = state.last_output_ref.clone();
     run.tool_refs_materialized = state.tool_refs_materialized;
     run.in_flight_effects = state.in_flight_effects;
@@ -970,12 +1103,69 @@ fn fail_run(state: &mut SessionState) -> Result<(), SessionReduceError> {
                 detail: "run failed while handling effect receipt".into(),
             }),
             cancelled_reason: None,
+            interrupted_reason_ref: None,
         }),
     );
     transition_lifecycle(state, SessionLifecycle::Failed)
         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
     clear_active_run(state);
     Ok(())
+}
+
+fn start_queued_run(
+    state: &mut SessionState,
+    queued: QueuedRunStart,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    on_run_start_requested(state, &queued.cause, queued.run_overrides.as_ref(), out)
+}
+
+fn start_next_queued_run(
+    state: &mut SessionState,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    let Some(queued) = pop_follow_up_if_ready(state) else {
+        return Ok(());
+    };
+    start_queued_run(state, queued, out)
+}
+
+fn has_open_runtime_work(state: &SessionState) -> bool {
+    !state.pending_effects.is_empty()
+        || !state.pending_blob_gets.is_empty()
+        || !state.pending_blob_puts.is_empty()
+        || state.pending_follow_up_turn.is_some()
+        || state
+            .active_tool_batch
+            .as_ref()
+            .is_some_and(|batch| !batch.is_settled())
+}
+
+pub(super) fn finish_interrupted_run_if_quiescent(
+    state: &mut SessionState,
+    out: &mut SessionReduceOutput,
+) -> Result<(), SessionReduceError> {
+    if state.run_interrupt.is_none() || has_open_runtime_work(state) {
+        return Ok(());
+    }
+    let reason_ref = state
+        .run_interrupt
+        .as_ref()
+        .and_then(|interrupt| interrupt.reason_ref.clone());
+    finish_current_run(
+        state,
+        RunLifecycle::Interrupted,
+        Some(RunOutcome {
+            output_ref: state.last_output_ref.clone(),
+            failure: None,
+            cancelled_reason: None,
+            interrupted_reason_ref: reason_ref,
+        }),
+    );
+    transition_lifecycle(state, SessionLifecycle::Interrupted)
+        .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+    clear_active_run(state);
+    start_next_queued_run(state, out)
 }
 
 fn handle_completed_tool_batch(
@@ -1081,6 +1271,9 @@ pub fn dispatch_queued_llm_turn_with_engine<E: ContextEngine>(
     if state.queued_llm_message_refs.is_none() {
         return Ok(());
     }
+    if state.run_interrupt.is_some() {
+        return Ok(());
+    }
     if !state.pending_effects.is_empty()
         || !state.pending_blob_gets.is_empty()
         || !state.pending_blob_puts.is_empty()
@@ -1116,9 +1309,13 @@ pub fn dispatch_queued_llm_turn_with_engine<E: ContextEngine>(
         state.tool_refs_materialized = true;
     }
 
-    let Some(message_refs) = state.queued_llm_message_refs.take() else {
+    let Some(mut message_refs) = state.queued_llm_message_refs.take() else {
         return Ok(());
     };
+    let steer_refs = state.pending_steer_refs.clone();
+    if !steer_refs.is_empty() {
+        message_refs.extend(steer_refs.iter().cloned());
+    }
     let run_seq = state
         .active_run_id
         .as_ref()
@@ -1149,6 +1346,22 @@ pub fn dispatch_queued_llm_turn_with_engine<E: ContextEngine>(
             },
         },
     )?;
+    if !steer_refs.is_empty() {
+        let refs = steer_refs
+            .iter()
+            .cloned()
+            .map(|value| trace_ref("instruction_ref", value))
+            .collect::<Vec<_>>();
+        push_run_trace(
+            state,
+            RunTraceEntryKind::InterventionApplied,
+            "steer instruction injected into LLM turn",
+            refs,
+            BTreeMap::new(),
+        );
+        state.pending_steer_refs.clear();
+        sync_current_run_execution(state);
+    }
     Ok(())
 }
 
@@ -1539,6 +1752,12 @@ fn finish_current_run(
     {
         metadata.insert("cancelled_reason".into(), reason.clone());
     }
+    if let Some(reason_ref) = outcome
+        .as_ref()
+        .and_then(|value| value.interrupted_reason_ref.as_ref())
+    {
+        refs.push(trace_ref("interrupted_reason_ref", reason_ref.clone()));
+    }
     push_trace_entry(
         &mut run.trace,
         state.updated_at,
@@ -1570,6 +1789,8 @@ fn clear_active_run(state: &mut SessionState) {
     state.pending_blob_puts.clear();
     state.pending_follow_up_turn = None;
     state.queued_llm_message_refs = None;
+    state.pending_steer_refs.clear();
+    state.run_interrupt = None;
     state.tool_refs_materialized = false;
     state.in_flight_effects = 0;
 }
@@ -1987,6 +2208,7 @@ mod tests {
 
         let mut state = SessionState::default();
         state.session_id = SessionId("s-1".into());
+        state.lifecycle = SessionLifecycle::Running;
         state.tool_registry = registry;
         state.tool_profiles.insert("sandbox".into(), profile);
         state.tool_profile = "sandbox".into();
@@ -2152,6 +2374,155 @@ mod tests {
             record.trace_summary.last_kind,
             Some(RunTraceEntryKind::RunFinished)
         ));
+    }
+
+    fn queued_llm_state(input_ref: String) -> SessionState {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        let run_id = RunId {
+            session_id: state.session_id.clone(),
+            run_seq: 1,
+        };
+        let config = RunConfig {
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            max_tokens: Some(512),
+            ..RunConfig::default()
+        };
+        state.active_run_id = Some(run_id.clone());
+        state.active_run_config = Some(config.clone());
+        state.lifecycle = SessionLifecycle::Running;
+        state.current_run = Some(RunState {
+            run_id,
+            lifecycle: RunLifecycle::Running,
+            cause: RunCause::direct_input(input_ref.clone()),
+            config,
+            input_refs: vec![input_ref.clone()],
+            queued_llm_message_refs: Some(vec![input_ref.clone()]),
+            ..RunState::default()
+        });
+        state.transcript_message_refs = vec![input_ref.clone()];
+        state.queued_llm_message_refs = Some(vec![input_ref]);
+        state
+    }
+
+    #[test]
+    fn steer_ref_is_injected_into_next_llm_turn() {
+        let input_ref = fake_hash('a');
+        let steer_ref = fake_hash('b');
+        let mut state = queued_llm_state(input_ref.clone());
+
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                1,
+                SessionIngressKind::RunSteerRequested {
+                    instruction_ref: steer_ref.clone(),
+                },
+            ),
+        )
+        .expect("steer");
+        let mut out = SessionReduceOutput::default();
+        dispatch_queued_llm_turn(&mut state, &mut out).expect("dispatch");
+
+        let message_refs = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { params, .. } => Some(
+                    params
+                        .message_refs
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .expect("llm params");
+        assert_eq!(message_refs, vec![input_ref, steer_ref]);
+        assert!(state.pending_steer_refs.is_empty());
+        assert!(state.current_run.as_ref().is_some_and(|run| {
+            run.trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::InterventionApplied))
+        }));
+    }
+
+    #[test]
+    fn follow_up_input_queues_and_starts_after_current_run() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let follow_up = fake_hash('b');
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                2,
+                SessionIngressKind::FollowUpInputAppended {
+                    input_ref: follow_up.clone(),
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: None,
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )
+        .expect("queue follow-up");
+        assert_eq!(state.queued_follow_up_runs.len(), 1);
+
+        apply_session_workflow_event(&mut state, &ingress(3, SessionIngressKind::RunCompleted))
+            .expect("complete and start next");
+
+        assert_eq!(state.queued_follow_up_runs.len(), 0);
+        assert_eq!(state.run_history.len(), 1);
+        assert_eq!(
+            state.current_run.as_ref().map(|run| run.run_id.run_seq),
+            Some(2)
+        );
+        assert_eq!(
+            state.transcript_message_refs,
+            vec![fake_hash('a'), follow_up]
+        );
+    }
+
+    #[test]
+    fn interrupt_blocks_queued_llm_and_finishes_when_quiescent() {
+        let input_ref = fake_hash('a');
+        let reason_ref = fake_hash('b');
+        let mut state = queued_llm_state(input_ref);
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                1,
+                SessionIngressKind::RunInterruptRequested {
+                    reason_ref: Some(reason_ref.clone()),
+                },
+            ),
+        )
+        .expect("interrupt");
+
+        assert!(out.effects.is_empty());
+        assert!(state.current_run.is_none());
+        let record = state.run_history.first().expect("run record");
+        assert_eq!(record.lifecycle, RunLifecycle::Interrupted);
+        assert_eq!(
+            record
+                .outcome
+                .as_ref()
+                .and_then(|outcome| outcome.interrupted_reason_ref.as_ref()),
+            Some(&reason_ref)
+        );
     }
 
     struct RepoBootstrapFirstEngine;

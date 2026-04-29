@@ -1,32 +1,29 @@
-use crate::contracts::{HostCommandKind, SessionLifecycle, SessionState};
+use crate::contracts::{QueuedRunStart, SessionLifecycle, SessionState};
 use alloc::string::String;
 
-pub fn enqueue_host_text(state: &mut SessionState, command: &HostCommandKind) {
-    match command {
-        HostCommandKind::Steer { text } => state.pending_steer.push(text.clone()),
-        HostCommandKind::FollowUp { text } => state.pending_follow_up.push(text.clone()),
-        _ => {}
-    }
-}
-
-pub fn pop_pending_steer(state: &mut SessionState) -> Option<String> {
-    if state.pending_steer.is_empty() {
+pub fn pop_pending_steer_ref(state: &mut SessionState) -> Option<String> {
+    if state.pending_steer_refs.is_empty() {
         return None;
     }
-    Some(state.pending_steer.remove(0))
+    Some(state.pending_steer_refs.remove(0))
 }
 
-pub fn pop_follow_up_if_ready(state: &mut SessionState) -> Option<String> {
+pub fn pop_follow_up_if_ready(state: &mut SessionState) -> Option<QueuedRunStart> {
     if !matches!(
         state.lifecycle,
-        SessionLifecycle::Idle | SessionLifecycle::WaitingInput
+        SessionLifecycle::Idle
+            | SessionLifecycle::WaitingInput
+            | SessionLifecycle::Completed
+            | SessionLifecycle::Failed
+            | SessionLifecycle::Cancelled
+            | SessionLifecycle::Interrupted
     ) {
         return None;
     }
 
-    if state.pending_follow_up.is_empty() {
+    if state.queued_follow_up_runs.is_empty() {
         return None;
     }
 
-    Some(state.pending_follow_up.remove(0))
+    Some(state.queued_follow_up_runs.remove(0))
 }

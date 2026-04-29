@@ -47,6 +47,12 @@ pub fn transition_lifecycle(
             | (SessionLifecycle::Completed, SessionLifecycle::Running)
             | (SessionLifecycle::Failed, SessionLifecycle::Running)
             | (SessionLifecycle::Cancelled, SessionLifecycle::Running)
+            | (SessionLifecycle::Running, SessionLifecycle::Interrupted)
+            | (
+                SessionLifecycle::WaitingInput,
+                SessionLifecycle::Interrupted
+            )
+            | (SessionLifecycle::Interrupted, SessionLifecycle::Running)
     );
 
     if !allowed {

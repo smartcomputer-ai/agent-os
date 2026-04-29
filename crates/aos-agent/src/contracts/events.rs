@@ -23,6 +23,19 @@ pub enum SessionIngressKind {
         cause: RunCause,
         run_overrides: Option<SessionConfig>,
     },
+    FollowUpInputAppended {
+        #[aos(air_type = "hash")]
+        input_ref: String,
+        run_overrides: Option<SessionConfig>,
+    },
+    RunSteerRequested {
+        #[aos(air_type = "hash")]
+        instruction_ref: String,
+    },
+    RunInterruptRequested {
+        #[aos(air_type = "hash")]
+        reason_ref: Option<String>,
+    },
     SessionOpened {
         config: Option<SessionConfig>,
     },

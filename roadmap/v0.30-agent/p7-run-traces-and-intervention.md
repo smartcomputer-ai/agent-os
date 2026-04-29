@@ -2,20 +2,20 @@
 
 **Priority**: P1  
 **Effort**: High  
-**Risk if deferred**: High (agent failures will remain hard to diagnose, and pause/steer/cancel behavior will stay ad hoc)  
-**Status**: Core run trace model and recording complete; intervention replacement and host signal integration still pending  
+**Risk if deferred**: High (agent failures will remain hard to diagnose, and steer/interrupt behavior will stay ad hoc)
+**Status**: Core run trace model and LLM-level ref-based intervention queue complete; host/Fabric signaling deferred to P8
 **Depends on**: `roadmap/v0.30-agent/p5-session-run-model.md`, `roadmap/v0.30-agent/p6-context-engine.md`
 
 ## Goal
 
-Add first-class run traces and deterministic intervention semantics.
+Add first-class run traces and deterministic LLM-level intervention semantics.
 
 Primary outcome:
 
 1. every run has an inspectable trace of LLM turns, context plans, tool batches, effects, receipts, and outcomes,
-2. operator steer/follow-up/interrupt/cancel behavior is explicit and replay-safe,
+2. operator steer/follow-up/interrupt behavior is explicit and replay-safe at the agent run level,
 3. active runs can be diagnosed without reconstructing state from raw journal frames,
-4. intervention semantics work for both local host sessions and Fabric-backed host sessions where supported,
+4. the agent SDK leaves room for host/session signaling without baking Fabric policy into core contracts,
 5. Demiurge can report meaningful task progress and failure causes.
 
 ## Current Fit
@@ -82,19 +82,18 @@ Use distinct semantics:
 
 These should not be collapsed into one host command queue.
 
-### 4) Interrupt must be effect-aware
+### 4) Interrupt must be effect-aware, but host signaling is P8
 
 Deterministic reducer state cannot pretend an external effect stopped until a receipt or rejection is admitted.
 
-Interrupt behavior should be explicit:
+P7 handles the agent-side semantics:
 
 1. mark interrupt requested,
-2. emit signal/cancel effect where available,
-3. block new LLM/tool dispatch while interruption is pending,
-4. settle in-flight work through receipts/rejections,
-5. transition run lifecycle only through deterministic admitted events.
+2. block new LLM/tool dispatch while interruption is pending,
+3. settle in-flight work through receipts/rejections,
+4. transition run lifecycle only through deterministic admitted events.
 
-Fabric matters here because Fabric host sessions expose session signaling and exec progress. Local host adapters and Fabric adapters should converge on the same AOS effect receipts/stream frames.
+Host/session signaling is deliberately deferred to P8. Fabric host sessions expose session signaling and exec progress, but the aos-agent SDK should only need stable run-level intervention state and traces. The actual external cancellation workflow should be implemented as AOS effects/workflows/adapters later, with receipts or stream frames re-entering deterministically.
 
 ### 5) Observability should serve tests and operators
 
@@ -187,33 +186,37 @@ Done:
 5. stream frames record `StreamFrameObserved` with effect, kind, sequence, payload size, and refs.
 6. admitted receipts/rejections record `ReceiptSettled` with effect, status, params hash, issuer ref, and intent id.
 
-### [ ] 5) Replace ad hoc steer/follow-up queues
+### [x] 5) Replace ad hoc steer/follow-up queues
 
 Add explicit intervention operations for:
 
 1. append follow-up input,
 2. steer active run,
-3. interrupt active run,
-4. cancel active run,
-5. pause/resume session.
+3. interrupt active run.
 
 Required outcome:
 
 1. steer has defined placement in the next model turn,
 2. follow-up starts or queues a later run,
 3. interrupt blocks further turn dispatch until resolved,
-4. cancel has deterministic terminal semantics,
-5. all intervention requests are trace entries.
+4. all intervention requests are trace entries.
 
-Current cut:
+Done:
 
-1. existing host commands now record `InterventionRequested` trace entries.
-2. ref-based follow-up, steer, interrupt, and cancel operations still need to replace `pending_steer` and `pending_follow_up`.
-3. interrupt-aware dispatch blocking and deterministic cancellation semantics remain pending.
+1. added ref-based `FollowUpInputAppended`, `RunSteerRequested`, and `RunInterruptRequested` ingress variants.
+2. replaced text queues with hash-ref queues: `pending_steer_refs` and `queued_follow_up_runs`.
+3. follow-up input starts immediately when idle or queues a later run when one is active.
+4. steer refs are injected into the next LLM turn after selected context refs.
+5. interrupt requests block further LLM dispatch and finish the run as `Interrupted` once runtime work is quiescent.
+6. `RunOutcome` records `interrupted_reason_ref` by hash ref.
+7. intervention requests and applied steer injection are recorded in the run trace.
+8. legacy text host steer/follow-up commands are traced as unsupported; the core model is now ref-based.
 
-### [ ] 6) Add signal integration
+### [ ] 6) Defer host/Fabric signal integration to P8
 
-Integrate host signaling with run interruption:
+P7 does not implement external host session cancellation or exec interruption.
+
+P8 should integrate host signaling with run interruption:
 
 1. active host session can receive an interrupt/cancel signal when supported,
 2. unsupported signals produce a typed trace entry and deterministic fallback,
@@ -233,7 +236,7 @@ Required outcome:
 Current cut:
 
 1. `aos-agent-eval` now reads durable `transcript_message_refs` instead of the removed conversation mirror.
-2. Demiurge still compiles against the trace-enabled state model.
+2. Demiurge compiles against the trace/interruption-enabled state model and treats interrupted sessions as cancelled tasks for now.
 3. task status surfacing of last meaningful trace event remains pending.
 
 ## Non-Goals
@@ -254,7 +257,7 @@ P7 does **not** attempt:
 2. [x] Trace storage is bounded and large payloads stay behind refs.
 3. [x] Run cause/provenance and open correlation refs are visible without product-specific trace variants.
 4. [x] Domain-event tool emissions are traceable alongside effect emissions.
-5. [ ] Steer, follow-up, interrupt, cancel, pause, and resume have distinct semantics.
-6. [ ] Interrupt/cancel does not claim external work stopped until an admitted receipt/rejection supports the transition.
-7. [ ] Local and Fabric-backed host signaling can share the same agent-level intervention model.
+5. [x] Steer, follow-up, and interrupt have distinct ref-based run semantics.
+6. [x] LLM-level interrupt does not dispatch more model/tool work and only finishes once local runtime work is quiescent.
+7. [ ] Local and Fabric-backed host signaling can share the same agent-level intervention model. Deferred to P8.
 8. [ ] Demiurge or a focused fixture proves live intervention and trace inspection.
