@@ -24,7 +24,7 @@ The current code has early pieces but no coherent model:
 
 1. `last_tool_plan_hash` stores only a narrow reference to the last plan.
 2. `last_output_ref` is run-like but stored in session state.
-3. `pending_steer` and `pending_follow_up` are queues with weak semantics.
+3. `queued_steer` and `queued_follow_up` are queues with weak semantics.
 4. pause/resume/cancel change `SessionLifecycle`, but there is no separate run lifecycle.
 5. active host effects may continue running even if the agent marks itself cancelled.
 6. stream frames are observed only as effect progress, not surfaced as a run trace.
@@ -204,7 +204,7 @@ Required outcome:
 Done:
 
 1. added ref-based `FollowUpInputAppended`, `RunSteerRequested`, and `RunInterruptRequested` ingress variants.
-2. replaced text queues with hash-ref queues: `pending_steer_refs` and `queued_follow_up_runs`.
+2. replaced text queues with hash-ref queues: `queued_steer_refs` and `queued_follow_up_runs`.
 3. follow-up input starts immediately when idle or queues a later run when one is active.
 4. steer refs are injected into the next LLM turn after selected context refs.
 5. interrupt requests block further LLM dispatch and finish the run as `Interrupted` once runtime work is quiescent.

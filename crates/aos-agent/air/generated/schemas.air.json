@@ -733,48 +733,19 @@
     "name": "aos.agent/PendingBlobPutKind@1",
     "type": {
       "variant": {
-        "FollowUpMessage": {
-          "record": {
-            "index": {
-              "nat": {}
-            }
-          }
-        },
         "ToolDefinition": {
           "record": {
             "tool_id": {
               "text": {}
             }
           }
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/PendingFollowUpTurn@1",
-    "type": {
-      "record": {
-        "base_message_refs": {
-          "list": {
-            "hash": {}
-          }
         },
-        "blob_refs_by_index": {
-          "map": {
-            "key": {
+        "ToolFollowUpMessage": {
+          "record": {
+            "index": {
               "nat": {}
-            },
-            "value": {
-              "hash": {}
             }
           }
-        },
-        "expected_messages": {
-          "nat": {}
-        },
-        "tool_batch_id": {
-          "ref": "aos.agent/ToolBatchId@1"
         }
       }
     }
@@ -1252,25 +1223,25 @@
             }
           }
         },
-        "pending_follow_up_turn": {
-          "option": {
-            "ref": "aos.agent/PendingFollowUpTurn@1"
-          }
-        },
-        "pending_steer_refs": {
-          "list": {
-            "hash": {}
-          }
-        },
-        "queued_llm_message_refs": {
+        "pending_llm_turn_refs": {
           "option": {
             "list": {
               "hash": {}
             }
           }
         },
+        "queued_steer_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
         "run_id": {
           "ref": "aos.agent/RunId@1"
+        },
+        "staged_tool_follow_up_turn": {
+          "option": {
+            "ref": "aos.agent/StagedToolFollowUpTurn@1"
+          }
         },
         "started_at": {
           "time": {}
@@ -1932,14 +1903,11 @@
             }
           }
         },
-        "pending_follow_up_turn": {
+        "pending_llm_turn_refs": {
           "option": {
-            "ref": "aos.agent/PendingFollowUpTurn@1"
-          }
-        },
-        "pending_steer_refs": {
-          "list": {
-            "hash": {}
+            "list": {
+              "hash": {}
+            }
           }
         },
         "queued_follow_up_runs": {
@@ -1947,11 +1915,9 @@
             "ref": "aos.agent/QueuedRunStart@1"
           }
         },
-        "queued_llm_message_refs": {
-          "option": {
-            "list": {
-              "hash": {}
-            }
+        "queued_steer_refs": {
+          "list": {
+            "hash": {}
           }
         },
         "run_history": {
@@ -1969,6 +1935,11 @@
         },
         "session_id": {
           "ref": "aos.agent/SessionId@1"
+        },
+        "staged_tool_follow_up_turn": {
+          "option": {
+            "ref": "aos.agent/StagedToolFollowUpTurn@1"
+          }
         },
         "status": {
           "ref": "aos.agent/SessionStatus@1"
@@ -2109,6 +2080,35 @@
           "list": {
             "ref": "aos.agent/PendingBlobPut@1"
           }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/StagedToolFollowUpTurn@1",
+    "type": {
+      "record": {
+        "base_message_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "blob_refs_by_index": {
+          "map": {
+            "key": {
+              "nat": {}
+            },
+            "value": {
+              "hash": {}
+            }
+          }
+        },
+        "expected_messages": {
+          "nat": {}
+        },
+        "tool_batch_id": {
+          "ref": "aos.agent/ToolBatchId@1"
         }
       }
     }

@@ -6,10 +6,10 @@ use super::{
 use crate::contracts::{
     ContextBudget, ContextObservation, ContextPlan, EffectiveTool, EffectiveToolSet,
     HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
-    PendingBlobPutKind, PendingFollowUpTurn, QueuedRunStart, RunCause, RunConfig, RunFailure,
-    RunInterrupt, RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry,
-    RunTraceEntryKind, RunTraceRef, RunTraceSummary, SessionConfig, SessionInputKind,
-    SessionLifecycle, SessionState, SessionStatus, SessionWorkflowEvent, ToolAvailabilityRule,
+    PendingBlobPutKind, QueuedRunStart, RunCause, RunConfig, RunFailure, RunInterrupt,
+    RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry, RunTraceEntryKind,
+    RunTraceRef, RunTraceSummary, SessionConfig, SessionInputKind, SessionLifecycle, SessionState,
+    SessionStatus, SessionWorkflowEvent, StagedToolFollowUpTurn, ToolAvailabilityRule,
     ToolBatchPlan, ToolCallStatus, ToolOverrideScope, ToolSpec,
 };
 use crate::helpers::ContextEngine;
@@ -30,8 +30,8 @@ mod tool_batch;
 mod types;
 
 use self::blob_effects::{
-    enqueue_blob_get, enqueue_blob_put, handle_pending_blob_get_receipt,
-    handle_pending_blob_put_receipt, has_pending_tool_definition_puts,
+    enqueue_blob_get, enqueue_blob_put, handle_blob_get_receipt, handle_blob_put_receipt,
+    has_open_tool_definition_puts,
 };
 use self::types::pending_effect_lookup_err_to_session_err;
 pub use self::types::{
@@ -532,14 +532,14 @@ fn on_run_start_requested(
         config: requested.clone(),
         input_refs: cause.input_refs.clone(),
         context_plan: None,
-        pending_steer_refs: Vec::new(),
+        queued_steer_refs: Vec::new(),
         interrupt: None,
         active_tool_batch: None,
         pending_effects: aos_wasm_sdk::PendingEffects::new(),
         pending_blob_gets: aos_wasm_sdk::SharedBlobGets::new(),
         pending_blob_puts: aos_wasm_sdk::SharedBlobPuts::new(),
-        pending_follow_up_turn: None,
-        queued_llm_message_refs: None,
+        staged_tool_follow_up_turn: None,
+        pending_llm_turn_refs: None,
         last_output_ref: None,
         tool_refs_materialized: false,
         in_flight_effects: 0,
@@ -569,9 +569,9 @@ fn on_run_start_requested(
     state.active_tool_batch = None;
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
-    state.pending_follow_up_turn = None;
-    state.queued_llm_message_refs = None;
-    state.pending_steer_refs.clear();
+    state.staged_tool_follow_up_turn = None;
+    state.pending_llm_turn_refs = None;
+    state.queued_steer_refs.clear();
     state.run_interrupt = None;
     state.last_output_ref = None;
     state.tool_refs_materialized = false;
@@ -580,7 +580,7 @@ fn on_run_start_requested(
     state
         .transcript_message_refs
         .extend(cause.input_refs.iter().cloned());
-    queue_llm_turn(state, state.transcript_message_refs.clone(), out)
+    set_pending_llm_turn(state, state.transcript_message_refs.clone(), out)
 }
 
 fn on_follow_up_input_appended(
@@ -632,7 +632,7 @@ fn on_run_steer_requested(
         refs,
         BTreeMap::new(),
     );
-    state.pending_steer_refs.push(instruction_ref.into());
+    state.queued_steer_refs.push(instruction_ref.into());
     sync_current_run_execution(state);
     Ok(())
 }
@@ -663,7 +663,7 @@ fn on_run_interrupt_requested(
         BTreeMap::new(),
     );
     state.run_interrupt = Some(interrupt);
-    state.queued_llm_message_refs = None;
+    state.pending_llm_turn_refs = None;
     sync_current_run_execution(state);
     finish_interrupted_run_if_quiescent(state, out)
 }
@@ -899,7 +899,7 @@ fn handle_standalone_host_session_open_receipt(
         return Ok(true);
     }
 
-    dispatch_queued_llm_turn(state, out)?;
+    dispatch_pending_llm_turn(state, out)?;
     Ok(true)
 }
 
@@ -979,8 +979,8 @@ fn on_receipt_envelope(
     out: &mut SessionWorkflowOutput,
 ) -> Result<(), SessionWorkflowError> {
     trace_receipt_envelope(state, envelope);
-    if handle_pending_blob_get_receipt(state, envelope, out)?
-        || handle_pending_blob_put_receipt(state, envelope, out)?
+    if handle_blob_get_receipt(state, envelope, out)?
+        || handle_blob_put_receipt(state, envelope, out)?
     {
         recompute_in_flight_effects(state);
         return Ok(());
@@ -1017,8 +1017,8 @@ fn on_receipt_rejected(
 ) -> Result<(), SessionWorkflowError> {
     trace_receipt_rejected(state, rejected);
     let envelope = rejected_as_error_envelope(rejected);
-    if handle_pending_blob_get_receipt(state, &envelope, out)?
-        || handle_pending_blob_put_receipt(state, &envelope, out)?
+    if handle_blob_get_receipt(state, &envelope, out)?
+        || handle_blob_put_receipt(state, &envelope, out)?
     {
         recompute_in_flight_effects(state);
         return Ok(());
@@ -1082,9 +1082,9 @@ fn sync_current_run_execution(state: &mut SessionState) {
     run.pending_effects = state.pending_effects.clone();
     run.pending_blob_gets = state.pending_blob_gets.clone();
     run.pending_blob_puts = state.pending_blob_puts.clone();
-    run.pending_follow_up_turn = state.pending_follow_up_turn.clone();
-    run.queued_llm_message_refs = state.queued_llm_message_refs.clone();
-    run.pending_steer_refs = state.pending_steer_refs.clone();
+    run.staged_tool_follow_up_turn = state.staged_tool_follow_up_turn.clone();
+    run.pending_llm_turn_refs = state.pending_llm_turn_refs.clone();
+    run.queued_steer_refs = state.queued_steer_refs.clone();
     run.interrupt = state.run_interrupt.clone();
     run.last_output_ref = state.last_output_ref.clone();
     run.tool_refs_materialized = state.tool_refs_materialized;
@@ -1134,7 +1134,7 @@ fn has_open_runtime_work(state: &SessionState) -> bool {
     !state.pending_effects.is_empty()
         || !state.pending_blob_gets.is_empty()
         || !state.pending_blob_puts.is_empty()
-        || state.pending_follow_up_turn.is_some()
+        || state.staged_tool_follow_up_turn.is_some()
         || state
             .active_tool_batch
             .as_ref()
@@ -1189,12 +1189,12 @@ fn handle_completed_tool_batch(
         enqueue_blob_put(
             state,
             bytes,
-            PendingBlobPutKind::FollowUpMessage { index: idx as u64 },
+            PendingBlobPutKind::ToolFollowUpMessage { index: idx as u64 },
             out,
         );
         expected_messages = expected_messages.saturating_add(1);
     }
-    state.pending_follow_up_turn = Some(PendingFollowUpTurn {
+    state.staged_tool_follow_up_turn = Some(StagedToolFollowUpTurn {
         tool_batch_id: completion.tool_batch_id.clone(),
         base_message_refs: state.transcript_message_refs.clone(),
         expected_messages,
@@ -1238,20 +1238,20 @@ fn build_tool_batch_follow_up_messages(completion: &CompletedToolBatch) -> Vec<s
     messages
 }
 
-fn queue_llm_turn(
+fn set_pending_llm_turn(
     state: &mut SessionState,
     message_refs: Vec<String>,
     out: &mut SessionWorkflowOutput,
 ) -> Result<(), SessionWorkflowError> {
-    state.queued_llm_message_refs = Some(message_refs);
-    dispatch_queued_llm_turn(state, out)
+    state.pending_llm_turn_refs = Some(message_refs);
+    dispatch_pending_llm_turn(state, out)
 }
 
-fn dispatch_queued_llm_turn(
+fn dispatch_pending_llm_turn(
     state: &mut SessionState,
     out: &mut SessionWorkflowOutput,
 ) -> Result<(), SessionWorkflowError> {
-    dispatch_queued_llm_turn_with_engine(
+    dispatch_pending_llm_turn_with_engine(
         state,
         out,
         &DefaultContextEngine,
@@ -1262,13 +1262,13 @@ fn dispatch_queued_llm_turn(
     )
 }
 
-pub fn dispatch_queued_llm_turn_with_engine<E: ContextEngine>(
+pub fn dispatch_pending_llm_turn_with_engine<E: ContextEngine>(
     state: &mut SessionState,
     out: &mut SessionWorkflowOutput,
     engine: &E,
     budget: ContextBudget,
 ) -> Result<(), SessionWorkflowError> {
-    if state.queued_llm_message_refs.is_none() {
+    if state.pending_llm_turn_refs.is_none() {
         return Ok(());
     }
     if state.run_interrupt.is_some() {
@@ -1277,7 +1277,7 @@ pub fn dispatch_queued_llm_turn_with_engine<E: ContextEngine>(
     if !state.pending_effects.is_empty()
         || !state.pending_blob_gets.is_empty()
         || !state.pending_blob_puts.is_empty()
-        || state.pending_follow_up_turn.is_some()
+        || state.staged_tool_follow_up_turn.is_some()
     {
         return Ok(());
     }
@@ -1303,16 +1303,16 @@ pub fn dispatch_queued_llm_turn_with_engine<E: ContextEngine>(
                 out,
             );
         }
-        if has_pending_tool_definition_puts(state) {
+        if has_open_tool_definition_puts(state) {
             return Ok(());
         }
         state.tool_refs_materialized = true;
     }
 
-    let Some(mut message_refs) = state.queued_llm_message_refs.take() else {
+    let Some(mut message_refs) = state.pending_llm_turn_refs.take() else {
         return Ok(());
     };
-    let steer_refs = state.pending_steer_refs.clone();
+    let steer_refs = state.queued_steer_refs.clone();
     if !steer_refs.is_empty() {
         message_refs.extend(steer_refs.iter().cloned());
     }
@@ -1359,7 +1359,7 @@ pub fn dispatch_queued_llm_turn_with_engine<E: ContextEngine>(
             refs,
             BTreeMap::new(),
         );
-        state.pending_steer_refs.clear();
+        state.queued_steer_refs.clear();
         sync_current_run_execution(state);
     }
     Ok(())
@@ -1787,9 +1787,9 @@ fn clear_active_run(state: &mut SessionState) {
     state.pending_effects.clear();
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
-    state.pending_follow_up_turn = None;
-    state.queued_llm_message_refs = None;
-    state.pending_steer_refs.clear();
+    state.staged_tool_follow_up_turn = None;
+    state.pending_llm_turn_refs = None;
+    state.queued_steer_refs.clear();
     state.run_interrupt = None;
     state.tool_refs_materialized = false;
     state.in_flight_effects = 0;
@@ -2163,7 +2163,7 @@ mod tests {
         ));
         assert_eq!(state.pending_effects.len(), 1);
         assert!(state.pending_blob_puts.is_empty());
-        assert!(state.queued_llm_message_refs.is_some());
+        assert!(state.pending_llm_turn_refs.is_some());
         assert_eq!(state.in_flight_effects, 1);
         assert_eq!(state.effective_tools.profile_id, "openai");
         let tools: Vec<&str> = state
@@ -2379,7 +2379,7 @@ mod tests {
         ));
     }
 
-    fn queued_llm_state(input_ref: String) -> SessionState {
+    fn pending_llm_turn_state(input_ref: String) -> SessionState {
         let mut state = SessionState::default();
         state.session_id = SessionId("s-1".into());
         let run_id = RunId {
@@ -2401,11 +2401,11 @@ mod tests {
             cause: RunCause::direct_input(input_ref.clone()),
             config,
             input_refs: vec![input_ref.clone()],
-            queued_llm_message_refs: Some(vec![input_ref.clone()]),
+            pending_llm_turn_refs: Some(vec![input_ref.clone()]),
             ..RunState::default()
         });
         state.transcript_message_refs = vec![input_ref.clone()];
-        state.queued_llm_message_refs = Some(vec![input_ref]);
+        state.pending_llm_turn_refs = Some(vec![input_ref]);
         state
     }
 
@@ -2413,7 +2413,7 @@ mod tests {
     fn steer_ref_is_injected_into_next_llm_turn() {
         let input_ref = fake_hash('a');
         let steer_ref = fake_hash('b');
-        let mut state = queued_llm_state(input_ref.clone());
+        let mut state = pending_llm_turn_state(input_ref.clone());
 
         apply_session_workflow_event(
             &mut state,
@@ -2426,7 +2426,7 @@ mod tests {
         )
         .expect("steer");
         let mut out = SessionWorkflowOutput::default();
-        dispatch_queued_llm_turn(&mut state, &mut out).expect("dispatch");
+        dispatch_pending_llm_turn(&mut state, &mut out).expect("dispatch");
 
         let message_refs = out
             .effects
@@ -2443,7 +2443,7 @@ mod tests {
             })
             .expect("llm params");
         assert_eq!(message_refs, vec![input_ref, steer_ref]);
-        assert!(state.pending_steer_refs.is_empty());
+        assert!(state.queued_steer_refs.is_empty());
         assert!(state.current_run.as_ref().is_some_and(|run| {
             run.trace
                 .entries
@@ -2502,10 +2502,10 @@ mod tests {
     }
 
     #[test]
-    fn interrupt_blocks_queued_llm_and_finishes_when_quiescent() {
+    fn interrupt_blocks_pending_llm_turn_and_finishes_when_quiescent() {
         let input_ref = fake_hash('a');
         let reason_ref = fake_hash('b');
-        let mut state = queued_llm_state(input_ref);
+        let mut state = pending_llm_turn_state(input_ref);
 
         let out = apply_session_workflow_event(
             &mut state,
@@ -2646,10 +2646,10 @@ mod tests {
             ..RunState::default()
         });
         state.transcript_message_refs = vec![transcript_ref.clone(), input_ref.clone()];
-        state.queued_llm_message_refs = Some(vec![input_ref.clone()]);
+        state.pending_llm_turn_refs = Some(vec![input_ref.clone()]);
 
         let mut out = SessionWorkflowOutput::default();
-        dispatch_queued_llm_turn_with_engine(
+        dispatch_pending_llm_turn_with_engine(
             &mut state,
             &mut out,
             &RepoBootstrapFirstEngine,

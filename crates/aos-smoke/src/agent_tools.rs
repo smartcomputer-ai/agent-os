@@ -188,7 +188,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let state_after_tools: SessionState = host.read_state()?;
     ensure!(
         state_after_tools.lifecycle == SessionLifecycle::WaitingInput,
-        "expected WaitingInput after scripted tool + follow-up llm flow, got {:?}; active_tool_batch={:?}; pending_effects={:?}; llm_results={:?}; pending_follow_up={:?}",
+        "expected WaitingInput after scripted tool + follow-up llm flow, got {:?}; active_tool_batch={:?}; pending_effects={:?}; llm_results={:?}; staged_tool_follow_up_turn={:?}",
         state_after_tools.lifecycle,
         state_after_tools
             .active_tool_batch
@@ -202,7 +202,7 @@ pub fn run(example_root: &Path) -> Result<()> {
             .active_tool_batch
             .as_ref()
             .map(|batch| &batch.llm_results),
-        state_after_tools.pending_follow_up_turn
+        state_after_tools.staged_tool_follow_up_turn
     );
     let batch = state_after_tools
         .active_tool_batch

@@ -34,7 +34,7 @@
     { "name": "aos.agent/PendingBlobPut@1" },
     { "name": "aos.agent/PendingBlobGetKind@1" },
     { "name": "aos.agent/PendingBlobGet@1" },
-    { "name": "aos.agent/PendingFollowUpTurn@1" },
+    { "name": "aos.agent/StagedToolFollowUpTurn@1" },
     { "name": "aos.agent/SessionState@1" },
     { "name": "aos.agent/SessionNoop@1" },
     { "name": "aos.agent/SessionWorkflowEvent@1" }

@@ -1,11 +1,11 @@
 use crate::contracts::{QueuedRunStart, SessionLifecycle, SessionState};
 use alloc::string::String;
 
-pub fn pop_pending_steer_ref(state: &mut SessionState) -> Option<String> {
-    if state.pending_steer_refs.is_empty() {
+pub fn pop_queued_steer_ref(state: &mut SessionState) -> Option<String> {
+    if state.queued_steer_refs.is_empty() {
         return None;
     }
-    Some(state.pending_steer_refs.remove(0))
+    Some(state.queued_steer_refs.remove(0))
 }
 
 pub fn pop_follow_up_if_ready(state: &mut SessionState) -> Option<QueuedRunStart> {

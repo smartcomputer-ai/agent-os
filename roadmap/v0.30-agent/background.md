@@ -276,9 +276,9 @@ The important current limitation is step 7: starting a run clears conversation h
 
 LLM turn dispatch is staged rather than emitted immediately in all cases.
 
-`queue_llm_turn()` stores message refs in `queued_llm_message_refs`, then calls `dispatch_queued_llm_turn()`.
+`set_pending_llm_turn()` stores message refs in `pending_llm_turn_refs`, then calls `dispatch_pending_llm_turn()`.
 
-`dispatch_queued_llm_turn()` waits until:
+`dispatch_pending_llm_turn()` waits until:
 
 1. no top-level pending effects exist,
 2. no pending blob gets exist,
@@ -551,8 +551,8 @@ Current host commands are:
 
 The current behavior is limited:
 
-1. `Steer` pushes text into `pending_steer`.
-2. `FollowUp` pushes text into `pending_follow_up`.
+1. `Steer` pushes text into `queued_steer`.
+2. `FollowUp` pushes text into `queued_follow_up`.
 3. pause/resume/cancel transition the combined lifecycle.
 4. cancel immediately transitions through `Cancelling` to `Cancelled` and clears active run state.
 

@@ -16,12 +16,12 @@ use crate::helpers::{SessionEffectCommand, SessionWorkflowOutput};
 use super::tool_batch::{fail_tool_call, set_tool_call_status};
 use super::{
     RunToolBatch, SessionWorkflowError, TOOL_RESULT_BLOB_MAX_BYTES, continue_tool_batch,
-    dispatch_queued_llm_turn, fail_run, finish_interrupted_run_if_quiescent, push_run_trace,
-    queue_llm_turn, run_tool_batch, trace_ref, transition_to_waiting_input_if_running,
+    dispatch_pending_llm_turn, fail_run, finish_interrupted_run_if_quiescent, push_run_trace,
+    run_tool_batch, set_pending_llm_turn, trace_ref, transition_to_waiting_input_if_running,
 };
 use alloc::collections::BTreeMap;
 
-pub(super) fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
+pub(super) fn has_open_tool_definition_puts(state: &SessionState) -> bool {
     state.pending_blob_puts.values().any(|shared| {
         shared
             .waiters
@@ -30,7 +30,7 @@ pub(super) fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
     })
 }
 
-fn has_pending_tool_result_blob_get(
+fn has_open_tool_result_blob_get(
     state: &SessionState,
     tool_batch_id: &crate::contracts::ToolBatchId,
     call_id: &str,
@@ -379,7 +379,7 @@ fn on_tool_result_blob(
         result.output_json = updated_output;
     }
 
-    let pending = has_pending_tool_result_blob_get(state, &tool_batch_id, call_id.as_str());
+    let pending = has_open_tool_result_blob_get(state, &tool_batch_id, call_id.as_str());
     if !pending
         && let Some(batch) = state.active_tool_batch.as_mut()
         && batch.tool_batch_id == tool_batch_id
@@ -395,7 +395,7 @@ fn on_tool_result_blob(
     Ok(true)
 }
 
-pub(super) fn handle_pending_blob_get_receipt(
+pub(super) fn handle_blob_get_receipt(
     state: &mut SessionState,
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionWorkflowOutput,
@@ -464,7 +464,7 @@ pub(super) fn handle_pending_blob_get_receipt(
     Ok(true)
 }
 
-pub(super) fn handle_pending_blob_put_receipt(
+pub(super) fn handle_blob_put_receipt(
     state: &mut SessionState,
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     out: &mut SessionWorkflowOutput,
@@ -488,17 +488,17 @@ pub(super) fn handle_pending_blob_put_receipt(
                         tool.tool_ref = blob_ref.clone();
                     }
                 }
-                if !has_pending_tool_definition_puts(state) {
+                if !has_open_tool_definition_puts(state) {
                     state.tool_refs_materialized = true;
-                    dispatch_queued_llm_turn(state, out)?;
+                    dispatch_pending_llm_turn(state, out)?;
                 }
             }
-            PendingBlobPutKind::FollowUpMessage { index } => {
+            PendingBlobPutKind::ToolFollowUpMessage { index } => {
                 let Some(receipt) = matched.receipt.clone().ok() else {
                     fail_run(state)?;
                     return Ok(true);
                 };
-                if let Some(turn) = state.pending_follow_up_turn.as_mut() {
+                if let Some(turn) = state.staged_tool_follow_up_turn.as_mut() {
                     turn.blob_refs_by_index
                         .insert(index, receipt.blob_ref.as_str().to_string());
                     if turn.blob_refs_by_index.len() as u64 >= turn.expected_messages {
@@ -511,8 +511,8 @@ pub(super) fn handle_pending_blob_put_receipt(
                         let mut next_refs = turn.base_message_refs.clone();
                         next_refs.extend(refs);
                         state.transcript_message_refs = next_refs.clone();
-                        state.pending_follow_up_turn = None;
-                        queue_llm_turn(state, next_refs, out)?;
+                        state.staged_tool_follow_up_turn = None;
+                        set_pending_llm_turn(state, next_refs, out)?;
                     }
                 }
             }

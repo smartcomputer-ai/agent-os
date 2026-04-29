@@ -199,7 +199,7 @@ Required outcome:
 
 Done:
 
-1. `dispatch_queued_llm_turn` now builds a context plan before emitting `sys/llm.generate@1`.
+1. `dispatch_pending_llm_turn` now builds a context plan before emitting `sys/llm.generate@1`.
 2. selected context refs feed `LlmGenerateParams.message_refs`; prompt refs are no longer appended in the LLM primitive.
 3. `RunState.context_plan` records the per-run plan for inspection.
 4. `SessionContextState.last_report` records the latest context report.
@@ -283,7 +283,7 @@ This can be Demiurge or a focused linked-library fixture.
 
 Done:
 
-1. added `dispatch_queued_llm_turn_with_engine` so direct library consumers can reuse queued-turn LLM/tool orchestration with a custom `ContextEngine`.
+1. added `dispatch_pending_llm_turn_with_engine` so direct library consumers can reuse pending-turn LLM/tool orchestration with a custom `ContextEngine`.
 2. added `build_context_for_turn_with_engine` so wrapper workflows can build/apply a custom context plan while preserving session/run state updates.
 3. added a focused `RepoBootstrapFirstEngine` reducer test that selects a pinned repo bootstrap input, drops transcript refs, records a custom context report, and emits a normal `sys/llm.generate@1` request with the selected refs.
 4. the proof uses generic context input metadata only; no Demiurge or software-factory-specific SDK variants were added.

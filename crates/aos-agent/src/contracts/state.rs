@@ -41,7 +41,7 @@ pub struct PendingBlobGet {
 #[serde(tag = "$tag", content = "$value")]
 pub enum PendingBlobPutKind {
     ToolDefinition { tool_id: String },
-    FollowUpMessage { index: u64 },
+    ToolFollowUpMessage { index: u64 },
 }
 
 impl Default for PendingBlobPutKind {
@@ -61,8 +61,8 @@ pub struct PendingBlobPut {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
-#[aos(schema = "aos.agent/PendingFollowUpTurn@1")]
-pub struct PendingFollowUpTurn {
+#[aos(schema = "aos.agent/StagedToolFollowUpTurn@1")]
+pub struct StagedToolFollowUpTurn {
     pub tool_batch_id: ToolBatchId,
     #[aos(air_type = "hash")]
     pub base_message_refs: Vec<String>,
@@ -202,7 +202,7 @@ pub struct RunState {
     pub context_plan: Option<ContextPlan>,
     pub trace: RunTrace,
     #[aos(air_type = "hash")]
-    pub pending_steer_refs: Vec<String>,
+    pub queued_steer_refs: Vec<String>,
     pub interrupt: Option<RunInterrupt>,
     pub active_tool_batch: Option<ActiveToolBatch>,
     #[aos(map_key_air_type = "hash", schema_ref = PendingEffect)]
@@ -211,9 +211,9 @@ pub struct RunState {
     pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
     #[aos(map_key_air_type = "hash", schema_ref = SharedPendingBlobPut)]
     pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
-    pub pending_follow_up_turn: Option<PendingFollowUpTurn>,
+    pub staged_tool_follow_up_turn: Option<StagedToolFollowUpTurn>,
     #[aos(air_type = "hash")]
-    pub queued_llm_message_refs: Option<Vec<String>>,
+    pub pending_llm_turn_refs: Option<Vec<String>>,
     #[aos(air_type = "hash")]
     pub last_output_ref: Option<String>,
     pub tool_refs_materialized: bool,
@@ -262,9 +262,9 @@ pub struct SessionState {
     pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
     #[aos(map_key_air_type = "hash", schema_ref = SharedPendingBlobPut)]
     pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
-    pub pending_follow_up_turn: Option<PendingFollowUpTurn>,
+    pub staged_tool_follow_up_turn: Option<StagedToolFollowUpTurn>,
     #[aos(air_type = "hash")]
-    pub queued_llm_message_refs: Option<Vec<String>>,
+    pub pending_llm_turn_refs: Option<Vec<String>>,
     #[aos(air_type = "hash")]
     pub transcript_message_refs: Vec<String>,
     #[aos(air_type = "hash")]
@@ -279,7 +279,7 @@ pub struct SessionState {
     #[aos(air_type = "hash")]
     pub last_tool_plan_hash: Option<String>,
     #[aos(air_type = "hash")]
-    pub pending_steer_refs: Vec<String>,
+    pub queued_steer_refs: Vec<String>,
     pub queued_follow_up_runs: Vec<QueuedRunStart>,
     pub run_interrupt: Option<RunInterrupt>,
     #[aos(air_type = "time")]
@@ -306,8 +306,8 @@ impl Default for SessionState {
             pending_effects: PendingEffects::new(),
             pending_blob_gets: SharedBlobGets::new(),
             pending_blob_puts: SharedBlobPuts::new(),
-            pending_follow_up_turn: None,
-            queued_llm_message_refs: None,
+            staged_tool_follow_up_turn: None,
+            pending_llm_turn_refs: None,
             transcript_message_refs: Vec::new(),
             last_output_ref: None,
             tool_refs_materialized: false,
@@ -318,7 +318,7 @@ impl Default for SessionState {
             tool_runtime_context: ToolRuntimeContext::default(),
             effective_tools: EffectiveToolSet::default(),
             last_tool_plan_hash: None,
-            pending_steer_refs: Vec::new(),
+            queued_steer_refs: Vec::new(),
             queued_follow_up_runs: Vec::new(),
             run_interrupt: None,
             created_at: 0,

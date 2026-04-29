@@ -99,7 +99,7 @@
       "name": "aos.agent/PendingBlobGet@1"
     },
     {
-      "name": "aos.agent/PendingFollowUpTurn@1"
+      "name": "aos.agent/StagedToolFollowUpTurn@1"
     },
     {
       "name": "aos.agent/SessionState@1"
