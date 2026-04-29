@@ -405,6 +405,7 @@ fn run_attempt(
                 default_tool_enable: case.run.tool_enable.clone(),
                 default_tool_disable: case.run.tool_disable.clone(),
                 default_tool_force: case.run.tool_force.clone(),
+                default_host_session_open: None,
             }),
         },
     )?;

@@ -1,12 +1,13 @@
 use crate::{
-    ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommand, HostSessionStatus,
-    PendingBlobGet, PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, PendingFollowUpTurn,
-    PlannedToolCall, ReasoningEffort, RunConfig, RunId, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, SessionNoop, SessionState,
-    SessionWorkflow, SessionWorkflowEvent, SharedPendingBlobGet, SharedPendingBlobPut,
-    ToolAvailabilityRule, ToolBatchId, ToolBatchPlan, ToolCallLlmResult, ToolCallObserved,
-    ToolCallStatus, ToolExecutionPlan, ToolExecutor, ToolMapper, ToolOverrideScope,
-    ToolParallelismHint, ToolRuntimeContext, ToolSpec,
+    ActiveToolBatch, EffectiveTool, EffectiveToolSet, HostCommand, HostMountConfig,
+    HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, PendingBlobGet, PendingBlobGetKind,
+    PendingBlobPut, PendingBlobPutKind, PendingFollowUpTurn, PlannedToolCall, ReasoningEffort,
+    RunConfig, RunId, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
+    SessionLifecycle, SessionLifecycleChanged, SessionNoop, SessionState, SessionWorkflow,
+    SessionWorkflowEvent, SharedPendingBlobGet, SharedPendingBlobPut, ToolAvailabilityRule,
+    ToolBatchId, ToolBatchPlan, ToolCallLlmResult, ToolCallObserved, ToolCallStatus,
+    ToolExecutionPlan, ToolExecutor, ToolMapper, ToolOverrideScope, ToolParallelismHint,
+    ToolRuntimeContext, ToolSpec,
 };
 
 aos_wasm_sdk::aos_air_world! {
@@ -34,6 +35,9 @@ aos_wasm_sdk::aos_air_world! {
             ActiveToolBatch,
             ToolOverrideScope,
             ReasoningEffort,
+            HostMountConfig,
+            HostTargetConfig,
+            HostSessionOpenConfig,
             SessionConfig,
             RunConfig,
             SessionLifecycle,

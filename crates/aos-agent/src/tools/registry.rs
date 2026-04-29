@@ -152,6 +152,64 @@ fn effect_tool(
 }
 
 pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
+    BTreeMap::new()
+}
+
+pub fn default_tool_profiles() -> BTreeMap<String, Vec<String>> {
+    BTreeMap::new()
+}
+
+pub fn default_tool_profile_for_provider(_provider: &str) -> String {
+    String::new()
+}
+
+pub fn tool_bundle_inspect() -> Vec<ToolSpec> {
+    tools_by_id(&["introspect.manifest", "introspect.workflow_state"])
+}
+
+pub fn tool_bundle_host_session() -> Vec<ToolSpec> {
+    tools_by_id(&["host.session.open", "host.session.signal"])
+}
+
+pub fn tool_bundle_host_fs() -> Vec<ToolSpec> {
+    tools_by_id(&[
+        "host.exec",
+        "host.fs.read_file",
+        "host.fs.write_file",
+        "host.fs.edit_file",
+        "host.fs.apply_patch",
+        "host.fs.grep",
+        "host.fs.glob",
+        "host.fs.stat",
+        "host.fs.exists",
+        "host.fs.list_dir",
+    ])
+}
+
+pub fn tool_bundle_host_local() -> Vec<ToolSpec> {
+    let mut tools = tool_bundle_host_session();
+    tools.extend(tool_bundle_host_fs());
+    tools
+}
+
+pub fn tool_bundle_host_sandbox() -> Vec<ToolSpec> {
+    let mut tools = tool_bundle_host_session();
+    tools.extend(tool_bundle_host_fs());
+    tools
+}
+
+pub fn tool_bundle_workspace() -> Vec<ToolSpec> {
+    tools_by_id(&[
+        "workspace.inspect",
+        "workspace.list",
+        "workspace.read",
+        "workspace.apply",
+        "workspace.diff",
+        "workspace.commit",
+    ])
+}
+
+pub fn local_coding_agent_tool_registry() -> BTreeMap<String, ToolSpec> {
     let mut registry = BTreeMap::new();
 
     let tools = [
@@ -403,11 +461,18 @@ pub fn default_tool_registry() -> BTreeMap<String, ToolSpec> {
         registry.insert(tool.tool_id.clone(), tool);
     }
 
-    validate_tool_registry(&registry).expect("default tool registry must be valid");
+    validate_tool_registry(&registry).expect("local coding agent tool registry must be valid");
     registry
 }
 
-pub fn default_tool_profiles() -> BTreeMap<String, Vec<String>> {
+fn tools_by_id(ids: &[&str]) -> Vec<ToolSpec> {
+    let registry = local_coding_agent_tool_registry();
+    ids.iter()
+        .filter_map(|id| registry.get(*id).cloned())
+        .collect()
+}
+
+pub fn local_coding_agent_tool_profiles() -> BTreeMap<String, Vec<String>> {
     let common = vec![
         "introspect.manifest".into(),
         "introspect.workflow_state".into(),
@@ -442,7 +507,7 @@ pub fn default_tool_profiles() -> BTreeMap<String, Vec<String>> {
     profiles
 }
 
-pub fn default_tool_profile_for_provider(provider: &str) -> String {
+pub fn local_coding_agent_tool_profile_for_provider(provider: &str) -> String {
     let normalized = provider.trim().to_ascii_lowercase();
     if normalized.contains("anthropic") {
         "anthropic".into()
@@ -466,19 +531,101 @@ mod tests {
     }
 
     #[test]
-    fn default_registry_uses_unique_valid_llm_names() {
+    fn default_registry_is_empty() {
         let registry = default_tool_registry();
+        assert!(registry.is_empty());
+        assert!(default_tool_profiles().is_empty());
+        assert!(default_tool_profile_for_provider("openai").is_empty());
+    }
+
+    #[test]
+    fn local_coding_registry_uses_unique_valid_llm_names() {
+        let registry = local_coding_agent_tool_registry();
         assert!(validate_tool_registry(&registry).is_ok());
     }
 
     #[test]
-    fn provider_profiles_select_different_mutation_tools() {
-        let profiles = default_tool_profiles();
+    fn local_coding_provider_profiles_select_different_mutation_tools() {
+        let profiles = local_coding_agent_tool_profiles();
         let openai = profiles.get("openai").expect("openai profile");
         let anthropic = profiles.get("anthropic").expect("anthropic profile");
         assert!(openai.iter().any(|id| id == "host.fs.apply_patch"));
         assert!(!openai.iter().any(|id| id == "host.fs.edit_file"));
         assert!(anthropic.iter().any(|id| id == "host.fs.edit_file"));
         assert!(!anthropic.iter().any(|id| id == "host.fs.apply_patch"));
+    }
+
+    #[test]
+    fn bundle_constructors_are_independently_selectable() {
+        let inspect = tool_bundle_inspect();
+        assert!(
+            inspect
+                .iter()
+                .any(|tool| tool.tool_id == "introspect.manifest")
+        );
+        assert!(!inspect.iter().any(|tool| tool.tool_id == "host.exec"));
+
+        let host = tool_bundle_host_local();
+        assert!(host.iter().any(|tool| tool.tool_id == "host.exec"));
+        assert!(!host.iter().any(|tool| tool.tool_id == "workspace.read"));
+
+        let sandbox = tool_bundle_host_sandbox();
+        assert!(
+            sandbox
+                .iter()
+                .any(|tool| tool.tool_id == "host.session.open")
+        );
+        assert!(sandbox.iter().any(|tool| tool.tool_id == "host.exec"));
+        assert!(!sandbox.iter().any(|tool| tool.tool_id == "workspace.read"));
+
+        let workspace = tool_bundle_workspace();
+        assert!(
+            workspace
+                .iter()
+                .any(|tool| tool.tool_id == "workspace.read")
+        );
+        assert!(!workspace.iter().any(|tool| tool.tool_id == "host.exec"));
+    }
+
+    #[test]
+    fn registry_builder_merges_and_removes_tools() {
+        let registry = crate::contracts::ToolRegistryBuilder::new()
+            .with_bundle(tool_bundle_inspect())
+            .with_bundle(tool_bundle_workspace())
+            .without_tool("workspace.commit")
+            .build()
+            .expect("registry");
+
+        assert!(registry.contains_key("introspect.manifest"));
+        assert!(registry.contains_key("workspace.read"));
+        assert!(!registry.contains_key("workspace.commit"));
+    }
+
+    #[test]
+    fn profile_builder_validates_against_registry() {
+        let registry = crate::contracts::ToolRegistryBuilder::new()
+            .with_bundle(tool_bundle_inspect())
+            .with_bundle(tool_bundle_host_sandbox())
+            .without_tool("host.session.signal")
+            .build()
+            .expect("registry");
+
+        let profile = crate::contracts::ToolProfileBuilder::new()
+            .with_bundle(tool_bundle_inspect())
+            .with_tool_id("host.exec")
+            .without_tool("introspect.workflow_state")
+            .build_for_registry(&registry)
+            .expect("profile");
+
+        assert_eq!(
+            profile,
+            vec!["introspect.manifest".to_string(), "host.exec".to_string()]
+        );
+
+        let err = crate::contracts::ToolProfileBuilder::new()
+            .with_tool_id("missing.tool")
+            .build_for_registry(&registry)
+            .expect_err("unknown tool rejected");
+        assert!(err.contains("missing.tool"));
     }
 }

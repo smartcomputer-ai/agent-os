@@ -160,6 +160,51 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/HostMountConfig@1",
+    "type": {
+      "record": {
+        "guest_path": {
+          "text": {}
+        },
+        "host_path": {
+          "text": {}
+        },
+        "mode": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostSessionOpenConfig@1",
+    "type": {
+      "record": {
+        "labels": {
+          "option": {
+            "map": {
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "session_ttl_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "target": {
+          "ref": "aos.agent/HostTargetConfig@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/HostSessionStatus@1",
     "type": {
       "variant": {
@@ -174,6 +219,98 @@
         },
         "Ready": {
           "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostTargetConfig@1",
+    "type": {
+      "variant": {
+        "Local": {
+          "record": {
+            "env": {
+              "option": {
+                "map": {
+                  "key": {
+                    "text": {}
+                  },
+                  "value": {
+                    "text": {}
+                  }
+                }
+              }
+            },
+            "mounts": {
+              "option": {
+                "list": {
+                  "ref": "aos.agent/HostMountConfig@1"
+                }
+              }
+            },
+            "network_mode": {
+              "option": {
+                "text": {}
+              }
+            },
+            "workdir": {
+              "option": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "Sandbox": {
+          "record": {
+            "cpu_limit_millis": {
+              "option": {
+                "nat": {}
+              }
+            },
+            "env": {
+              "option": {
+                "map": {
+                  "key": {
+                    "text": {}
+                  },
+                  "value": {
+                    "text": {}
+                  }
+                }
+              }
+            },
+            "image": {
+              "text": {}
+            },
+            "memory_limit_bytes": {
+              "option": {
+                "nat": {}
+              }
+            },
+            "mounts": {
+              "option": {
+                "list": {
+                  "ref": "aos.agent/HostMountConfig@1"
+                }
+              }
+            },
+            "network_mode": {
+              "option": {
+                "text": {}
+              }
+            },
+            "runtime_class": {
+              "option": {
+                "text": {}
+              }
+            },
+            "workdir": {
+              "option": {
+                "text": {}
+              }
+            }
+          }
         }
       }
     }
@@ -363,6 +500,11 @@
     "name": "aos.agent/RunConfig@1",
     "type": {
       "record": {
+        "host_session_open": {
+          "option": {
+            "ref": "aos.agent/HostSessionOpenConfig@1"
+          }
+        },
         "max_tokens": {
           "option": {
             "nat": {}
@@ -434,6 +576,11 @@
     "name": "aos.agent/SessionConfig@1",
     "type": {
       "record": {
+        "default_host_session_open": {
+          "option": {
+            "ref": "aos.agent/HostSessionOpenConfig@1"
+          }
+        },
         "default_prompt_refs": {
           "option": {
             "list": {

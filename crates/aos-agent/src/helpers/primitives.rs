@@ -1,7 +1,8 @@
 use crate::contracts::{
     HostSessionStatus, RunId, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionLifecycleChanged, SessionState, default_tool_profile_for_provider,
-    default_tool_profiles, default_tool_registry,
+    SessionLifecycle, SessionLifecycleChanged, SessionState,
+    local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
+    local_coding_agent_tool_registry,
 };
 use crate::helpers::workflow::SessionReduceError;
 use crate::{helpers::llm::LlmMappingError, tools::ToolEffectOp};
@@ -242,12 +243,14 @@ pub fn build_session_handoff_plan(request: &SessionHandoffRequest) -> SessionHan
     let tool_profile = run_overrides
         .default_tool_profile
         .clone()
-        .unwrap_or_else(|| default_tool_profile_for_provider(run_overrides.provider.as_str()));
+        .unwrap_or_else(|| {
+            local_coding_agent_tool_profile_for_provider(run_overrides.provider.as_str())
+        });
     run_overrides.default_tool_profile = Some(tool_profile.clone());
 
     if let Some(allowed_tools) = request.allowed_tools.clone() {
-        let registry = default_tool_registry();
-        let mut profiles = default_tool_profiles();
+        let registry = local_coding_agent_tool_registry();
+        let mut profiles = local_coding_agent_tool_profiles();
         profiles.insert(tool_profile.clone(), allowed_tools);
         ingresses.push(SessionIngress {
             session_id: request.session_id.clone(),
@@ -502,6 +505,7 @@ mod tests {
                     default_tool_enable: Some(vec!["shell".into()]),
                     default_tool_disable: None,
                     default_tool_force: None,
+                    default_host_session_open: None,
                 },
                 allowed_tools: Some(vec!["shell".into(), "apply_patch".into()]),
             },

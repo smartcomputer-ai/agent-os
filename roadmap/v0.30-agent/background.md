@@ -4,6 +4,8 @@ This document describes how `aos-agent` works today, before the v0.30 agent road
 
 The goal is to give reviewers and implementers enough context to understand what the roadmap is changing on top of. It is intentionally descriptive rather than aspirational. The roadmap docs describe the target refactors.
 
+It is okay to focus only on aos-agent for now and assume we'll break downstream users, we can fix them later once the agent sdk reaches its desired shape. This allows us to refactor more agressively, without worrying about backward compatibility.
+
 ## High-Level Shape
 
 `aos-agent` is the reusable AOS agent SDK layer.

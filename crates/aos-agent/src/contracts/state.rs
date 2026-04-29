@@ -1,7 +1,6 @@
 use super::{
     ActiveToolBatch, EffectiveToolSet, RunConfig, RunId, SessionConfig, SessionId,
-    SessionLifecycle, ToolBatchId, ToolRuntimeContext, ToolSpec, default_tool_profiles,
-    default_tool_registry,
+    SessionLifecycle, ToolBatchId, ToolRuntimeContext, ToolSpec,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -145,9 +144,9 @@ impl Default for SessionState {
             last_output_ref: None,
             tool_refs_materialized: false,
             in_flight_effects: 0,
-            tool_registry: default_tool_registry(),
-            tool_profiles: default_tool_profiles(),
-            tool_profile: "openai".into(),
+            tool_registry: BTreeMap::new(),
+            tool_profiles: BTreeMap::new(),
+            tool_profile: String::new(),
             tool_runtime_context: ToolRuntimeContext::default(),
             effective_tools: EffectiveToolSet::default(),
             last_tool_plan_hash: None,

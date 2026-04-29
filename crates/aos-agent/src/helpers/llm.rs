@@ -180,6 +180,7 @@ mod tests {
             tool_enable: None,
             tool_disable: None,
             tool_force: None,
+            host_session_open: None,
         }
     }
 

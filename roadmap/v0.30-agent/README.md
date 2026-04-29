@@ -12,6 +12,8 @@ Boundary for this roadmap:
 4. v0.30 adds the agent-side seams those workflows need: explicit bundles, durable sessions, run provenance, context inputs, traces, intervention, and host target config.
 5. v0.30 does not add policy/capability gating, full scheduler/heartbeat semantics, factory work-item workflows, full skills, or a memory engine to `aos-agent` core.
 
+**Important**: It is okay to focus only on aos-agent for now and assume we'll break downstream users, we can fix them later once the agent sdk reaches its desired shape. This allows us to refactor more agressively, without worrying about backward compatibility.
+
 The current sequence is:
 
 1. `p4-tool-bundle-refactoring.md`

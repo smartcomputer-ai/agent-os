@@ -4,18 +4,19 @@ use super::{
     transition_lifecycle,
 };
 use crate::contracts::{
-    EffectiveTool, EffectiveToolSet, HostCommandKind, PendingBlobGetKind, PendingBlobPutKind,
-    PendingFollowUpTurn, RunConfig, SessionConfig, SessionIngressKind, SessionLifecycle,
-    SessionState, SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan, ToolCallStatus,
-    ToolOverrideScope, ToolSpec, default_tool_profile_for_provider,
+    EffectiveTool, EffectiveToolSet, HostCommandKind, HostSessionOpenConfig, HostTargetConfig,
+    PendingBlobGetKind, PendingBlobPutKind, PendingFollowUpTurn, RunConfig, SessionConfig,
+    SessionIngressKind, SessionLifecycle, SessionState, SessionWorkflowEvent, ToolAvailabilityRule,
+    ToolBatchPlan, ToolCallStatus, ToolOverrideScope, ToolSpec,
 };
-use crate::tools::{
-    ToolEffectOp, map_tool_arguments_to_effect_params, map_tool_receipt_to_llm_result,
-};
+use crate::tools::{ToolEffectOp, map_tool_receipt_to_llm_result};
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
-use aos_effects::builtins::LlmGenerateReceipt;
+use aos_effects::builtins::{
+    HostLocalTarget, HostMount, HostSandboxTarget, HostSessionOpenParams, HostTarget,
+    LlmGenerateReceipt,
+};
 use aos_wasm_sdk::{EffectReceiptEnvelope, EffectReceiptRejected};
 
 mod blob_effects;
@@ -793,6 +794,9 @@ fn should_auto_open_host_session(state: &SessionState) -> bool {
     if state.active_run_id.is_none() {
         return false;
     }
+    if effective_host_session_open_config(state).is_none() {
+        return false;
+    }
     if !state.effective_tools.profile_requires_host_session {
         return false;
     }
@@ -810,41 +814,93 @@ fn emit_auto_host_session_open(
     state: &mut SessionState,
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
-    let params = map_tool_arguments_to_effect_params(
-        crate::contracts::ToolMapper::HostSessionOpen,
-        "{}",
-        &state.tool_runtime_context,
-    )
-    .map_err(|_| SessionReduceError::InvalidToolRegistry)?;
+    let config =
+        effective_host_session_open_config(state).ok_or(SessionReduceError::InvalidToolRegistry)?;
+    let params = host_session_open_params_from_config(config);
+    let params_json =
+        serde_json::to_value(&params).map_err(|_| SessionReduceError::InvalidToolRegistry)?;
     out.effects.push(SessionEffectCommand::ToolEffect {
         kind: ToolEffectOp::HostSessionOpen,
-        params_json: serde_json::to_string(&params.params_json).unwrap_or_else(|_| "{}".into()),
-        pending: super::begin_pending_effect(
-            state,
-            "sys/host.session.open@1",
-            &params.params_json,
-            None,
-        ),
+        params_json: serde_json::to_string(&params_json).unwrap_or_else(|_| "{}".into()),
+        pending: super::begin_pending_effect(state, "sys/host.session.open@1", &params_json, None),
     });
     Ok(())
+}
+
+fn effective_host_session_open_config(state: &SessionState) -> Option<&HostSessionOpenConfig> {
+    state
+        .active_run_config
+        .as_ref()
+        .and_then(|config| config.host_session_open.as_ref())
+        .or_else(|| state.session_config.default_host_session_open.as_ref())
+}
+
+fn host_session_open_params_from_config(config: &HostSessionOpenConfig) -> HostSessionOpenParams {
+    HostSessionOpenParams {
+        target: host_target_from_config(&config.target),
+        session_ttl_ns: config.session_ttl_ns,
+        labels: config.labels.clone(),
+    }
+}
+
+fn host_target_from_config(config: &HostTargetConfig) -> HostTarget {
+    match config {
+        HostTargetConfig::Local {
+            mounts,
+            workdir,
+            env,
+            network_mode,
+        } => HostTarget::local(HostLocalTarget {
+            mounts: mounts.as_ref().map(|items| {
+                items
+                    .iter()
+                    .map(|mount| HostMount {
+                        host_path: mount.host_path.clone(),
+                        guest_path: mount.guest_path.clone(),
+                        mode: mount.mode.clone(),
+                    })
+                    .collect()
+            }),
+            workdir: workdir.clone(),
+            env: env.clone(),
+            network_mode: network_mode.clone().unwrap_or_else(|| "none".into()),
+        }),
+        HostTargetConfig::Sandbox {
+            image,
+            runtime_class,
+            workdir,
+            env,
+            network_mode,
+            mounts,
+            cpu_limit_millis,
+            memory_limit_bytes,
+        } => HostTarget::sandbox(HostSandboxTarget {
+            image: image.clone(),
+            runtime_class: runtime_class.clone(),
+            workdir: workdir.clone(),
+            env: env.clone(),
+            network_mode: network_mode.clone(),
+            mounts: mounts.as_ref().map(|items| {
+                items
+                    .iter()
+                    .map(|mount| HostMount {
+                        host_path: mount.host_path.clone(),
+                        guest_path: mount.guest_path.clone(),
+                        mode: mount.mode.clone(),
+                    })
+                    .collect()
+            }),
+            cpu_limit_millis: *cpu_limit_millis,
+            memory_limit_bytes: *memory_limit_bytes,
+        }),
+    }
 }
 
 fn refresh_effective_tools(
     state: &mut SessionState,
     run_config: Option<&RunConfig>,
 ) -> Result<(), SessionReduceError> {
-    let provider = run_config
-        .map(|cfg| cfg.provider.as_str())
-        .or_else(|| {
-            if state.session_config.provider.trim().is_empty() {
-                None
-            } else {
-                Some(state.session_config.provider.as_str())
-            }
-        })
-        .unwrap_or("openai");
-
-    let profile_id = run_config
+    let configured_profile_id = run_config
         .and_then(|cfg| cfg.tool_profile.clone())
         .or_else(|| state.session_config.default_tool_profile.clone())
         .or_else(|| {
@@ -853,15 +909,18 @@ fn refresh_effective_tools(
             } else {
                 Some(state.tool_profile.clone())
             }
-        })
-        .unwrap_or_else(|| default_tool_profile_for_provider(provider));
+        });
 
-    let base_profile = state
-        .tool_profiles
-        .get(&profile_id)
-        .ok_or(SessionReduceError::ToolProfileUnknown)?;
-
-    validate_known_tool_names(state, Some(base_profile.as_slice()))?;
+    let base_profile = if let Some(profile_id) = configured_profile_id.as_ref() {
+        let base_profile = state
+            .tool_profiles
+            .get(profile_id)
+            .ok_or(SessionReduceError::ToolProfileUnknown)?;
+        validate_known_tool_names(state, Some(base_profile.as_slice()))?;
+        base_profile.as_slice()
+    } else {
+        &[]
+    };
 
     let enabled_session = state.session_config.default_tool_enable.as_deref();
     let disabled_session = state.session_config.default_tool_disable.as_deref();
@@ -942,6 +1001,7 @@ fn refresh_effective_tools(
         });
     }
 
+    let profile_id = configured_profile_id.unwrap_or_default();
     state.tool_profile = profile_id.clone();
     state.effective_tools = EffectiveToolSet {
         profile_id,
@@ -991,6 +1051,7 @@ fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfi
         tool_enable: source.default_tool_enable.clone(),
         tool_disable: source.default_tool_disable.clone(),
         tool_force: source.default_tool_force.clone(),
+        host_session_open: source.default_host_session_open.clone(),
     }
 }
 
@@ -1060,7 +1121,10 @@ fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
 mod tests {
     use super::*;
     use crate::contracts::{
-        HostSessionStatus, SessionId, SessionIngress, ToolCallObserved, ToolOverrideScope,
+        HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, SessionId, SessionIngress,
+        ToolCallObserved, ToolOverrideScope, ToolProfileBuilder, ToolRegistryBuilder,
+        local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
+        local_coding_agent_tool_registry, tool_bundle_host_sandbox,
     };
     use alloc::string::ToString;
     use alloc::vec;
@@ -1153,14 +1217,54 @@ mod tests {
                     default_tool_enable: None,
                     default_tool_disable: None,
                     default_tool_force: None,
+                    default_host_session_open: None,
                 }),
             },
         )
     }
 
+    fn local_coding_state() -> SessionState {
+        let mut state = SessionState::default();
+        state.tool_registry = local_coding_agent_tool_registry();
+        state.tool_profiles = local_coding_agent_tool_profiles();
+        state.tool_profile = local_coding_agent_tool_profile_for_provider("openai");
+        state.session_config.default_host_session_open = Some(local_host_session_open_config());
+        state
+    }
+
+    fn local_host_session_open_config() -> HostSessionOpenConfig {
+        HostSessionOpenConfig {
+            target: HostTargetConfig::Local {
+                mounts: None,
+                workdir: None,
+                env: None,
+                network_mode: Some("none".into()),
+            },
+            session_ttl_ns: None,
+            labels: None,
+        }
+    }
+
+    fn sandbox_host_session_open_config() -> HostSessionOpenConfig {
+        HostSessionOpenConfig {
+            target: HostTargetConfig::Sandbox {
+                image: "aos-agent-test:latest".into(),
+                runtime_class: Some("fabric".into()),
+                workdir: Some("/workspace".into()),
+                env: None,
+                network_mode: Some("none".into()),
+                mounts: None,
+                cpu_limit_millis: Some(2000),
+                memory_limit_bytes: Some(512 * 1024 * 1024),
+            },
+            session_ttl_ns: Some(60_000_000_000),
+            labels: None,
+        }
+    }
+
     #[test]
     fn run_request_auto_opens_host_session_when_missing() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
 
         let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
@@ -1188,8 +1292,91 @@ mod tests {
     }
 
     #[test]
-    fn host_session_ready_enables_host_fs_and_exec_tools() {
+    fn run_request_does_not_auto_open_host_session_without_config() {
+        let mut state = local_coding_state();
+        state.session_config.default_host_session_open = None;
+        state.session_id = SessionId("s-1".into());
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+        assert_eq!(state.lifecycle, SessionLifecycle::Running);
+        assert!(!out.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                SessionEffectCommand::ToolEffect { pending, .. }
+                    if pending.effect == "sys/host.session.open@1"
+            )
+        }));
+        assert!(state.effective_tools.profile_requires_host_session);
+    }
+
+    #[test]
+    fn run_request_auto_opens_sandbox_host_session_from_config() {
+        let registry = ToolRegistryBuilder::new()
+            .with_bundle(tool_bundle_host_sandbox())
+            .build()
+            .expect("registry");
+        let profile = ToolProfileBuilder::new()
+            .with_tool_id("host.exec")
+            .build_for_registry(&registry)
+            .expect("profile");
+
         let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        state.tool_registry = registry;
+        state.tool_profiles.insert("sandbox".into(), profile);
+        state.tool_profile = "sandbox".into();
+        state.session_config.default_host_session_open = Some(sandbox_host_session_open_config());
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+        let params_json = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::ToolEffect {
+                    params_json,
+                    pending,
+                    ..
+                } if pending.effect == "sys/host.session.open@1" => Some(params_json.as_str()),
+                _ => None,
+            })
+            .expect("host session open effect");
+        let params: serde_json::Value = serde_json::from_str(params_json).expect("params json");
+
+        assert_eq!(params["target"]["$tag"], "sandbox");
+        assert_eq!(params["target"]["$value"]["image"], "aos-agent-test:latest");
+        assert_eq!(params["target"]["$value"]["runtime_class"], "fabric");
+        assert_eq!(params["target"]["$value"]["workdir"], "/workspace");
+        assert_eq!(params["session_ttl_ns"], 60_000_000_000_u64);
+    }
+
+    #[test]
+    fn run_request_with_empty_registry_is_chat_only() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+
+        assert!(state.effective_tools.ordered_tools.is_empty());
+        assert!(!state.effective_tools.profile_requires_host_session);
+        assert!(!out.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                SessionEffectCommand::ToolEffect { pending, .. }
+                    if pending.effect == "sys/host.session.open@1"
+            )
+        }));
+        assert!(out.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                SessionEffectCommand::LlmGenerate { params, .. }
+                    if params.runtime.tool_refs.is_none()
+            )
+        }));
+    }
+
+    #[test]
+    fn host_session_ready_enables_host_fs_and_exec_tools() {
+        let mut state = local_coding_state();
         apply_session_workflow_event(
             &mut state,
             &ingress(
@@ -1216,7 +1403,7 @@ mod tests {
 
     #[test]
     fn tool_calls_observed_builds_deterministic_plan_and_ignores_disabled() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         apply_session_workflow_event(
             &mut state,
             &ingress(
@@ -1296,7 +1483,7 @@ mod tests {
 
     #[test]
     fn run_request_materializes_tool_refs_before_llm_generate() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
@@ -1349,7 +1536,7 @@ mod tests {
 
     #[test]
     fn llm_receipt_settles_by_issuer_ref_when_params_hash_differs() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
@@ -1445,7 +1632,7 @@ mod tests {
 
     #[test]
     fn llm_tool_calls_are_resolved_executed_and_queued_for_follow_up() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
@@ -1678,7 +1865,7 @@ mod tests {
 
     #[test]
     fn llm_no_tools_completion_keeps_last_output_ref_for_lifecycle_event() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
@@ -1815,7 +2002,7 @@ mod tests {
 
     #[test]
     fn workspace_apply_composite_tool_runs_to_completion() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,
@@ -2024,7 +2211,7 @@ mod tests {
 
     #[test]
     fn workspace_commit_immediate_tool_allows_next_group_to_run() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
 
@@ -2087,7 +2274,7 @@ mod tests {
 
     #[test]
     fn workspace_commit_with_arguments_ref_rewinds_into_next_group() {
-        let mut state = SessionState::default();
+        let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
         apply_session_workflow_event(
             &mut state,

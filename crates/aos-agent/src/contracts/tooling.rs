@@ -1,4 +1,5 @@
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_wasm_sdk::AirSchema;
@@ -225,4 +226,123 @@ pub fn default_tool_profiles() -> BTreeMap<String, Vec<String>> {
 
 pub fn default_tool_profile_for_provider(provider: &str) -> String {
     crate::tools::registry::default_tool_profile_for_provider(provider)
+}
+
+pub fn local_coding_agent_tool_registry() -> BTreeMap<String, ToolSpec> {
+    crate::tools::registry::local_coding_agent_tool_registry()
+}
+
+pub fn local_coding_agent_tool_profiles() -> BTreeMap<String, Vec<String>> {
+    crate::tools::registry::local_coding_agent_tool_profiles()
+}
+
+pub fn local_coding_agent_tool_profile_for_provider(provider: &str) -> String {
+    crate::tools::registry::local_coding_agent_tool_profile_for_provider(provider)
+}
+
+pub fn tool_bundle_inspect() -> Vec<ToolSpec> {
+    crate::tools::registry::tool_bundle_inspect()
+}
+
+pub fn tool_bundle_host_session() -> Vec<ToolSpec> {
+    crate::tools::registry::tool_bundle_host_session()
+}
+
+pub fn tool_bundle_host_fs() -> Vec<ToolSpec> {
+    crate::tools::registry::tool_bundle_host_fs()
+}
+
+pub fn tool_bundle_host_local() -> Vec<ToolSpec> {
+    crate::tools::registry::tool_bundle_host_local()
+}
+
+pub fn tool_bundle_host_sandbox() -> Vec<ToolSpec> {
+    crate::tools::registry::tool_bundle_host_sandbox()
+}
+
+pub fn tool_bundle_workspace() -> Vec<ToolSpec> {
+    crate::tools::registry::tool_bundle_workspace()
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ToolRegistryBuilder {
+    registry: BTreeMap<String, ToolSpec>,
+}
+
+impl ToolRegistryBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_bundle(mut self, bundle: Vec<ToolSpec>) -> Self {
+        for tool in bundle {
+            self.registry.insert(tool.tool_id.clone(), tool);
+        }
+        self
+    }
+
+    pub fn with_tool(mut self, tool: ToolSpec) -> Self {
+        self.registry.insert(tool.tool_id.clone(), tool);
+        self
+    }
+
+    pub fn without_tool(mut self, tool_id: &str) -> Self {
+        self.registry.remove(tool_id);
+        self
+    }
+
+    pub fn build(self) -> Result<BTreeMap<String, ToolSpec>, String> {
+        crate::tools::registry::validate_tool_registry(&self.registry)?;
+        Ok(self.registry)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ToolProfileBuilder {
+    tool_ids: Vec<String>,
+}
+
+impl ToolProfileBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_bundle(mut self, bundle: Vec<ToolSpec>) -> Self {
+        for tool in bundle {
+            self = self.with_tool_id(tool.tool_id.as_str());
+        }
+        self
+    }
+
+    pub fn with_tool_id(mut self, tool_id: &str) -> Self {
+        if !self.tool_ids.iter().any(|existing| existing == tool_id) {
+            self.tool_ids.push(tool_id.into());
+        }
+        self
+    }
+
+    pub fn without_tool(mut self, tool_id: &str) -> Self {
+        self.tool_ids.retain(|existing| existing != tool_id);
+        self
+    }
+
+    pub fn build(self) -> Vec<String> {
+        self.tool_ids
+    }
+
+    pub fn build_for_registry(
+        self,
+        registry: &BTreeMap<String, ToolSpec>,
+    ) -> Result<Vec<String>, String> {
+        let mut seen = BTreeSet::new();
+        for tool_id in &self.tool_ids {
+            if !seen.insert(tool_id.clone()) {
+                return Err(format!("duplicate tool id '{tool_id}' in profile"));
+            }
+            if !registry.contains_key(tool_id) {
+                return Err(format!("profile references unknown tool id '{tool_id}'"));
+            }
+        }
+        Ok(self.tool_ids)
+    }
 }

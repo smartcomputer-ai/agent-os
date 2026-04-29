@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: High  
 **Risk if deferred**: High (`aos-agent` will keep hardening around one accidental coding-agent tool surface, making session, context, hosted execution, and Demiurge integration harder to clean up later)  
-**Status**: Proposed  
+**Status**: In Progress; implementation complete through scope item 4  
 **Depends on**: `roadmap/v0.21-air-v2/`, `roadmap/v0.22-dx/p2-migrate-rust-authored-agent-demiurge.md`
 
 ## Goal
@@ -30,7 +30,7 @@ Current `aos-agent` has improved since the first roadmap draft:
 3. prompt refs are hash refs rather than workspace paths.
 4. session bootstrap can be driven through library helpers.
 
-But the tool boundary is still too broad:
+Before this P4 slice, the tool boundary was too broad:
 
 1. `default_tool_registry()` mixes host, inspect, and workspace-facing tools.
 2. `default_tool_profiles()` expose a coding-agent shaped default.
@@ -39,7 +39,9 @@ But the tool boundary is still too broad:
 5. workspace composite tools are special-cased inside the generic tool runner.
 6. host-session auto-open assumes one host target story instead of explicit local/sandbox config.
 
-That is the wrong default for the next agent work.
+Scope items 1-4 address the SDK default, explicit bundle assembly, composite-tool seam, and
+host-target config. Scope item 5 still needs the AIR/package documentation pass for the broad
+evented `SessionWorkflow` adapter surface.
 
 The core session kernel should not care whether a world chooses:
 
@@ -132,7 +134,7 @@ The immediate slice can keep one broad workflow, but docs and builders must stop
 
 ## Scope
 
-### [ ] 1) Define the code boundary
+### [x] 1) Define the code boundary
 
 Document and implement the internal split:
 
@@ -143,7 +145,14 @@ Document and implement the internal split:
 
 The public API should expose the assembly pieces intentionally instead of hiding them under `#[doc(hidden)]` if downstream worlds are expected to use them.
 
-### [ ] 2) Add explicit bundle constructors and registry builders
+Done:
+
+1. `SessionState::default()` now starts with an empty tool registry, empty profiles, and no selected profile.
+2. the previous broad coding-agent surface is available only through explicit `local_coding_agent_*` helpers.
+3. built-in tool assembly is exposed through public bundle constructors and builder APIs in `aos-agent`.
+4. generic workflow helpers no longer depend on provider defaults to select a hidden tool surface.
+
+### [x] 2) Add explicit bundle constructors and registry builders
 
 Add bundle constructors for at least:
 
@@ -162,7 +171,15 @@ Add registry/profile builders that support:
 3. deterministic conflict handling,
 4. validation of canonical `tool_id` values and LLM-facing `tool_name` uniqueness.
 
-### [ ] 3) Move composite execution behind bundle seams
+Done:
+
+1. added `tool_bundle_inspect()`, `tool_bundle_host_local()`, `tool_bundle_host_sandbox()`, and `tool_bundle_workspace()`.
+2. added smaller host pieces, `tool_bundle_host_session()` and `tool_bundle_host_fs()`, for custom assembly.
+3. added `ToolRegistryBuilder` with bundle merge, single-tool override, per-tool removal, and final registry validation.
+4. added `ToolProfileBuilder` so profiles can be assembled independently and validated against a chosen registry.
+5. kept the local coding profile as an explicit compatibility helper instead of an SDK default.
+
+### [x] 3) Move composite execution behind bundle seams
 
 The generic tool runner should stop hardcoding workspace internals.
 
@@ -174,7 +191,14 @@ Required outcome:
 4. domain-event tools can emit typed domain events without becoming host or workspace effects,
 5. core planning remains generic over accepted tool calls, parallelism hints, domain events, and receipts.
 
-### [ ] 4) Make host target config explicit
+Done:
+
+1. added a generic composite-tool seam: `is_composite_tool_mapper`, `start_composite_tool`, `continue_composite_tool`, and `resume_composite_tool`.
+2. moved workspace composite execution behind that seam; workspace remains the first backend, not a special case in the tool-batch runner.
+3. kept tool planning and receipt settlement generic over mapper, executor, parallelism hints, domain events, and LLM results.
+4. preserved workspace composite coverage with deterministic reducer tests.
+
+### [x] 4) Make host target config explicit
 
 Represent host-session target config at assembly/config time.
 
@@ -186,6 +210,14 @@ Required outcome:
 4. a chat-only agent can have no tool registry at all.
 
 This slice does not need to finish all Fabric product behavior; it only needs to avoid baking local-host assumptions into `aos-agent` core.
+
+Done:
+
+1. added `HostSessionOpenConfig`, `HostTargetConfig::Local`, `HostTargetConfig::Sandbox`, and `HostMountConfig` to session/run config contracts.
+2. auto-open now requires explicit session or run host-open config; there is no implicit local-host default.
+3. run-level host-open config overrides the session default.
+4. local and sandbox host-open configs are converted into `sys/host.session.open@1` params through the same core path.
+5. reducer tests cover local auto-open, sandbox auto-open, host-tools-without-auto-open, and chat-only no-tool sessions.
 
 ### [ ] 5) Update Rust-authored AIR and generated package docs
 
