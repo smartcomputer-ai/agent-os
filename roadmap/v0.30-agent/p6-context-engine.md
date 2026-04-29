@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: High  
 **Risk if deferred**: High (skills, memories, repo instructions, and world-specific behavior will keep accreting around ad hoc prompt refs)  
-**Status**: Proposed  
+**Status**: Core contracts, default engine, and session reducer wiring complete; override and `aos-harness-py` fixtures still pending  
 **Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p5-session-run-model.md`
 
 ## Goal
@@ -160,7 +160,7 @@ The exact names can change.
 
 ## Scope
 
-### [ ] 1) Define shared context contracts
+### [x] 1) Define shared context contracts
 
 Add core types for:
 
@@ -176,7 +176,15 @@ Add core types for:
 
 These should be source-agnostic and live in the `aos-agent` library surface.
 
-### [ ] 2) Add the run-planning hook
+Done:
+
+1. added source-agnostic `ContextInput`, `ContextInputScope`, `ContextInputKind`, `ContextPriority`, and `ContextBudget`.
+2. added deterministic `ContextSelection`, `ContextAction`, `ContextReport`, and `ContextPlan`.
+3. added `ContextObservation` for feeding completed summaries and pinned/removed inputs back into session state.
+4. added `SessionContextState` with pinned inputs, summary refs, and last report.
+5. exported context contracts from the `aos-agent` library and generated AIR schemas.
+
+### [x] 2) Add the run-planning hook
 
 The session runtime should stop treating prompt refs as the entire context story.
 
@@ -189,7 +197,16 @@ Required outcome:
 5. run cause/provenance can be presented as an input,
 6. old prompt refs become inputs to the default engine.
 
-### [ ] 3) Provide a minimal default engine
+Done:
+
+1. `dispatch_queued_llm_turn` now builds a context plan before emitting `sys/llm.generate@1`.
+2. selected context refs feed `LlmGenerateParams.message_refs`; prompt refs are no longer appended in the LLM primitive.
+3. `RunState.context_plan` records the per-run plan for inspection.
+4. `SessionContextState.last_report` records the latest context report.
+5. run cause payload and subject refs are normalized into context inputs.
+6. legacy prompt refs are normalized into default-engine inputs.
+
+### [x] 3) Provide a minimal default engine
 
 The default engine should be deliberately conservative:
 
@@ -203,7 +220,15 @@ The default engine should be deliberately conservative:
 
 This is a reference implementation, not the final factory brain.
 
-### [ ] 4) Add compaction hooks
+Done:
+
+1. added `ContextEngine` plus `DefaultContextEngine`.
+2. default selection includes prompt refs, pinned inputs, summary refs, run cause refs, transcript refs, and current turn refs.
+3. default selection deduplicates refs deterministically.
+4. simple `ContextBudget.max_refs` limits non-required inputs and records dropped selections.
+5. default reports include selected/dropped counts and selection decisions.
+
+### [x] 4) Add compaction hooks
 
 The engine contract should support compaction without hiding summarization.
 
@@ -214,7 +239,14 @@ Required outcome:
 3. completed summary refs can be observed back into session context state,
 4. tests can assert compaction recommendations deterministically.
 
-### [ ] 5) Add inspection and tests
+Done:
+
+1. default engine emits `ContextActionKind::Compact` when budgeted selection drops inputs.
+2. compaction actions are recommendations only; summarization remains explicit runtime work.
+3. `ContextObservation::SummaryCompleted` adds completed summary refs to session context state.
+4. deterministic unit tests assert budget drops and compaction recommendations.
+
+### [~] 5) Add inspection and tests
 
 Required surfaces:
 
@@ -225,6 +257,17 @@ Required surfaces:
 
 The Python fixture should script LLM and blob receipts rather than depending on live provider
 output. See `roadmap/v0.30-agent/p10-agent-sdk-testing.md` for the harness direction.
+
+Done:
+
+1. pure context-engine tests cover prompt-ref ordering, domain cause refs, budget drops, and compaction recommendations.
+2. reducer tests cover prompt-ref compatibility through the default context engine.
+3. run-level context plans and session-level last reports are inspectable in state.
+
+Remaining:
+
+1. add an `aos-harness-py` workflow fixture for prompt-ref compatibility and report inspection.
+2. add a source-agnostic fixture that scripts LLM/blob receipts end to end.
 
 ### [ ] 6) Prove override
 

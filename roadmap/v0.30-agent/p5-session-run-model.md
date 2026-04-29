@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: High  
 **Risk if deferred**: High (context, traces, interruption, and Demiurge will land against the wrong lifecycle boundary)  
-**Status**: Proposed  
+**Status**: Core SDK and Demiurge integration complete; `aos-harness-py` E2E fixture still pending  
 **Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`
 
 ## Goal
@@ -161,7 +161,7 @@ populate `RunCause` rather than relying on implicit user-turn semantics.
 
 ## Scope
 
-### [ ] 1) Split contracts
+### [x] 1) Split contracts
 
 Add separate contracts for:
 
@@ -174,7 +174,15 @@ Add separate contracts for:
 
 Retire or narrow `SessionLifecycle` once migration is complete.
 
-### [ ] 2) Add explicit session operations
+Done:
+
+1. added `SessionStatus` for durable session state.
+2. added `RunLifecycle` for per-run execution state.
+3. added `RunState` and `RunRecord` with open-ended `RunCause`.
+4. added `RunCauseOrigin`, `CauseRef`, `RunOutcome`, and `RunFailure`.
+5. kept legacy `SessionLifecycle` as a compatibility mirror for existing consumers while new run/session contracts become the semantic model.
+
+### [x] 2) Add explicit session operations
 
 Add first-class ingress operations for:
 
@@ -191,7 +199,15 @@ Add first-class ingress operations for:
 
 The exact event names can change, but the semantic separation should not.
 
-### [ ] 3) Move active execution into run state
+Done:
+
+1. added `SessionOpened`, `SessionConfigUpdated`, `SessionPaused`, `SessionResumed`, `SessionArchived`, `SessionExpired`, and `SessionClosed`.
+2. added `RunStartRequested { cause, run_overrides }` while preserving legacy `RunRequested` as user-input sugar.
+3. retained host session attachment via `HostSessionUpdated`.
+4. retained run completion/failure/cancel ingress and records terminal run outcome in run history.
+5. closed, paused, archived, and expired sessions reject new run starts independently from run lifecycle.
+
+### [x] 3) Move active execution into run state
 
 Move or re-scope:
 
@@ -205,7 +221,14 @@ Move or re-scope:
 
 The session may expose `current_run`, but the fields should be run-scoped.
 
-### [ ] 4) Preserve deterministic replay
+Done:
+
+1. `current_run` stores run id, lifecycle, cause, config, input refs, active tool batch, pending effects, queued LLM refs, follow-up state, last output, and in-flight count.
+2. existing reducer fields remain as compatibility mirrors for this cut, but are synced into `current_run` after each reduction.
+3. terminal runs move into bounded `run_history` records with outcome data.
+4. durable transcript refs stay at session scope and are no longer cleared when a run ends.
+
+### [x] 4) Preserve deterministic replay
 
 Add focused tests for:
 
@@ -221,7 +244,14 @@ Use Rust unit tests for reducer transition invariants and `aos-harness-py` workf
 end-to-end session/run stories. Live `aos-agent-eval` coverage should only prove provider/tool
 acceptance still works.
 
-### [ ] 5) Update telemetry
+Done:
+
+1. added Rust reducer tests for session-with-no-runs, multiple sequential runs, failed-then-later run, paused/closed session boundaries, and non-user domain-event causes.
+2. generated AIR is checked against Rust source.
+3. downstream `aos-agent-eval`, `aos-smoke`, and Demiurge compile against the new contracts.
+4. `aos-harness-py` E2E coverage is still pending because that package does not currently have an agent session fixture lane.
+
+### [x] 5) Update telemetry
 
 Add separate events for:
 
@@ -234,7 +264,14 @@ Add separate events for:
 
 This prepares the ground for P7 run traces.
 
-### [ ] 6) Update Demiurge and fixtures
+Done:
+
+1. added `SessionStatusChanged` and `RunLifecycleChanged`.
+2. run lifecycle telemetry carries run cause/provenance and output ref.
+3. session lifecycle telemetry remains for compatibility while P7 can build on the new run/session events.
+4. current-run and run-history inspection data is present in `SessionState`.
+
+### [x] 6) Update Demiurge and fixtures
 
 Required outcome:
 
@@ -243,6 +280,14 @@ Required outcome:
 3. Demiurge populates `RunCause` explicitly,
 4. a fixture proves one durable session can run multiple turns/tasks,
 5. evented and direct reducer helper paths preserve the same model.
+
+Done:
+
+1. Demiurge handoff now emits `RunStartRequested` through the helper path.
+2. Demiurge populates `RunCause` with `demiurge/task_submitted` provenance and task subject refs.
+3. existing Demiurge task-driven behavior still compiles and passes its unit tests.
+4. focused SDK reducer tests prove session continuity across multiple runs and direct domain-event causes.
+5. `aos-harness-py` fixture coverage remains the explicit follow-up from this P5 cut.
 
 ## Non-Goals
 
@@ -260,12 +305,46 @@ P5 does **not** attempt:
 
 ## Acceptance Criteria
 
-1. A durable session can exist with zero or more runs.
-2. Run lifecycle transitions no longer double as session status transitions.
-3. Transcript/history is explicitly session-scoped.
-4. Active effects and tool batches are explicitly run-scoped.
-5. Every run records an open-ended `RunCause` without requiring SDK changes for product-specific triggers.
-6. A deterministic fixture proves a non-user/domain-event cause can start a run through normal session ingress.
-7. Demiurge or a focused fixture proves session continuity across multiple runs.
-8. A deterministic `aos-harness-py` fixture proves multi-run session continuity without provider credentials.
-9. Existing one-shot live agent evals still work through the new model.
+### [x] 1) A durable session can exist with zero or more runs.
+
+Covered by `SessionStatus`, optional `current_run`, `run_history`, and reducer tests for a session
+with no runs plus sequential runs in one session.
+
+### [x] 2) Run lifecycle transitions no longer double as session status transitions.
+
+Covered by separate `SessionStatus` and `RunLifecycle` contracts. Legacy `SessionLifecycle` remains
+only as a compatibility mirror for existing event consumers.
+
+### [x] 3) Transcript/history is explicitly session-scoped.
+
+Covered by `transcript_message_refs` on `SessionState`; `clear_active_run()` no longer clears the
+durable transcript.
+
+### [x] 4) Active effects and tool batches are explicitly run-scoped.
+
+Covered by `RunState` fields for active tool batch, pending effects, pending blob work, queued LLM
+refs, follow-up turn, last output, tool materialization, and in-flight count. Existing session-level
+fields remain as reducer compatibility mirrors in this cut.
+
+### [x] 5) Every run records an open-ended `RunCause` without requiring SDK changes for product-specific triggers.
+
+Covered by `RunCause`, `RunCauseOrigin`, and `CauseRef` with namespaced/open string `kind` fields.
+
+### [x] 6) A deterministic fixture proves a non-user/domain-event cause can start a run through normal session ingress.
+
+Covered by the Rust reducer test for `RunStartRequested` with a `DomainEvent` origin.
+
+### [x] 7) Demiurge or a focused fixture proves session continuity across multiple runs.
+
+Covered by focused SDK reducer tests for multiple sequential runs and failed-run-then-later-run in
+the same durable session. Demiurge now populates `RunCause` for task handoff.
+
+### [ ] 8) A deterministic `aos-harness-py` fixture proves multi-run session continuity without provider credentials.
+
+Pending. `aos-harness-py` currently has no dedicated agent session fixture lane; this remains the
+explicit follow-up for P5 end-to-end coverage.
+
+### [x] 9) Existing one-shot live agent evals still work through the new model.
+
+Covered by `cargo check -p aos-agent-eval` against the new contracts; live provider execution is
+still the acceptance lane rather than a unit test.

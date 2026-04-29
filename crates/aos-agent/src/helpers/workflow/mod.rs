@@ -1,14 +1,17 @@
 use super::{
-    LlmStepContext, RequestLlm, SessionEffectCommand, SessionReduceOutput, allocate_run_id,
-    can_apply_host_command, enqueue_host_text, pop_follow_up_if_ready, request_llm,
-    transition_lifecycle,
+    ContextError, ContextRequest, DefaultContextEngine, LlmStepContext, RequestLlm,
+    SessionEffectCommand, SessionReduceOutput, allocate_run_id, can_apply_host_command,
+    enqueue_host_text, pop_follow_up_if_ready, request_llm, transition_lifecycle,
 };
 use crate::contracts::{
-    EffectiveTool, EffectiveToolSet, HostCommandKind, HostSessionOpenConfig, HostTargetConfig,
-    PendingBlobGetKind, PendingBlobPutKind, PendingFollowUpTurn, RunConfig, SessionConfig,
-    SessionIngressKind, SessionLifecycle, SessionState, SessionWorkflowEvent, ToolAvailabilityRule,
-    ToolBatchPlan, ToolCallStatus, ToolOverrideScope, ToolSpec,
+    ContextBudget, ContextObservation, ContextPlan, EffectiveTool, EffectiveToolSet,
+    HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
+    PendingBlobPutKind, PendingFollowUpTurn, RunCause, RunConfig, RunFailure, RunLifecycle,
+    RunOutcome, RunRecord, RunState, SessionConfig, SessionIngressKind, SessionLifecycle,
+    SessionState, SessionStatus, SessionWorkflowEvent, ToolAvailabilityRule, ToolBatchPlan,
+    ToolCallStatus, ToolOverrideScope, ToolSpec,
 };
+use crate::helpers::ContextEngine;
 use crate::tools::{ToolEffectOp, map_tool_receipt_to_llm_result};
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
@@ -77,6 +80,12 @@ fn transition_to_waiting_input_if_running(
         transition_lifecycle(state, SessionLifecycle::WaitingInput)
             .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
     }
+    if let Some(run) = state.current_run.as_mut()
+        && matches!(run.lifecycle, RunLifecycle::Running)
+    {
+        run.lifecycle = RunLifecycle::WaitingInput;
+        run.updated_at = state.updated_at;
+    }
     Ok(())
 }
 
@@ -128,13 +137,49 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     input_ref,
                     run_overrides,
                 } => {
+                    let cause = RunCause::direct_input(input_ref.clone());
                     validate_run_request_catalog(
                         state,
                         run_overrides.as_ref(),
                         allowed_providers,
                         allowed_models,
                     )?;
-                    on_run_requested(state, input_ref, run_overrides.as_ref(), &mut out)?;
+                    on_run_start_requested(state, &cause, run_overrides.as_ref(), &mut out)?;
+                }
+                SessionIngressKind::RunStartRequested {
+                    cause,
+                    run_overrides,
+                } => {
+                    validate_run_request_catalog(
+                        state,
+                        run_overrides.as_ref(),
+                        allowed_providers,
+                        allowed_models,
+                    )?;
+                    on_run_start_requested(state, cause, run_overrides.as_ref(), &mut out)?;
+                }
+                SessionIngressKind::SessionOpened { config } => {
+                    on_session_opened(state, config.as_ref())?;
+                }
+                SessionIngressKind::SessionConfigUpdated { config } => {
+                    state.session_config = config.clone();
+                    let active = state.active_run_config.clone();
+                    refresh_effective_tools(state, active.as_ref())?;
+                }
+                SessionIngressKind::SessionPaused => {
+                    transition_session_status(state, SessionStatus::Paused)?;
+                }
+                SessionIngressKind::SessionResumed => {
+                    transition_session_status(state, SessionStatus::Open)?;
+                }
+                SessionIngressKind::SessionArchived => {
+                    transition_session_status(state, SessionStatus::Archived)?;
+                }
+                SessionIngressKind::SessionExpired => {
+                    transition_session_status(state, SessionStatus::Expired)?;
+                }
+                SessionIngressKind::SessionClosed => {
+                    transition_session_status(state, SessionStatus::Closed)?;
                 }
                 SessionIngressKind::HostCommandReceived(command) => {
                     on_host_command(state, command)?
@@ -164,6 +209,9 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     disable.as_deref(),
                     force.as_deref(),
                 )?,
+                SessionIngressKind::ContextObserved(observation) => {
+                    on_context_observed(state, observation);
+                }
                 SessionIngressKind::HostSessionUpdated {
                     host_session_id,
                     host_session_status,
@@ -171,16 +219,46 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     on_host_session_updated(state, host_session_id.as_ref(), *host_session_status)?
                 }
                 SessionIngressKind::RunCompleted => {
+                    finish_current_run(
+                        state,
+                        RunLifecycle::Completed,
+                        Some(RunOutcome {
+                            output_ref: state.last_output_ref.clone(),
+                            failure: None,
+                            cancelled_reason: None,
+                        }),
+                    );
                     transition_lifecycle(state, SessionLifecycle::Completed)
                         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
                 }
-                SessionIngressKind::RunFailed { .. } => {
+                SessionIngressKind::RunFailed { code, detail } => {
+                    finish_current_run(
+                        state,
+                        RunLifecycle::Failed,
+                        Some(RunOutcome {
+                            output_ref: state.last_output_ref.clone(),
+                            failure: Some(RunFailure {
+                                code: code.clone(),
+                                detail: detail.clone(),
+                            }),
+                            cancelled_reason: None,
+                        }),
+                    );
                     transition_lifecycle(state, SessionLifecycle::Failed)
                         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
                 }
-                SessionIngressKind::RunCancelled { .. } => {
+                SessionIngressKind::RunCancelled { reason } => {
+                    finish_current_run(
+                        state,
+                        RunLifecycle::Cancelled,
+                        Some(RunOutcome {
+                            output_ref: state.last_output_ref.clone(),
+                            failure: None,
+                            cancelled_reason: reason.clone(),
+                        }),
+                    );
                     transition_lifecycle(state, SessionLifecycle::Cancelled)
                         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
                     clear_active_run(state);
@@ -271,14 +349,49 @@ pub fn validate_run_catalog(
     Ok(())
 }
 
-fn on_run_requested(
+fn on_session_opened(
     state: &mut SessionState,
-    input_ref: &str,
+    config: Option<&SessionConfig>,
+) -> Result<(), SessionReduceError> {
+    if let Some(config) = config {
+        state.session_config = config.clone();
+    }
+    transition_session_status(state, SessionStatus::Open)
+}
+
+fn transition_session_status(
+    state: &mut SessionState,
+    next: SessionStatus,
+) -> Result<(), SessionReduceError> {
+    if state.status == next {
+        return Ok(());
+    }
+    if state.active_run_id.is_some()
+        && matches!(
+            next,
+            SessionStatus::Archived | SessionStatus::Expired | SessionStatus::Closed
+        )
+    {
+        return Err(SessionReduceError::RunAlreadyActive);
+    }
+    state.status = next;
+    Ok(())
+}
+
+fn on_run_start_requested(
+    state: &mut SessionState,
+    cause: &RunCause,
     run_overrides: Option<&SessionConfig>,
     out: &mut SessionReduceOutput,
 ) -> Result<(), SessionReduceError> {
+    if !state.status.accepts_new_runs() {
+        return Err(SessionReduceError::InvalidLifecycleTransition);
+    }
     if state.active_run_id.is_some() {
         return Err(SessionReduceError::RunAlreadyActive);
+    }
+    if cause.input_refs.is_empty() {
+        return Err(SessionReduceError::EmptyMessageRefs);
     }
 
     let requested = select_run_config(&state.session_config, run_overrides);
@@ -290,16 +403,39 @@ fn on_run_requested(
     let run_id = allocate_run_id(state);
     state.active_run_id = Some(run_id.clone());
     state.active_run_config = Some(requested.clone());
+    state.current_run = Some(RunState {
+        run_id: run_id.clone(),
+        lifecycle: RunLifecycle::Running,
+        cause: cause.clone(),
+        config: requested.clone(),
+        input_refs: cause.input_refs.clone(),
+        context_plan: None,
+        active_tool_batch: None,
+        pending_effects: aos_wasm_sdk::PendingEffects::new(),
+        pending_blob_gets: aos_wasm_sdk::SharedBlobGets::new(),
+        pending_blob_puts: aos_wasm_sdk::SharedBlobPuts::new(),
+        pending_follow_up_turn: None,
+        queued_llm_message_refs: None,
+        last_output_ref: None,
+        tool_refs_materialized: false,
+        in_flight_effects: 0,
+        outcome: None,
+        started_at: state.updated_at,
+        updated_at: state.updated_at,
+    });
     state.active_tool_batch = None;
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
     state.pending_follow_up_turn = None;
     state.queued_llm_message_refs = None;
-    state.conversation_message_refs.clear();
     state.last_output_ref = None;
+    state.tool_refs_materialized = false;
 
     refresh_effective_tools(state, Some(&requested))?;
-    state.conversation_message_refs.push(input_ref.into());
+    state
+        .transcript_message_refs
+        .extend(cause.input_refs.iter().cloned());
+    state.conversation_message_refs = state.transcript_message_refs.clone();
     queue_llm_turn(state, state.conversation_message_refs.clone(), out)
 }
 
@@ -315,16 +451,27 @@ fn on_host_command(
 
     match &command.command {
         HostCommandKind::Pause => {
+            transition_session_status(state, SessionStatus::Paused)?;
             transition_lifecycle(state, SessionLifecycle::Paused)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
         }
         HostCommandKind::Resume => {
+            transition_session_status(state, SessionStatus::Open)?;
             transition_lifecycle(state, SessionLifecycle::Running)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
         }
         HostCommandKind::Cancel { .. } => {
             transition_lifecycle(state, SessionLifecycle::Cancelling)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+            finish_current_run(
+                state,
+                RunLifecycle::Cancelled,
+                Some(RunOutcome {
+                    output_ref: state.last_output_ref.clone(),
+                    failure: None,
+                    cancelled_reason: Some("host command cancel".into()),
+                }),
+            );
             transition_lifecycle(state, SessionLifecycle::Cancelled)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
             clear_active_run(state);
@@ -437,6 +584,38 @@ fn on_host_session_updated(
 
     let active = state.active_run_config.clone();
     refresh_effective_tools(state, active.as_ref())
+}
+
+fn on_context_observed(state: &mut SessionState, observation: &ContextObservation) {
+    match observation {
+        ContextObservation::SummaryCompleted {
+            summary_ref,
+            input_refs: _,
+        } => {
+            if !state
+                .context_state
+                .summary_refs
+                .iter()
+                .any(|existing| existing == summary_ref)
+            {
+                state.context_state.summary_refs.push(summary_ref.clone());
+            }
+        }
+        ContextObservation::InputPinned(input) => {
+            state
+                .context_state
+                .pinned_inputs
+                .retain(|existing| existing.input_id != input.input_id);
+            state.context_state.pinned_inputs.push(input.clone());
+        }
+        ContextObservation::InputRemoved { input_id } => {
+            state
+                .context_state
+                .pinned_inputs
+                .retain(|existing| existing.input_id != *input_id);
+        }
+        ContextObservation::Noop => {}
+    }
 }
 
 fn handle_standalone_host_session_open_receipt(
@@ -626,9 +805,38 @@ fn recompute_in_flight_effects(state: &mut SessionState) {
         + pending_tool_effect_receipts
         + pending_host_loop_calls;
     state.in_flight_effects = total as u64;
+    sync_current_run_execution(state);
+}
+
+fn sync_current_run_execution(state: &mut SessionState) {
+    let Some(run) = state.current_run.as_mut() else {
+        return;
+    };
+    run.active_tool_batch = state.active_tool_batch.clone();
+    run.pending_effects = state.pending_effects.clone();
+    run.pending_blob_gets = state.pending_blob_gets.clone();
+    run.pending_blob_puts = state.pending_blob_puts.clone();
+    run.pending_follow_up_turn = state.pending_follow_up_turn.clone();
+    run.queued_llm_message_refs = state.queued_llm_message_refs.clone();
+    run.last_output_ref = state.last_output_ref.clone();
+    run.tool_refs_materialized = state.tool_refs_materialized;
+    run.in_flight_effects = state.in_flight_effects;
+    run.updated_at = state.updated_at;
 }
 
 fn fail_run(state: &mut SessionState) -> Result<(), SessionReduceError> {
+    finish_current_run(
+        state,
+        RunLifecycle::Failed,
+        Some(RunOutcome {
+            output_ref: state.last_output_ref.clone(),
+            failure: Some(RunFailure {
+                code: "run_failed".into(),
+                detail: "run failed while handling effect receipt".into(),
+            }),
+            cancelled_reason: None,
+        }),
+    );
     transition_lifecycle(state, SessionLifecycle::Failed)
         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
     clear_active_run(state);
@@ -764,6 +972,7 @@ fn dispatch_queued_llm_turn(
         .as_ref()
         .map(|id| id.run_seq)
         .unwrap_or(0);
+    let planned_message_refs = build_default_context_for_turn(state, message_refs)?;
 
     request_llm(
         state,
@@ -774,7 +983,7 @@ fn dispatch_queued_llm_turn(
                     "run-{run_seq}-turn-{}",
                     state.next_tool_batch_seq + 1
                 )),
-                message_refs,
+                message_refs: planned_message_refs,
                 temperature: None,
                 top_p: None,
                 tool_refs: state.effective_tools.tool_refs(),
@@ -788,6 +997,66 @@ fn dispatch_queued_llm_turn(
         },
     )?;
     Ok(())
+}
+
+fn build_default_context_for_turn(
+    state: &mut SessionState,
+    turn_refs: Vec<String>,
+) -> Result<Vec<String>, SessionReduceError> {
+    let (run_id, prompt_refs, cause) = {
+        let run = state
+            .current_run
+            .as_ref()
+            .ok_or(SessionReduceError::RunNotActive)?;
+        (
+            run.run_id.clone(),
+            run.config.prompt_refs.clone().unwrap_or_default(),
+            run.cause.clone(),
+        )
+    };
+    let transcript_refs = state
+        .transcript_message_refs
+        .iter()
+        .filter(|value| !turn_refs.iter().any(|turn| turn == *value))
+        .cloned()
+        .collect::<Vec<_>>();
+    let plan = DefaultContextEngine
+        .build_plan(ContextRequest {
+            session_id: &state.session_id,
+            run_id: &run_id,
+            run_cause: Some(&cause),
+            budget: ContextBudget {
+                max_refs: None,
+                reserve_output_tokens: None,
+            },
+            session_context: &state.context_state,
+            prompt_refs: &prompt_refs,
+            transcript_refs: &transcript_refs,
+            turn_refs: &turn_refs,
+        })
+        .map_err(context_error_to_reduce_error)?;
+    apply_context_plan_to_state(state, plan)
+}
+
+fn apply_context_plan_to_state(
+    state: &mut SessionState,
+    plan: ContextPlan,
+) -> Result<Vec<String>, SessionReduceError> {
+    if plan.selected_refs.is_empty() {
+        return Err(SessionReduceError::EmptyMessageRefs);
+    }
+    let selected_refs = plan.selected_refs.clone();
+    state.context_state.last_report = Some(plan.report.clone());
+    if let Some(run) = state.current_run.as_mut() {
+        run.context_plan = Some(plan);
+    }
+    Ok(selected_refs)
+}
+
+fn context_error_to_reduce_error(err: ContextError) -> SessionReduceError {
+    match err {
+        ContextError::EmptySelection => SessionReduceError::EmptyMessageRefs,
+    }
 }
 
 fn should_auto_open_host_session(state: &SessionState) -> bool {
@@ -1065,16 +1334,38 @@ fn validate_run_config(config: &RunConfig) -> Result<(), SessionReduceError> {
     Ok(())
 }
 
+fn finish_current_run(
+    state: &mut SessionState,
+    lifecycle: RunLifecycle,
+    outcome: Option<RunOutcome>,
+) {
+    let Some(mut run) = state.current_run.take() else {
+        return;
+    };
+    run.lifecycle = lifecycle;
+    run.updated_at = state.updated_at;
+    run.outcome = outcome.clone();
+    state.run_history.push(RunRecord {
+        run_id: run.run_id,
+        lifecycle,
+        cause: run.cause,
+        input_refs: run.input_refs,
+        outcome,
+        started_at: run.started_at,
+        ended_at: state.updated_at,
+    });
+}
+
 fn clear_active_run(state: &mut SessionState) {
     state.active_run_id = None;
     state.active_run_config = None;
+    state.current_run = None;
     state.active_tool_batch = None;
     state.pending_effects.clear();
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
     state.pending_follow_up_turn = None;
     state.queued_llm_message_refs = None;
-    state.conversation_message_refs.clear();
     state.tool_refs_materialized = false;
     state.in_flight_effects = 0;
 }
@@ -1121,10 +1412,11 @@ fn hash_cbor<T: serde::Serialize>(value: &T) -> String {
 mod tests {
     use super::*;
     use crate::contracts::{
-        HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, SessionId, SessionIngress,
-        ToolCallObserved, ToolOverrideScope, ToolProfileBuilder, ToolRegistryBuilder,
-        local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
-        local_coding_agent_tool_registry, tool_bundle_host_sandbox,
+        CauseRef, HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, RunCauseOrigin,
+        SessionId, SessionIngress, ToolCallObserved, ToolOverrideScope, ToolProfileBuilder,
+        ToolRegistryBuilder, local_coding_agent_tool_profile_for_provider,
+        local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
+        tool_bundle_host_sandbox,
     };
     use alloc::string::ToString;
     use alloc::vec;
@@ -1372,6 +1664,231 @@ mod tests {
                     if params.runtime.tool_refs.is_none()
             )
         }));
+    }
+
+    #[test]
+    fn run_request_records_context_plan_and_preserves_prompt_refs() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        let prompt_ref = fake_hash('b');
+        let input_ref = fake_hash('a');
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                1,
+                SessionIngressKind::RunRequested {
+                    input_ref: input_ref.clone(),
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: Some(vec![prompt_ref.clone()]),
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )
+        .expect("reduce");
+
+        let params = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { params, .. } => Some(params),
+                _ => None,
+            })
+            .expect("expected llm.generate");
+        let message_refs = params
+            .message_refs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(message_refs, vec![prompt_ref.clone(), input_ref.clone()]);
+
+        let plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.context_plan.as_ref())
+            .expect("context plan");
+        assert_eq!(plan.selected_refs, vec![prompt_ref, input_ref]);
+        assert_eq!(plan.report.engine, "aos.agent/default");
+        assert_eq!(state.context_state.last_report.as_ref(), Some(&plan.report));
+    }
+
+    #[test]
+    fn session_can_exist_with_no_runs() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(1, SessionIngressKind::SessionOpened { config: None }),
+        )
+        .expect("open session");
+
+        assert_eq!(state.status, SessionStatus::Open);
+        assert!(state.current_run.is_none());
+        assert!(state.run_history.is_empty());
+        assert!(state.transcript_message_refs.is_empty());
+    }
+
+    #[test]
+    fn session_preserves_transcript_across_sequential_runs() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("first run");
+        assert_eq!(state.transcript_message_refs, vec![fake_hash('a')]);
+        assert!(state.current_run.is_some());
+        apply_session_workflow_event(&mut state, &ingress(2, SessionIngressKind::RunCompleted))
+            .expect("complete first run");
+
+        let second_input = fake_hash('b');
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                3,
+                SessionIngressKind::RunRequested {
+                    input_ref: second_input.clone(),
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: None,
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )
+        .expect("second run");
+
+        assert_eq!(state.run_history.len(), 1);
+        assert_eq!(state.next_run_seq, 2);
+        assert_eq!(
+            state.transcript_message_refs,
+            vec![fake_hash('a'), second_input]
+        );
+        assert_eq!(
+            state.conversation_message_refs,
+            state.transcript_message_refs
+        );
+        assert_eq!(
+            state.current_run.as_ref().map(|run| run.run_id.run_seq),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn failed_run_can_be_followed_by_later_run() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                2,
+                SessionIngressKind::RunFailed {
+                    code: "boom".into(),
+                    detail: "failed".into(),
+                },
+            ),
+        )
+        .expect("fail run");
+        assert!(state.current_run.is_none());
+        assert_eq!(state.run_history[0].lifecycle, RunLifecycle::Failed);
+
+        apply_session_workflow_event(&mut state, &run_request_event(3)).expect("later run");
+        assert_eq!(state.status, SessionStatus::Open);
+        assert_eq!(
+            state.current_run.as_ref().map(|run| run.run_id.run_seq),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn paused_and_closed_session_boundaries_are_separate_from_runs() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+
+        apply_session_workflow_event(&mut state, &ingress(1, SessionIngressKind::SessionPaused))
+            .expect("pause");
+        assert_eq!(state.status, SessionStatus::Paused);
+        assert!(state.current_run.is_none());
+        assert!(apply_session_workflow_event(&mut state, &run_request_event(2)).is_err());
+
+        apply_session_workflow_event(&mut state, &ingress(3, SessionIngressKind::SessionResumed))
+            .expect("resume");
+        apply_session_workflow_event(&mut state, &run_request_event(4)).expect("run");
+        apply_session_workflow_event(&mut state, &ingress(5, SessionIngressKind::RunCompleted))
+            .expect("complete");
+
+        apply_session_workflow_event(&mut state, &ingress(6, SessionIngressKind::SessionClosed))
+            .expect("close");
+        assert_eq!(state.status, SessionStatus::Closed);
+        assert!(apply_session_workflow_event(&mut state, &run_request_event(7)).is_err());
+    }
+
+    #[test]
+    fn domain_event_cause_starts_normal_run() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        let input_ref = fake_hash('d');
+        let event_ref = fake_hash('e');
+
+        apply_session_workflow_event(
+            &mut state,
+            &ingress(
+                1,
+                SessionIngressKind::RunStartRequested {
+                    cause: RunCause {
+                        kind: "example/work_item_ready".into(),
+                        origin: RunCauseOrigin::DomainEvent {
+                            schema: "example/WorkItemReady@1".into(),
+                            event_ref: Some(event_ref.clone()),
+                            key: Some("work-1".into()),
+                        },
+                        input_refs: vec![input_ref.clone()],
+                        payload_schema: Some("example/WorkItemReady@1".into()),
+                        payload_ref: Some(event_ref),
+                        subject_refs: vec![CauseRef {
+                            kind: "example/work_item".into(),
+                            id: "work-1".into(),
+                            ref_: None,
+                        }],
+                    },
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: None,
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )
+        .expect("domain run");
+
+        let run = state.current_run.as_ref().expect("current run");
+        assert_eq!(run.cause.kind, "example/work_item_ready");
+        assert_eq!(run.input_refs, vec![input_ref]);
+        assert_eq!(state.lifecycle, SessionLifecycle::Running);
     }
 
     #[test]

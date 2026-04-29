@@ -1,8 +1,8 @@
 use crate::contracts::{
-    HostSessionStatus, RunId, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionLifecycleChanged, SessionState,
-    local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
-    local_coding_agent_tool_registry,
+    HostSessionStatus, RunCause, RunId, RunLifecycleChanged, RunState, SessionConfig, SessionId,
+    SessionIngress, SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, SessionState,
+    SessionStatus, SessionStatusChanged, local_coding_agent_tool_profile_for_provider,
+    local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
 };
 use crate::helpers::workflow::SessionReduceError;
 use crate::{helpers::llm::LlmMappingError, tools::ToolEffectOp};
@@ -15,7 +15,7 @@ use aos_effects::builtins::{
 };
 use aos_wasm_sdk::{PendingEffect, ReduceError, Value, WorkflowCtx};
 
-use super::llm::{LlmStepContext, materialize_llm_generate_params_with_prompt_refs};
+use super::llm::LlmStepContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEffectCommand {
@@ -123,6 +123,7 @@ pub struct SessionHandoffRequest {
     pub first_observed_at_ns: u64,
     pub session_id: SessionId,
     pub input_ref: String,
+    pub run_cause: Option<RunCause>,
     pub host_session_id: String,
     pub run_overrides: SessionConfig,
     pub allowed_tools: Option<Vec<String>>,
@@ -169,7 +170,7 @@ pub fn request_llm(
     if request.step.api_key.is_none() {
         request.step.api_key = provider_secret_ref(run_config.provider.as_str());
     }
-    let params = materialize_llm_generate_params_with_prompt_refs(&run_config, request.step)
+    let params = crate::helpers::llm::materialize_llm_generate_params(&run_config, &request.step)
         .map_err(map_llm_mapping_error)?;
     let pending = begin_pending_effect(state, "sys/llm.generate@1", &params, None);
     out.effects.push(SessionEffectCommand::LlmGenerate {
@@ -218,6 +219,113 @@ pub fn emit_session_lifecycle_changed(
         return;
     };
     ctx.intent("aos.agent/SessionLifecycleChanged@1")
+        .payload(&payload)
+        .send();
+}
+
+pub fn session_status_changed_payload(
+    state: &SessionState,
+    prev_status: SessionStatus,
+    observed_at_ns: u64,
+) -> Option<SessionStatusChanged> {
+    if prev_status == state.status || state.session_id.0.is_empty() {
+        return None;
+    }
+    Some(SessionStatusChanged {
+        session_id: state.session_id.clone(),
+        observed_at_ns,
+        from: prev_status,
+        to: state.status,
+    })
+}
+
+pub fn run_lifecycle_changed_payload(
+    state: &SessionState,
+    prev_run: Option<&RunState>,
+    observed_at_ns: u64,
+) -> Option<RunLifecycleChanged> {
+    let current = state.current_run.as_ref();
+    match (prev_run, current) {
+        (Some(prev), Some(current)) if prev.lifecycle != current.lifecycle => {
+            Some(RunLifecycleChanged {
+                session_id: state.session_id.clone(),
+                run_id: current.run_id.clone(),
+                observed_at_ns,
+                from: prev.lifecycle,
+                to: current.lifecycle,
+                cause: current.cause.clone(),
+                output_ref: current
+                    .outcome
+                    .as_ref()
+                    .and_then(|outcome| outcome.output_ref.clone()),
+            })
+        }
+        (None, Some(current)) => Some(RunLifecycleChanged {
+            session_id: state.session_id.clone(),
+            run_id: current.run_id.clone(),
+            observed_at_ns,
+            from: crate::contracts::RunLifecycle::Queued,
+            to: current.lifecycle,
+            cause: current.cause.clone(),
+            output_ref: current
+                .outcome
+                .as_ref()
+                .and_then(|outcome| outcome.output_ref.clone()),
+        }),
+        (Some(prev), None) => {
+            let record = state
+                .run_history
+                .iter()
+                .rev()
+                .find(|record| record.run_id == prev.run_id)?;
+            Some(RunLifecycleChanged {
+                session_id: state.session_id.clone(),
+                run_id: record.run_id.clone(),
+                observed_at_ns,
+                from: prev.lifecycle,
+                to: record.lifecycle,
+                cause: record.cause.clone(),
+                output_ref: record
+                    .outcome
+                    .as_ref()
+                    .and_then(|outcome| outcome.output_ref.clone()),
+            })
+        }
+        _ => None,
+    }
+}
+
+pub fn emit_session_status_changed(
+    ctx: &mut WorkflowCtx<SessionState, Value>,
+    prev_status: SessionStatus,
+) {
+    let observed_at_ns = ctx
+        .logical_now_ns()
+        .or_else(|| ctx.now_ns())
+        .unwrap_or(ctx.state.updated_at);
+    let Some(payload) = session_status_changed_payload(&ctx.state, prev_status, observed_at_ns)
+    else {
+        return;
+    };
+    ctx.intent("aos.agent/SessionStatusChanged@1")
+        .payload(&payload)
+        .send();
+}
+
+pub fn emit_run_lifecycle_changed(
+    ctx: &mut WorkflowCtx<SessionState, Value>,
+    prev_run: Option<RunState>,
+) {
+    let observed_at_ns = ctx
+        .logical_now_ns()
+        .or_else(|| ctx.now_ns())
+        .unwrap_or(ctx.state.updated_at);
+    let Some(payload) =
+        run_lifecycle_changed_payload(&ctx.state, prev_run.as_ref(), observed_at_ns)
+    else {
+        return;
+    };
+    ctx.intent("aos.agent/RunLifecycleChanged@1")
         .payload(&payload)
         .send();
 }
@@ -277,8 +385,11 @@ pub fn build_session_handoff_plan(request: &SessionHandoffRequest) -> SessionHan
     ingresses.push(SessionIngress {
         session_id: request.session_id.clone(),
         observed_at_ns,
-        ingress: SessionIngressKind::RunRequested {
-            input_ref: request.input_ref.clone(),
+        ingress: SessionIngressKind::RunStartRequested {
+            cause: request
+                .run_cause
+                .clone()
+                .unwrap_or_else(|| RunCause::direct_input(request.input_ref.clone())),
             run_overrides: Some(run_overrides),
         },
     });
@@ -487,13 +598,14 @@ mod tests {
     }
 
     #[test]
-    fn handoff_plan_emits_registry_host_and_run_requested_in_order() {
+    fn handoff_plan_emits_registry_host_and_run_start_requested_in_order() {
         let plan = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::Handoff(
             SessionHandoffRequest {
                 first_observed_at_ns: 10,
                 session_id: SessionId("s-1".into()),
                 input_ref:
                     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                run_cause: None,
                 host_session_id: "hs_1".into(),
                 run_overrides: SessionConfig {
                     provider: "openai".into(),
@@ -526,7 +638,7 @@ mod tests {
         ));
         assert!(matches!(
             plan.ingresses[2].ingress,
-            SessionIngressKind::RunRequested { .. }
+            SessionIngressKind::RunStartRequested { .. }
         ));
     }
 }

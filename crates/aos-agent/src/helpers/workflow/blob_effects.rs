@@ -490,6 +490,7 @@ pub(super) fn handle_pending_blob_put_receipt(
                         let mut next_refs = turn.base_message_refs.clone();
                         next_refs.extend(refs);
                         state.conversation_message_refs = next_refs.clone();
+                        state.transcript_message_refs = next_refs.clone();
                         state.pending_follow_up_turn = None;
                         queue_llm_turn(state, next_refs, out)?;
                     }

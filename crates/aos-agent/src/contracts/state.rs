@@ -1,9 +1,11 @@
 use super::{
-    ActiveToolBatch, EffectiveToolSet, RunConfig, RunId, SessionConfig, SessionId,
-    SessionLifecycle, ToolBatchId, ToolRuntimeContext, ToolSpec,
+    ActiveToolBatch, ContextPlan, EffectiveToolSet, RunConfig, RunId, RunLifecycle, SessionConfig,
+    SessionContextState, SessionId, SessionLifecycle, SessionStatus, ToolBatchId,
+    ToolRuntimeContext, ToolSpec,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use aos_wasm_sdk::{AirSchema, PendingEffect, PendingEffects, SharedBlobGets, SharedBlobPuts};
 use serde::{Deserialize, Serialize};
@@ -83,14 +85,149 @@ pub struct SharedPendingBlobPut {
     pub waiters: Vec<PendingBlobPut>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/CauseRef@1")]
+pub struct CauseRef {
+    pub kind: String,
+    pub id: String,
+    #[aos(air_type = "hash")]
+    pub ref_: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, AirSchema)]
+#[aos(schema = "aos.agent/RunCauseOrigin@1")]
+#[serde(tag = "$tag", content = "$value")]
+pub enum RunCauseOrigin {
+    DirectIngress {
+        source: String,
+        #[aos(air_type = "hash")]
+        request_ref: Option<String>,
+    },
+    DomainEvent {
+        schema: String,
+        #[aos(air_type = "hash")]
+        event_ref: Option<String>,
+        key: Option<String>,
+    },
+    Internal {
+        reason: String,
+        #[aos(air_type = "hash")]
+        ref_: Option<String>,
+    },
+}
+
+impl Default for RunCauseOrigin {
+    fn default() -> Self {
+        Self::Internal {
+            reason: String::new(),
+            ref_: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/RunCause@1")]
+pub struct RunCause {
+    pub kind: String,
+    pub origin: RunCauseOrigin,
+    #[aos(air_type = "hash")]
+    pub input_refs: Vec<String>,
+    pub payload_schema: Option<String>,
+    #[aos(air_type = "hash")]
+    pub payload_ref: Option<String>,
+    pub subject_refs: Vec<CauseRef>,
+}
+
+impl RunCause {
+    pub fn direct_input(input_ref: String) -> Self {
+        Self {
+            kind: "aos.agent/user_input".into(),
+            origin: RunCauseOrigin::DirectIngress {
+                source: "aos.agent/RunRequested".into(),
+                request_ref: None,
+            },
+            input_refs: vec![input_ref],
+            payload_schema: None,
+            payload_ref: None,
+            subject_refs: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/RunFailure@1")]
+pub struct RunFailure {
+    pub code: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/RunOutcome@1")]
+pub struct RunOutcome {
+    #[aos(air_type = "hash")]
+    pub output_ref: Option<String>,
+    pub failure: Option<RunFailure>,
+    pub cancelled_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/RunState@1")]
+pub struct RunState {
+    pub run_id: RunId,
+    pub lifecycle: RunLifecycle,
+    pub cause: RunCause,
+    pub config: RunConfig,
+    #[aos(air_type = "hash")]
+    pub input_refs: Vec<String>,
+    pub context_plan: Option<ContextPlan>,
+    pub active_tool_batch: Option<ActiveToolBatch>,
+    #[aos(map_key_air_type = "hash", schema_ref = PendingEffect)]
+    pub pending_effects: PendingEffects,
+    #[aos(map_key_air_type = "hash", schema_ref = SharedPendingBlobGet)]
+    pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
+    #[aos(map_key_air_type = "hash", schema_ref = SharedPendingBlobPut)]
+    pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
+    pub pending_follow_up_turn: Option<PendingFollowUpTurn>,
+    #[aos(air_type = "hash")]
+    pub queued_llm_message_refs: Option<Vec<String>>,
+    #[aos(air_type = "hash")]
+    pub last_output_ref: Option<String>,
+    pub tool_refs_materialized: bool,
+    pub in_flight_effects: u64,
+    pub outcome: Option<RunOutcome>,
+    #[aos(air_type = "time")]
+    pub started_at: u64,
+    #[aos(air_type = "time")]
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/RunRecord@1")]
+pub struct RunRecord {
+    pub run_id: RunId,
+    pub lifecycle: RunLifecycle,
+    pub cause: RunCause,
+    #[aos(air_type = "hash")]
+    pub input_refs: Vec<String>,
+    pub outcome: Option<RunOutcome>,
+    #[aos(air_type = "time")]
+    pub started_at: u64,
+    #[aos(air_type = "time")]
+    pub ended_at: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, AirSchema)]
 #[aos(schema = "aos.agent/SessionState@1")]
 pub struct SessionState {
     pub session_id: SessionId,
+    pub status: SessionStatus,
     pub lifecycle: SessionLifecycle,
     pub next_run_seq: u64,
     pub next_tool_batch_seq: u64,
     pub session_config: SessionConfig,
+    pub context_state: SessionContextState,
+    pub current_run: Option<RunState>,
+    pub run_history: Vec<RunRecord>,
     pub active_run_id: Option<RunId>,
     pub active_run_config: Option<RunConfig>,
     pub active_tool_batch: Option<ActiveToolBatch>,
@@ -103,6 +240,8 @@ pub struct SessionState {
     pub pending_follow_up_turn: Option<PendingFollowUpTurn>,
     #[aos(air_type = "hash")]
     pub queued_llm_message_refs: Option<Vec<String>>,
+    #[aos(air_type = "hash")]
+    pub transcript_message_refs: Vec<String>,
     #[aos(air_type = "hash")]
     pub conversation_message_refs: Vec<String>,
     #[aos(air_type = "hash")]
@@ -128,10 +267,14 @@ impl Default for SessionState {
     fn default() -> Self {
         Self {
             session_id: SessionId::default(),
+            status: SessionStatus::default(),
             lifecycle: SessionLifecycle::default(),
             next_run_seq: 0,
             next_tool_batch_seq: 0,
             session_config: SessionConfig::default(),
+            context_state: SessionContextState::default(),
+            current_run: None,
+            run_history: Vec::new(),
             active_run_id: None,
             active_run_config: None,
             active_tool_batch: None,
@@ -140,6 +283,7 @@ impl Default for SessionState {
             pending_blob_puts: SharedBlobPuts::new(),
             pending_follow_up_turn: None,
             queued_llm_message_refs: None,
+            transcript_message_refs: Vec::new(),
             conversation_message_refs: Vec::new(),
             last_output_ref: None,
             tool_refs_materialized: false,

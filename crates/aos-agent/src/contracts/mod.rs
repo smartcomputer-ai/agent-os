@@ -1,5 +1,6 @@
 mod batch;
 mod config;
+mod context;
 mod events;
 mod failure;
 mod host;
@@ -11,6 +12,7 @@ mod tooling;
 
 pub use batch::*;
 pub use config::*;
+pub use context::*;
 pub use events::*;
 pub use failure::*;
 pub use host::*;

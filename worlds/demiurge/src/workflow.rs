@@ -4,8 +4,9 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_agent::{
-    EffectReceiptRejected, ReasoningEffort, RunId, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, SessionNoop,
+    CauseRef, EffectReceiptRejected, ReasoningEffort, RunCause, RunCauseOrigin, RunId,
+    SessionConfig, SessionId, SessionIngress, SessionIngressKind, SessionLifecycle,
+    SessionLifecycleChanged, SessionNoop,
     helpers::{
         LocalSessionSpawnRequest, SessionHandoffRequest, SpawnOrHandoffSessionPlan,
         SpawnOrHandoffSessionRequest, emit_session_ingresses, spawn_or_handoff_session,
@@ -419,11 +420,28 @@ fn emit_session_bootstrap(
     };
 
     let first_observed_at_ns = next_observed_at_ns(&mut ctx.state);
+    let run_cause = RunCause {
+        kind: "demiurge/task_submitted".into(),
+        origin: RunCauseOrigin::DomainEvent {
+            schema: "demiurge/TaskSubmitted@1".into(),
+            event_ref: None,
+            key: Some(ctx.state.task_id.0.clone()),
+        },
+        input_refs: alloc::vec![input_ref.clone()],
+        payload_schema: Some("demiurge/TaskSubmitted@1".into()),
+        payload_ref: None,
+        subject_refs: alloc::vec![CauseRef {
+            kind: "demiurge/task".into(),
+            id: ctx.state.task_id.0.clone(),
+            ref_: None,
+        }],
+    };
     let plan = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::Handoff(
         SessionHandoffRequest {
             first_observed_at_ns,
             session_id: ctx.state.task_id.clone(),
             input_ref,
+            run_cause: Some(run_cause),
             host_session_id: host_session_id.into(),
             run_overrides,
             allowed_tools: cfg.allowed_tools,

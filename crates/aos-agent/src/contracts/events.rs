@@ -1,6 +1,6 @@
 use super::{
-    HostCommand, HostSessionStatus, RunId, SessionConfig, SessionId, SessionLifecycle,
-    ToolOverrideScope, ToolSpec,
+    ContextObservation, HostCommand, HostSessionStatus, RunCause, RunId, RunLifecycle,
+    SessionConfig, SessionId, SessionLifecycle, SessionStatus, ToolOverrideScope, ToolSpec,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -19,6 +19,21 @@ pub enum SessionIngressKind {
         input_ref: String,
         run_overrides: Option<SessionConfig>,
     },
+    RunStartRequested {
+        cause: RunCause,
+        run_overrides: Option<SessionConfig>,
+    },
+    SessionOpened {
+        config: Option<SessionConfig>,
+    },
+    SessionConfigUpdated {
+        config: SessionConfig,
+    },
+    SessionPaused,
+    SessionResumed,
+    SessionArchived,
+    SessionExpired,
+    SessionClosed,
     HostCommandReceived(HostCommand),
     ToolRegistrySet {
         registry: BTreeMap<String, ToolSpec>,
@@ -34,6 +49,7 @@ pub enum SessionIngressKind {
         disable: Option<Vec<String>>,
         force: Option<Vec<String>>,
     },
+    ContextObserved(ContextObservation),
     HostSessionUpdated {
         host_session_id: Option<String>,
         host_session_status: Option<HostSessionStatus>,
@@ -72,6 +88,30 @@ pub struct SessionLifecycleChanged {
     #[aos(air_type = "hash")]
     pub output_ref: Option<String>,
     pub in_flight_effects: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/SessionStatusChanged@1")]
+pub struct SessionStatusChanged {
+    pub session_id: SessionId,
+    #[aos(air_type = "time")]
+    pub observed_at_ns: u64,
+    pub from: SessionStatus,
+    pub to: SessionStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
+#[aos(schema = "aos.agent/RunLifecycleChanged@1")]
+pub struct RunLifecycleChanged {
+    pub session_id: SessionId,
+    pub run_id: RunId,
+    #[aos(air_type = "time")]
+    pub observed_at_ns: u64,
+    pub from: RunLifecycle,
+    pub to: RunLifecycle,
+    pub cause: RunCause,
+    #[aos(air_type = "hash")]
+    pub output_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]

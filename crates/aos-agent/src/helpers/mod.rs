@@ -1,3 +1,4 @@
+mod context;
 mod failure;
 mod ids;
 mod lifecycle;
@@ -6,6 +7,7 @@ mod primitives;
 mod queue;
 mod workflow;
 
+pub use context::*;
 pub use failure::*;
 pub use ids::*;
 pub use lifecycle::*;
