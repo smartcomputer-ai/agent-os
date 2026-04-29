@@ -4,7 +4,8 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use aos_agent::{
     HostSessionStatus, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, ToolCallStatus, default_tool_registry,
+    SessionLifecycle, SessionState, ToolCallStatus, ToolRegistryBuilder, tool_bundle_host_local,
+    tool_bundle_inspect, tool_bundle_workspace,
 };
 use aos_air_types::{HashRef, Manifest};
 use aos_cbor::{Hash, to_canonical_cbor};
@@ -173,6 +174,7 @@ pub fn run(example_root: &Path) -> Result<()> {
                 default_tool_enable: None,
                 default_tool_disable: None,
                 default_tool_force: None,
+                default_host_session_open: None,
             }),
         },
     )?;
@@ -1005,7 +1007,12 @@ impl AgentToolsScript {
 }
 
 fn configure_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()> {
-    let mut registry = default_tool_registry();
+    let mut registry = ToolRegistryBuilder::new()
+        .with_bundle(tool_bundle_host_local())
+        .with_bundle(tool_bundle_inspect())
+        .with_bundle(tool_bundle_workspace())
+        .build()
+        .map_err(|err| anyhow!(err))?;
     let ordered = vec![
         TOOL_SESSION_OPEN.to_string(),
         TOOL_FS_WRITE.to_string(),

@@ -204,6 +204,7 @@ fn run_requested_event_with_config(
                 default_tool_enable: Some(vec!["host.session.open".into()]),
                 default_tool_disable: None,
                 default_tool_force: None,
+                default_host_session_open: None,
             }),
         },
     )

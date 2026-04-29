@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: High  
 **Risk if deferred**: High (`aos-agent` will keep hardening around one accidental coding-agent tool surface, making session, context, hosted execution, and Demiurge integration harder to clean up later)  
-**Status**: In Progress; implementation complete through scope item 4  
+**Status**: Complete  
 **Depends on**: `roadmap/v0.21-air-v2/`, `roadmap/v0.22-dx/p2-migrate-rust-authored-agent-demiurge.md`
 
 ## Goal
@@ -39,9 +39,10 @@ Before this P4 slice, the tool boundary was too broad:
 5. workspace composite tools are special-cased inside the generic tool runner.
 6. host-session auto-open assumes one host target story instead of explicit local/sandbox config.
 
-Scope items 1-4 address the SDK default, explicit bundle assembly, composite-tool seam, and
-host-target config. Scope item 5 still needs the AIR/package documentation pass for the broad
-evented `SessionWorkflow` adapter surface.
+P4 addressed the SDK default, explicit bundle assembly, composite-tool seam, host-target config,
+AIR/package documentation, and representative consumer migration. Follow-on roadmap items still
+own session/run lifecycle changes, context, tracing/intervention, hosted execution product flows,
+and skills.
 
 The core session kernel should not care whether a world chooses:
 
@@ -219,7 +220,7 @@ Done:
 4. local and sandbox host-open configs are converted into `sys/host.session.open@1` params through the same core path.
 5. reducer tests cover local auto-open, sandbox auto-open, host-tools-without-auto-open, and chat-only no-tool sessions.
 
-### [ ] 5) Update Rust-authored AIR and generated package docs
+### [x] 5) Update Rust-authored AIR and generated package docs
 
 Keep generated AIR aligned with the new boundary.
 
@@ -230,7 +231,14 @@ Required outcome:
 3. optional bundle/effect surfaces are described in `aos-agent` docs,
 4. consumers understand when they are using evented broad `SessionWorkflow` versus direct wrapper composition.
 
-### [ ] 6) Migrate representative consumers
+Done:
+
+1. crate docs now state that `SessionState::default()` is chat/no-tools and that built-in bundles are opt-in.
+2. `crates/aos-agent/air/README.md` documents the broad evented `SessionWorkflow` as the full adapter surface.
+3. docs describe chat-only, inspect-only, local coding, sandbox host, and workspace-only assembly shapes.
+4. `aos air check` verifies checked-in generated AIR remains aligned with the Rust-authored source.
+
+### [x] 6) Migrate representative consumers
 
 Update:
 
@@ -239,6 +247,14 @@ Update:
 3. `aos-harness-py` agent fixtures to install explicit bundles/profiles for deterministic SDK tests,
 4. one local-coding fixture proving host plus inspect,
 5. one hosted-style fixture proving workspace without host.
+
+Done:
+
+1. Demiurge validates allowed tools against the explicit local-coding registry instead of the empty SDK default.
+2. `aos-agent-eval` installs the explicit local-coding registry/profiles for live acceptance cases.
+3. `aos-smoke` agent-tools assembles host, inspect, and workspace bundles through `ToolRegistryBuilder`.
+4. direct `SessionConfig` consumers in smoke fixtures set `default_host_session_open: None` explicitly.
+5. `aos-harness-py` has no current agent fixture references to migrate.
 
 ## Non-Goals
 

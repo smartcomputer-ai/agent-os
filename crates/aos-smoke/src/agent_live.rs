@@ -181,6 +181,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 default_tool_enable: None,
                 default_tool_disable: None,
                 default_tool_force: None,
+                default_host_session_open: None,
             }),
         },
     )?;

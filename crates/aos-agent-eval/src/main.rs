@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use aos_agent::{
     HostSessionStatus, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, default_tool_profile_for_provider, default_tool_profiles,
-    default_tool_registry,
+    SessionLifecycle, SessionState, local_coding_agent_tool_profile_for_provider,
+    local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
@@ -358,7 +358,7 @@ fn run_attempt(
         .run
         .tool_profile
         .clone()
-        .unwrap_or_else(|| default_tool_profile_for_provider(&provider.provider_id));
+        .unwrap_or_else(|| local_coding_agent_tool_profile_for_provider(&provider.provider_id));
 
     install_tool_registry(
         &mut invocation.host,
@@ -585,8 +585,8 @@ fn install_tool_registry(
     default_profile: &str,
     allowed_tools: Option<&[String]>,
 ) -> Result<()> {
-    let registry = default_tool_registry();
-    let mut profiles = default_tool_profiles();
+    let registry = local_coding_agent_tool_registry();
+    let mut profiles = local_coding_agent_tool_profiles();
 
     if let Some(allowed) = allowed_tools {
         if allowed.is_empty() {

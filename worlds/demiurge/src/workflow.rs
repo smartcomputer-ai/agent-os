@@ -6,11 +6,11 @@ use alloc::vec::Vec;
 use aos_agent::{
     EffectReceiptRejected, ReasoningEffort, RunId, SessionConfig, SessionId, SessionIngress,
     SessionIngressKind, SessionLifecycle, SessionLifecycleChanged, SessionNoop,
-    default_tool_registry,
     helpers::{
         LocalSessionSpawnRequest, SessionHandoffRequest, SpawnOrHandoffSessionPlan,
         SpawnOrHandoffSessionRequest, emit_session_ingresses, spawn_or_handoff_session,
     },
+    local_coding_agent_tool_registry,
 };
 use aos_effects::builtins::{BlobPutReceipt, HostSessionOpenReceipt};
 use aos_wasm_sdk::{
@@ -415,6 +415,7 @@ fn emit_session_bootstrap(
         default_tool_enable: cfg.tool_enable,
         default_tool_disable: cfg.tool_disable,
         default_tool_force: cfg.tool_force,
+        default_host_session_open: None,
     };
 
     let first_observed_at_ns = next_observed_at_ns(&mut ctx.state);
@@ -583,7 +584,7 @@ fn validate_allowed_tools(allowed_tools: Option<&[String]>) -> Option<TaskFailur
         });
     }
 
-    let registry = default_tool_registry();
+    let registry = local_coding_agent_tool_registry();
     for tool_id in allowed_tools {
         if !registry.contains_key(tool_id) {
             return Some(TaskFailure {
