@@ -21,16 +21,15 @@ pub fn run(example_root: &Path) -> Result<()> {
     assert_run_request_validation(example_root)?;
 
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
-    let import_roots = vec![sdk_air_root];
     let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root,
-            assets_root: None,
+            assets_root: Some(&sdk_air_root),
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
             module_crate: "",
         },
-        &import_roots,
+        &[],
         Some(ExampleHostConfig {
             world: WorldConfig::default(),
             adapters: EffectAdapterConfig {
@@ -136,16 +135,15 @@ pub fn run(example_root: &Path) -> Result<()> {
 
 fn assert_run_request_validation(example_root: &Path) -> Result<()> {
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
-    let import_roots = vec![sdk_air_root];
     let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root,
-            assets_root: None,
+            assets_root: Some(&sdk_air_root),
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
             module_crate: "",
         },
-        &import_roots,
+        &[],
         Some(ExampleHostConfig {
             world: WorldConfig::default(),
             adapters: EffectAdapterConfig {
@@ -201,7 +199,7 @@ fn run_requested_event_with_config(
                 max_tokens: Some(512),
                 default_prompt_refs: Some(vec![fake_hash('e')]),
                 default_tool_profile: None,
-                default_tool_enable: Some(vec!["host.session.open".into()]),
+                default_tool_enable: None,
                 default_tool_disable: None,
                 default_tool_force: None,
                 default_host_session_open: None,

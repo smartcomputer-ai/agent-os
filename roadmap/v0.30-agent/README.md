@@ -40,10 +40,15 @@ The current sequence is:
 7. `p10-agent-sdk-testing.md`
    - make `aos-harness-py` the primary deterministic SDK test harness,
    - keep `aos-agent-eval` as the live provider/tool acceptance lane during migration.
+8. `p11-context-compaction.md`
+   - add explicit token-counting and compaction effects,
+   - split full transcript history from the active model window,
+   - make compaction an auditable planner/workflow state transition.
 
-`p10-agent-sdk-testing.md` is numbered last because it is cross-cutting, not because it should wait
-until all other work is complete. Start using it as soon as P4 exposes explicit bundle/profile
-selection, then expand the Python fixture layer as P5-P9 land.
+`p10-agent-sdk-testing.md` and `p11-context-compaction.md` are numbered late because they are
+cross-cutting, not because they should wait until all other work is complete. Start using P10 as soon
+as P4 exposes explicit bundle/profile selection, then expand the Python fixture layer as P5-P9 land.
+Use P11 once the turn planner is stable enough to own token-budget prerequisites.
 
 Deferred for later roadmaps:
 

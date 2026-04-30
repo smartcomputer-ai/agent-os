@@ -34,7 +34,6 @@ use tempfile::TempDir;
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const WORKFLOW_MODULE_NAME: &str = "aos.agent/SessionWorkflow_wasm@1";
 const DIRECT_EVENT_SCHEMA: &str = "aos.agent/SessionInput@1";
-const EVAL_ASSETS_ROOT: &str = "crates/aos-agent-eval/fixtures/eval-world/air";
 const CASES_ROOT: &str = "crates/aos-agent-eval/cases";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
@@ -144,9 +143,7 @@ impl EvalInvocation {
         fs::create_dir_all(&workspaces_root)
             .with_context(|| format!("create workspaces root {}", workspaces_root.display()))?;
 
-        let assets_root = workspace_root().join(EVAL_ASSETS_ROOT);
         let sdk_air_root = workspace_root().join(SDK_AIR_ROOT);
-        let import_roots = vec![sdk_air_root];
         let module_patches = vec![EvalModulePatch {
             module_name: WORKFLOW_MODULE_NAME,
             build: EvalModuleBuild::CargoBin {
@@ -156,8 +153,8 @@ impl EvalInvocation {
         }];
         let host = EvalHost::prepare(EvalHostConfig {
             world_root: &world_root,
-            assets_root: &assets_root,
-            import_roots: &import_roots,
+            assets_root: &sdk_air_root,
+            import_roots: &[],
             workspace_root: workspace_root().as_path(),
             workflow_name: WORKFLOW_NAME,
             event_schema: DIRECT_EVENT_SCHEMA,

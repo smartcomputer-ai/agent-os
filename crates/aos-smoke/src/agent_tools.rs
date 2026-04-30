@@ -117,16 +117,15 @@ const APPLY_BLOB_HASH: &str =
 
 pub fn run(example_root: &Path) -> Result<()> {
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
-    let import_roots = vec![sdk_air_root];
     let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root,
-            assets_root: None,
+            assets_root: Some(&sdk_air_root),
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
             module_crate: "",
         },
-        &import_roots,
+        &[],
         Some(ExampleHostConfig {
             world: WorldConfig::default(),
             adapters: EffectAdapterConfig {
