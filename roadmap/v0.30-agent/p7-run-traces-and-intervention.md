@@ -4,7 +4,7 @@
 **Effort**: High  
 **Risk if deferred**: High (agent failures will remain hard to diagnose, and steer/interrupt behavior will stay ad hoc)
 **Status**: Core run trace model and LLM-level ref-based intervention queue complete; host/Fabric signaling deferred to P8
-**Depends on**: `roadmap/v0.30-agent/p5-session-run-model.md`, `roadmap/v0.30-agent/p6-context-engine.md`
+**Depends on**: `roadmap/v0.30-agent/p5-session-run-model.md`, `roadmap/v0.30-agent/p6-turn-planner.md`
 
 ## Goal
 
@@ -12,7 +12,7 @@ Add first-class run traces and deterministic LLM-level intervention semantics.
 
 Primary outcome:
 
-1. every run has an inspectable trace of LLM turns, context plans, tool batches, effects, receipts, and outcomes,
+1. every run has an inspectable trace of turn plans, LLM turns, tool batches, effects, receipts, and outcomes,
 2. operator steer/follow-up/interrupt behavior is explicit and replay-safe at the agent run level,
 3. active runs can be diagnosed without reconstructing state from raw journal frames,
 4. the agent SDK leaves room for host/session signaling without baking Fabric policy into core contracts,
@@ -32,7 +32,7 @@ The current code has early pieces but no coherent model:
 P5 and P6 provide the right attachment points:
 
 1. run state owns active execution,
-2. context reports are run-scoped,
+2. turn-planning reports are run-scoped,
 3. session status is separate from run lifecycle.
 
 ## Design Stance
@@ -47,7 +47,7 @@ Trace entries should cover:
 
 1. run started,
 2. run cause/provenance,
-3. context planned,
+3. turn planned,
 4. LLM turn requested,
 5. LLM receipt received,
 6. tool calls observed,
@@ -114,7 +114,7 @@ Add contracts for:
 1. run trace entry,
 2. trace entry kind,
 3. run cause/provenance reference,
-4. context report reference,
+4. turn plan/report reference,
 5. LLM turn summary,
 6. tool batch summary,
 7. effect/domain-event/receipt summary,
@@ -147,13 +147,13 @@ Done:
 2. `RunRecord` now keeps a bounded `RunTraceSummary`.
 3. trace insertion uses deterministic reducer timestamps and monotonic per-run sequence numbers.
 4. bounded trace behavior drops oldest entries and increments `dropped_entries`.
-5. removed `conversation_message_refs`; durable message history is now `transcript_message_refs`, while actual model input is represented by `context_plan.selected_refs` and trace entries.
+5. removed `conversation_message_refs`; durable message history is now `transcript_message_refs`, while actual model input is represented by the recorded turn/context planning refs and trace entries.
 
-### [x] 3) Record context and LLM turn trace entries
+### [x] 3) Record planning and LLM turn trace entries
 
 Required outcome:
 
-1. context plan/report is recorded before LLM dispatch,
+1. turn plan/report is recorded before LLM dispatch,
 2. LLM request summary records provider/model/message refs/tool refs,
 3. LLM receipt summary records output ref, status, finish reason when available,
 4. failures record typed cause and relevant refs.
@@ -161,7 +161,7 @@ Required outcome:
 Done:
 
 1. run start records `RunStarted` with cause/input refs.
-2. context planning records `ContextPlanned` with selected refs and context report metadata.
+2. turn planning records the pre-LLM planning trace with selected message refs, selected tools, actions, and report metadata.
 3. LLM dispatch records `LlmRequested` with provider/model/message refs/tool refs.
 4. LLM receipts record `LlmReceived` with output ref, provider id, status, and finish reason.
 5. run completion/failure/cancellation records `RunFinished` before summary is retained in run history.

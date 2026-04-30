@@ -261,7 +261,7 @@ Done:
 P4 does **not** attempt:
 
 1. the session/run lifecycle split,
-2. the context engine,
+2. the turn planner,
 3. final interrupt/steer semantics,
 4. final Fabric hosted-agent product flow,
 5. subagent/session-tree semantics,

@@ -4,7 +4,7 @@
 **Effort**: Medium  
 **Risk if deferred**: Medium (worlds will keep inventing ad hoc prompt bundles and repo-instruction loading, but the core session/context/trace seams can land first)  
 **Status**: Proposed  
-**Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p6-context-engine.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
+**Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p6-turn-planner.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
 
 ## Goal
 
@@ -14,7 +14,7 @@ Primary outcome:
 
 1. skills become a reusable implementation-layer concept,
 2. skill sources can come from repo-local files, workspaces, CAS refs, or static assets,
-3. resolved skills feed the context engine through normalized contributions,
+3. resolved skills feed the turn planner through normalized contributions,
 4. tool/profile effects remain explicit and inspectable,
 5. `aos-agent` core can run without any skill model.
 
@@ -95,12 +95,12 @@ Activation may come from:
 
 The activation logic belongs above the core session kernel.
 
-### 5) Skills integrate through context and tools
+### 5) Skills integrate through turn planning and tools
 
 The clean flow is:
 
 1. skill source resolves to structured contributions,
-2. context engine chooses what to include for a run,
+2. turn planner chooses what to include for a run,
 3. tool/profile contributions are applied explicitly,
 4. run trace records active skills and selected contributions.
 
@@ -119,12 +119,12 @@ Add small contracts for:
 5. tool/profile contributions,
 6. inspection/debug info.
 
-### [ ] 2) Add a resolver seam above the context engine
+### [ ] 2) Add a resolver seam above the turn planner
 
 Required outcome:
 
 1. resolver loads and normalizes skill sources,
-2. context engine receives normalized contributions,
+2. turn planner receives normalized contributions,
 3. session kernel remains unaware of raw skill storage,
 4. run trace can report active and dropped skills.
 
@@ -151,7 +151,7 @@ We need to answer:
 1. which skills were active,
 2. why they were active,
 3. which contributions they produced,
-4. which contributions entered the context plan,
+4. which contributions entered the turn plan,
 5. which tool/profile suggestions were applied or ignored.
 
 ### [ ] 6) Prove the model
@@ -183,6 +183,6 @@ P9 does **not** attempt:
 1. Skills are not required for core session execution.
 2. Repo-local instruction files can participate as skills without becoming the universal storage model.
 3. Workspace-backed skills remain possible without reintroducing workspace coupling.
-4. Skill resolution feeds the context engine through normalized contributions.
+4. Skill resolution feeds the turn planner through normalized contributions.
 5. Tool/profile contributions are explicit and inspectable.
 6. A deterministic `aos-harness-py` fixture proves end-to-end skill activation and trace visibility.

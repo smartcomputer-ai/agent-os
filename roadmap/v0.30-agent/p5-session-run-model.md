@@ -15,20 +15,20 @@ Primary outcome:
 1. durable session status is distinct from run lifecycle,
 2. one session can own zero or more runs over time,
 3. transcript and future context state live at session scope,
-4. tool batches, active effects, context plans, and output live at run scope,
+4. tool batches, active effects, turn plans, and output live at run scope,
 5. every run records an extensible cause/provenance envelope,
 6. evented `SessionWorkflow` and direct library wrapping preserve the same semantics.
 
 ## Current Fit
 
-This is the most important model cleanup before the context engine.
+This is the most important model cleanup before the turn planner.
 
 Today:
 
 1. `SessionLifecycle` mixes session state and run state.
 2. terminal run states can transition back to `Running`.
 3. `SessionState` stores durable session config, active run config, active tool batch, transcript refs, host-session handles, pending effects, and operator queues together.
-4. `RunRequested` starts a run and clears `conversation_message_refs`.
+4. `RunRequested` starts a run and used to clear conversation history.
 5. `clear_active_run()` clears run fields and transcript refs together.
 6. Demiurge still treats task id as the whole session story and converts `WaitingInput` into `RunCompleted`.
 
@@ -67,7 +67,7 @@ Run state should own:
 2. run lifecycle,
 3. run cause/provenance,
 4. active input refs,
-5. selected context plan,
+5. selected turn plan,
 6. current tool batch state,
 7. active pending effects,
 8. final output and outcome,
@@ -89,7 +89,7 @@ Example run lifecycles:
 
 The SDK should add a stable `RunCause` contract, but it should not add a closed enum of every
 possible product trigger. Native AOS workflows already route domain events through
-`routing.subscriptions`; `RunCause` records why a run exists so context planning, traces, and
+`routing.subscriptions`; `RunCause` records why a run exists so turn planning, traces, and
 operators can inspect provenance.
 
 Illustrative shape:
@@ -126,7 +126,7 @@ can start. Product-specific cause kinds belong to embedding workflows.
 
 ### 4) Transcript is durable session state
 
-The current run-start behavior that clears `conversation_message_refs` is the wrong long-term default.
+The old run-start behavior that cleared conversation history is the wrong long-term default.
 
 The new model should distinguish:
 
@@ -216,7 +216,7 @@ Move or re-scope:
 3. `active_tool_batch`,
 4. run pending effects,
 5. queued LLM turn refs,
-6. pending follow-up turn,
+6. staged tool follow-up turn,
 7. last output ref.
 
 The session may expose `current_run`, but the fields should be run-scoped.
@@ -293,7 +293,7 @@ Done:
 
 P5 does **not** attempt:
 
-1. the context engine itself,
+1. the turn planner itself,
 2. run traces beyond the fields needed to attach them later,
 3. final interrupt/steer behavior,
 4. subagent trees,

@@ -15,7 +15,7 @@ Primary outcome:
 1. SDK correctness tests are deterministic and script external effects,
 2. live LLM/provider evals remain available but are not the foundation for reducer correctness,
 3. agent fixtures are easier to write, inspect, and extend from Python,
-4. traces, context plans, run state, intervention, and Fabric-backed execution can be asserted through one harness family,
+4. traces, turn plans, run state, intervention, and Fabric-backed execution can be asserted through one harness family,
 5. current `aos-agent-eval` cases can be ported or reused without losing their live-eval value.
 
 ## Current Fit
@@ -99,7 +99,7 @@ A deterministic scripted-LLM eval means:
 5. admit a matching `LlmGenerateReceipt`,
 6. answer the workflow's follow-up `sys/blob.get@1` with a fixed `LlmOutputEnvelope`,
 7. script any tool-call argument blobs and tool receipts,
-8. assert final run state, trace entries, context reports, files, and replay behavior.
+8. assert final run state, trace entries, turn reports, files, and replay behavior.
 
 The model is not called in this lane. The test decides exactly what the model "said."
 
@@ -170,7 +170,7 @@ As P7 lands, Python fixtures should assert:
 
 1. run started/completed/failed trace entries,
 2. run cause/provenance trace entries,
-3. context planned entries,
+3. turn-planned entries,
 4. LLM turn entries,
 5. tool batch entries,
 6. effect, domain-event, and receipt summaries,

@@ -189,9 +189,9 @@ It currently contains all of these in one structure:
 6. active tool batch,
 7. pending top-level effects,
 8. pending shared blob gets/puts,
-9. pending follow-up turn state,
-10. queued LLM message refs,
-11. conversation message refs,
+9. staged tool follow-up turn state,
+10. pending LLM turn refs,
+11. transcript message refs,
 12. last output ref,
 13. tool registry and profiles,
 14. selected profile and runtime context,
@@ -265,9 +265,9 @@ The current run start path is:
 4. It transitions lifecycle to `Running`.
 5. It allocates a `RunId` by incrementing `next_run_seq`.
 6. It stores `active_run_id` and `active_run_config`.
-7. It clears active tool batch, pending blob state, queued LLM refs, conversation refs, and last output.
+7. It clears active tool batch, pending blob state, queued LLM refs, staged follow-up state, and last output.
 8. It recomputes effective tools.
-9. It pushes `input_ref` into `conversation_message_refs`.
+9. It pushes `input_ref` into `transcript_message_refs`.
 10. It queues an LLM turn with those refs.
 
 The important current limitation is step 7: starting a run clears conversation history. That makes sense for current one-shot tasks, but not for a durable multi-run session.
@@ -283,7 +283,7 @@ LLM turn dispatch is staged rather than emitted immediately in all cases.
 1. no top-level pending effects exist,
 2. no pending blob gets exist,
 3. no pending blob puts exist,
-4. no pending follow-up turn is waiting.
+4. no staged tool follow-up turn is waiting.
 
 Then it may do two setup steps before emitting `sys/llm.generate@1`:
 
@@ -300,7 +300,9 @@ After setup, it emits `sys/llm.generate@1` with:
 6. max tokens/reasoning effort from config,
 7. provider secret ref when available.
 
-Prompt refs are handled by prepending `RunConfig.prompt_refs` to the message refs during LLM parameter materialization. There is no context planner yet.
+The current implementation already has a narrow context planner that selects `message_refs`.
+P6 replaces that with a full turn planner that also selects tools, turn controls, and skill/runtime
+contributions.
 
 ## LLM Receipt Flow
 
@@ -399,6 +401,10 @@ Availability rules can require:
 3. host session not ready.
 
 If any selected tool requires a ready host session, the profile is marked `profile_requires_host_session`. That flag drives host session auto-open.
+
+P6 changes this target shape: host readiness should no longer be encoded as generic tool
+availability. A turn planner should choose selected tools and request host-session materialization
+when appropriate.
 
 ## Host Session Auto-Open
 
@@ -503,7 +509,7 @@ After all accepted tool calls in a batch settle:
    - assistant tool call message,
    - one function-call-output message per result,
 4. those messages are written with `sys/blob.put@1`,
-5. once all follow-up message blobs are available, the workflow appends them to `conversation_message_refs`,
+5. once all follow-up message blobs are available, the workflow appends them to `transcript_message_refs`,
 6. it queues the next LLM turn.
 
 This creates the normal tool-call loop:
@@ -567,30 +573,32 @@ This keeps a clear distinction between:
 
 Host/Fabric cancellation semantics remain deferred to P8.
 
-## Context Model Today
+## Turn Planning Gap
 
-There is no context engine yet.
-
-The current context equivalent is:
+The current implementation has a narrow context engine:
 
 1. `SessionConfig.default_prompt_refs`,
 2. `RunConfig.prompt_refs`,
-3. `conversation_message_refs`,
-4. current run input ref,
-5. tool follow-up message refs.
+3. `transcript_message_refs`,
+4. current turn refs,
+5. run cause refs,
+6. summary and pinned context refs.
 
-When materializing `sys/llm.generate@1`, prompt refs are prepended to message refs.
+It can select message refs deterministically, report selected/dropped refs, and recommend
+compaction.
 
-There is no:
+It does not yet plan the whole LLM turn:
 
-1. context budget model,
-2. source metadata,
-3. selected/dropped input report,
-4. compaction recommendation,
-5. session-scoped context state,
-6. skill contribution model.
+1. selected tools,
+2. tool materialization actions,
+3. host/Fabric runtime availability,
+4. skill activation,
+5. discoverable skills,
+6. provider options,
+7. response format,
+8. turn-level system/developer instruction layering.
 
-P6 introduces this.
+P6 replaces the narrow context-engine seam with this turn-planning boundary.
 
 ## Demiurge Current Integration
 
@@ -655,7 +663,7 @@ It already provides:
 4. state, blob, trace, snapshot, and reopen inspection,
 5. `WorldHarness` for realistic unified-node/SQLite world tests.
 
-A deterministic scripted-LLM eval would replace the live LLM provider with a fake adapter whose responses are scripted by test case and turn. That would let tests verify reducer behavior, context planning, tool batching, traces, and replay without depending on model choices.
+A deterministic scripted-LLM eval would replace the live LLM provider with a fake adapter whose responses are scripted by test case and turn. That would let tests verify reducer behavior, turn planning, tool batching, traces, and replay without depending on model choices.
 
 In practical terms, a scripted LLM eval drives the workflow until it emits `sys/llm.generate@1`,
 inspects the request, admits a known `LlmGenerateReceipt`, answers the follow-up `sys/blob.get@1`

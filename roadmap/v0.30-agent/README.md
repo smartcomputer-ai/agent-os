@@ -9,7 +9,7 @@ Boundary for this roadmap:
 1. `aos-agent` remains the reusable LLM session/run SDK, not a factory runtime.
 2. Native AOS workflows should own long-running domain processes such as work ledgers, project orchestration, schedules, worker invocation, review, and test flows.
 3. Those workflows interact with agent sessions through ordinary domain events and `routing.subscriptions`.
-4. v0.30 adds the agent-side seams those workflows need: explicit bundles, durable sessions, run provenance, context inputs, traces, intervention, and host target config.
+4. v0.30 adds the agent-side seams those workflows need: explicit bundles, durable sessions, run provenance, turn planning, traces, intervention, and host target config.
 5. v0.30 does not add policy/capability gating, full scheduler/heartbeat semantics, factory work-item workflows, full skills, or a memory engine to `aos-agent` core.
 
 **Important**: It is okay to focus only on aos-agent for now and assume we'll break downstream users, we can fix them later once the agent sdk reaches its desired shape. This allows us to refactor more agressively, without worrying about backward compatibility.
@@ -25,9 +25,10 @@ The current sequence is:
    - split durable session status from per-run lifecycle,
    - make transcript/context state session-scoped and active execution run-scoped,
    - add extensible run provenance so runs are not implicitly user-turn driven.
-3. `p6-context-engine.md`
-   - add deterministic, inspectable context planning after the session/run split,
-   - accept source-agnostic run-cause, domain, artifact, and instruction inputs.
+3. `p6-turn-planner.md`
+   - add deterministic, inspectable turn planning after the session/run split,
+   - plan message refs, system/developer instruction refs, selected tools, turn controls, and follow-up actions together,
+   - accept source-agnostic run-cause, domain, artifact, memory, skill, and runtime inputs.
 4. `p7-run-traces-and-intervention.md`
    - add run traces plus explicit follow-up, steer, interrupt, cancel, pause, and resume semantics,
    - carry run-cause and correlation metadata without making traces factory-specific.

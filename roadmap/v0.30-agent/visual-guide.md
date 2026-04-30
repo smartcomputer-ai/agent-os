@@ -2,6 +2,11 @@
 
 This guide explains how `aos-agent` fits together as a deterministic agent SDK layer on top of AOS.
 
+Note: this guide still describes the current implementation shape. P6 has been reset to
+`p6-turn-planner.md`, which deliberately supersedes the narrower context-engine model by planning
+message refs, tools, skills, runtime hints, and turn controls together. Update this guide after the
+TurnPlanner implementation lands.
+
 It starts with the high-level shape and then zooms into the relevant state machines:
 
 1. session workflow event reduction,
