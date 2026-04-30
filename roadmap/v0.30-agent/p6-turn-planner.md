@@ -1,199 +1,184 @@
 # P6: Turn Planner
 
-**Priority**: P1  
-**Effort**: High  
-**Risk if deferred**: High (`aos-agent` will keep splitting prompt/context/tool/skill decisions across unrelated helpers, making future context engineering harder to reason about)  
-**Status**: Target shape reset; previous `ContextEngine` work is useful foundation but should be replaced, not slowly layered around  
+**Priority**: P1
+**Effort**: High
+**Risk if deferred**: High (`aos-agent` will keep splitting prompt/context/tool/skill decisions across unrelated helpers, making future context engineering harder to reason about)
+**Status**: Target shape trimmed; replace the narrow `ContextEngine` with a small pre-turn planner and a separate post-turn maintenance hook
 **Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p5-session-run-model.md`
 
 ## Goal
 
-Replace the narrow context-engine seam with a first-class, deterministic turn planner.
+Replace the narrow context engine with a deterministic turn planner.
 
-The planner should decide the complete LLM turn shape:
+The planner decides the next LLM request shape:
 
-1. which system/developer/user/assistant/tool message refs are included,
-2. which transcript, summary, memory, domain, runtime, and skill refs are included,
-3. which tools are exposed for this turn,
-4. which tools are only discoverable or intentionally omitted,
-5. which turn controls are applied,
-6. which follow-up actions such as compaction or materialization are requested,
-7. why each inclusion, exclusion, and action happened.
+1. ordered `message_refs`,
+2. selected tool ids,
+3. `tool_choice`,
+4. optional response-format and provider-options refs,
+5. blocking prerequisites such as tool-definition materialization or host-session opening,
+6. durable planner state updates,
+7. a bounded report with selection counts, token estimates, and unresolved prerequisites.
 
-This is the core context-engineering boundary for `aos-agent`.
+This is the context-engineering boundary for `aos-agent`: what the model can see and what the model
+can do should be planned together.
 
-Most serious agents are built around two decisions repeated every turn:
-
-1. what the model can see,
-2. what the model can do.
-
-Those decisions should be planned together.
+Post-turn maintenance is not part of the pre-turn decision. Compaction, summarization, memory
+writes, reflection, and skill learning are considered only after the LLM output, tool results,
+token usage, and run state are known.
 
 ## Current Fit
 
-The earlier P6 implementation added a useful but too-narrow context engine:
+The earlier P6 implementation added useful pieces: `ContextEngine`, `ContextRequest`,
+`ContextPlan`, `ContextInput`, bounded reports, and session-scoped context state.
 
-1. `ContextEngine::build_plan`,
-2. `ContextRequest`,
-3. `ContextPlan`,
-4. `ContextInput`,
-5. context reports and compaction recommendations,
-6. session-scoped context state.
+That moved prompt refs, transcript refs, run-cause refs, summaries, and pinned inputs behind a
+deterministic selector. The problem is that the current LLM turn is still assembled from separate
+decisions:
 
-That moved prompt refs, transcript refs, run cause refs, summaries, and pinned inputs behind a
-deterministic selector.
-
-However, the current model still assembles an LLM turn from separate decisions:
-
-1. context planning selects only `message_refs`,
+1. context planning selects only message refs,
 2. tool selection is computed separately as `EffectiveToolSet`,
 3. host-session readiness is encoded in generic `ToolAvailabilityRule` variants,
-4. tool refs are materialized outside the planning decision,
+4. selected tool refs are materialized outside the planning decision,
 5. `tool_choice` is chosen by workflow code,
-6. skills are still imagined as later context contributions,
-7. system/developer instruction layering is only implicit in the selected message refs.
+6. steer refs are appended before planning rather than represented as candidates.
 
-That creates the wrong foundation. Tool availability, skill activation, memory selection, runtime
-hints, and system/developer prompt layering are all part of the same turn-planning problem.
-
-Because this is still experimental SDK development, do not add compatibility indirections around
-the old `ContextEngine`. Replace it with the better abstraction.
+Do not build compatibility indirection around `ContextEngine`. Port the useful behavior and tests
+into the new planner.
 
 ## Design Stance
 
-### 1) A turn is the unit of planning
+### 1) Planning is pre-turn only
 
-The workflow should ask one deterministic planner for the complete next LLM turn.
+`TurnPlanner` runs before `sys/llm.generate@1`.
 
-The workflow should remain responsible for orchestration:
+It may request blocking prerequisites, but it must not perform hidden work. The workflow remains
+responsible for admitting events, tracking state, emitting effects/blob puts, materializing selected
+tool definitions, dispatching the LLM request, settling tool batches, and recording traces.
 
-1. accepting inputs, receipts, rejections, and stream frames,
-2. tracking run/session state,
-3. materializing selected tool definitions,
-4. emitting `sys/llm.generate@1`,
-5. settling tool batches,
-6. recording trace entries.
+The planner consumes already-materialized refs and deterministic runtime state. It does not read
+files, call embeddings, search memory, summarize text, load skill packages, or open host sessions.
 
-The workflow should not own context policy, skill activation, host/Fabric tool availability, prompt
-layering, or memory selection.
+### 2) Post-turn maintenance is separate
 
-### 2) Message refs remain the primitive
+Do not decide compaction or summarization before the model turn.
 
-Do not add a separate system-message management subsystem.
+A later `TurnFinalizer`-style hook may request compaction, summarization, memory refresh/write,
+skill-resolution refresh, or custom maintenance after the turn is complete. P6 should leave this
+hook explicit and replayable, but it does not implement those systems.
 
-`message_refs` can already point to JSON messages with roles such as `system`, `developer`, `user`,
-`assistant`, and `tool`. The planner should output an ordered `message_refs` list. Role semantics
-stay in the referenced message blobs.
+### 3) Message refs remain the primitive
 
-The planner needs metadata about candidate refs for deterministic selection and reporting, but that
-metadata should not replace the message blob format.
+Do not add a system-message or prompt-template subsystem.
 
-### 3) Planning metadata uses lanes
+`message_refs` point to JSON message blobs whose roles may be `system`, `developer`, `user`,
+`assistant`, or `tool`. Role semantics stay in the blob. Planner metadata is only for ordering,
+budgeting, token estimates, and reporting.
 
-The planner should receive normalized candidate refs with a lane that explains how the candidate
-should be considered.
+### 4) Candidates are normalized
 
-Illustrative lanes:
+The planner should not receive separate `prompt_refs`, `transcript_refs`, `turn_refs`, `steer_refs`,
+`memory_refs`, or `skill_refs` fields.
+
+Workflow helpers convert all available material into `TurnInput` candidates: prompt refs,
+transcript refs, current turn refs, steer refs, run-cause refs, pinned inputs, summaries, retrieved
+memory refs, domain/workspace/runtime hint refs, and resolved skill contributions.
+
+This keeps the planner API stable as new sources appear.
+
+### 5) Lanes are metadata, not LLM roles
+
+Initial lanes:
 
 1. `System`,
 2. `Developer`,
 3. `Conversation`,
 4. `ToolResult`,
-5. `Summary`,
-6. `Memory`,
-7. `Skill`,
-8. `Domain`,
-9. `RuntimeHint`,
-10. `Custom`.
+5. `Steer`,
+6. `Summary`,
+7. `Memory`,
+8. `Skill`,
+9. `Domain`,
+10. `RuntimeHint`,
+11. `Custom { kind }`.
 
-Lanes are not LLM roles. They are planner metadata for ordering, budgeting, diagnostics, and
+Lanes guide ordering, budgets, and source-specific decisions. They do not replace message roles.
+
+### 6) Tools are planned with context
+
+Tool schemas are part of what the model sees. Tool selection belongs in the same plan as message
 selection.
 
-### 4) Tools are planned with context
+The planner receives tool candidates plus registry/profile/run config state. It outputs selected
+tool ids. The workflow materializes those definitions and passes their refs to `sys/llm.generate@1`.
 
-Tools are not just runtime wiring. Tool schemas are part of what the model sees, and selected tools
-change how the model interprets the task.
+Host/Fabric readiness should not be a base tool-spec primitive. If no host session exists, the
+default planner can expose only `open_session` or request host-session materialization. If host
+sessions are ready, host mappers decide whether a session can be implicit or must be explicit.
 
-The planner should select tools from explicit tool candidates and registry/profile state.
+### 7) Skills are contributions, not core language
 
-Host/Fabric-specific availability should not be a base SDK primitive. For example:
+P6 should not add a full skill model to `aos-agent` core.
 
-1. if no host session exists, expose only `open_session` or request host-session materialization,
-2. if exactly one host session is ready, host tool mappers may use it as the implicit target,
-3. if multiple host sessions are ready, selected tools may require explicit `session_id`,
-4. Fabric-vs-local behavior is selected by host target config and effect routing, not a separate
-   LLM tool family.
+P9 or embedding worlds resolve skills into ordinary planner candidates:
 
-Those are planner and mapper concerns, not generic `ToolAvailabilityRule` concerns.
-
-### 5) Skills are planner inputs
-
-Skills should not be hidden prompt magic.
-
-A resolved skill may contribute:
-
-1. instruction refs,
-2. short skill-card refs,
-3. memory/query hints,
+1. instruction/message refs,
+2. compact skill-card refs,
+3. memory/query hint refs,
 4. tool candidates,
 5. response-format or provider-option refs,
-6. activation metadata.
+6. source metadata such as `source_kind = "skill"` and `source_id = "<skill id>"`.
 
-The planner decides whether a skill is:
+Active/discoverable/inactive skill semantics live above the core planner and are expressed through
+candidates and source metadata.
 
-1. active: full instruction refs and relevant tools are loaded,
-2. discoverable: a compact skill card or lookup tool is available,
-3. inactive: not included this turn.
+### 8) Token estimates are deterministic inputs
 
-This prevents both extremes:
+`TurnInput` and `TurnToolInput` may carry estimated token counts. Unknown estimates are allowed and
+reported.
 
-1. loading every known skill into every turn,
-2. hiding all capabilities behind tools the model may not know to call.
+The default implementation can start with a crude deterministic estimator supplied by the workflow
+or caller. Actual provider token usage is recorded from receipts after the turn.
 
-### 6) Planning remains deterministic and effect-free
+### 9) Stable ordering should help prompt caches
 
-The planner may consume already-materialized refs and request explicit actions.
+The default planner should keep stable, reusable material before volatile material:
 
-It must not perform hidden I/O such as:
+1. system/developer/session instructions,
+2. stable summaries,
+3. stable skill cards or instruction refs,
+4. memory/domain/runtime hints,
+5. older selected transcript,
+6. recent transcript,
+7. steer/current turn refs.
 
-1. LLM summarization,
-2. embedding updates,
-3. remote search,
-4. filesystem reads,
-5. skill package loading.
+Tool ids should also be selected in stable order. Provider-specific cache controls can later be
+passed through `provider_options_ref`; P6 only needs stable ordering and minimal churn.
 
-Those are AOS workflows/effects that produce refs or state updates. The planner consumes their
-results.
+### 10) Planner state is durable and small
 
-### 7) Planner state is durable session state
+Planner state is part of deterministic workflow state. It must not live in an in-memory planner.
 
-The planner needs durable state across turns. Examples:
+Core state should cover pinned inputs, durable inputs observed from explicit workflows, the last
+bounded report, and opaque custom state refs. Custom planners persist extra state through
+namespaced refs, not new top-level SDK fields.
 
-1. previously active skills,
-2. recently discoverable skills,
-3. pinned instruction refs,
-4. completed summary refs,
-5. memory refs selected or suppressed recently,
-6. unresolved prerequisites,
-7. planner-specific cursors or indexes.
+### 11) Turn planning is the pre-LLM trace boundary
 
-That state must be part of deterministic workflow state. It must not live in an in-memory planner
-instance, because replay and custom workflow composition must produce the same turn plan.
+After the workflow accepts a `TurnPlan` and before it emits `sys/llm.generate@1`, it should record
+the canonical pre-LLM trace entry.
 
-`aos-agent` should provide a structured `SessionTurnState` for common needs and an open extension
-slot for custom planner state.
+P6 supersedes the current P7 `ContextPlanned` trace point with `TurnPlanned`. The trace entry should
+stay compact: planner id, turn plan hash/ref when available, selected/dropped message counts,
+selected/dropped tool counts, token estimate summary, prerequisite count, and unresolved count.
+Large plan details stay behind refs.
 
-The planner trait should receive immutable state and return state updates through the plan. The
-workflow applies those updates after the plan is accepted, records the plan/report, then emits
-effects. This keeps planning pure and replayable.
-
-Custom planners should be able to track their own state without changing the SDK schema every time.
-Use refs or opaque namespaced records for planner-specific state, not new top-level SDK fields for
-every product.
+Later `LlmRequested`, `LlmReceived`, tool, stream, and receipt trace entries should be able to
+correlate back to the accepted turn plan. Updating those trace contracts belongs in P7.
 
 ## Proposed Contracts
 
-Illustrative target shape:
+Illustrative shape:
 
 ```rust
 pub trait TurnPlanner {
@@ -204,12 +189,11 @@ pub struct TurnRequest<'a> {
     pub session_id: &'a SessionId,
     pub run_id: &'a RunId,
     pub run_cause: Option<&'a RunCause>,
-    pub budget: TurnBudget,
-    pub session_turn_state: &'a SessionTurnState,
     pub run_config: &'a RunConfig,
-    pub transcript_refs: &'a [String],
-    pub turn_refs: &'a [String],
-    pub steer_refs: &'a [String],
+    pub budget: TurnBudget,
+    pub state: &'a SessionTurnState,
+    pub inputs: &'a [TurnInput],
+    pub tools: &'a [TurnToolInput],
     pub registry: &'a BTreeMap<String, ToolSpec>,
     pub profiles: &'a BTreeMap<String, Vec<String>>,
     pub runtime: &'a ToolRuntimeContext,
@@ -221,14 +205,14 @@ pub struct TurnPlan {
     pub tool_choice: Option<LlmToolChoice>,
     pub response_format_ref: Option<String>,
     pub provider_options_ref: Option<String>,
+    pub prerequisites: Vec<TurnPrerequisite>,
     pub state_updates: Vec<TurnStateUpdate>,
-    pub actions: Vec<TurnAction>,
     pub report: TurnReport,
 }
 ```
 
-The exact fields can change during implementation, but the important property is that one plan owns
-the complete next LLM turn.
+If prerequisites are returned, the workflow satisfies them explicitly and retries dispatch when
+state changes or materialization receipts arrive.
 
 Candidate inputs:
 
@@ -239,31 +223,56 @@ pub struct TurnInput {
     pub kind: TurnInputKind,
     pub priority: TurnPriority,
     pub content_ref: String,
+    pub estimated_tokens: Option<u64>,
     pub source_kind: Option<String>,
     pub source_id: Option<String>,
     pub correlation_id: Option<String>,
     pub tags: Vec<String>,
 }
 
+pub enum TurnInputKind {
+    MessageRef,
+    ResponseFormatRef,
+    ProviderOptionsRef,
+    ArtifactRef,
+    Custom { kind: String },
+}
+
 pub struct TurnToolInput {
     pub tool_id: String,
     pub priority: TurnPriority,
+    pub estimated_tokens: Option<u64>,
     pub source_kind: Option<String>,
     pub source_id: Option<String>,
     pub tags: Vec<String>,
 }
 ```
 
-Session-scoped planner state:
+Budgeting:
+
+```rust
+pub struct TurnBudget {
+    pub max_input_tokens: Option<u64>,
+    pub reserve_output_tokens: Option<u64>,
+    pub max_message_refs: Option<u64>,
+    pub max_tool_refs: Option<u64>,
+}
+
+pub struct TurnTokenEstimate {
+    pub message_tokens: u64,
+    pub tool_tokens: u64,
+    pub total_input_tokens: u64,
+    pub unknown_message_count: u64,
+    pub unknown_tool_count: u64,
+}
+```
+
+Minimal state and reporting:
 
 ```rust
 pub struct SessionTurnState {
     pub pinned_inputs: Vec<TurnInput>,
-    pub summary_refs: Vec<String>,
-    pub active_skills: Vec<SkillActivationState>,
-    pub discoverable_skills: Vec<SkillDiscoveryState>,
-    pub memory_refs: Vec<TurnInput>,
-    pub runtime_hints: Vec<TurnInput>,
+    pub durable_inputs: Vec<TurnInput>,
     pub last_report: Option<TurnReport>,
     pub custom_state_refs: Vec<PlannerStateRef>,
 }
@@ -273,207 +282,157 @@ pub struct PlannerStateRef {
     pub key: String,
     pub state_ref: String,
 }
-```
 
-The structured fields cover the SDK's common needs. `custom_state_refs` lets a custom planner store
-its own durable state as content-addressed data without adding schema variants to `aos-agent`.
-
-State updates:
-
-```rust
-pub enum TurnStateUpdate {
-    PinInput(TurnInput),
-    RemoveInput { input_id: String },
-    AddSummaryRef { summary_ref: String, input_refs: Vec<String> },
-    ActivateSkill(SkillActivationState),
-    DeactivateSkill { skill_id: String, reason: String },
-    MarkSkillDiscoverable(SkillDiscoveryState),
-    AddMemoryInput(TurnInput),
-    RemoveMemoryInput { input_id: String },
-    UpsertRuntimeHint(TurnInput),
-    UpsertCustomStateRef(PlannerStateRef),
-    RemoveCustomStateRef { planner_id: String, key: String },
-}
-```
-
-The workflow applies these updates deterministically after validating the plan. External workflows
-may also update `SessionTurnState` through explicit observations.
-
-Observations:
-
-```rust
-pub enum TurnObservation {
-    SummaryCompleted { summary_ref: String, input_refs: Vec<String> },
-    InputPinned(TurnInput),
-    InputRemoved { input_id: String },
-    SkillResolved(SkillDiscoveryState),
-    SkillActivated(SkillActivationState),
-    SkillDeactivated { skill_id: String, reason: String },
-    MemoryInputAdded(TurnInput),
-    RuntimeHintUpdated(TurnInput),
-    CustomStateRefUpdated(PlannerStateRef),
-}
-```
-
-This replaces the old narrow `ContextObservation` with a turn-planning observation stream.
-
-Report shape:
-
-```rust
 pub struct TurnReport {
     pub planner: String,
     pub selected_message_count: u64,
     pub dropped_message_count: u64,
     pub selected_tool_count: u64,
     pub dropped_tool_count: u64,
+    pub token_estimate: TurnTokenEstimate,
     pub budget: TurnBudget,
-    pub decisions: Vec<String>,
+    pub decision_codes: Vec<String>,
     pub unresolved: Vec<String>,
-    pub compaction_recommended: bool,
-    pub compaction_required: bool,
 }
 ```
 
-Actions remain explicit requests, not hidden work:
+State updates and observations should stay generic:
 
 ```rust
-pub enum TurnActionKind {
+pub enum TurnStateUpdate {
+    UpsertPinnedInput(TurnInput),
+    RemovePinnedInput { input_id: String },
+    UpsertDurableInput(TurnInput),
+    RemoveDurableInput { input_id: String },
+    UpsertCustomStateRef(PlannerStateRef),
+    RemoveCustomStateRef { planner_id: String, key: String },
+}
+
+pub enum TurnObservation {
+    InputObserved(TurnInput),
+    InputRemoved { input_id: String },
+    CustomStateRefUpdated(PlannerStateRef),
+    CustomStateRefRemoved { planner_id: String, key: String },
+    Noop,
+}
+```
+
+Prerequisites are explicit requests, not hidden planner work:
+
+```rust
+pub enum TurnPrerequisiteKind {
+    MaterializeToolDefinitions,
+    OpenHostSession,
+    Custom { kind: String },
+}
+
+pub struct TurnPrerequisite {
+    pub prerequisite_id: String,
+    pub kind: TurnPrerequisiteKind,
+    pub reason: String,
+    pub input_ids: Vec<String>,
+    pub tool_ids: Vec<String>,
+}
+```
+
+Post-turn maintenance can use a smaller later hook:
+
+```rust
+pub trait TurnFinalizer {
+    fn finish_turn(&self, request: TurnFinalizerRequest<'_>) -> Result<PostTurnPlan, TurnPlanError>;
+}
+
+pub struct PostTurnPlan {
+    pub state_updates: Vec<TurnStateUpdate>,
+    pub actions: Vec<PostTurnActionKind>,
+}
+
+pub enum PostTurnActionKind {
     Compact,
     Summarize,
-    Materialize,
-    ResolveSkill,
     RefreshMemory,
-    OpenHostSession,
+    WriteMemory,
+    ResolveSkill,
     Custom { kind: String },
 }
 ```
 
-`OpenHostSession` is a request to workflow code to emit the relevant explicit effect when config
-allows it. The planner does not open anything directly.
+Avoid verbose full-prompt reports in core state. If a product needs rich diagnostics, store a
+separate blob ref above the SDK.
 
 ## Scope
 
-### [ ] 1) Replace context contracts with turn-planning contracts
+### [ ] 1) Replace context contracts
 
-Remove or supersede:
+Remove or supersede `ContextEngine`, `ContextRequest`, `ContextPlan`, `ContextInput`,
+`ContextSelection`, `ContextReport`, and `SessionContextState`. Add the turn-planning contracts:
+`TurnPlanner`, `TurnRequest`, `TurnPlan`, `TurnInput`, `TurnToolInput`, `TurnBudget`,
+`TurnTokenEstimate`, `TurnReport`, `SessionTurnState`, `TurnObservation`, `TurnStateUpdate`,
+`TurnPrerequisite`, and `PlannerStateRef`.
 
-1. `ContextEngine`,
-2. `ContextRequest`,
-3. `ContextPlan`,
-4. `ContextInput`,
-5. `ContextSelection`,
-6. `ContextReport`,
-7. `SessionContextState`.
+### [ ] 2) Build normalized candidates before planning
 
-Add:
+Convert all message/source refs into `TurnInput` and tool registry/profile/run overrides into
+`TurnToolInput`. Candidates must carry deterministic ids, source metadata, priority, lane, and
+optional token estimates. The planner should receive candidates, not source-specific ref lists.
 
-1. `TurnPlanner`,
-2. `TurnRequest`,
-3. `TurnPlan`,
-4. `TurnInput`,
-5. `TurnToolInput`,
-6. `TurnSelection`,
-7. `TurnReport`,
-8. `SessionTurnState`,
-9. `TurnObservation`,
-10. `TurnStateUpdate`,
-11. `PlannerStateRef`.
+### [ ] 3) Make LLM dispatch consume `TurnPlan`
 
-The old context implementation is not a compatibility layer. It is a source of test cases and
-selection behavior to port.
+Run start and tool follow-up turns call the planner. Planner-selected `message_refs`, tool ids,
+`tool_choice`, `provider_options_ref`, and `response_format_ref` feed `sys/llm.generate@1`.
+Blocking prerequisites delay dispatch until explicitly satisfied. Run state and trace expose the
+latest turn plan/report.
 
-### [ ] 2) Make LLM dispatch consume `TurnPlan`
+### [ ] 4) Move generic tool selection into the planner
 
-Required outcome:
+Selected tools become planner output. `EffectiveToolSet` becomes derived state or disappears.
+`ToolAvailabilityRule::HostSessionReady` and `HostSessionNotReady` are removed from generic tool
+specs. Host/Fabric availability decisions live in default planner logic and host mappers.
 
-1. run start and tool follow-up turns call the planner,
-2. planner-selected `message_refs` feed `sys/llm.generate@1`,
-3. planner-selected tool ids determine which tool definitions are materialized,
-4. planner-selected tool refs feed `sys/llm.generate@1`,
-5. `tool_choice`, `provider_options_ref`, and `response_format_ref` come from the plan,
-6. the run stores the turn plan for inspection,
-7. the run trace records the turn-planning decision before LLM dispatch.
+### [ ] 5) Keep instructions as message refs
 
-### [ ] 3) Move generic tool selection into the planner
+`SessionConfig.default_prompt_refs` and `RunConfig.prompt_refs` become `TurnInput` candidates. Those
+refs may point to `system` or `developer` message blobs. Default ordering keeps stable instruction
+refs ahead of volatile conversational refs. Templating or rendering happens in external workflows
+that materialize refs.
 
-Required outcome:
+### [ ] 6) Keep skills source-agnostic
 
-1. profile/default/run overrides are planner inputs,
-2. selected tools are planner output,
-3. `EffectiveToolSet` becomes either derived state or disappears,
-4. `ToolAvailabilityRule::HostSessionReady` and `HostSessionNotReady` are removed from the generic
-   SDK contract,
-5. `profile_requires_host_session` is removed from `EffectiveToolSet` or replaced by explicit
-   planner actions,
-6. host/Fabric availability decisions live in default planner logic and host mappers, not in base
-   tool specs.
+Skills feed planner inputs through `TurnInput` and `TurnToolInput`. Core P6 contracts do not define
+skill storage or activation schemas. Selected/dropped skill contributions are reportable through
+source metadata. P9 can add skill descriptors and resolvers without changing LLM dispatch.
 
-### [ ] 4) Keep system/developer instructions as message refs
+### [ ] 7) Preserve memory and compaction hooks
 
-Required outcome:
+Memory refs and completed summary refs are normalized turn inputs. Pre-turn budget selection remains
+deterministic. Post-turn compaction/summarization/memory actions are explicit requests. No memory
+retrieval, embedding update, or summarization runs inside the planner.
 
-1. `SessionConfig.default_prompt_refs` and `RunConfig.prompt_refs` are ported into `TurnInput`
-   candidates,
-2. those refs may point to `system` or `developer` message blobs,
-3. the planner orders them deterministically ahead of conversational refs when selected,
-4. no separate system-message template subsystem is added to the SDK core,
-5. templating or instruction rendering happens in external workflows that materialize refs.
+### [ ] 8) Define durable planner state semantics
 
-### [ ] 5) Add skill-aware planning inputs
+Planner state is stored on `SessionState` as `SessionTurnState`. Planners receive immutable state
+and return deterministic updates. `TurnObservation` lets external workflows feed materialized refs
+and custom state into the session. Custom planners persist opaque state through namespaced
+`PlannerStateRef` entries.
 
-Required outcome:
+### [ ] 9) Prove custom planner override
 
-1. skills can contribute instruction refs,
-2. skills can contribute compact discoverability/card refs,
-3. skills can contribute tool candidates,
-4. skills can contribute response-format/provider-option refs,
-5. planner reports distinguish active, discoverable, and inactive skills,
-6. P9 can build skill resolution above this without changing the core turn dispatch path.
+Direct library consumers can dispatch with a custom `TurnPlanner`; wrapper workflows can reuse base
+session/run/tool orchestration. Add a focused test for custom message selection, tool selection,
+state update, and transcript dropping. Do not add Demiurge or software-factory-specific SDK variants.
 
-### [ ] 6) Preserve compaction and memory hooks
+### [ ] 10) Update inspection and tests
 
-Required outcome:
+Add deterministic unit tests for prompt-ref compatibility, lane ordering, budget drops, token
+estimates, source metadata, and tool selection. Add reducer tests for selected tool materialization,
+blocking prerequisites, and planner state updates. Update `aos-harness-py` fixtures to assert turn
+plans rather than old context plans.
 
-1. budgeted message selection remains deterministic,
-2. compaction/summarization remain explicit action requests,
-3. completed summary refs can be observed into session turn state,
-4. memory refs are normalized turn inputs,
-5. memory writes remain later explicit workflows and are not hidden inside the planner.
+### [ ] 11) Mark P7 trace follow-up
 
-### [ ] 7) Define planner state update semantics
-
-Required outcome:
-
-1. planner state is stored on `SessionState` as `SessionTurnState`,
-2. planners receive immutable state and return deterministic `TurnStateUpdate` values,
-3. workflow code applies state updates after accepting a plan,
-4. `TurnObservation` lets external workflows feed materialized summaries, resolved skills, memory
-   refs, runtime hints, and custom planner state into the session,
-5. custom planners can persist opaque state through namespaced `PlannerStateRef` entries,
-6. no planner state depends on process memory or hidden I/O.
-
-### [ ] 8) Prove custom planner override
-
-Required outcome:
-
-1. direct library consumers can call LLM dispatch with a custom `TurnPlanner`,
-2. wrapper workflows can reuse base session/run and tool orchestration,
-3. a focused test proves a custom planner can select a repo/bootstrap ref, activate a tool subset,
-   update planner state, and drop transcript refs deterministically,
-4. a custom planner can round-trip `PlannerStateRef` state across multiple turns,
-5. no Demiurge or software-factory-specific SDK variants are added.
-
-### [ ] 9) Update inspection and tests
-
-Required outcome:
-
-1. run state exposes the latest turn plan/report,
-2. trace entries record turn planning before LLM dispatch,
-3. deterministic unit tests cover prompt-ref compatibility, lane ordering, budget drops, skill
-   activation states, and tool selection,
-4. reducer tests cover selected tool materialization,
-5. reducer tests cover planner state updates across multiple turns,
-6. the deferred `aos-harness-py` fixture asserts turn plans rather than old context plans.
+P6 should record the accepted turn plan as the pre-LLM trace point. P7 still needs follow-up work to
+rename or supersede `ContextPlanned` with `TurnPlanned`, add compact turn-plan metadata, and thread
+turn-plan correlation through `LlmRequested`, `LlmReceived`, tool, stream, and receipt trace entries.
 
 ## Non-Goals
 
@@ -481,25 +440,30 @@ P6 does **not** add:
 
 1. hidden LLM summarization,
 2. embedding/search infrastructure,
-3. policy/capability gating or approval UX,
-4. host/Fabric execution adapters,
-5. a complete skill registry,
-6. memory write governance,
-7. factory work-item workflows,
-8. scheduler or heartbeat workflows.
+3. memory write governance,
+4. policy/capability gating or approval UX,
+5. host/Fabric execution adapters,
+6. a complete skill registry,
+7. skill package loading,
+8. factory work-item workflows,
+9. scheduler or heartbeat workflows,
+10. extensive prompt/context reports in core state.
 
-Those systems feed materialized refs, tool candidates, observations, or actions into the planner.
+Those systems feed materialized refs, tool candidates, observations, post-turn actions, or custom
+state refs into the planner.
 
 ## Acceptance Criteria
 
-1. [ ] One planner call produces the complete next LLM turn.
+1. [ ] One pre-turn planner call produces the complete next LLM request shape.
 2. [ ] System/developer/user/assistant/tool messages remain ordered refs in `message_refs`.
 3. [ ] Tool selection is planner output, not a separate workflow-global `EffectiveToolSet` decision.
 4. [ ] Host-specific availability rules are removed from generic tool specs.
-5. [ ] Skills can be active, discoverable, or inactive per turn.
-6. [ ] Turn reports explain selected/dropped messages, selected/dropped tools, actions, and unresolved prerequisites.
-7. [ ] Compaction and materialization are explicit requested actions, not hidden planner I/O.
-8. [ ] A custom planner can reuse base session/run/tool orchestration without forking the workflow loop.
-9. [ ] Planner state is durable, replayable, and extensible for custom planners.
-10. [ ] P7 traces record turn planning as the canonical pre-LLM decision point.
-11. [ ] P10 deterministic fixtures assert turn plans end to end.
+5. [ ] Skills participate as generic source-tagged candidates, not core SDK skill state.
+6. [ ] Token estimates and unknown-token counts are represented in the plan/report.
+7. [ ] Prompt-cache-friendly stable ordering is a default planner invariant.
+8. [ ] Compaction, summarization, and memory writes are post-turn actions, not pre-turn guesses.
+9. [ ] A custom planner can reuse base session/run/tool orchestration.
+10. [ ] Planner state is durable, replayable, and extensible through namespaced refs.
+11. [ ] P6 records `TurnPlanned` as the canonical pre-LLM trace point, with P7 follow-up called out
+   for trace schema/correlation updates.
+12. [ ] P10 deterministic fixtures assert turn plans end to end.
