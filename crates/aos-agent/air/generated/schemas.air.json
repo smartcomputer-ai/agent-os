@@ -266,6 +266,40 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/LlmUsageRecord@1",
+    "type": {
+      "record": {
+        "cache_read_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "cache_write_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "completion_tokens": {
+          "nat": {}
+        },
+        "prompt_tokens": {
+          "nat": {}
+        },
+        "reasoning_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "total_tokens": {
+          "option": {
+            "nat": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/PendingBlobGet@1",
     "type": {
       "record": {
@@ -744,6 +778,11 @@
             "hash": {}
           }
         },
+        "last_llm_usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
+          }
+        },
         "lifecycle": {
           "ref": "aos.agent/RunLifecycle@1"
         },
@@ -791,6 +830,11 @@
         "interrupt": {
           "option": {
             "ref": "aos.agent/RunInterrupt@1"
+          }
+        },
+        "last_llm_usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
           }
         },
         "last_output_ref": {

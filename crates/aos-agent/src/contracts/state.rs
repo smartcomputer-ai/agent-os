@@ -1,7 +1,7 @@
 use super::{
-    ActiveToolBatch, RunConfig, RunId, RunLifecycle, RunTrace, RunTraceSummary, SessionConfig,
-    SessionId, SessionLifecycle, SessionStatus, SessionTurnState, ToolBatchId, ToolRuntimeContext,
-    ToolSpec, TurnPlan,
+    ActiveToolBatch, LlmUsageRecord, RunConfig, RunId, RunLifecycle, RunTrace, RunTraceSummary,
+    SessionConfig, SessionId, SessionLifecycle, SessionStatus, SessionTurnState, ToolBatchId,
+    ToolRuntimeContext, ToolSpec, TurnPlan,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -216,6 +216,7 @@ pub struct RunState {
     pub pending_llm_turn_refs: Option<Vec<String>>,
     #[aos(air_type = "hash")]
     pub last_output_ref: Option<String>,
+    pub last_llm_usage: Option<LlmUsageRecord>,
     pub tool_refs_materialized: bool,
     pub in_flight_effects: u64,
     pub outcome: Option<RunOutcome>,
@@ -234,6 +235,7 @@ pub struct RunRecord {
     #[aos(air_type = "hash")]
     pub input_refs: Vec<String>,
     pub outcome: Option<RunOutcome>,
+    pub last_llm_usage: Option<LlmUsageRecord>,
     pub trace_summary: RunTraceSummary,
     #[aos(air_type = "time")]
     pub started_at: u64,

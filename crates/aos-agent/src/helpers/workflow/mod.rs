@@ -540,6 +540,7 @@ fn on_run_start_requested(
         staged_tool_follow_up_turn: None,
         pending_llm_turn_refs: None,
         last_output_ref: None,
+        last_llm_usage: None,
         tool_refs_materialized: false,
         in_flight_effects: 0,
         outcome: None,
@@ -573,6 +574,9 @@ fn on_run_start_requested(
     state.queued_steer_refs.clear();
     state.run_interrupt = None;
     state.last_output_ref = None;
+    if let Some(run) = state.current_run.as_mut() {
+        run.last_llm_usage = None;
+    }
     state.tool_refs_materialized = false;
 
     state
@@ -893,12 +897,17 @@ fn handle_llm_generate_receipt(
         return Ok(());
     };
 
+    let usage = llm_usage_record_from_receipt(&receipt);
     state.last_output_ref = Some(receipt.output_ref.as_str().into());
+    if let Some(run) = state.current_run.as_mut() {
+        run.last_llm_usage = Some(usage.clone());
+    }
     let refs = vec![trace_ref("output_ref", receipt.output_ref.to_string())];
     let mut metadata = BTreeMap::new();
     metadata.insert("provider_id".into(), receipt.provider_id.clone());
     metadata.insert("finish_reason".into(), receipt.finish_reason.reason.clone());
     metadata.insert("status".into(), envelope.status.clone());
+    insert_llm_usage_trace_metadata(&mut metadata, &usage);
     push_run_trace(
         state,
         RunTraceEntryKind::LlmReceived,
@@ -919,6 +928,49 @@ fn handle_llm_generate_receipt(
     }
 
     Ok(())
+}
+
+fn llm_usage_record_from_receipt(receipt: &LlmGenerateReceipt) -> crate::contracts::LlmUsageRecord {
+    crate::contracts::LlmUsageRecord {
+        prompt_tokens: receipt.token_usage.prompt,
+        completion_tokens: receipt.token_usage.completion,
+        total_tokens: receipt.token_usage.total,
+        reasoning_tokens: receipt
+            .usage_details
+            .as_ref()
+            .and_then(|details| details.reasoning_tokens),
+        cache_read_tokens: receipt
+            .usage_details
+            .as_ref()
+            .and_then(|details| details.cache_read_tokens),
+        cache_write_tokens: receipt
+            .usage_details
+            .as_ref()
+            .and_then(|details| details.cache_write_tokens),
+    }
+}
+
+fn insert_llm_usage_trace_metadata(
+    metadata: &mut BTreeMap<String, String>,
+    usage: &crate::contracts::LlmUsageRecord,
+) {
+    metadata.insert("prompt_tokens".into(), usage.prompt_tokens.to_string());
+    metadata.insert(
+        "completion_tokens".into(),
+        usage.completion_tokens.to_string(),
+    );
+    if let Some(total) = usage.total_tokens {
+        metadata.insert("total_tokens".into(), total.to_string());
+    }
+    if let Some(reasoning) = usage.reasoning_tokens {
+        metadata.insert("reasoning_tokens".into(), reasoning.to_string());
+    }
+    if let Some(cache_read) = usage.cache_read_tokens {
+        metadata.insert("cache_read_tokens".into(), cache_read.to_string());
+    }
+    if let Some(cache_write) = usage.cache_write_tokens {
+        metadata.insert("cache_write_tokens".into(), cache_write.to_string());
+    }
 }
 
 fn rejected_as_error_envelope(rejected: &EffectReceiptRejected) -> EffectReceiptEnvelope {
@@ -1854,6 +1906,7 @@ fn finish_current_run(
         cause: run.cause,
         input_refs: run.input_refs,
         outcome,
+        last_llm_usage: run.last_llm_usage,
         trace_summary,
         started_at: run.started_at,
         ended_at: state.updated_at,
@@ -2101,7 +2154,7 @@ mod tests {
     };
     use aos_effects::builtins::{
         BlobGetReceipt, BlobPutReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
-        LlmToolCall, TokenUsage,
+        LlmToolCall, LlmUsageDetails, TokenUsage,
     };
 
     fn fake_hash(ch: char) -> String {
@@ -3372,11 +3425,15 @@ mod tests {
                         raw: None,
                     },
                     token_usage: TokenUsage {
-                        prompt: 0,
-                        completion: 0,
-                        total: Some(0),
+                        prompt: 123,
+                        completion: 45,
+                        total: Some(168),
                     },
-                    usage_details: None,
+                    usage_details: Some(LlmUsageDetails {
+                        reasoning_tokens: Some(12),
+                        cache_read_tokens: Some(34),
+                        cache_write_tokens: Some(56),
+                    }),
                     warnings_ref: None,
                     rate_limit_ref: None,
                     cost_cents: None,
@@ -3390,6 +3447,40 @@ mod tests {
         assert_eq!(
             state.last_output_ref.as_deref(),
             Some(hash_ref('e').as_str())
+        );
+        let usage = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.last_llm_usage.as_ref())
+            .expect("last llm usage");
+        assert_eq!(usage.prompt_tokens, 123);
+        assert_eq!(usage.completion_tokens, 45);
+        assert_eq!(usage.total_tokens, Some(168));
+        assert_eq!(usage.reasoning_tokens, Some(12));
+        assert_eq!(usage.cache_read_tokens, Some(34));
+        assert_eq!(usage.cache_write_tokens, Some(56));
+        let llm_received = state
+            .current_run
+            .as_ref()
+            .expect("current run")
+            .trace
+            .entries
+            .iter()
+            .find(|entry| matches!(entry.kind, RunTraceEntryKind::LlmReceived))
+            .expect("llm received trace");
+        assert_eq!(
+            llm_received
+                .metadata
+                .get("prompt_tokens")
+                .map(String::as_str),
+            Some("123")
+        );
+        assert_eq!(
+            llm_received
+                .metadata
+                .get("cache_read_tokens")
+                .map(String::as_str),
+            Some("34")
         );
         assert!(matches!(
             out.effects.first(),
@@ -3465,11 +3556,15 @@ mod tests {
                         raw: None,
                     },
                     token_usage: TokenUsage {
-                        prompt: 0,
-                        completion: 0,
-                        total: Some(0),
+                        prompt: 200,
+                        completion: 30,
+                        total: Some(230),
                     },
-                    usage_details: None,
+                    usage_details: Some(LlmUsageDetails {
+                        reasoning_tokens: Some(7),
+                        cache_read_tokens: Some(11),
+                        cache_write_tokens: None,
+                    }),
                     warnings_ref: None,
                     rate_limit_ref: None,
                     cost_cents: None,
@@ -3700,11 +3795,15 @@ mod tests {
                         raw: None,
                     },
                     token_usage: TokenUsage {
-                        prompt: 0,
-                        completion: 0,
-                        total: Some(0),
+                        prompt: 200,
+                        completion: 30,
+                        total: Some(230),
                     },
-                    usage_details: None,
+                    usage_details: Some(LlmUsageDetails {
+                        reasoning_tokens: Some(7),
+                        cache_read_tokens: Some(11),
+                        cache_write_tokens: None,
+                    }),
                     warnings_ref: None,
                     rate_limit_ref: None,
                     cost_cents: None,
@@ -3765,6 +3864,22 @@ mod tests {
         )
         .expect("lifecycle payload");
         assert_eq!(changed.output_ref.as_deref(), Some(hash_ref('e').as_str()));
+
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(5, SessionInputKind::RunCompleted),
+        )
+        .expect("complete run");
+        let usage = state
+            .run_history
+            .first()
+            .and_then(|record| record.last_llm_usage.as_ref())
+            .expect("run record llm usage");
+        assert_eq!(usage.prompt_tokens, 200);
+        assert_eq!(usage.completion_tokens, 30);
+        assert_eq!(usage.total_tokens, Some(230));
+        assert_eq!(usage.reasoning_tokens, Some(7));
+        assert_eq!(usage.cache_read_tokens, Some(11));
     }
 
     #[test]
