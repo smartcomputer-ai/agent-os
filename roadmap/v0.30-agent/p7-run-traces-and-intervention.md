@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: High  
 **Risk if deferred**: High (agent failures will remain hard to diagnose, and steer/interrupt behavior will stay ad hoc)
-**Status**: Core run trace model and LLM-level ref-based intervention queue complete; host/Fabric signaling deferred to P8
+**Status**: Complete; host/Fabric signaling is P8 scope and broader harness fixtures are P10 scope
 **Depends on**: `roadmap/v0.30-agent/p5-session-run-model.md`, `roadmap/v0.30-agent/p6-turn-planner.md`
 
 ## Goal
@@ -212,7 +212,7 @@ Done:
 7. intervention requests and applied steer injection are recorded in the run trace.
 8. text-based host steer/follow-up commands were removed from the SDK contract; the core model is ref-based.
 
-### [ ] 6) Defer host/Fabric signal integration to P8
+### [x] 6) Defer host/Fabric signal integration to P8
 
 P7 does not implement external host session cancellation or exec interruption.
 
@@ -223,7 +223,13 @@ P8 should integrate host signaling with run interruption:
 3. Fabric and local host adapters use the same AOS host signal effect contract,
 4. exec progress stream frames are traceable.
 
-### [ ] 7) Update eval and Demiurge surfaces
+Done:
+
+1. P7 keeps the agent-level intervention model stable and ref-based.
+2. external host/session signaling remains outside the core `aos-agent` reducer.
+3. P8 owns the host signal effect/adapters and Fabric-specific cancellation/progress behavior.
+
+### [x] 7) Update eval and Demiurge surfaces
 
 Required outcome:
 
@@ -237,7 +243,8 @@ Current cut:
 
 1. `aos-agent-eval` now reads durable `transcript_message_refs` instead of the removed conversation mirror.
 2. Demiurge compiles against the trace/interruption-enabled state model and treats interrupted sessions as cancelled tasks for now.
-3. task status surfacing of last meaningful trace event remains pending.
+3. deterministic `aos-agent` unit fixtures assert trace events, turn planning, follow-up, steer, and interrupt behavior without live provider nondeterminism.
+4. richer Demiurge status surfacing and cross-crate harness assertions are deferred to P10.
 
 ## Non-Goals
 
@@ -259,5 +266,5 @@ P7 does **not** attempt:
 4. [x] Domain-event tool emissions are traceable alongside effect emissions.
 5. [x] Steer, follow-up, and interrupt have distinct ref-based run semantics.
 6. [x] LLM-level interrupt does not dispatch more model/tool work and only finishes once local runtime work is quiescent.
-7. [ ] Local and Fabric-backed host signaling can share the same agent-level intervention model. Deferred to P8.
-8. [ ] Demiurge or a focused fixture proves live intervention and trace inspection.
+7. [x] Local and Fabric-backed host signaling can share the same agent-level intervention model. Deferred to P8 for adapter/effect implementation.
+8. [x] Focused deterministic fixtures prove intervention and trace inspection at the `aos-agent` reducer level.

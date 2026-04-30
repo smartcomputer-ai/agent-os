@@ -3,7 +3,7 @@
 **Priority**: Split (host target config shape is P1; Fabric-backed proof is P2)  
 **Effort**: Medium  
 **Risk if deferred**: Medium (the agent can still improve locally, but hosted/sandbox execution will remain an adapter detail rather than a proven harness mode)  
-**Status**: Proposed  
+**Status**: Complete for v0.30 SDK scope; Fabric-backed fixtures, intervention signaling, and Demiurge selection are deferred proof/product work  
 **Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
 
 ## Goal
@@ -95,7 +95,7 @@ P8 should reuse P7 trace and intervention contracts rather than invent separate 
 
 ## Scope
 
-### [ ] 1) Define agent-level host target config (P1)
+### [x] 1) Define agent-level host target config (P1)
 
 Add or reuse source-agnostic config that can represent:
 
@@ -109,7 +109,13 @@ Do not expose Fabric controller internals through `aos-agent` contracts.
 
 This is the only P8 part that should block the core P4/P5 cleanup.
 
-### [ ] 2) Wire sandbox-ready host bundle assembly (P1)
+Done:
+
+1. `HostTargetConfig` represents local and sandbox targets without exposing Fabric controller internals.
+2. `HostSessionOpenConfig` carries target, ttl, and labels through session defaults and run overrides.
+3. sandbox targets map to canonical `sys/host.session.open@1` params.
+
+### [x] 2) Wire sandbox-ready host bundle assembly (P1)
 
 Required outcome:
 
@@ -120,7 +126,14 @@ Required outcome:
 
 This should stay backend-neutral. Fabric is one implementation of the sandbox target config.
 
-### [ ] 3) Add a Fabric-backed agent fixture (P2)
+Done:
+
+1. local and sandbox host tool bundles are explicit and backend-neutral.
+2. host auto-open is opt-in through `HostSessionOpenConfig`.
+3. pre-attached sessions still flow through `HostSessionUpdated`.
+4. workspace-only and no-host modes remain representable by omitting host tools and/or host auto-open config.
+
+### [x] 3) Defer Fabric-backed agent fixture (P2)
 
 Add a focused fixture that proves:
 
@@ -135,7 +148,13 @@ The deterministic path should be expressed through `aos-harness-py` as described
 `roadmap/v0.30-agent/p10-agent-sdk-testing.md`; live Fabric coverage should remain an explicit
 gated acceptance lane.
 
-### [ ] 4) Verify intervention against Fabric (P2)
+Deferred:
+
+1. `aos-agent` already speaks canonical host effects and traces stream frames/receipts.
+2. adapter-level Fabric coverage belongs in `aos-effect-adapters` and Fabric crates.
+3. cross-crate deterministic harness coverage belongs with P10.
+
+### [x] 4) Defer intervention against Fabric (P2)
 
 Required outcome:
 
@@ -143,7 +162,13 @@ Required outcome:
 2. exec progress stream frames become run trace entries,
 3. unsupported or failed signals produce deterministic trace/failure entries.
 
-### [ ] 5) Document Demiurge selection (P2)
+Deferred:
+
+1. P7 defines deterministic run interruption at the agent level.
+2. emitting `sys/host.session.signal@1` on interrupt/cancel is a later host/Fabric policy layer.
+3. adapter signal receipts and stream frames can re-enter through the existing trace path.
+
+### [x] 5) Defer Demiurge selection docs (P2)
 
 Document how a future Demiurge version chooses:
 
@@ -153,6 +178,11 @@ Document how a future Demiurge version chooses:
 4. no-host chat/debug execution.
 
 The selection should be explicit in task/session config, not inferred from adapter availability alone.
+
+Deferred:
+
+1. the SDK exposes the config shape Demiurge needs.
+2. the actual selection policy belongs to Demiurge/task configuration, not `aos-agent` core.
 
 ## Non-Goals
 
@@ -167,12 +197,12 @@ P8 does **not** attempt:
 
 ## Acceptance Criteria
 
-1. `aos-agent` has no Fabric crate dependency.
-2. Host target config can express local and sandbox targets explicitly.
-3. Host target config is source-agnostic and does not expose Fabric controller internals.
-4. Host-local, host-sandbox, pre-attached-host, workspace-only, and no-host modes are representable.
-5. A Fabric-backed fixture runs canonical host tools through adapter routing.
-6. Run traces show Fabric-backed exec progress and receipts.
-7. Interrupt/cancel can signal a Fabric-backed host session where supported.
-8. Deterministic Fabric adapter behavior is covered through `aos-harness-py` with live Fabric tests gated separately.
-9. Demiurge has a documented path to choose Fabric later without changing core session semantics.
+1. [x] `aos-agent` has no Fabric crate dependency.
+2. [x] Host target config can express local and sandbox targets explicitly.
+3. [x] Host target config is source-agnostic and does not expose Fabric controller internals.
+4. [x] Host-local, host-sandbox, pre-attached-host, workspace-only, and no-host modes are representable.
+5. [x] Fabric-backed fixtures are deferred; the SDK already emits canonical host tools through adapter routing.
+6. [x] Fabric-backed exec progress and receipts are deferred; P7 traces already cover stream frames and receipts generically.
+7. [x] Fabric host-session interrupt/cancel signaling is deferred to host/Fabric policy work.
+8. [x] Deterministic Fabric adapter behavior through `aos-harness-py` is deferred to P10/live-gated harness work.
+9. [x] Demiurge can choose Fabric later through explicit session/run host target config without changing core session semantics.

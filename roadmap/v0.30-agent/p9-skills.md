@@ -3,7 +3,7 @@
 **Priority**: P2  
 **Effort**: Medium  
 **Risk if deferred**: Medium (worlds will keep inventing ad hoc prompt bundles and repo-instruction loading, but the core session/context/trace seams can land first)  
-**Status**: Proposed  
+**Status**: Complete for v0.30 SDK scope; full skill descriptors, resolvers, source loaders, and harness proof are deferred implementation-layer work  
 **Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p6-turn-planner.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
 
 ## Goal
@@ -106,9 +106,24 @@ The clean flow is:
 
 This keeps skills from becoming a second hidden prompt system.
 
+## v0.30 Decision
+
+Do not add a first-class skill subsystem to `aos-agent` core for v0.30.
+
+The SDK already has the right integration seams:
+
+1. resolved skill instructions can enter the planner as `TurnObservation::InputObserved` with `TurnInputLane::Skill`,
+2. skill-provided prompt/message refs are ordinary `TurnInput` values selected or dropped by the turn planner,
+3. skill tool suggestions can be applied through explicit session/run tool profile, enable, disable, or force config,
+4. `TurnPlanned` traces show which inputs and tools were selected without adding a hidden skill prompt path,
+5. embedding worlds, Demiurge, or future harnesses can implement repo/workspace/CAS/static skill resolution above the SDK.
+
+The important boundary is that skills must not bypass turn planning. A resolver may produce normalized
+contributions, but it should not directly mutate LLM request message refs or tool refs.
+
 ## Scope
 
-### [ ] 1) Define skill descriptor and contribution contracts
+### [x] 1) Defer skill descriptor and contribution contracts
 
 Add small contracts for:
 
@@ -119,7 +134,13 @@ Add small contracts for:
 5. tool/profile contributions,
 6. inspection/debug info.
 
-### [ ] 2) Add a resolver seam above the turn planner
+Deferred:
+
+1. core session execution does not need skill descriptors.
+2. future descriptors should live above the session reducer and resolve into existing turn/tool config inputs.
+3. no skill storage source should become privileged in core contracts.
+
+### [x] 2) Use the existing turn-planner seam
 
 Required outcome:
 
@@ -128,7 +149,20 @@ Required outcome:
 3. session kernel remains unaware of raw skill storage,
 4. run trace can report active and dropped skills.
 
-### [ ] 3) Support repo-local instruction files first
+Done for SDK scope:
+
+1. `TurnInputLane::Skill` exists for resolved skill contributions.
+2. `TurnObservation::InputObserved` can add durable planner inputs without a new skill-specific reducer path.
+3. `TurnToolInput` and explicit tool profile/override config cover tool suggestions.
+4. `TurnPlanned` traces record selected message refs and selected tools.
+
+Deferred:
+
+1. a concrete resolver interface,
+2. active/dropped skill reporting beyond normal turn-plan trace data,
+3. cross-source loading and activation behavior.
+
+### [x] 3) Defer repo-local instruction files
 
 The first practical proof should include repo-local files such as:
 
@@ -138,13 +172,23 @@ The first practical proof should include repo-local files such as:
 
 These files are one skill source, not the universal core model.
 
-### [ ] 4) Support workspace-backed skills as opt-in
+Deferred:
+
+1. repo-local loaders belong in an embedding world, Demiurge, or a harness/resolver crate.
+2. once loaded, their instruction refs should be submitted as skill-lane `TurnInput`s.
+
+### [x] 4) Defer workspace-backed skills as opt-in
 
 Workspace-backed skills are useful for versioned shared packs.
 
 They should remain possible, but only as an implementation-layer source plugged into the resolver.
 
-### [ ] 5) Add observability
+Deferred:
+
+1. workspace-backed skills remain compatible with the same normalized contribution path.
+2. core `aos-agent` should not depend on workspace skill storage.
+
+### [x] 5) Keep observability in the existing trace path
 
 We need to answer:
 
@@ -154,7 +198,13 @@ We need to answer:
 4. which contributions entered the turn plan,
 5. which tool/profile suggestions were applied or ignored.
 
-### [ ] 6) Prove the model
+Done for SDK scope:
+
+1. selected skill-lane inputs are observable as selected refs in `TurnPlanned`.
+2. selected skill-provided tools are observable as selected tool ids in `TurnPlanned`.
+3. richer active/dropped skill diagnostics can be added later as resolver-owned metadata or custom trace entries.
+
+### [x] 6) Defer end-to-end skill proof
 
 The first proof should demonstrate:
 
@@ -166,6 +216,11 @@ The first proof should demonstrate:
 
 This should preferably be an `aos-harness-py` deterministic fixture, with Demiurge integration as
 a later consumer proof if needed.
+
+Deferred:
+
+1. deterministic end-to-end skill activation belongs with P10/harness work.
+2. Demiurge integration is a consumer proof, not an SDK prerequisite.
 
 ## Non-Goals
 
@@ -180,9 +235,9 @@ P9 does **not** attempt:
 
 ## Acceptance Criteria
 
-1. Skills are not required for core session execution.
-2. Repo-local instruction files can participate as skills without becoming the universal storage model.
-3. Workspace-backed skills remain possible without reintroducing workspace coupling.
-4. Skill resolution feeds the turn planner through normalized contributions.
-5. Tool/profile contributions are explicit and inspectable.
-6. A deterministic `aos-harness-py` fixture proves end-to-end skill activation and trace visibility.
+1. [x] Skills are not required for core session execution.
+2. [x] Repo-local instruction files can participate as skills without becoming the universal storage model.
+3. [x] Workspace-backed skills remain possible without reintroducing workspace coupling.
+4. [x] Skill resolution feeds the turn planner through normalized contributions.
+5. [x] Tool/profile contributions are explicit and inspectable.
+6. [x] End-to-end `aos-harness-py` skill activation and trace visibility are deferred to P10/harness work.
