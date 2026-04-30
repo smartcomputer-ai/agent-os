@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent::{
     LlmToolCallList, SessionConfig, SessionId, SessionInput, SessionInputKind, SessionState,
-    ToolAvailabilityRule, ToolExecutor, ToolParallelismHint, ToolSpec,
+    ToolExecutor, ToolParallelismHint, ToolSpec,
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
@@ -218,7 +218,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
 
         let history_ref = store_history_blob(&host, &history)?;
         let turn_tool_refs = if matches!(phase, SearchPhase::Looking) {
-            state.effective_tools.tool_refs()
+            selected_tool_refs(&state)
         } else {
             None
         };
@@ -428,7 +428,6 @@ fn configure_search_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Re
             executor: ToolExecutor::HostLoop {
                 bridge: SEARCH_TOOL_NAME.into(),
             },
-            availability_rules: vec![ToolAvailabilityRule::Always],
             parallelism_hint: ToolParallelismHint {
                 parallel_safe: true,
                 resource_key: None,
@@ -447,6 +446,24 @@ fn configure_search_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Re
             profiles: Some(profiles),
             default_profile: Some(SEARCH_TOOL_PROFILE.into()),
         },
+    )
+}
+
+fn selected_tool_refs(state: &SessionState) -> Option<Vec<String>> {
+    let selected = state
+        .current_run
+        .as_ref()
+        .and_then(|run| run.turn_plan.as_ref())
+        .map(|plan| plan.selected_tool_ids.as_slice())?;
+    if selected.is_empty() {
+        return None;
+    }
+    Some(
+        selected
+            .iter()
+            .filter_map(|tool_id| state.tool_registry.get(tool_id))
+            .map(|tool| tool.tool_ref.clone())
+            .collect(),
     )
 }
 

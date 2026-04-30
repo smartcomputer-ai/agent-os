@@ -73,391 +73,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/ContextAction@1",
-    "type": {
-      "record": {
-        "action_id": {
-          "text": {}
-        },
-        "input_ids": {
-          "list": {
-            "text": {}
-          }
-        },
-        "kind": {
-          "ref": "aos.agent/ContextActionKind@1"
-        },
-        "reason": {
-          "text": {}
-        },
-        "required": {
-          "bool": {}
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextActionKind@1",
-    "type": {
-      "variant": {
-        "Compact": {
-          "unit": {}
-        },
-        "Custom": {
-          "record": {
-            "kind": {
-              "text": {}
-            }
-          }
-        },
-        "Materialize": {
-          "unit": {}
-        },
-        "Summarize": {
-          "unit": {}
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextBudget@1",
-    "type": {
-      "record": {
-        "max_refs": {
-          "option": {
-            "nat": {}
-          }
-        },
-        "reserve_output_tokens": {
-          "option": {
-            "nat": {}
-          }
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextInput@1",
-    "type": {
-      "record": {
-        "content_ref": {
-          "hash": {}
-        },
-        "correlation_id": {
-          "option": {
-            "text": {}
-          }
-        },
-        "input_id": {
-          "text": {}
-        },
-        "kind": {
-          "ref": "aos.agent/ContextInputKind@1"
-        },
-        "label": {
-          "option": {
-            "text": {}
-          }
-        },
-        "priority": {
-          "ref": "aos.agent/ContextPriority@1"
-        },
-        "scope": {
-          "ref": "aos.agent/ContextInputScope@1"
-        },
-        "source_id": {
-          "option": {
-            "text": {}
-          }
-        },
-        "source_kind": {
-          "option": {
-            "text": {}
-          }
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextInputKind@1",
-    "type": {
-      "variant": {
-        "ArtifactRef": {
-          "unit": {}
-        },
-        "Custom": {
-          "record": {
-            "kind": {
-              "text": {}
-            }
-          }
-        },
-        "DomainRef": {
-          "unit": {}
-        },
-        "MemoryRef": {
-          "unit": {}
-        },
-        "MessageRef": {
-          "unit": {}
-        },
-        "PromptRef": {
-          "unit": {}
-        },
-        "SkillRef": {
-          "unit": {}
-        },
-        "SummaryRef": {
-          "unit": {}
-        },
-        "WorkspaceRef": {
-          "unit": {}
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextInputScope@1",
-    "type": {
-      "variant": {
-        "Cause": {
-          "unit": {}
-        },
-        "Custom": {
-          "record": {
-            "kind": {
-              "text": {}
-            }
-          }
-        },
-        "Domain": {
-          "unit": {}
-        },
-        "Memory": {
-          "unit": {}
-        },
-        "Run": {
-          "unit": {}
-        },
-        "Session": {
-          "unit": {}
-        },
-        "Skill": {
-          "unit": {}
-        },
-        "Summary": {
-          "unit": {}
-        },
-        "Transcript": {
-          "unit": {}
-        },
-        "Workspace": {
-          "unit": {}
-        },
-        "World": {
-          "unit": {}
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextObservation@1",
-    "type": {
-      "variant": {
-        "InputPinned": {
-          "ref": "aos.agent/ContextInput@1"
-        },
-        "InputRemoved": {
-          "record": {
-            "input_id": {
-              "text": {}
-            }
-          }
-        },
-        "Noop": {
-          "unit": {}
-        },
-        "SummaryCompleted": {
-          "record": {
-            "input_refs": {
-              "list": {
-                "text": {}
-              }
-            },
-            "summary_ref": {
-              "hash": {}
-            }
-          }
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextPlan@1",
-    "type": {
-      "record": {
-        "actions": {
-          "list": {
-            "ref": "aos.agent/ContextAction@1"
-          }
-        },
-        "report": {
-          "ref": "aos.agent/ContextReport@1"
-        },
-        "selected_refs": {
-          "list": {
-            "hash": {}
-          }
-        },
-        "selections": {
-          "list": {
-            "ref": "aos.agent/ContextSelection@1"
-          }
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextPriority@1",
-    "type": {
-      "variant": {
-        "High": {
-          "unit": {}
-        },
-        "Low": {
-          "unit": {}
-        },
-        "Normal": {
-          "unit": {}
-        },
-        "Required": {
-          "unit": {}
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextReport@1",
-    "type": {
-      "record": {
-        "budget": {
-          "ref": "aos.agent/ContextBudget@1"
-        },
-        "compaction_recommended": {
-          "bool": {}
-        },
-        "compaction_required": {
-          "bool": {}
-        },
-        "decisions": {
-          "list": {
-            "text": {}
-          }
-        },
-        "dropped_count": {
-          "nat": {}
-        },
-        "engine": {
-          "text": {}
-        },
-        "selected_count": {
-          "nat": {}
-        },
-        "unresolved": {
-          "list": {
-            "text": {}
-          }
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ContextSelection@1",
-    "type": {
-      "record": {
-        "content_ref": {
-          "hash": {}
-        },
-        "input_id": {
-          "text": {}
-        },
-        "reason": {
-          "text": {}
-        },
-        "selected": {
-          "bool": {}
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/EffectiveTool@1",
-    "type": {
-      "record": {
-        "args_schema_json": {
-          "text": {}
-        },
-        "description": {
-          "text": {}
-        },
-        "executor": {
-          "ref": "aos.agent/ToolExecutor@1"
-        },
-        "mapper": {
-          "ref": "aos.agent/ToolMapper@1"
-        },
-        "parallel_safe": {
-          "bool": {}
-        },
-        "resource_key": {
-          "option": {
-            "text": {}
-          }
-        },
-        "tool_id": {
-          "text": {}
-        },
-        "tool_name": {
-          "text": {}
-        },
-        "tool_ref": {
-          "hash": {}
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/EffectiveToolSet@1",
-    "type": {
-      "record": {
-        "ordered_tools": {
-          "list": {
-            "ref": "aos.agent/EffectiveTool@1"
-          }
-        },
-        "profile_id": {
-          "text": {}
-        },
-        "profile_requires_host_session": {
-          "bool": {}
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "aos.agent/HostCommand@1",
     "type": {
       "record": {
@@ -779,6 +394,23 @@
         },
         "tool_name": {
           "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/PlannerStateRef@1",
+    "type": {
+      "record": {
+        "key": {
+          "text": {}
+        },
+        "planner_id": {
+          "text": {}
+        },
+        "state_ref": {
+          "hash": {}
         }
       }
     }
@@ -1148,11 +780,6 @@
         "config": {
           "ref": "aos.agent/RunConfig@1"
         },
-        "context_plan": {
-          "option": {
-            "ref": "aos.agent/ContextPlan@1"
-          }
-        },
         "in_flight_effects": {
           "nat": {}
         },
@@ -1238,6 +865,11 @@
         "trace": {
           "ref": "aos.agent/RunTrace@1"
         },
+        "turn_plan": {
+          "option": {
+            "ref": "aos.agent/TurnPlan@1"
+          }
+        },
         "updated_at": {
           "time": {}
         }
@@ -1306,9 +938,6 @@
     "name": "aos.agent/RunTraceEntryKind@1",
     "type": {
       "variant": {
-        "ContextPlanned": {
-          "unit": {}
-        },
         "Custom": {
           "record": {
             "kind": {
@@ -1350,6 +979,9 @@
           "unit": {}
         },
         "ToolCallsObserved": {
+          "unit": {}
+        },
+        "TurnPlanned": {
           "unit": {}
         }
       }
@@ -1479,29 +1111,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/SessionContextState@1",
-    "type": {
-      "record": {
-        "last_report": {
-          "option": {
-            "ref": "aos.agent/ContextReport@1"
-          }
-        },
-        "pinned_inputs": {
-          "list": {
-            "ref": "aos.agent/ContextInput@1"
-          }
-        },
-        "summary_refs": {
-          "list": {
-            "hash": {}
-          }
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "aos.agent/SessionId@1",
     "type": {
       "uuid": {}
@@ -1529,9 +1138,6 @@
     "name": "aos.agent/SessionInputKind@1",
     "type": {
       "variant": {
-        "ContextObserved": {
-          "ref": "aos.agent/ContextObservation@1"
-        },
         "FollowUpInputAppended": {
           "record": {
             "input_ref": {
@@ -1724,6 +1330,9 @@
               }
             }
           }
+        },
+        "TurnObserved": {
+          "ref": "aos.agent/TurnObservation@1"
         }
       }
     }
@@ -1823,9 +1432,6 @@
             "ref": "aos.agent/ActiveToolBatch@1"
           }
         },
-        "context_state": {
-          "ref": "aos.agent/SessionContextState@1"
-        },
         "created_at": {
           "time": {}
         },
@@ -1833,9 +1439,6 @@
           "option": {
             "ref": "aos.agent/RunState@1"
           }
-        },
-        "effective_tools": {
-          "ref": "aos.agent/EffectiveToolSet@1"
         },
         "in_flight_effects": {
           "nat": {}
@@ -1966,6 +1569,9 @@
             "hash": {}
           }
         },
+        "turn_state": {
+          "ref": "aos.agent/SessionTurnState@1"
+        },
         "updated_at": {
           "time": {}
         }
@@ -2011,6 +1617,34 @@
         },
         "to": {
           "ref": "aos.agent/SessionStatus@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionTurnState@1",
+    "type": {
+      "record": {
+        "custom_state_refs": {
+          "list": {
+            "ref": "aos.agent/PlannerStateRef@1"
+          }
+        },
+        "durable_inputs": {
+          "list": {
+            "ref": "aos.agent/TurnInput@1"
+          }
+        },
+        "last_report": {
+          "option": {
+            "ref": "aos.agent/TurnReport@1"
+          }
+        },
+        "pinned_inputs": {
+          "list": {
+            "ref": "aos.agent/TurnInput@1"
+          }
         }
       }
     }
@@ -2095,23 +1729,6 @@
         },
         "tool_batch_id": {
           "ref": "aos.agent/ToolBatchId@1"
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/ToolAvailabilityRule@1",
-    "type": {
-      "variant": {
-        "Always": {
-          "unit": {}
-        },
-        "HostSessionNotReady": {
-          "unit": {}
-        },
-        "HostSessionReady": {
-          "unit": {}
         }
       }
     }
@@ -2402,11 +2019,6 @@
         "args_schema_json": {
           "text": {}
         },
-        "availability_rules": {
-          "list": {
-            "ref": "aos.agent/ToolAvailabilityRule@1"
-          }
-        },
         "description": {
           "text": {}
         },
@@ -2427,6 +2039,466 @@
         },
         "tool_ref": {
           "hash": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnBudget@1",
+    "type": {
+      "record": {
+        "max_input_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_message_refs": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_tool_refs": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "reserve_output_tokens": {
+          "option": {
+            "nat": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnInput@1",
+    "type": {
+      "record": {
+        "content_ref": {
+          "hash": {}
+        },
+        "correlation_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "estimated_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "input_id": {
+          "text": {}
+        },
+        "kind": {
+          "ref": "aos.agent/TurnInputKind@1"
+        },
+        "lane": {
+          "ref": "aos.agent/TurnInputLane@1"
+        },
+        "priority": {
+          "ref": "aos.agent/TurnPriority@1"
+        },
+        "source_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "source_kind": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tags": {
+          "list": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnInputKind@1",
+    "type": {
+      "variant": {
+        "ArtifactRef": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "MessageRef": {
+          "unit": {}
+        },
+        "ProviderOptionsRef": {
+          "unit": {}
+        },
+        "ResponseFormatRef": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnInputLane@1",
+    "type": {
+      "variant": {
+        "Conversation": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "Developer": {
+          "unit": {}
+        },
+        "Domain": {
+          "unit": {}
+        },
+        "Memory": {
+          "unit": {}
+        },
+        "RuntimeHint": {
+          "unit": {}
+        },
+        "Skill": {
+          "unit": {}
+        },
+        "Steer": {
+          "unit": {}
+        },
+        "Summary": {
+          "unit": {}
+        },
+        "System": {
+          "unit": {}
+        },
+        "ToolResult": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnObservation@1",
+    "type": {
+      "variant": {
+        "CustomStateRefRemoved": {
+          "record": {
+            "key": {
+              "text": {}
+            },
+            "planner_id": {
+              "text": {}
+            }
+          }
+        },
+        "CustomStateRefUpdated": {
+          "ref": "aos.agent/PlannerStateRef@1"
+        },
+        "InputObserved": {
+          "ref": "aos.agent/TurnInput@1"
+        },
+        "InputRemoved": {
+          "record": {
+            "input_id": {
+              "text": {}
+            }
+          }
+        },
+        "Noop": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnPlan@1",
+    "type": {
+      "record": {
+        "message_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "prerequisites": {
+          "list": {
+            "ref": "aos.agent/TurnPrerequisite@1"
+          }
+        },
+        "provider_options_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "report": {
+          "ref": "aos.agent/TurnReport@1"
+        },
+        "response_format_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "selected_tool_ids": {
+          "list": {
+            "text": {}
+          }
+        },
+        "state_updates": {
+          "list": {
+            "ref": "aos.agent/TurnStateUpdate@1"
+          }
+        },
+        "tool_choice": {
+          "option": {
+            "ref": "aos.agent/TurnToolChoice@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnPrerequisite@1",
+    "type": {
+      "record": {
+        "input_ids": {
+          "list": {
+            "text": {}
+          }
+        },
+        "kind": {
+          "ref": "aos.agent/TurnPrerequisiteKind@1"
+        },
+        "prerequisite_id": {
+          "text": {}
+        },
+        "reason": {
+          "text": {}
+        },
+        "tool_ids": {
+          "list": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnPrerequisiteKind@1",
+    "type": {
+      "variant": {
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "MaterializeToolDefinitions": {
+          "unit": {}
+        },
+        "OpenHostSession": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnPriority@1",
+    "type": {
+      "variant": {
+        "High": {
+          "unit": {}
+        },
+        "Low": {
+          "unit": {}
+        },
+        "Normal": {
+          "unit": {}
+        },
+        "Required": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnReport@1",
+    "type": {
+      "record": {
+        "budget": {
+          "ref": "aos.agent/TurnBudget@1"
+        },
+        "decision_codes": {
+          "list": {
+            "text": {}
+          }
+        },
+        "dropped_message_count": {
+          "nat": {}
+        },
+        "dropped_tool_count": {
+          "nat": {}
+        },
+        "planner": {
+          "text": {}
+        },
+        "selected_message_count": {
+          "nat": {}
+        },
+        "selected_tool_count": {
+          "nat": {}
+        },
+        "token_estimate": {
+          "ref": "aos.agent/TurnTokenEstimate@1"
+        },
+        "unresolved": {
+          "list": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnStateUpdate@1",
+    "type": {
+      "variant": {
+        "Noop": {
+          "unit": {}
+        },
+        "RemoveCustomStateRef": {
+          "record": {
+            "key": {
+              "text": {}
+            },
+            "planner_id": {
+              "text": {}
+            }
+          }
+        },
+        "RemoveDurableInput": {
+          "record": {
+            "input_id": {
+              "text": {}
+            }
+          }
+        },
+        "RemovePinnedInput": {
+          "record": {
+            "input_id": {
+              "text": {}
+            }
+          }
+        },
+        "UpsertCustomStateRef": {
+          "ref": "aos.agent/PlannerStateRef@1"
+        },
+        "UpsertDurableInput": {
+          "ref": "aos.agent/TurnInput@1"
+        },
+        "UpsertPinnedInput": {
+          "ref": "aos.agent/TurnInput@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnTokenEstimate@1",
+    "type": {
+      "record": {
+        "message_tokens": {
+          "nat": {}
+        },
+        "tool_tokens": {
+          "nat": {}
+        },
+        "total_input_tokens": {
+          "nat": {}
+        },
+        "unknown_message_count": {
+          "nat": {}
+        },
+        "unknown_tool_count": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnToolChoice@1",
+    "type": {
+      "variant": {
+        "Auto": {
+          "unit": {}
+        },
+        "NoneChoice": {
+          "unit": {}
+        },
+        "Required": {
+          "unit": {}
+        },
+        "Tool": {
+          "record": {
+            "name": {
+              "text": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnToolInput@1",
+    "type": {
+      "record": {
+        "estimated_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "priority": {
+          "ref": "aos.agent/TurnPriority@1"
+        },
+        "source_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "source_kind": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tags": {
+          "list": {
+            "text": {}
+          }
+        },
+        "tool_id": {
+          "text": {}
         }
       }
     }

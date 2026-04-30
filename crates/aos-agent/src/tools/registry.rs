@@ -1,6 +1,4 @@
-use crate::contracts::{
-    ToolAvailabilityRule, ToolExecutor, ToolMapper, ToolParallelismHint, ToolSpec,
-};
+use crate::contracts::{ToolExecutor, ToolMapper, ToolParallelismHint, ToolSpec};
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -92,7 +90,7 @@ fn host_tool(
     description: &str,
     args_schema_json: &str,
     mapper: ToolMapper,
-    requires_host_session: bool,
+    _requires_host_session: bool,
     hint: ToolParallelismHint,
 ) -> ToolSpec {
     assert!(
@@ -110,13 +108,6 @@ fn host_tool(
         mapper,
         executor: ToolExecutor::Effect {
             effect: tool_id.to_string(),
-        },
-        availability_rules: if requires_host_session {
-            vec![ToolAvailabilityRule::HostSessionReady]
-        } else if mapper == ToolMapper::HostSessionOpen {
-            vec![ToolAvailabilityRule::HostSessionNotReady]
-        } else {
-            vec![ToolAvailabilityRule::Always]
         },
         parallelism_hint: hint,
     }
@@ -146,7 +137,6 @@ fn effect_tool(
         executor: ToolExecutor::Effect {
             effect: tool_id.to_string(),
         },
-        availability_rules: vec![ToolAvailabilityRule::Always],
         parallelism_hint: hint,
     }
 }
@@ -449,7 +439,6 @@ pub fn local_coding_agent_tool_registry() -> BTreeMap<String, ToolSpec> {
             executor: ToolExecutor::DomainEvent {
                 schema: "sys/WorkspaceCommit@1".into(),
             },
-            availability_rules: vec![ToolAvailabilityRule::Always],
             parallelism_hint: ToolParallelismHint {
                 parallel_safe: false,
                 resource_key: Some("workspace.commit".into()),

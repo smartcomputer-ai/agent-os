@@ -1,7 +1,7 @@
 use super::{
-    ActiveToolBatch, ContextPlan, EffectiveToolSet, RunConfig, RunId, RunLifecycle, RunTrace,
-    RunTraceSummary, SessionConfig, SessionContextState, SessionId, SessionLifecycle,
-    SessionStatus, ToolBatchId, ToolRuntimeContext, ToolSpec,
+    ActiveToolBatch, RunConfig, RunId, RunLifecycle, RunTrace, RunTraceSummary, SessionConfig,
+    SessionId, SessionLifecycle, SessionStatus, SessionTurnState, ToolBatchId, ToolRuntimeContext,
+    ToolSpec, TurnPlan,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -199,7 +199,7 @@ pub struct RunState {
     pub config: RunConfig,
     #[aos(air_type = "hash")]
     pub input_refs: Vec<String>,
-    pub context_plan: Option<ContextPlan>,
+    pub turn_plan: Option<TurnPlan>,
     pub trace: RunTrace,
     #[aos(air_type = "hash")]
     pub queued_steer_refs: Vec<String>,
@@ -250,7 +250,7 @@ pub struct SessionState {
     pub next_run_seq: u64,
     pub next_tool_batch_seq: u64,
     pub session_config: SessionConfig,
-    pub context_state: SessionContextState,
+    pub turn_state: SessionTurnState,
     pub current_run: Option<RunState>,
     pub run_history: Vec<RunRecord>,
     pub active_run_id: Option<RunId>,
@@ -275,7 +275,6 @@ pub struct SessionState {
     pub tool_profiles: BTreeMap<String, Vec<String>>,
     pub tool_profile: String,
     pub tool_runtime_context: ToolRuntimeContext,
-    pub effective_tools: EffectiveToolSet,
     #[aos(air_type = "hash")]
     pub last_tool_plan_hash: Option<String>,
     #[aos(air_type = "hash")]
@@ -297,7 +296,7 @@ impl Default for SessionState {
             next_run_seq: 0,
             next_tool_batch_seq: 0,
             session_config: SessionConfig::default(),
-            context_state: SessionContextState::default(),
+            turn_state: SessionTurnState::default(),
             current_run: None,
             run_history: Vec::new(),
             active_run_id: None,
@@ -316,7 +315,6 @@ impl Default for SessionState {
             tool_profiles: BTreeMap::new(),
             tool_profile: String::new(),
             tool_runtime_context: ToolRuntimeContext::default(),
-            effective_tools: EffectiveToolSet::default(),
             last_tool_plan_hash: None,
             queued_steer_refs: Vec::new(),
             queued_follow_up_runs: Vec::new(),

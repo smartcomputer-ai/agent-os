@@ -12,7 +12,7 @@ pub const DEFAULT_RUN_TRACE_MAX_ENTRIES: u64 = 256;
 pub enum RunTraceEntryKind {
     #[default]
     RunStarted,
-    ContextPlanned,
+    TurnPlanned,
     LlmRequested,
     LlmReceived,
     ToolCallsObserved,

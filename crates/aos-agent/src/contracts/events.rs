@@ -1,6 +1,6 @@
 use super::{
-    ContextObservation, HostCommand, HostSessionStatus, RunCause, RunId, RunLifecycle,
-    SessionConfig, SessionId, SessionLifecycle, SessionStatus, ToolOverrideScope, ToolSpec,
+    HostCommand, HostSessionStatus, RunCause, RunId, RunLifecycle, SessionConfig, SessionId,
+    SessionLifecycle, SessionStatus, ToolOverrideScope, ToolSpec, TurnObservation,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -62,7 +62,7 @@ pub enum SessionInputKind {
         disable: Option<Vec<String>>,
         force: Option<Vec<String>>,
     },
-    ContextObserved(ContextObservation),
+    TurnObserved(TurnObservation),
     HostSessionUpdated {
         host_session_id: Option<String>,
         host_session_status: Option<HostSessionStatus>,

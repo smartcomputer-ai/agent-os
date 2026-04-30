@@ -1,20 +1,21 @@
 use super::{
-    ContextError, ContextRequest, DefaultContextEngine, LlmStepContext, RequestLlm,
-    SessionEffectCommand, SessionWorkflowOutput, allocate_run_id, can_apply_host_command,
-    pop_follow_up_if_ready, request_llm, transition_lifecycle,
+    DefaultTurnPlanner, LlmStepContext, RequestLlm, SessionEffectCommand, SessionWorkflowOutput,
+    TurnPlanError, TurnRequest, allocate_run_id, can_apply_host_command, pop_follow_up_if_ready,
+    request_llm, transition_lifecycle,
 };
 use crate::contracts::{
-    ContextBudget, ContextObservation, ContextPlan, EffectiveTool, EffectiveToolSet,
     HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
     PendingBlobPutKind, QueuedRunStart, RunCause, RunConfig, RunFailure, RunInterrupt,
     RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry, RunTraceEntryKind,
     RunTraceRef, RunTraceSummary, SessionConfig, SessionInputKind, SessionLifecycle, SessionState,
-    SessionStatus, SessionWorkflowEvent, StagedToolFollowUpTurn, ToolAvailabilityRule,
-    ToolBatchPlan, ToolCallStatus, ToolOverrideScope, ToolSpec,
+    SessionStatus, SessionWorkflowEvent, StagedToolFollowUpTurn, ToolBatchPlan, ToolCallStatus,
+    ToolOverrideScope, ToolSpec, TurnBudget, TurnInput, TurnInputKind, TurnInputLane,
+    TurnObservation, TurnPlan, TurnPrerequisiteKind, TurnPriority, TurnToolChoice, TurnToolInput,
 };
-use crate::helpers::ContextEngine;
+use crate::helpers::TurnPlanner;
 use crate::tools::{ToolEffectOp, map_tool_receipt_to_llm_result};
 use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec;
@@ -275,8 +276,6 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                 }
                 SessionInputKind::SessionConfigUpdated { config } => {
                     state.session_config = config.clone();
-                    let active = state.active_run_config.clone();
-                    refresh_effective_tools(state, active.as_ref())?;
                 }
                 SessionInputKind::SessionPaused => {
                     transition_session_status(state, SessionStatus::Paused)?;
@@ -321,8 +320,8 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                     disable.as_deref(),
                     force.as_deref(),
                 )?,
-                SessionInputKind::ContextObserved(observation) => {
-                    on_context_observed(state, observation);
+                SessionInputKind::TurnObserved(observation) => {
+                    on_turn_observed(state, observation);
                 }
                 SessionInputKind::HostSessionUpdated {
                     host_session_id,
@@ -531,7 +530,7 @@ fn on_run_start_requested(
         cause: cause.clone(),
         config: requested.clone(),
         input_refs: cause.input_refs.clone(),
-        context_plan: None,
+        turn_plan: None,
         queued_steer_refs: Vec::new(),
         interrupt: None,
         active_tool_batch: None,
@@ -576,7 +575,6 @@ fn on_run_start_requested(
     state.last_output_ref = None;
     state.tool_refs_materialized = false;
 
-    refresh_effective_tools(state, Some(&requested))?;
     state
         .transcript_message_refs
         .extend(cause.input_refs.iter().cloned());
@@ -764,8 +762,7 @@ fn on_tool_registry_set(
         state.tool_profile = default_profile.clone();
     }
 
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())
+    Ok(())
 }
 
 fn on_tool_profile_selected(
@@ -776,8 +773,7 @@ fn on_tool_profile_selected(
         return Err(SessionWorkflowError::ToolProfileUnknown);
     }
     state.tool_profile = profile_id.into();
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())
+    Ok(())
 }
 
 fn on_tool_overrides_set(
@@ -808,8 +804,7 @@ fn on_tool_overrides_set(
         }
     }
 
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())
+    Ok(())
 }
 
 fn on_host_session_updated(
@@ -819,40 +814,37 @@ fn on_host_session_updated(
 ) -> Result<(), SessionWorkflowError> {
     state.tool_runtime_context.host_session_id = host_session_id.cloned();
     state.tool_runtime_context.host_session_status = host_session_status;
-
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())
+    Ok(())
 }
 
-fn on_context_observed(state: &mut SessionState, observation: &ContextObservation) {
+fn on_turn_observed(state: &mut SessionState, observation: &TurnObservation) {
     match observation {
-        ContextObservation::SummaryCompleted {
-            summary_ref,
-            input_refs: _,
-        } => {
-            if !state
-                .context_state
-                .summary_refs
-                .iter()
-                .any(|existing| existing == summary_ref)
-            {
-                state.context_state.summary_refs.push(summary_ref.clone());
-            }
-        }
-        ContextObservation::InputPinned(input) => {
+        TurnObservation::InputObserved(input) => {
             state
-                .context_state
-                .pinned_inputs
+                .turn_state
+                .durable_inputs
                 .retain(|existing| existing.input_id != input.input_id);
-            state.context_state.pinned_inputs.push(input.clone());
+            state.turn_state.durable_inputs.push(input.clone());
         }
-        ContextObservation::InputRemoved { input_id } => {
+        TurnObservation::InputRemoved { input_id } => {
             state
-                .context_state
-                .pinned_inputs
+                .turn_state
+                .durable_inputs
                 .retain(|existing| existing.input_id != *input_id);
         }
-        ContextObservation::Noop => {}
+        TurnObservation::CustomStateRefUpdated(value) => {
+            state.turn_state.custom_state_refs.retain(|existing| {
+                existing.planner_id != value.planner_id || existing.key != value.key
+            });
+            state.turn_state.custom_state_refs.push(value.clone());
+        }
+        TurnObservation::CustomStateRefRemoved { planner_id, key } => {
+            state
+                .turn_state
+                .custom_state_refs
+                .retain(|existing| existing.planner_id != *planner_id || existing.key != *key);
+        }
+        TurnObservation::Noop => {}
     }
 }
 
@@ -877,9 +869,6 @@ fn handle_standalone_host_session_open_receipt(
     if let Some(host_session_status) = mapped.runtime_delta.host_session_status {
         state.tool_runtime_context.host_session_status = Some(host_session_status);
     }
-    let active = state.active_run_config.clone();
-    refresh_effective_tools(state, active.as_ref())?;
-
     if mapped.is_error {
         fail_run(state)?;
         return Ok(true);
@@ -1237,22 +1226,24 @@ fn dispatch_pending_llm_turn(
     state: &mut SessionState,
     out: &mut SessionWorkflowOutput,
 ) -> Result<(), SessionWorkflowError> {
-    dispatch_pending_llm_turn_with_engine(
+    dispatch_pending_llm_turn_with_planner(
         state,
         out,
-        &DefaultContextEngine,
-        ContextBudget {
-            max_refs: None,
+        &DefaultTurnPlanner,
+        TurnBudget {
+            max_input_tokens: None,
             reserve_output_tokens: None,
+            max_message_refs: None,
+            max_tool_refs: None,
         },
     )
 }
 
-pub fn dispatch_pending_llm_turn_with_engine<E: ContextEngine>(
+pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
     state: &mut SessionState,
     out: &mut SessionWorkflowOutput,
-    engine: &E,
-    budget: ContextBudget,
+    planner: &P,
+    budget: TurnBudget,
 ) -> Result<(), SessionWorkflowError> {
     if state.pending_llm_turn_refs.is_none() {
         return Ok(());
@@ -1268,13 +1259,35 @@ pub fn dispatch_pending_llm_turn_with_engine<E: ContextEngine>(
         return Ok(());
     }
 
-    if should_auto_open_host_session(state) {
-        emit_auto_host_session_open(state, out)?;
+    let Some(message_refs) = state.pending_llm_turn_refs.clone() else {
+        return Ok(());
+    };
+    let steer_refs = state.queued_steer_refs.clone();
+    let plan = build_turn_plan_for_pending_turn(state, message_refs, planner, budget)?;
+
+    if plan
+        .prerequisites
+        .iter()
+        .any(|item| matches!(item.kind, TurnPrerequisiteKind::OpenHostSession))
+    {
+        if !state
+            .pending_effects
+            .contains_effect("sys/host.session.open@1")
+        {
+            emit_auto_host_session_open(state, out)?;
+        }
         return Ok(());
     }
 
-    if !state.tool_refs_materialized {
-        for tool in state.effective_tools.ordered_tools.clone() {
+    if plan
+        .prerequisites
+        .iter()
+        .any(|item| matches!(item.kind, TurnPrerequisiteKind::MaterializeToolDefinitions))
+    {
+        for tool_id in plan.selected_tool_ids.clone() {
+            let Some(tool) = state.tool_registry.get(&tool_id).cloned() else {
+                return Err(SessionWorkflowError::UnknownToolOverride);
+            };
             let bytes = crate::tools::registry::tool_definition_bytes(
                 tool.tool_name.as_str(),
                 tool.description.as_str(),
@@ -1295,20 +1308,12 @@ pub fn dispatch_pending_llm_turn_with_engine<E: ContextEngine>(
         state.tool_refs_materialized = true;
     }
 
-    let Some(mut message_refs) = state.pending_llm_turn_refs.take() else {
-        return Ok(());
-    };
-    let steer_refs = state.queued_steer_refs.clone();
-    if !steer_refs.is_empty() {
-        message_refs.extend(steer_refs.iter().cloned());
-    }
     let run_seq = state
         .active_run_id
         .as_ref()
         .map(|id| id.run_seq)
         .unwrap_or(0);
-    let planned_message_refs =
-        build_context_for_turn_with_engine(state, message_refs, engine, budget)?;
+    state.pending_llm_turn_refs = None;
 
     request_llm(
         state,
@@ -1319,15 +1324,15 @@ pub fn dispatch_pending_llm_turn_with_engine<E: ContextEngine>(
                     "run-{run_seq}-turn-{}",
                     state.next_tool_batch_seq + 1
                 )),
-                message_refs: planned_message_refs,
+                message_refs: plan.message_refs.clone(),
                 temperature: None,
                 top_p: None,
-                tool_refs: state.effective_tools.tool_refs(),
-                tool_choice: Some(aos_effects::builtins::LlmToolChoice::Auto),
+                tool_refs: selected_tool_refs(state, &plan),
+                tool_choice: plan.tool_choice.clone().map(turn_tool_choice_to_llm),
                 stop_sequences: None,
                 metadata: None,
-                provider_options_ref: None,
-                response_format_ref: None,
+                provider_options_ref: plan.provider_options_ref.clone(),
+                response_format_ref: plan.response_format_ref.clone(),
                 api_key: None,
             },
         },
@@ -1351,13 +1356,17 @@ pub fn dispatch_pending_llm_turn_with_engine<E: ContextEngine>(
     Ok(())
 }
 
-pub fn build_context_for_turn_with_engine<E: ContextEngine>(
+pub fn build_turn_plan_for_pending_turn<P: TurnPlanner>(
     state: &mut SessionState,
-    turn_refs: Vec<String>,
-    engine: &E,
-    budget: ContextBudget,
-) -> Result<Vec<String>, SessionWorkflowError> {
-    let (run_id, prompt_refs, cause) = {
+    mut turn_refs: Vec<String>,
+    planner: &P,
+    budget: TurnBudget,
+) -> Result<TurnPlan, SessionWorkflowError> {
+    let steer_refs = state.queued_steer_refs.clone();
+    if !steer_refs.is_empty() {
+        turn_refs.extend(steer_refs.iter().cloned());
+    }
+    let (run_id, prompt_refs, cause, mut run_config) = {
         let run = state
             .current_run
             .as_ref()
@@ -1366,95 +1375,310 @@ pub fn build_context_for_turn_with_engine<E: ContextEngine>(
             run.run_id.clone(),
             run.config.prompt_refs.clone().unwrap_or_default(),
             run.cause.clone(),
+            run.config.clone(),
         )
     };
+    if run_config.host_session_open.is_none() {
+        run_config.host_session_open = state.session_config.default_host_session_open.clone();
+    }
     let transcript_refs = state
         .transcript_message_refs
         .iter()
         .filter(|value| !turn_refs.iter().any(|turn| turn == *value))
         .cloned()
         .collect::<Vec<_>>();
-    let plan = engine
-        .build_plan(ContextRequest {
+    let inputs = build_turn_inputs(&prompt_refs, &transcript_refs, &turn_refs, Some(&cause));
+    let tools = build_turn_tool_inputs(state, Some(&run_config))?;
+    let mut plan = planner
+        .build_turn(TurnRequest {
             session_id: &state.session_id,
             run_id: &run_id,
             run_cause: Some(&cause),
+            run_config: &run_config,
             budget,
-            session_context: &state.context_state,
-            prompt_refs: &prompt_refs,
-            transcript_refs: &transcript_refs,
-            turn_refs: &turn_refs,
+            state: &state.turn_state,
+            inputs: &inputs,
+            tools: &tools,
+            registry: &state.tool_registry,
+            profiles: &state.tool_profiles,
+            runtime: &state.tool_runtime_context,
         })
-        .map_err(context_error_to_workflow_error)?;
-    apply_context_plan_to_state(state, plan)
+        .map_err(turn_plan_error_to_workflow_error)?;
+    add_workflow_prerequisites(state, &mut plan);
+    apply_turn_plan_to_state(state, plan)
 }
 
-fn apply_context_plan_to_state(
+fn add_workflow_prerequisites(state: &SessionState, plan: &mut TurnPlan) {
+    if !state.tool_refs_materialized && !plan.selected_tool_ids.is_empty() {
+        plan.prerequisites.push(crate::contracts::TurnPrerequisite {
+            prerequisite_id: "tool_definitions:materialize".into(),
+            kind: TurnPrerequisiteKind::MaterializeToolDefinitions,
+            reason: "selected tool definitions must be materialized before llm dispatch".into(),
+            input_ids: Vec::new(),
+            tool_ids: plan.selected_tool_ids.clone(),
+        });
+        if !plan
+            .report
+            .unresolved
+            .iter()
+            .any(|item| item == "tool_definitions_pending")
+        {
+            plan.report
+                .unresolved
+                .push("tool_definitions_pending".into());
+        }
+    }
+}
+
+fn apply_turn_plan_to_state(
     state: &mut SessionState,
-    plan: ContextPlan,
-) -> Result<Vec<String>, SessionWorkflowError> {
-    if plan.selected_refs.is_empty() {
+    plan: TurnPlan,
+) -> Result<TurnPlan, SessionWorkflowError> {
+    if plan.message_refs.is_empty() {
         return Err(SessionWorkflowError::EmptyMessageRefs);
     }
-    let selected_refs = plan.selected_refs.clone();
-    state.context_state.last_report = Some(plan.report.clone());
+    crate::helpers::apply_turn_state_updates(&mut state.turn_state, &plan.state_updates);
+    state.turn_state.last_report = Some(plan.report.clone());
     let refs = plan
-        .selected_refs
+        .message_refs
         .iter()
         .cloned()
         .map(|value| trace_ref("selected_ref", value))
         .collect::<Vec<_>>();
     let mut metadata = BTreeMap::new();
-    metadata.insert("engine".into(), plan.report.engine.clone());
+    metadata.insert("planner".into(), plan.report.planner.clone());
     metadata.insert(
-        "selected_count".into(),
-        plan.report.selected_count.to_string(),
+        "selected_message_count".into(),
+        plan.report.selected_message_count.to_string(),
     );
     metadata.insert(
-        "dropped_count".into(),
-        plan.report.dropped_count.to_string(),
+        "dropped_message_count".into(),
+        plan.report.dropped_message_count.to_string(),
     );
     metadata.insert(
-        "compaction_recommended".into(),
-        plan.report.compaction_recommended.to_string(),
+        "selected_tool_count".into(),
+        plan.report.selected_tool_count.to_string(),
     );
     push_run_trace(
         state,
-        RunTraceEntryKind::ContextPlanned,
-        "context plan selected model inputs",
+        RunTraceEntryKind::TurnPlanned,
+        "turn plan selected model inputs and tools",
         refs,
         metadata,
     );
     if let Some(run) = state.current_run.as_mut() {
-        run.context_plan = Some(plan);
+        run.turn_plan = Some(plan.clone());
     }
-    Ok(selected_refs)
+    Ok(plan)
 }
 
-fn context_error_to_workflow_error(err: ContextError) -> SessionWorkflowError {
+fn turn_plan_error_to_workflow_error(err: TurnPlanError) -> SessionWorkflowError {
     match err {
-        ContextError::EmptySelection => SessionWorkflowError::EmptyMessageRefs,
+        TurnPlanError::EmptySelection => SessionWorkflowError::EmptyMessageRefs,
+        TurnPlanError::UnknownTool => SessionWorkflowError::UnknownToolOverride,
     }
 }
 
-fn should_auto_open_host_session(state: &SessionState) -> bool {
-    if state.active_run_id.is_none() {
-        return false;
+fn build_turn_inputs(
+    prompt_refs: &[String],
+    transcript_refs: &[String],
+    turn_refs: &[String],
+    cause: Option<&RunCause>,
+) -> Vec<TurnInput> {
+    let mut inputs = Vec::new();
+    for (idx, value) in prompt_refs.iter().enumerate() {
+        inputs.push(turn_input(
+            format!("prompt:{idx}"),
+            TurnInputLane::System,
+            TurnInputKind::MessageRef,
+            TurnPriority::Required,
+            value.clone(),
+            Some("prompt".into()),
+        ));
     }
-    if effective_host_session_open_config(state).is_none() {
-        return false;
+    if let Some(cause) = cause {
+        if let Some(payload_ref) = cause.payload_ref.as_ref() {
+            inputs.push(turn_input(
+                "cause:payload".into(),
+                TurnInputLane::Domain,
+                TurnInputKind::MessageRef,
+                TurnPriority::High,
+                payload_ref.clone(),
+                cause.payload_schema.clone(),
+            ));
+        }
+        for (idx, subject) in cause.subject_refs.iter().enumerate() {
+            if let Some(value) = subject.ref_.as_ref() {
+                inputs.push(turn_input(
+                    format!("cause:subject:{idx}"),
+                    TurnInputLane::Domain,
+                    TurnInputKind::MessageRef,
+                    TurnPriority::High,
+                    value.clone(),
+                    Some(subject.kind.clone()),
+                ));
+            }
+        }
     }
-    if !state.effective_tools.profile_requires_host_session {
-        return false;
+    for (idx, value) in transcript_refs.iter().enumerate() {
+        inputs.push(turn_input(
+            format!("transcript:{idx}"),
+            TurnInputLane::Conversation,
+            TurnInputKind::MessageRef,
+            TurnPriority::Normal,
+            value.clone(),
+            Some("transcript".into()),
+        ));
     }
-    if state.tool_runtime_context.host_session_status
-        == Some(crate::contracts::HostSessionStatus::Ready)
-    {
-        return false;
+    for (idx, value) in turn_refs.iter().enumerate() {
+        inputs.push(turn_input(
+            format!("turn:{idx}"),
+            TurnInputLane::Conversation,
+            TurnInputKind::MessageRef,
+            TurnPriority::Required,
+            value.clone(),
+            Some("turn".into()),
+        ));
     }
-    !state
-        .pending_effects
-        .contains_effect("sys/host.session.open@1")
+    inputs
+}
+
+fn turn_input(
+    input_id: String,
+    lane: TurnInputLane,
+    kind: TurnInputKind,
+    priority: TurnPriority,
+    content_ref: String,
+    source_kind: Option<String>,
+) -> TurnInput {
+    TurnInput {
+        input_id,
+        lane,
+        kind,
+        priority,
+        content_ref,
+        estimated_tokens: None,
+        source_kind,
+        source_id: None,
+        correlation_id: None,
+        tags: Vec::new(),
+    }
+}
+
+fn build_turn_tool_inputs(
+    state: &mut SessionState,
+    run_config: Option<&RunConfig>,
+) -> Result<Vec<TurnToolInput>, SessionWorkflowError> {
+    let configured_profile_id = run_config
+        .and_then(|cfg| cfg.tool_profile.clone())
+        .or_else(|| state.session_config.default_tool_profile.clone())
+        .or_else(|| {
+            if state.tool_profile.trim().is_empty() {
+                None
+            } else {
+                Some(state.tool_profile.clone())
+            }
+        });
+
+    let base_profile = if let Some(profile_id) = configured_profile_id.as_ref() {
+        let base_profile = state
+            .tool_profiles
+            .get(profile_id)
+            .ok_or(SessionWorkflowError::ToolProfileUnknown)?;
+        validate_known_tool_names(state, Some(base_profile.as_slice()))?;
+        base_profile.as_slice()
+    } else {
+        &[]
+    };
+
+    let enabled_session = state.session_config.default_tool_enable.as_deref();
+    let disabled_session = state.session_config.default_tool_disable.as_deref();
+    let force_session = state.session_config.default_tool_force.as_deref();
+
+    let enabled_run = run_config.and_then(|cfg| cfg.tool_enable.as_deref());
+    let disabled_run = run_config.and_then(|cfg| cfg.tool_disable.as_deref());
+    let force_run = run_config.and_then(|cfg| cfg.tool_force.as_deref());
+
+    validate_known_tool_names(state, enabled_session)?;
+    validate_known_tool_names(state, disabled_session)?;
+    validate_known_tool_names(state, force_session)?;
+    validate_known_tool_names(state, enabled_run)?;
+    validate_known_tool_names(state, disabled_run)?;
+    validate_known_tool_names(state, force_run)?;
+
+    let mut denied = BTreeSet::new();
+    for source in [disabled_session, disabled_run] {
+        if let Some(items) = source {
+            denied.extend(items.iter().cloned());
+        }
+    }
+
+    let mut enabled = BTreeSet::new();
+    enabled.extend(base_profile.iter().cloned());
+    for source in [enabled_session, force_session, enabled_run, force_run] {
+        if let Some(items) = source {
+            enabled.extend(items.iter().cloned());
+        }
+    }
+
+    for denied_name in denied {
+        enabled.remove(&denied_name);
+    }
+
+    let mut ordered_names = Vec::new();
+    let mut seen = BTreeSet::new();
+    for name in base_profile {
+        if enabled.contains(name) {
+            ordered_names.push(name.clone());
+            seen.insert(name.clone());
+        }
+    }
+
+    let mut extras: Vec<String> = enabled
+        .into_iter()
+        .filter(|name| !seen.contains(name))
+        .collect();
+    extras.sort();
+    ordered_names.extend(extras);
+
+    state.tool_profile = configured_profile_id.unwrap_or_default();
+    Ok(ordered_names
+        .into_iter()
+        .map(|tool_id| TurnToolInput {
+            tool_id,
+            priority: TurnPriority::Normal,
+            estimated_tokens: None,
+            source_kind: Some("tool_profile".into()),
+            source_id: if state.tool_profile.is_empty() {
+                None
+            } else {
+                Some(state.tool_profile.clone())
+            },
+            tags: Vec::new(),
+        })
+        .collect())
+}
+
+fn selected_tool_refs(state: &SessionState, plan: &TurnPlan) -> Option<Vec<String>> {
+    if plan.selected_tool_ids.is_empty() {
+        return None;
+    }
+    Some(
+        plan.selected_tool_ids
+            .iter()
+            .filter_map(|tool_id| state.tool_registry.get(tool_id))
+            .map(|tool| tool.tool_ref.clone())
+            .collect(),
+    )
+}
+
+fn turn_tool_choice_to_llm(value: TurnToolChoice) -> aos_effects::builtins::LlmToolChoice {
+    match value {
+        TurnToolChoice::Auto => aos_effects::builtins::LlmToolChoice::Auto,
+        TurnToolChoice::NoneChoice => aos_effects::builtins::LlmToolChoice::NoneChoice,
+        TurnToolChoice::Required => aos_effects::builtins::LlmToolChoice::Required,
+        TurnToolChoice::Tool { name } => aos_effects::builtins::LlmToolChoice::Tool { name },
+    }
 }
 
 fn emit_auto_host_session_open(
@@ -1541,135 +1765,6 @@ fn host_target_from_config(config: &HostTargetConfig) -> HostTarget {
             memory_limit_bytes: *memory_limit_bytes,
         }),
     }
-}
-
-fn refresh_effective_tools(
-    state: &mut SessionState,
-    run_config: Option<&RunConfig>,
-) -> Result<(), SessionWorkflowError> {
-    let configured_profile_id = run_config
-        .and_then(|cfg| cfg.tool_profile.clone())
-        .or_else(|| state.session_config.default_tool_profile.clone())
-        .or_else(|| {
-            if state.tool_profile.trim().is_empty() {
-                None
-            } else {
-                Some(state.tool_profile.clone())
-            }
-        });
-
-    let base_profile = if let Some(profile_id) = configured_profile_id.as_ref() {
-        let base_profile = state
-            .tool_profiles
-            .get(profile_id)
-            .ok_or(SessionWorkflowError::ToolProfileUnknown)?;
-        validate_known_tool_names(state, Some(base_profile.as_slice()))?;
-        base_profile.as_slice()
-    } else {
-        &[]
-    };
-
-    let enabled_session = state.session_config.default_tool_enable.as_deref();
-    let disabled_session = state.session_config.default_tool_disable.as_deref();
-    let force_session = state.session_config.default_tool_force.as_deref();
-
-    let enabled_run = run_config.and_then(|cfg| cfg.tool_enable.as_deref());
-    let disabled_run = run_config.and_then(|cfg| cfg.tool_disable.as_deref());
-    let force_run = run_config.and_then(|cfg| cfg.tool_force.as_deref());
-
-    validate_known_tool_names(state, enabled_session)?;
-    validate_known_tool_names(state, disabled_session)?;
-    validate_known_tool_names(state, force_session)?;
-    validate_known_tool_names(state, enabled_run)?;
-    validate_known_tool_names(state, disabled_run)?;
-    validate_known_tool_names(state, force_run)?;
-
-    let mut denied = BTreeSet::new();
-    for source in [disabled_session, disabled_run] {
-        if let Some(items) = source {
-            denied.extend(items.iter().cloned());
-        }
-    }
-
-    let mut enabled = BTreeSet::new();
-    enabled.extend(base_profile.iter().cloned());
-    for source in [enabled_session, force_session, enabled_run, force_run] {
-        if let Some(items) = source {
-            enabled.extend(items.iter().cloned());
-        }
-    }
-
-    for denied_name in denied {
-        enabled.remove(&denied_name);
-    }
-
-    let mut ordered_names = Vec::new();
-    let mut seen = BTreeSet::new();
-    for name in base_profile {
-        if enabled.contains(name) {
-            ordered_names.push(name.clone());
-            seen.insert(name.clone());
-        }
-    }
-
-    let mut extras: Vec<String> = enabled
-        .into_iter()
-        .filter(|name| !seen.contains(name))
-        .collect();
-    extras.sort();
-    ordered_names.extend(extras);
-
-    let mut ordered_tools = Vec::new();
-    let mut profile_requires_host_session = false;
-    for tool_id in ordered_names {
-        let Some(spec) = state.tool_registry.get(&tool_id) else {
-            return Err(SessionWorkflowError::UnknownToolOverride);
-        };
-        if spec
-            .availability_rules
-            .iter()
-            .any(|rule| matches!(rule, ToolAvailabilityRule::HostSessionReady))
-        {
-            profile_requires_host_session = true;
-        }
-        if !is_tool_available(spec, &state.tool_runtime_context) {
-            continue;
-        }
-        ordered_tools.push(EffectiveTool {
-            tool_id: spec.tool_id.clone(),
-            tool_name: spec.tool_name.clone(),
-            tool_ref: spec.tool_ref.clone(),
-            description: spec.description.clone(),
-            args_schema_json: spec.args_schema_json.clone(),
-            mapper: spec.mapper,
-            executor: spec.executor.clone(),
-            parallel_safe: spec.parallelism_hint.parallel_safe,
-            resource_key: spec.parallelism_hint.resource_key.clone(),
-        });
-    }
-
-    let profile_id = configured_profile_id.unwrap_or_default();
-    state.tool_profile = profile_id.clone();
-    state.effective_tools = EffectiveToolSet {
-        profile_id,
-        profile_requires_host_session,
-        ordered_tools,
-    };
-    state.tool_refs_materialized = state.effective_tools.ordered_tools.is_empty();
-
-    Ok(())
-}
-
-fn is_tool_available(spec: &ToolSpec, runtime: &crate::contracts::ToolRuntimeContext) -> bool {
-    spec.availability_rules.iter().all(|rule| match rule {
-        ToolAvailabilityRule::Always => true,
-        ToolAvailabilityRule::HostSessionReady => {
-            runtime.host_session_status == Some(crate::contracts::HostSessionStatus::Ready)
-        }
-        ToolAvailabilityRule::HostSessionNotReady => {
-            runtime.host_session_status != Some(crate::contracts::HostSessionStatus::Ready)
-        }
-    })
 }
 
 fn validate_known_tool_names(
@@ -1991,12 +2086,12 @@ fn trace_stream_frame(state: &mut SessionState, frame: &aos_wasm_sdk::EffectStre
 mod tests {
     use super::*;
     use crate::contracts::{
-        CauseRef, ContextInput, ContextInputKind, ContextInputScope, ContextPriority,
-        ContextReport, ContextSelection, HostSessionOpenConfig, HostSessionStatus,
-        HostTargetConfig, RunCauseOrigin, RunId, SessionId, SessionInput, ToolCallObserved,
-        ToolOverrideScope, ToolProfileBuilder, ToolRegistryBuilder,
-        local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
-        local_coding_agent_tool_registry, tool_bundle_host_sandbox,
+        CauseRef, HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, RunCauseOrigin,
+        RunId, SessionId, SessionInput, ToolCallObserved, ToolProfileBuilder, ToolRegistryBuilder,
+        TurnInput, TurnInputKind, TurnInputLane, TurnPrerequisiteKind, TurnPriority, TurnReport,
+        TurnToolChoice, local_coding_agent_tool_profile_for_provider,
+        local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
+        tool_bundle_host_sandbox,
     };
     use alloc::string::ToString;
     use alloc::vec;
@@ -2151,16 +2246,15 @@ mod tests {
         assert!(state.pending_blob_puts.is_empty());
         assert!(state.pending_llm_turn_refs.is_some());
         assert_eq!(state.in_flight_effects, 1);
-        assert_eq!(state.effective_tools.profile_id, "openai");
-        let tools: Vec<&str> = state
-            .effective_tools
-            .ordered_tools
-            .iter()
-            .map(|tool| tool.tool_name.as_str())
-            .collect();
-        assert!(tools.contains(&"inspect_world"));
-        assert!(tools.contains(&"inspect_workflow"));
-        assert!(state.effective_tools.profile_requires_host_session);
+        let plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.as_ref())
+            .expect("turn plan");
+        assert!(matches!(
+            plan.prerequisites.first().map(|item| &item.kind),
+            Some(TurnPrerequisiteKind::OpenHostSession)
+        ));
     }
 
     #[test]
@@ -2178,7 +2272,17 @@ mod tests {
                     if pending.effect == "sys/host.session.open@1"
             )
         }));
-        assert!(state.effective_tools.profile_requires_host_session);
+        assert!(
+            state
+                .current_run
+                .as_ref()
+                .and_then(|run| run.turn_plan.as_ref())
+                .is_some_and(|plan| plan
+                    .report
+                    .unresolved
+                    .iter()
+                    .any(|item| item == "host_session_not_ready"))
+        );
     }
 
     #[test]
@@ -2229,8 +2333,6 @@ mod tests {
 
         let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
 
-        assert!(state.effective_tools.ordered_tools.is_empty());
-        assert!(!state.effective_tools.profile_requires_host_session);
         assert!(!out.effects.iter().any(|effect| {
             matches!(
                 effect,
@@ -2248,7 +2350,7 @@ mod tests {
     }
 
     #[test]
-    fn run_request_records_context_plan_and_preserves_prompt_refs() {
+    fn run_request_records_turn_plan_and_preserves_prompt_refs() {
         let mut state = SessionState::default();
         state.session_id = SessionId("s-1".into());
         let prompt_ref = fake_hash('b');
@@ -2295,15 +2397,15 @@ mod tests {
         let plan = state
             .current_run
             .as_ref()
-            .and_then(|run| run.context_plan.as_ref())
-            .expect("context plan");
-        assert_eq!(plan.selected_refs, vec![prompt_ref, input_ref]);
-        assert_eq!(plan.report.engine, "aos.agent/default");
-        assert_eq!(state.context_state.last_report.as_ref(), Some(&plan.report));
+            .and_then(|run| run.turn_plan.as_ref())
+            .expect("turn plan");
+        assert_eq!(plan.message_refs, vec![prompt_ref, input_ref]);
+        assert_eq!(plan.report.planner, "aos.agent/default-turn");
+        assert_eq!(state.turn_state.last_report.as_ref(), Some(&plan.report));
     }
 
     #[test]
-    fn run_request_records_context_and_llm_trace_entries() {
+    fn run_request_records_turn_and_llm_trace_entries() {
         let mut state = SessionState::default();
         state.session_id = SessionId("s-1".into());
 
@@ -2319,7 +2421,7 @@ mod tests {
             kinds,
             vec![
                 RunTraceEntryKind::RunStarted,
-                RunTraceEntryKind::ContextPlanned,
+                RunTraceEntryKind::TurnPlanned,
                 RunTraceEntryKind::LlmRequested,
             ]
         );
@@ -2517,97 +2619,91 @@ mod tests {
         );
     }
 
-    struct RepoBootstrapFirstEngine;
+    struct RepoBootstrapFirstPlanner;
 
-    impl ContextEngine for RepoBootstrapFirstEngine {
-        fn build_plan(&self, request: ContextRequest<'_>) -> Result<ContextPlan, ContextError> {
+    impl TurnPlanner for RepoBootstrapFirstPlanner {
+        fn build_turn(&self, request: TurnRequest<'_>) -> Result<TurnPlan, TurnPlanError> {
             let mut selected_refs = Vec::new();
-            let mut selections = Vec::new();
             let mut selected_count = 0_u64;
             let mut dropped_count = 0_u64;
 
-            for input in &request.session_context.pinned_inputs {
+            for input in &request.state.pinned_inputs {
                 let is_repo_bootstrap = input.source_kind.as_deref() == Some("repo_bootstrap")
                     || matches!(
-                        &input.scope,
-                        ContextInputScope::Custom { kind } if kind == "repo_bootstrap"
+                        &input.lane,
+                        TurnInputLane::Custom { kind } if kind == "repo_bootstrap"
                     );
                 if is_repo_bootstrap {
                     selected_refs.push(input.content_ref.clone());
                     selected_count = selected_count.saturating_add(1);
-                    selections.push(ContextSelection {
-                        input_id: input.input_id.clone(),
-                        selected: true,
-                        reason: "repo_bootstrap_first".into(),
-                        content_ref: input.content_ref.clone(),
-                    });
                     break;
                 }
             }
 
-            for (idx, value) in request.transcript_refs.iter().enumerate() {
-                dropped_count = dropped_count.saturating_add(1);
-                selections.push(ContextSelection {
-                    input_id: alloc::format!("transcript:{idx}"),
-                    selected: false,
-                    reason: "custom_engine_ignored_transcript".into(),
-                    content_ref: value.clone(),
-                });
-            }
-
-            for (idx, value) in request.turn_refs.iter().enumerate() {
-                selected_refs.push(value.clone());
-                selected_count = selected_count.saturating_add(1);
-                selections.push(ContextSelection {
-                    input_id: alloc::format!("turn:{idx}"),
-                    selected: true,
-                    reason: "current_turn_required".into(),
-                    content_ref: value.clone(),
-                });
+            for input in request.inputs {
+                if matches!(input.lane, TurnInputLane::Conversation)
+                    && matches!(input.priority, TurnPriority::Required)
+                {
+                    selected_refs.push(input.content_ref.clone());
+                    selected_count = selected_count.saturating_add(1);
+                } else if matches!(input.lane, TurnInputLane::Conversation) {
+                    dropped_count = dropped_count.saturating_add(1);
+                }
             }
 
             if selected_refs.is_empty() {
-                return Err(ContextError::EmptySelection);
+                return Err(TurnPlanError::EmptySelection);
             }
 
-            Ok(ContextPlan {
-                selected_refs,
-                selections,
-                actions: Vec::new(),
-                report: ContextReport {
-                    engine: "test/repo-bootstrap-first".into(),
-                    selected_count,
-                    dropped_count,
+            Ok(TurnPlan {
+                message_refs: selected_refs,
+                selected_tool_ids: request
+                    .tools
+                    .iter()
+                    .take(1)
+                    .map(|tool| tool.tool_id.clone())
+                    .collect(),
+                tool_choice: Some(TurnToolChoice::Auto),
+                response_format_ref: None,
+                provider_options_ref: None,
+                prerequisites: Vec::new(),
+                state_updates: Vec::new(),
+                report: TurnReport {
+                    planner: "test/repo-bootstrap-first".into(),
+                    selected_message_count: selected_count,
+                    dropped_message_count: dropped_count,
+                    selected_tool_count: request.tools.iter().take(1).count() as u64,
+                    dropped_tool_count: request.tools.len().saturating_sub(1) as u64,
+                    token_estimate: Default::default(),
                     budget: request.budget,
-                    decisions: vec!["selected repo bootstrap before current turn".into()],
+                    decision_codes: vec!["selected repo bootstrap before current turn".into()],
                     unresolved: Vec::new(),
-                    compaction_recommended: false,
-                    compaction_required: false,
                 },
             })
         }
     }
 
     #[test]
-    fn custom_context_engine_can_reuse_llm_dispatch() {
+    fn custom_turn_planner_can_reuse_llm_dispatch() {
         let mut state = SessionState::default();
         state.session_id = SessionId("s-1".into());
 
         let bootstrap_ref = fake_hash('b');
         let transcript_ref = fake_hash('c');
         let input_ref = fake_hash('a');
-        state.context_state.pinned_inputs.push(ContextInput {
+        state.turn_state.pinned_inputs.push(TurnInput {
             input_id: "repo-bootstrap".into(),
-            kind: ContextInputKind::WorkspaceRef,
-            scope: ContextInputScope::Custom {
+            kind: TurnInputKind::MessageRef,
+            lane: TurnInputLane::Custom {
                 kind: "repo_bootstrap".into(),
             },
-            priority: ContextPriority::Required,
+            priority: TurnPriority::Required,
             content_ref: bootstrap_ref.clone(),
-            label: Some("repo bootstrap".into()),
+            estimated_tokens: None,
             source_kind: Some("repo_bootstrap".into()),
             source_id: Some("repo://main".into()),
             correlation_id: None,
+            tags: Vec::new(),
         });
 
         let run_config = RunConfig {
@@ -2635,13 +2731,15 @@ mod tests {
         state.pending_llm_turn_refs = Some(vec![input_ref.clone()]);
 
         let mut out = SessionWorkflowOutput::default();
-        dispatch_pending_llm_turn_with_engine(
+        dispatch_pending_llm_turn_with_planner(
             &mut state,
             &mut out,
-            &RepoBootstrapFirstEngine,
-            ContextBudget {
-                max_refs: Some(2),
+            &RepoBootstrapFirstPlanner,
+            TurnBudget {
+                max_message_refs: Some(2),
                 reserve_output_tokens: Some(128),
+                max_input_tokens: None,
+                max_tool_refs: Some(1),
             },
         )
         .expect("dispatch");
@@ -2664,17 +2762,16 @@ mod tests {
         let plan = state
             .current_run
             .as_ref()
-            .and_then(|run| run.context_plan.as_ref())
-            .expect("context plan");
-        assert_eq!(plan.selected_refs, vec![bootstrap_ref, input_ref]);
-        assert_eq!(plan.report.engine, "test/repo-bootstrap-first");
-        assert_eq!(plan.report.dropped_count, 1);
-        assert!(plan.selections.iter().any(|selection| {
-            selection.content_ref == transcript_ref
-                && !selection.selected
-                && selection.reason == "custom_engine_ignored_transcript"
-        }));
-        assert_eq!(state.context_state.last_report.as_ref(), Some(&plan.report));
+            .and_then(|run| run.turn_plan.as_ref())
+            .expect("turn plan");
+        assert_eq!(plan.message_refs, vec![bootstrap_ref, input_ref.clone()]);
+        assert_eq!(plan.report.planner, "test/repo-bootstrap-first");
+        assert_eq!(plan.report.dropped_message_count, 1);
+        assert_eq!(state.turn_state.last_report.as_ref(), Some(&plan.report));
+        assert_eq!(
+            state.transcript_message_refs,
+            vec![transcript_ref, input_ref]
+        );
     }
 
     #[test]
@@ -2875,19 +2972,20 @@ mod tests {
 
         apply_session_workflow_event(&mut state, &run_request_event(2)).expect("run");
 
-        let tools: Vec<&str> = state
-            .effective_tools
-            .ordered_tools
-            .iter()
-            .map(|tool| tool.tool_name.as_str())
-            .collect();
-        assert!(tools.contains(&"shell"));
-        assert!(tools.contains(&"apply_patch"));
+        let tools = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.as_ref())
+            .map(|plan| plan.selected_tool_ids.clone())
+            .expect("turn plan");
+        assert!(tools.contains(&"host.exec".into()));
+        assert!(tools.contains(&"host.fs.apply_patch".into()));
     }
 
     #[test]
     fn tool_calls_observed_builds_deterministic_plan_and_ignores_disabled() {
         let mut state = local_coding_state();
+        state.session_config.default_tool_disable = Some(vec!["host.exec".into()]);
         apply_session_workflow_event(
             &mut state,
             &session_input(
@@ -2900,21 +2998,6 @@ mod tests {
         )
         .expect("host session ready");
         apply_session_workflow_event(&mut state, &run_request_event(2)).expect("run");
-
-        // Deny exec so it gets ignored even when host session is ready.
-        apply_session_workflow_event(
-            &mut state,
-            &session_input(
-                3,
-                SessionInputKind::ToolOverridesSet {
-                    scope: ToolOverrideScope::Run,
-                    enable: None,
-                    disable: Some(vec!["host.exec".into()]),
-                    force: None,
-                },
-            ),
-        )
-        .expect("overrides");
 
         let calls = vec![
             ToolCallObserved {
@@ -3016,6 +3099,206 @@ mod tests {
                 .any(|effect| matches!(effect, SessionEffectCommand::LlmGenerate { .. }))
         );
         assert_eq!(state.pending_effects.len(), 1);
+    }
+
+    #[test]
+    fn deterministic_fixture_asserts_turn_plan_end_to_end() {
+        let first = run_turn_plan_fixture().expect("first fixture run");
+        let second = run_turn_plan_fixture().expect("second fixture run");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first.initial_message_refs,
+            vec![fake_hash('b'), fake_hash('a')]
+        );
+        assert!(
+            first
+                .initial_selected_tool_ids
+                .contains(&"host.exec".into())
+        );
+        assert!(
+            first
+                .initial_selected_tool_ids
+                .contains(&"host.fs.apply_patch".into())
+        );
+        assert!(first.initial_prerequisite_kinds.contains(&alloc::format!(
+            "{:?}",
+            TurnPrerequisiteKind::MaterializeToolDefinitions
+        )));
+        assert_eq!(first.final_message_refs, first.initial_message_refs);
+        assert_eq!(
+            first.final_selected_tool_ids,
+            first.initial_selected_tool_ids
+        );
+        assert!(first.final_prerequisite_kinds.is_empty());
+        assert_eq!(first.llm_message_refs, first.final_message_refs);
+        assert_eq!(
+            first.llm_tool_ref_count,
+            first.final_selected_tool_ids.len()
+        );
+        assert_eq!(
+            first.trace_kinds,
+            vec!["RunStarted", "TurnPlanned", "TurnPlanned", "LlmRequested"]
+        );
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct TurnPlanFixtureObservation {
+        initial_message_refs: Vec<String>,
+        initial_selected_tool_ids: Vec<String>,
+        initial_prerequisite_kinds: Vec<String>,
+        final_message_refs: Vec<String>,
+        final_selected_tool_ids: Vec<String>,
+        final_prerequisite_kinds: Vec<String>,
+        llm_message_refs: Vec<String>,
+        llm_tool_ref_count: usize,
+        trace_kinds: Vec<&'static str>,
+    }
+
+    fn run_turn_plan_fixture() -> Result<TurnPlanFixtureObservation, SessionWorkflowError> {
+        let mut state = local_coding_state();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                0,
+                SessionInputKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )?;
+
+        let prompt_ref = fake_hash('b');
+        let input_ref = fake_hash('a');
+        let out = apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                1,
+                SessionInputKind::RunRequested {
+                    input_ref,
+                    run_overrides: Some(SessionConfig {
+                        provider: "openai".into(),
+                        model: "gpt-5.2".into(),
+                        reasoning_effort: None,
+                        max_tokens: Some(512),
+                        default_prompt_refs: Some(vec![prompt_ref]),
+                        default_tool_profile: None,
+                        default_tool_enable: None,
+                        default_tool_disable: None,
+                        default_tool_force: None,
+                        default_host_session_open: None,
+                    }),
+                },
+            ),
+        )?;
+        let initial_plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.clone())
+            .expect("initial turn plan");
+        let blob_put_hashes = out
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. }))
+            .map(|effect| effect.params_hash().to_string())
+            .collect::<Vec<_>>();
+        assert!(!blob_put_hashes.is_empty(), "expected tool definition puts");
+
+        let mut last_out = SessionWorkflowOutput::default();
+        for (idx, hash) in blob_put_hashes.iter().enumerate() {
+            last_out = apply_session_workflow_event(
+                &mut state,
+                &receipt_event(
+                    2 + idx as u64,
+                    "sys/blob.put@1",
+                    Some(hash.clone()),
+                    "ok",
+                    &BlobPutReceipt {
+                        blob_ref: hash_ref_for_index(idx),
+                        edge_ref: hash_ref_for_index(idx + 1),
+                        size: 42,
+                    },
+                ),
+            )?;
+        }
+
+        let final_plan = state
+            .current_run
+            .as_ref()
+            .and_then(|run| run.turn_plan.clone())
+            .expect("final turn plan");
+        let (llm_message_refs, llm_tool_ref_count) = last_out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { params, .. } => Some((
+                    params
+                        .message_refs
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    params.runtime.tool_refs.as_ref().map_or(0, Vec::len),
+                )),
+                _ => None,
+            })
+            .expect("llm.generate emitted after materialization");
+        let trace_kinds = state
+            .current_run
+            .as_ref()
+            .expect("current run")
+            .trace
+            .entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.kind,
+                    RunTraceEntryKind::RunStarted
+                        | RunTraceEntryKind::TurnPlanned
+                        | RunTraceEntryKind::LlmRequested
+                )
+            })
+            .map(|entry| trace_kind_name(&entry.kind))
+            .collect::<Vec<_>>();
+
+        Ok(TurnPlanFixtureObservation {
+            initial_message_refs: initial_plan.message_refs,
+            initial_selected_tool_ids: initial_plan.selected_tool_ids,
+            initial_prerequisite_kinds: initial_plan
+                .prerequisites
+                .iter()
+                .map(|item| alloc::format!("{:?}", item.kind))
+                .collect(),
+            final_message_refs: final_plan.message_refs,
+            final_selected_tool_ids: final_plan.selected_tool_ids,
+            final_prerequisite_kinds: final_plan
+                .prerequisites
+                .iter()
+                .map(|item| alloc::format!("{:?}", item.kind))
+                .collect(),
+            llm_message_refs,
+            llm_tool_ref_count,
+            trace_kinds,
+        })
+    }
+
+    fn trace_kind_name(kind: &RunTraceEntryKind) -> &'static str {
+        match kind {
+            RunTraceEntryKind::RunStarted => "RunStarted",
+            RunTraceEntryKind::TurnPlanned => "TurnPlanned",
+            RunTraceEntryKind::LlmRequested => "LlmRequested",
+            RunTraceEntryKind::LlmReceived => "LlmReceived",
+            RunTraceEntryKind::ToolCallsObserved => "ToolCallsObserved",
+            RunTraceEntryKind::ToolBatchPlanned => "ToolBatchPlanned",
+            RunTraceEntryKind::EffectEmitted => "EffectEmitted",
+            RunTraceEntryKind::DomainEventEmitted => "DomainEventEmitted",
+            RunTraceEntryKind::StreamFrameObserved => "StreamFrameObserved",
+            RunTraceEntryKind::ReceiptSettled => "ReceiptSettled",
+            RunTraceEntryKind::InterventionRequested => "InterventionRequested",
+            RunTraceEntryKind::InterventionApplied => "InterventionApplied",
+            RunTraceEntryKind::RunFinished => "RunFinished",
+            RunTraceEntryKind::Custom { .. } => "Custom",
+        }
     }
 
     #[test]

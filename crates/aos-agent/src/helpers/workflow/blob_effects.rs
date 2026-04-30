@@ -483,11 +483,6 @@ pub(super) fn handle_blob_put_receipt(
                 if let Some(spec) = state.tool_registry.get_mut(&tool_id) {
                     spec.tool_ref = blob_ref.clone();
                 }
-                for tool in &mut state.effective_tools.ordered_tools {
-                    if tool.tool_id == tool_id {
-                        tool.tool_ref = blob_ref.clone();
-                    }
-                }
                 if !has_open_tool_definition_puts(state) {
                     state.tool_refs_materialized = true;
                     dispatch_pending_llm_turn(state, out)?;

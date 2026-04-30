@@ -52,16 +52,6 @@ pub enum ToolMapper {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
-#[aos(schema = "aos.agent/ToolAvailabilityRule@1")]
-#[serde(tag = "$tag", content = "$value")]
-pub enum ToolAvailabilityRule {
-    #[default]
-    Always,
-    HostSessionReady,
-    HostSessionNotReady,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
 #[aos(schema = "aos.agent/ToolParallelismHint@1")]
 pub struct ToolParallelismHint {
     pub parallel_safe: bool,
@@ -79,7 +69,6 @@ pub struct ToolSpec {
     pub args_schema_json: String,
     pub mapper: ToolMapper,
     pub executor: ToolExecutor,
-    pub availability_rules: Vec<ToolAvailabilityRule>,
     pub parallelism_hint: ToolParallelismHint,
 }
 
@@ -99,56 +88,6 @@ pub enum HostSessionStatus {
 pub struct ToolRuntimeContext {
     pub host_session_id: Option<String>,
     pub host_session_status: Option<HostSessionStatus>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
-#[aos(schema = "aos.agent/EffectiveTool@1")]
-pub struct EffectiveTool {
-    pub tool_id: String,
-    pub tool_name: String,
-    #[aos(air_type = "hash")]
-    pub tool_ref: String,
-    pub description: String,
-    pub args_schema_json: String,
-    pub mapper: ToolMapper,
-    pub executor: ToolExecutor,
-    pub parallel_safe: bool,
-    pub resource_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
-#[aos(schema = "aos.agent/EffectiveToolSet@1")]
-pub struct EffectiveToolSet {
-    pub profile_id: String,
-    pub profile_requires_host_session: bool,
-    pub ordered_tools: Vec<EffectiveTool>,
-}
-
-impl EffectiveToolSet {
-    pub fn tool_refs(&self) -> Option<Vec<String>> {
-        if self.ordered_tools.is_empty() {
-            None
-        } else {
-            Some(
-                self.ordered_tools
-                    .iter()
-                    .map(|tool| tool.tool_ref.clone())
-                    .collect(),
-            )
-        }
-    }
-
-    pub fn tool_by_id(&self, tool_id: &str) -> Option<&EffectiveTool> {
-        self.ordered_tools
-            .iter()
-            .find(|tool| tool.tool_id == tool_id)
-    }
-
-    pub fn tool_by_llm_name(&self, tool_name: &str) -> Option<&EffectiveTool> {
-        self.ordered_tools
-            .iter()
-            .find(|tool| tool.tool_name == tool_name)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]

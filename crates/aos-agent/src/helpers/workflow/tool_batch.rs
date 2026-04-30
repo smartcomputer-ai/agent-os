@@ -23,7 +23,7 @@ use super::blob_effects::enqueue_blob_get;
 use super::{
     CompletedToolBatch, RunToolBatch, SessionWorkflowError, StartedToolBatch,
     ToolBatchReceiptMatch, hash_cbor, hash_tool_plan, pending_effect_lookup_err_to_session_err,
-    push_run_trace, recompute_in_flight_effects, refresh_effective_tools, trace_ref,
+    push_run_trace, recompute_in_flight_effects, trace_ref,
 };
 
 pub(super) fn build_tool_execution(
@@ -150,7 +150,7 @@ fn plan_tool_batch(
     let mut call_status = BTreeMap::new();
 
     for call in calls {
-        if let Some(tool) = state.effective_tools.tool_by_llm_name(&call.tool_name) {
+        if let Some(tool) = selected_tool_by_llm_name(state, &call.tool_name) {
             planned_calls.push(PlannedToolCall {
                 call_id: call.call_id.clone(),
                 tool_id: tool.tool_id.clone(),
@@ -160,8 +160,8 @@ fn plan_tool_batch(
                 provider_call_id: call.provider_call_id.clone(),
                 mapper: tool.mapper,
                 executor: tool.executor.clone(),
-                parallel_safe: tool.parallel_safe,
-                resource_key: tool.resource_key.clone(),
+                parallel_safe: tool.parallelism_hint.parallel_safe,
+                resource_key: tool.parallelism_hint.resource_key.clone(),
                 accepted: true,
             });
             call_status.insert(call.call_id.clone(), ToolCallStatus::Queued);
@@ -217,6 +217,22 @@ fn plan_tool_batch(
         },
         call_status,
     )
+}
+
+fn selected_tool_by_llm_name<'a>(
+    state: &'a SessionState,
+    tool_name: &str,
+) -> Option<&'a crate::contracts::ToolSpec> {
+    let selected_tool_ids = state
+        .current_run
+        .as_ref()
+        .and_then(|run| run.turn_plan.as_ref())
+        .map(|plan| plan.selected_tool_ids.as_slice())
+        .unwrap_or(&[]);
+    selected_tool_ids
+        .iter()
+        .filter_map(|tool_id| state.tool_registry.get(tool_id))
+        .find(|tool| tool.tool_name == tool_name)
 }
 
 fn flush_group(
@@ -904,18 +920,11 @@ fn apply_mapped_tool_receipt(
         )?;
     }
 
-    let mut runtime_changed = false;
     if let Some(host_session_id) = mapped.runtime_delta.host_session_id {
         state.tool_runtime_context.host_session_id = Some(host_session_id);
-        runtime_changed = true;
     }
     if let Some(host_session_status) = mapped.runtime_delta.host_session_status {
         state.tool_runtime_context.host_session_status = Some(host_session_status);
-        runtime_changed = true;
-    }
-    if runtime_changed {
-        let active = state.active_run_config.clone();
-        refresh_effective_tools(state, active.as_ref())?;
     }
     Ok(())
 }

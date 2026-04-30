@@ -24,10 +24,6 @@
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ToolAvailabilityRule@1",
-        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-      },
-      {
         "name": "aos.agent/ToolParallelismHint@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
@@ -45,14 +41,6 @@
       },
       {
         "name": "aos.agent/ToolRuntimeContext@1",
-        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-      },
-      {
-        "name": "aos.agent/EffectiveTool@1",
-        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-      },
-      {
-        "name": "aos.agent/EffectiveToolSet@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
@@ -168,51 +156,67 @@
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextInputScope@1",
+        "name": "aos.agent/TurnInputLane@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextInputKind@1",
+        "name": "aos.agent/TurnInputKind@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextPriority@1",
+        "name": "aos.agent/TurnPriority@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextBudget@1",
+        "name": "aos.agent/TurnBudget@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextInput@1",
+        "name": "aos.agent/TurnInput@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextSelection@1",
+        "name": "aos.agent/TurnToolInput@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextActionKind@1",
+        "name": "aos.agent/TurnToolChoice@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextAction@1",
+        "name": "aos.agent/TurnTokenEstimate@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextReport@1",
+        "name": "aos.agent/PlannerStateRef@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextPlan@1",
+        "name": "aos.agent/TurnReport@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/ContextObservation@1",
+        "name": "aos.agent/TurnPrerequisiteKind@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
-        "name": "aos.agent/SessionContextState@1",
+        "name": "aos.agent/TurnPrerequisite@1",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "name": "aos.agent/TurnStateUpdate@1",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "name": "aos.agent/TurnObservation@1",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "name": "aos.agent/SessionTurnState@1",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "name": "aos.agent/TurnPlan@1",
         "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       {
