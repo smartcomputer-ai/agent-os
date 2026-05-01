@@ -3,8 +3,9 @@ use crate::workflow::{
     TaskFinished, TaskStatus, TaskSubmitted,
 };
 use aos_agent::{
-    ReasoningEffort, RunId, SessionId, SessionInput, SessionLifecycleChanged, SessionNoop,
-    SessionState, SessionWorkflow, SessionWorkflowEvent,
+    ReasoningEffort, RunId, RunLifecycleChanged, SessionId, SessionInput,
+    SessionLifecycleChanged, SessionNoop, SessionState, SessionStatusChanged, SessionWorkflow,
+    SessionWorkflowEvent,
 };
 
 aos_wasm_sdk::aos_air_secret! {
@@ -45,6 +46,8 @@ aos_wasm_sdk::aos_air_world! {
             ReasoningEffort,
             SessionInput,
             SessionLifecycleChanged,
+            SessionStatusChanged,
+            RunLifecycleChanged,
             SessionNoop,
             SessionState,
             SessionWorkflowEvent,
