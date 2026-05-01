@@ -240,16 +240,16 @@ Add focused tests for:
 6. a run started from a non-user domain-event cause,
 7. replay from genesis producing byte-identical state.
 
-Use Rust unit tests for reducer transition invariants and `aos-harness-py` workflow fixtures for
-end-to-end session/run stories. Live `aos-agent-eval` coverage should only prove provider/tool
-acceptance still works.
+Use Rust unit tests for reducer transition invariants and keep `aos-agent-eval` as the current
+end-to-end/live acceptance lane. `aos-harness-py` workflow fixtures remain future harness work for
+new agent workflows, tracked in P10, rather than a required refactor of this P5 cut.
 
 Done:
 
 1. added Rust reducer tests for session-with-no-runs, multiple sequential runs, failed-then-later run, paused/closed session boundaries, and non-user domain-event causes.
 2. generated AIR is checked against Rust source.
 3. downstream `aos-agent-eval`, `aos-smoke`, and Demiurge compile against the new contracts.
-4. `aos-harness-py` E2E coverage is still pending because that package does not currently have an agent session fixture lane.
+4. `aos-harness-py` E2E coverage is explicitly deferred to P10's new-agent harness lane.
 
 ### [x] 5) Update telemetry
 
@@ -287,7 +287,7 @@ Done:
 2. Demiurge populates `RunCause` with `demiurge/task_submitted` provenance and task subject refs.
 3. existing Demiurge task-driven behavior still compiles and passes its unit tests.
 4. focused SDK reducer tests prove session continuity across multiple runs and direct domain-event causes.
-5. `aos-harness-py` fixture coverage remains the explicit follow-up from this P5 cut.
+5. `aos-harness-py` fixture coverage remains deferred to P10's new-agent harness lane, not a blocker for current `aos-agent` coverage.
 
 ## Non-Goals
 
@@ -339,10 +339,11 @@ Covered by the Rust reducer test for `RunStartRequested` with a `DomainEvent` or
 Covered by focused SDK reducer tests for multiple sequential runs and failed-run-then-later-run in
 the same durable session. Demiurge now populates `RunCause` for task handoff.
 
-### [ ] 8) A deterministic `aos-harness-py` fixture proves multi-run session continuity without provider credentials.
+### [x] 8) Future deterministic `aos-harness-py` coverage is deferred to P10.
 
-Pending. `aos-harness-py` currently has no dedicated agent session fixture lane; this remains the
-explicit follow-up for P5 end-to-end coverage.
+Current `aos-agent` coverage stays on focused reducer tests plus `aos-agent-eval` for the live
+acceptance lane. P10 tracks the separate goal that new agent workflows should be able to use
+`aos-harness-py` without provider credentials.
 
 ### [x] 9) Existing one-shot live agent evals still work through the new model.
 

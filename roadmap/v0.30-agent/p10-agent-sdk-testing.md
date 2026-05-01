@@ -2,25 +2,27 @@
 
 **Priority**: P1
 **Effort**: Medium
-**Risk if deferred**: High (SDK behavior will be validated mostly through live LLM evals, making regressions slow, flaky, and hard to diagnose)
+**Risk if deferred**: Medium (new agent workflows will lack a first-class deterministic Python lane and will keep leaning on ad hoc live evals)
 **Status**: Proposed
 **Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p6-turn-planner.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
 
 ## Goal
 
-Make `aos-harness-py` the first-class deterministic harness for `aos-agent` SDK behavior, while keeping `aos-agent-eval` unchanged as the live provider/tool acceptance lane.
+Make `aos-harness-py` the first-class deterministic harness for new agent-style workflow
+testing, while keeping current `aos-agent` coverage centered on Rust unit tests plus
+`aos-agent-eval` for now.
 
 Primary outcome:
 
-1. SDK correctness tests are deterministic and script external effects,
-2. live LLM/provider evals remain available but are not the foundation for reducer correctness,
+1. new agent workflows can test SDK-style behavior deterministically and script external effects,
+2. `aos-agent` keeps using reducer/unit tests for deterministic core behavior,
 3. agent fixtures are easier to write, inspect, and extend from Python,
 4. traces, turn plans, run state, and intervention can be asserted through one Python helper layer,
-5. current `aos-agent-eval` remains available and does not block deterministic SDK coverage.
+5. current `aos-agent-eval` remains available unchanged as the live provider/tool acceptance lane.
 
 ## Current Fit
 
-`aos-agent-eval` is useful today but has the wrong long-term center of gravity for SDK testing.
+`aos-agent-eval` is useful today and should remain the live acceptance lane for `aos-agent`.
 
 It currently:
 
@@ -33,7 +35,8 @@ It currently:
 7. executes `sys/llm.generate@1` against live providers,
 8. asserts tool usage, assistant text, tool output, and file state.
 
-That is valuable as a live prompt/tool acceptance lane. It is not deterministic in the model-output sense.
+That is valuable as a live prompt/tool acceptance lane. It is not deterministic in the model-output
+sense, and this P10 cut does not try to refactor it into a deterministic harness.
 
 `aos-harness-py` already has the better substrate for SDK tests:
 
@@ -44,7 +47,8 @@ That is valuable as a live prompt/tool acceptance lane. It is not deterministic 
 5. state, blob, trace, snapshot, and reopen helpers are available,
 6. `WorldHarness` exercises the unified node runtime and SQLite journal for realistic world tests.
 
-The gap is not the low-level substrate. The gap is a small agent-specific Python driver layer.
+The gap is not the low-level substrate. The gap is a small agent-oriented Python driver layer that
+new agent workflows can use without depending on provider credentials or live host infrastructure.
 
 ## Design Stance
 
@@ -53,14 +57,17 @@ The gap is not the low-level substrate. The gap is a small agent-specific Python
 Use three lanes:
 
 1. Rust unit tests in `crates/aos-agent` for reducer/helper invariants,
-2. Python deterministic harness tests through `aos-harness-py` for SDK/workflow integration,
-3. live provider/tool evals through `aos-agent-eval` or its successor for acceptance and quality checks.
+2. live provider/tool evals through `aos-agent-eval` for current `aos-agent` acceptance and quality checks,
+3. Python deterministic harness tests through `aos-harness-py` for new agent workflow integration and future migrated coverage.
 
-Do not use live LLM behavior to prove deterministic SDK semantics.
+Do not refactor `aos-agent-eval` in this phase. For `aos-agent` itself, use Rust unit tests for
+deterministic reducer semantics and keep `aos-agent-eval` for live provider/tool behavior.
 
-### 2) `aos-harness-py` is the future SDK harness
+### 2) `aos-harness-py` is the new-agent deterministic harness
 
-New SDK integration coverage should be written against `aos-harness-py` unless the test is a narrow Rust unit invariant.
+New agent workflows should be able to write deterministic integration coverage against
+`aos-harness-py`. Existing `aos-agent` acceptance coverage can remain in `aos-agent-eval` until
+there is a specific reason to port cases.
 
 For the first cut, the Python harness should own:
 
@@ -73,21 +80,23 @@ For the first cut, the Python harness should own:
 7. replay/reopen assertions,
 8. non-user/domain-event run-cause fixtures.
 
-Fabric fake-controller tests, broad eval-case migration, and live-gated hosted execution remain later work.
+Fabric fake-controller tests, broad eval-case migration, `aos-agent-eval` refactoring, and live-gated
+hosted execution remain later work.
 
 ### 3) Keep `aos-agent-eval` during migration
 
-`aos-agent-eval` should not be expanded into a second SDK harness.
+`aos-agent-eval` should not be expanded into a second deterministic SDK harness and should not be
+refactored as part of this P10 cut.
 
 Keep it for:
 
 1. current live prompt/tool coverage,
 2. provider compatibility checks,
 3. host adapter smoke coverage,
-4. source cases to port into deterministic Python fixtures,
-5. a live acceptance lane after the deterministic harness exists.
+4. current `aos-agent` workflow acceptance while the Python deterministic lane matures for new agents.
 
-Do not decide the future of `aos-agent-eval` in this first cut. It can keep serving the live acceptance lane while the Python deterministic lane matures.
+Do not decide the future of `aos-agent-eval` in this first cut. It keeps serving the live acceptance
+lane, and `aos-agent` continues to use unit tests plus `aos-agent-eval` for now.
 
 ### 4) Scripted LLM evals are receipt choreography
 
@@ -117,7 +126,9 @@ Live evals answer different questions:
 4. do token budgets and provider-specific fields work,
 5. are regressions visible against a representative model.
 
-Those tests can use pass-rate thresholds and provider credentials. They should not be required for ordinary SDK correctness.
+Those tests can use pass-rate thresholds and provider credentials. They remain the right lane for
+current `aos-agent` provider/tool acceptance, while deterministic reducer semantics stay in unit
+tests.
 
 ## Scope
 
@@ -125,19 +136,20 @@ Those tests can use pass-rate thresholds and provider credentials. They should n
 
 Required outcome:
 
-1. `aos-agent` contributor docs say when to use Rust tests, `aos-harness-py`, and live evals,
+1. contributor docs say when to use Rust tests, `aos-harness-py`, and live evals,
 2. roadmap items P4-P9 reference the right lane for their acceptance tests,
-3. live provider credentials are never required for deterministic SDK tests.
+3. live provider credentials are never required for deterministic harness tests.
 
 First cut:
 
 1. document that `aos-agent-eval` stays as the live provider/tool lane for now.
-2. document that new SDK integration tests use `aos-harness-py` unless a Rust unit test is enough.
-3. document that provider credentials and real host/Fabric infrastructure are not required for the deterministic lane.
+2. document that `aos-agent` itself continues to use Rust unit tests plus `aos-agent-eval` for now.
+3. document that new agent workflows should be able to use `aos-harness-py` for deterministic integration tests.
+4. document that provider credentials and real host/Fabric infrastructure are not required for the deterministic lane.
 
 ### [ ] 2) Add an `aos_harness.agent` helper module
 
-Add Python helpers for:
+Add Python helpers for new agent workflow fixtures:
 
 1. opening `crates/aos-agent` as a `WorkflowHarness` for `aos.agent/SessionWorkflow@1`,
 2. constants for `aos.agent/SessionWorkflow@1` and `aos.agent/SessionInput@1`,
@@ -217,8 +229,8 @@ Add a narrow set first:
 5. domain-event run cause:
    `RunStartRequested` with a non-user `RunCause` starts a run and records provenance.
 
-The goal is to prove the Python harness can express the agent session story deterministically, not
-to port every live eval case.
+The goal is to prove the Python harness can express an agent session story deterministically for
+new agent workflows, not to port current `aos-agent-eval` cases.
 
 ### [ ] 6) Add replay/reopen checks
 
@@ -252,16 +264,17 @@ P10 does **not** attempt:
 4. final product telemetry or UI,
 5. testing full scheduler/heartbeat or factory work-item workflows as part of `aos-agent` SDK correctness,
 6. requiring Fabric for ordinary SDK tests,
-7. replacing `aos-agent-eval` in this phase.
+7. replacing or refactoring `aos-agent-eval` in this phase,
+8. forcing existing `aos-agent` acceptance tests onto `aos-harness-py`.
 
 ## Acceptance Criteria
 
-1. New SDK integration tests can run through `aos-harness-py` without provider credentials.
-2. `aos_harness.agent` can open the `aos-agent` session workflow and send typed session inputs.
+1. New agent workflow integration tests can run through `aos-harness-py` without provider credentials.
+2. `aos_harness.agent` can open an agent session workflow and send typed session inputs.
 3. The Python harness can script an LLM turn and its follow-up blob reads.
 4. The Python harness can assert turn plans, selected tools, run traces, run history, and `last_llm_usage`.
 5. The Python harness can start a run with a non-user/domain-event `RunCause`.
-6. At least three deterministic Python fixtures cover no-tool completion, host-ready planning, tool-call flow, intervention, or domain-event cause.
+6. At least three deterministic Python fixtures cover no-tool completion, host-ready planning, tool-call flow, intervention, or domain-event cause for the harness lane.
 7. Replay/reopen preserves the asserted session/run state and trace summaries.
 8. `aos-agent-eval` remains available unchanged for live provider/tool acceptance.
 9. Fabric and broad eval migration are explicitly deferred.
