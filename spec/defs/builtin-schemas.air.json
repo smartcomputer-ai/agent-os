@@ -1071,6 +1071,11 @@
             "text": {}
           }
         },
+        "provider_context_items": {
+          "list": {
+            "ref": "sys/LlmWindowItem@1"
+          }
+        },
         "finish_reason": {
           "record": {
             "reason": {

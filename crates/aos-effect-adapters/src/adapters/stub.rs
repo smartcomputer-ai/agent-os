@@ -58,6 +58,7 @@ impl AsyncEffectAdapter for StubLlmAdapter {
             output_ref: fake_hashref(0x31),
             raw_output_ref: None,
             provider_response_id: None,
+            provider_context_items: Vec::new(),
             finish_reason: LlmFinishReason {
                 reason: "stub".into(),
                 raw: None,

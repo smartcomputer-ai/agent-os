@@ -862,6 +862,7 @@ fn common_receipt_llm_generate_ok<H: CommonHarnessOps>(
         output_ref: parse_hash_ref(output_ref)?,
         raw_output_ref: raw_output_ref.map(parse_hash_ref).transpose()?,
         provider_response_id,
+        provider_context_items: Vec::new(),
         finish_reason: LlmFinishReason {
             reason: finish_reason.to_string(),
             raw: None,

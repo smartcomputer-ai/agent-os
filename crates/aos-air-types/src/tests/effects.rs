@@ -167,6 +167,7 @@ fn llm_generate_receipt_literal_matches_builtin_schema() {
             record(vec![("reason", text("stop")), ("raw", null())]),
         ),
         ("provider_response_id", null()),
+        ("provider_context_items", list(vec![])),
         ("usage_details", null()),
         ("warnings_ref", null()),
         ("rate_limit_ref", null()),
@@ -186,6 +187,7 @@ fn llm_generate_receipt_requires_token_usage_fields() {
         ),
         ("raw_output_ref", null()),
         ("provider_response_id", null()),
+        ("provider_context_items", list(vec![])),
         (
             "finish_reason",
             record(vec![("reason", text("stop")), ("raw", null())]),

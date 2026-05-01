@@ -445,6 +445,7 @@ impl AgentToolsScript {
                 output_ref,
                 raw_output_ref: None,
                 provider_response_id: Some(format!("resp-{}", self.llm_turn)),
+                provider_context_items: Vec::new(),
                 finish_reason: LlmFinishReason {
                     reason: if self.llm_turn == 1 {
                         "tool_calls".into()

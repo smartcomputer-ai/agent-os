@@ -7,15 +7,15 @@ use super::{
 };
 use crate::contracts::{
     ActiveWindowItem, CompactionArtifactKind, CompactionRecord, CompactionStrategy,
-    ContextOperationPhase, ContextOperationState, HostCommandKind, HostSessionOpenConfig,
-    HostTargetConfig, PendingBlobGetKind, PendingBlobPutKind, QueuedRunStart, RunCause, RunConfig,
-    RunFailure, RunInterrupt, RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace,
-    RunTraceEntry, RunTraceEntryKind, RunTraceRef, RunTraceSummary, SessionConfig,
-    SessionInputKind, SessionLifecycle, SessionState, SessionStatus, SessionWorkflowEvent,
-    StagedToolFollowUpTurn, ToolBatchPlan, ToolCallStatus, ToolOverrideScope, ToolSpec,
-    TranscriptLedgerEntryKind, TranscriptRange, TurnBudget, TurnInput, TurnInputKind,
-    TurnInputLane, TurnObservation, TurnPlan, TurnPrerequisiteKind, TurnPriority, TurnToolChoice,
-    TurnToolInput,
+    ContextOperationPhase, ContextOperationState, ContextPressureReason, ContextPressureRecord,
+    HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
+    PendingBlobPutKind, QueuedRunStart, RunCause, RunConfig, RunFailure, RunInterrupt,
+    RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry, RunTraceEntryKind,
+    RunTraceRef, RunTraceSummary, SessionConfig, SessionInputKind, SessionLifecycle, SessionState,
+    SessionStatus, SessionWorkflowEvent, StagedToolFollowUpTurn, ToolBatchPlan, ToolCallStatus,
+    ToolOverrideScope, ToolSpec, TranscriptLedgerEntryKind, TranscriptRange, TurnBudget, TurnInput,
+    TurnInputKind, TurnInputLane, TurnObservation, TurnPlan, TurnPrerequisiteKind, TurnPriority,
+    TurnToolChoice, TurnToolInput,
 };
 use crate::helpers::TurnPlanner;
 use crate::tools::{ToolEffectOp, map_tool_receipt_to_llm_result};
@@ -47,6 +47,7 @@ pub use self::types::{
 };
 
 const TOOL_RESULT_BLOB_MAX_BYTES: usize = 8 * 1024;
+const USAGE_HIGH_WATER_INPUT_TOKENS: u64 = 64_000;
 
 pub(super) fn trace_ref(kind: impl Into<String>, value: impl Into<String>) -> RunTraceRef {
     let value = value.into();
@@ -942,6 +943,15 @@ fn handle_llm_generate_receipt(
     out: &mut SessionWorkflowOutput,
 ) -> Result<(), SessionWorkflowError> {
     if envelope.status != "ok" {
+        if let Some(receipt) = envelope
+            .decode_receipt_payload::<LlmGenerateReceipt>()
+            .ok()
+            .filter(is_context_limit_generate_receipt)
+        {
+            observe_context_pressure_from_generate_failure(state, &receipt);
+            dispatch_pending_llm_turn(state, out)?;
+            return Ok(());
+        }
         fail_run(state)?;
         return Ok(());
     }
@@ -956,11 +966,18 @@ fn handle_llm_generate_receipt(
     if let Some(run) = state.current_run.as_mut() {
         run.last_llm_usage = Some(usage.clone());
     }
+    state.context_state.last_llm_usage = Some(usage.clone());
     let refs = vec![trace_ref("output_ref", receipt.output_ref.to_string())];
     let mut metadata = BTreeMap::new();
     metadata.insert("provider_id".into(), receipt.provider_id.clone());
     metadata.insert("finish_reason".into(), receipt.finish_reason.reason.clone());
     metadata.insert("status".into(), envelope.status.clone());
+    if !receipt.provider_context_items.is_empty() {
+        metadata.insert(
+            "provider_context_item_count".into(),
+            receipt.provider_context_items.len().to_string(),
+        );
+    }
     insert_llm_usage_trace_metadata(&mut metadata, &usage);
     push_run_trace(
         state,
@@ -969,6 +986,8 @@ fn handle_llm_generate_receipt(
         refs,
         metadata,
     );
+    trace_provider_context_items_from_generate(state, &receipt);
+    schedule_usage_high_water_compaction_if_needed(state, &receipt, &usage);
 
     if enqueue_blob_get(
         state,
@@ -982,6 +1001,202 @@ fn handle_llm_generate_receipt(
     }
 
     Ok(())
+}
+
+fn is_context_limit_generate_receipt(receipt: &LlmGenerateReceipt) -> bool {
+    let reason = receipt.finish_reason.reason.to_ascii_lowercase();
+    let raw = receipt
+        .finish_reason
+        .raw
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    reason.contains("context")
+        || raw.contains("context length")
+        || raw.contains("context limit")
+        || raw.contains("too many tokens")
+        || raw.contains("maximum context")
+        || raw.contains("input tokens")
+}
+
+fn observe_context_pressure_from_generate_failure(
+    state: &mut SessionState,
+    receipt: &LlmGenerateReceipt,
+) {
+    let usage = llm_usage_record_from_receipt(receipt);
+    let candidate_plan_id = state
+        .current_run
+        .as_ref()
+        .and_then(|run| run.turn_plan.as_ref())
+        .map(hash_cbor);
+    let provider = Some(receipt.provider_id.clone());
+    let model = state
+        .active_run_config
+        .as_ref()
+        .map(|config| config.model.clone());
+    let pressure = ContextPressureRecord {
+        reason: ContextPressureReason::ProviderContextLimit,
+        provider,
+        model,
+        candidate_plan_id: candidate_plan_id.clone(),
+        observed_usage: Some(usage),
+        error_kind: Some("ProviderContextLimit".into()),
+        error_ref: receipt
+            .raw_output_ref
+            .as_ref()
+            .map(|value| value.to_string()),
+        recommended_strategy: Some(CompactionStrategy::Auto),
+        observed_at_ns: state.updated_at,
+    };
+    state.context_state.last_context_pressure = Some(pressure.clone());
+
+    let operation_id = context_operation_id(state, "context-limit");
+    let source_range = compactable_transcript_range(state);
+    let mut operation = ContextOperationState::needs_compaction(
+        operation_id.clone(),
+        ContextPressureReason::ProviderContextLimit,
+        CompactionStrategy::Auto,
+        source_range,
+        state.updated_at,
+    );
+    operation.candidate_plan_id = candidate_plan_id;
+    state.context_state.set_pending_operation(operation);
+
+    if let Some(items) = state
+        .current_run
+        .as_ref()
+        .and_then(|run| run.turn_plan.as_ref())
+        .map(|plan| plan.active_window_items.clone())
+    {
+        state.pending_llm_turn_items = Some(items);
+    }
+    trace_context_pressure_observed(state, &pressure);
+    trace_context_operation_state(state);
+    sync_current_run_execution(state);
+}
+
+fn schedule_usage_high_water_compaction_if_needed(
+    state: &mut SessionState,
+    receipt: &LlmGenerateReceipt,
+    usage: &crate::contracts::LlmUsageRecord,
+) {
+    if state.context_state.pending_context_operation.is_some() {
+        return;
+    }
+    if usage.prompt_tokens < USAGE_HIGH_WATER_INPUT_TOKENS {
+        return;
+    }
+
+    let candidate_plan_id = state
+        .current_run
+        .as_ref()
+        .and_then(|run| run.turn_plan.as_ref())
+        .map(hash_cbor);
+    let pressure = ContextPressureRecord {
+        reason: ContextPressureReason::UsageHighWater,
+        provider: Some(receipt.provider_id.clone()),
+        model: state
+            .active_run_config
+            .as_ref()
+            .map(|config| config.model.clone()),
+        candidate_plan_id: candidate_plan_id.clone(),
+        observed_usage: Some(usage.clone()),
+        error_kind: None,
+        error_ref: None,
+        recommended_strategy: Some(CompactionStrategy::Auto),
+        observed_at_ns: state.updated_at,
+    };
+    state.context_state.last_context_pressure = Some(pressure.clone());
+
+    let mut operation = ContextOperationState::needs_compaction(
+        context_operation_id(state, "usage-high-water"),
+        ContextPressureReason::UsageHighWater,
+        CompactionStrategy::Auto,
+        compactable_transcript_range(state),
+        state.updated_at,
+    );
+    operation.candidate_plan_id = candidate_plan_id;
+    state.context_state.set_pending_operation(operation);
+    trace_context_pressure_observed(state, &pressure);
+    trace_context_operation_state(state);
+    sync_current_run_execution(state);
+}
+
+fn trace_provider_context_items_from_generate(
+    state: &mut SessionState,
+    receipt: &LlmGenerateReceipt,
+) {
+    if receipt.provider_context_items.is_empty() {
+        return;
+    }
+    let refs = receipt
+        .provider_context_items
+        .iter()
+        .map(|item| trace_ref("provider_context_item_ref", item.ref_.to_string()))
+        .collect::<Vec<_>>();
+    let metadata = BTreeMap::from([
+        ("provider_id".into(), receipt.provider_id.clone()),
+        (
+            "provider_context_item_count".into(),
+            receipt.provider_context_items.len().to_string(),
+        ),
+    ]);
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ProviderContextArtifactsObserved,
+        "provider context artifacts surfaced from llm receipt",
+        refs,
+        metadata,
+    );
+}
+
+fn trace_context_pressure_observed(state: &mut SessionState, pressure: &ContextPressureRecord) {
+    let mut refs = Vec::new();
+    if let Some(error_ref) = pressure.error_ref.as_ref() {
+        refs.push(trace_ref("error_ref", error_ref.clone()));
+    }
+    if let Some(candidate_plan_id) = pressure.candidate_plan_id.as_ref() {
+        refs.push(trace_ref("candidate_plan_id", candidate_plan_id.clone()));
+    }
+    let mut metadata = BTreeMap::new();
+    metadata.insert("reason".into(), format!("{:?}", pressure.reason));
+    if let Some(provider) = pressure.provider.as_ref() {
+        metadata.insert("provider".into(), provider.clone());
+    }
+    if let Some(model) = pressure.model.as_ref() {
+        metadata.insert("model".into(), model.clone());
+    }
+    if let Some(usage) = pressure.observed_usage.as_ref() {
+        insert_llm_usage_trace_metadata(&mut metadata, usage);
+    }
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ContextPressureObserved,
+        "context pressure observed",
+        refs,
+        metadata,
+    );
+}
+
+fn compactable_transcript_range(state: &SessionState) -> Option<TranscriptRange> {
+    let end_seq = state.context_state.transcript_ledger.next_seq;
+    if end_seq == 0 {
+        None
+    } else {
+        Some(TranscriptRange {
+            start_seq: state.context_state.compacted_through.unwrap_or(0),
+            end_seq,
+        })
+    }
+}
+
+fn context_operation_id(state: &SessionState, reason: &str) -> String {
+    let run_seq = state
+        .active_run_id
+        .as_ref()
+        .map(|id| id.run_seq)
+        .unwrap_or(0);
+    format!("ctx-op:{reason}:run-{run_seq}:{}", state.updated_at)
 }
 
 fn handle_llm_compact_receipt(
@@ -2721,8 +2936,8 @@ mod tests {
     use aos_effects::builtins::{
         BlobGetReceipt, BlobPutReceipt, LlmCompactReceipt, LlmCompactionArtifactKind,
         LlmCountTokensReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
-        LlmTokenCountQuality, LlmToolCall, LlmTranscriptRange, LlmUsageDetails, LlmWindowItem,
-        LlmWindowItemKind, TokenUsage,
+        LlmProviderCompatibility, LlmTokenCountQuality, LlmToolCall, LlmTranscriptRange,
+        LlmUsageDetails, LlmWindowItem, LlmWindowItemKind, TokenUsage,
     };
 
     fn fake_hash(ch: char) -> String {
@@ -2822,6 +3037,59 @@ mod tests {
         state.tool_profile = local_coding_agent_tool_profile_for_provider("openai");
         state.session_config.default_host_session_open = Some(local_host_session_open_config());
         state
+    }
+
+    fn ready_state_with_llm_generate(state: &mut SessionState) -> (String, Option<String>) {
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            state,
+            &session_input(
+                0,
+                SessionInputKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )
+        .expect("host session ready");
+
+        let out = apply_session_workflow_event(state, &run_request_event(1)).expect("run");
+        let blob_put_hashes = out
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, SessionEffectCommand::BlobPut { .. }))
+            .map(|effect| effect.params_hash().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            !blob_put_hashes.is_empty(),
+            "expected initial blob.put effects"
+        );
+
+        let mut llm_pending = None;
+        for (idx, hash) in blob_put_hashes.iter().enumerate() {
+            let out = apply_session_workflow_event(
+                state,
+                &receipt_event(
+                    2 + idx as u64,
+                    "sys/blob.put@1",
+                    Some(hash.clone()),
+                    "ok",
+                    &BlobPutReceipt {
+                        blob_ref: hash_ref_for_index(idx),
+                        edge_ref: hash_ref_for_index(idx + 1),
+                        size: 111,
+                    },
+                ),
+            )
+            .expect("blob.put receipt");
+            llm_pending = out.effects.iter().find_map(|effect| match effect {
+                SessionEffectCommand::LlmGenerate { pending, .. } => Some(pending.clone()),
+                _ => None,
+            });
+        }
+
+        let pending = llm_pending.expect("expected llm.generate");
+        (pending.params_hash, pending.issuer_ref)
     }
 
     fn local_host_session_open_config() -> HostSessionOpenConfig {
@@ -4232,6 +4500,10 @@ mod tests {
             RunTraceEntryKind::InterventionRequested => "InterventionRequested",
             RunTraceEntryKind::InterventionApplied => "InterventionApplied",
             RunTraceEntryKind::ContextOperationStateChanged => "ContextOperationStateChanged",
+            RunTraceEntryKind::ContextPressureObserved => "ContextPressureObserved",
+            RunTraceEntryKind::ProviderContextArtifactsObserved => {
+                "ProviderContextArtifactsObserved"
+            }
             RunTraceEntryKind::CompactionRequested => "CompactionRequested",
             RunTraceEntryKind::CompactionReceived => "CompactionReceived",
             RunTraceEntryKind::TokenCountRequested => "TokenCountRequested",
@@ -4308,6 +4580,7 @@ mod tests {
                     output_ref: hash_ref('e'),
                     raw_output_ref: None,
                     provider_response_id: None,
+                    provider_context_items: Vec::new(),
                     finish_reason: LlmFinishReason {
                         reason: "stop".into(),
                         raw: None,
@@ -4377,6 +4650,241 @@ mod tests {
     }
 
     #[test]
+    fn llm_generate_context_limit_failure_schedules_compaction_and_retries() {
+        let mut state = local_coding_state();
+        let (llm_params_hash, llm_issuer_ref) = ready_state_with_llm_generate(&mut state);
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                3,
+                "sys/llm.generate@1",
+                Some(llm_params_hash),
+                llm_issuer_ref,
+                "error",
+                &LlmGenerateReceipt {
+                    output_ref: hash_ref('e'),
+                    raw_output_ref: Some(hash_ref('d')),
+                    provider_response_id: None,
+                    provider_context_items: Vec::new(),
+                    finish_reason: LlmFinishReason {
+                        reason: "error".into(),
+                        raw: Some("context length exceeded: too many input tokens".into()),
+                    },
+                    token_usage: TokenUsage {
+                        prompt: 128_000,
+                        completion: 0,
+                        total: Some(128_000),
+                    },
+                    usage_details: None,
+                    warnings_ref: None,
+                    rate_limit_ref: None,
+                    cost_cents: None,
+                    provider_id: "openai".into(),
+                },
+            ),
+        )
+        .expect("llm context-limit receipt");
+
+        let operation = state
+            .context_state
+            .pending_context_operation
+            .as_ref()
+            .expect("pending context operation");
+        assert!(matches!(
+            operation.reason,
+            ContextPressureReason::ProviderContextLimit
+        ));
+        assert!(state.pending_llm_turn_items.is_some());
+        assert!(
+            out.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::LlmCompact { .. }))
+        );
+        assert!(
+            state
+                .current_run
+                .as_ref()
+                .is_some_and(|run| matches!(run.lifecycle, RunLifecycle::Running))
+        );
+        let trace_kinds = state
+            .current_run
+            .as_ref()
+            .expect("current run")
+            .trace
+            .entries
+            .iter()
+            .map(|entry| trace_kind_name(&entry.kind))
+            .collect::<Vec<_>>();
+        assert!(trace_kinds.contains(&"ContextPressureObserved"));
+        assert!(trace_kinds.contains(&"CompactionRequested"));
+    }
+
+    #[test]
+    fn llm_generate_high_water_usage_schedules_lazy_compaction() {
+        let mut state = local_coding_state();
+        let (llm_params_hash, llm_issuer_ref) = ready_state_with_llm_generate(&mut state);
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                3,
+                "sys/llm.generate@1",
+                Some(llm_params_hash),
+                llm_issuer_ref,
+                "ok",
+                &LlmGenerateReceipt {
+                    output_ref: hash_ref('e'),
+                    raw_output_ref: None,
+                    provider_response_id: None,
+                    provider_context_items: Vec::new(),
+                    finish_reason: LlmFinishReason {
+                        reason: "stop".into(),
+                        raw: None,
+                    },
+                    token_usage: TokenUsage {
+                        prompt: USAGE_HIGH_WATER_INPUT_TOKENS,
+                        completion: 64,
+                        total: Some(USAGE_HIGH_WATER_INPUT_TOKENS + 64),
+                    },
+                    usage_details: None,
+                    warnings_ref: None,
+                    rate_limit_ref: None,
+                    cost_cents: None,
+                    provider_id: "openai".into(),
+                },
+            ),
+        )
+        .expect("llm high-water receipt");
+
+        let operation = state
+            .context_state
+            .pending_context_operation
+            .as_ref()
+            .expect("pending context operation");
+        assert!(matches!(
+            operation.reason,
+            ContextPressureReason::UsageHighWater
+        ));
+        assert!(
+            out.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::BlobGet { .. }))
+        );
+        assert!(
+            !out.effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffectCommand::LlmCompact { .. }))
+        );
+        assert!(
+            state
+                .current_run
+                .as_ref()
+                .expect("current run")
+                .trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::ContextPressureObserved))
+        );
+    }
+
+    #[test]
+    fn llm_generate_provider_context_items_are_traced() {
+        let mut state = local_coding_state();
+        let (llm_params_hash, llm_issuer_ref) = ready_state_with_llm_generate(&mut state);
+        let provider_item = LlmWindowItem {
+            item_id: "provider-item-1".into(),
+            kind: LlmWindowItemKind::ProviderNativeArtifactRef,
+            ref_: hash_ref('f'),
+            lane: Some("Summary".into()),
+            source_range: None,
+            source_refs: vec![hash_ref('0')],
+            provider_compatibility: Some(LlmProviderCompatibility {
+                provider: "openai-responses".into(),
+                api_kind: "responses".into(),
+                model: Some("gpt-5.2".into()),
+                model_family: None,
+                artifact_type: "compaction".into(),
+                opaque: true,
+                encrypted: true,
+            }),
+            estimated_tokens: None,
+            metadata: BTreeMap::new(),
+        };
+
+        let _out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event_with_issuer_ref(
+                3,
+                "sys/llm.generate@1",
+                Some(llm_params_hash),
+                llm_issuer_ref,
+                "ok",
+                &LlmGenerateReceipt {
+                    output_ref: hash_ref('e'),
+                    raw_output_ref: None,
+                    provider_response_id: Some("resp_1".into()),
+                    provider_context_items: vec![provider_item],
+                    finish_reason: LlmFinishReason {
+                        reason: "stop".into(),
+                        raw: None,
+                    },
+                    token_usage: TokenUsage {
+                        prompt: 120,
+                        completion: 20,
+                        total: Some(140),
+                    },
+                    usage_details: None,
+                    warnings_ref: None,
+                    rate_limit_ref: None,
+                    cost_cents: None,
+                    provider_id: "openai-responses".into(),
+                },
+            ),
+        )
+        .expect("llm provider context item receipt");
+
+        let run = state.current_run.as_ref().expect("current run");
+        let llm_received = run
+            .trace
+            .entries
+            .iter()
+            .find(|entry| matches!(entry.kind, RunTraceEntryKind::LlmReceived))
+            .expect("llm received trace");
+        assert_eq!(
+            llm_received
+                .metadata
+                .get("provider_context_item_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        let provider_trace = run
+            .trace
+            .entries
+            .iter()
+            .find(|entry| {
+                matches!(
+                    entry.kind,
+                    RunTraceEntryKind::ProviderContextArtifactsObserved
+                )
+            })
+            .expect("provider context artifacts trace");
+        assert_eq!(
+            provider_trace
+                .metadata
+                .get("provider_context_item_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert!(
+            provider_trace
+                .refs
+                .iter()
+                .any(|trace_ref| trace_ref.kind == "provider_context_item_ref")
+        );
+    }
+
+    #[test]
     fn llm_tool_calls_are_resolved_executed_and_queued_for_follow_up() {
         let mut state = local_coding_state();
         state.session_id = SessionId("s-1".into());
@@ -4439,6 +4947,7 @@ mod tests {
                     output_ref: hash_ref('e'),
                     raw_output_ref: None,
                     provider_response_id: None,
+                    provider_context_items: Vec::new(),
                     finish_reason: LlmFinishReason {
                         reason: "tool_calls".into(),
                         raw: None,
@@ -4678,6 +5187,7 @@ mod tests {
                     output_ref: hash_ref('e'),
                     raw_output_ref: None,
                     provider_response_id: None,
+                    provider_context_items: Vec::new(),
                     finish_reason: LlmFinishReason {
                         reason: "stop".into(),
                         raw: None,

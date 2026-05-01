@@ -87,9 +87,10 @@ impl<S: Store> LlmAdapter<S> {
             output_ref,
             raw_output_ref: None,
             provider_response_id: None,
+            provider_context_items: Vec::new(),
             finish_reason: LlmFinishReason {
                 reason: "error".to_string(),
-                raw: None,
+                raw: Some(msg.clone()),
             },
             token_usage: TokenUsage {
                 prompt: 0,
@@ -301,6 +302,61 @@ impl<S: Store> LlmAdapter<S> {
             .put_blob(bytes)
             .map_err(|e| format!("store blob failed: {e}"))?;
         HashRef::new(hash.to_hex()).map_err(|e| format!("invalid blob hash: {e}"))
+    }
+
+    fn store_provider_context_items(
+        &self,
+        response: &aos_llm::Response,
+        source_window_items: &[LlmWindowItem],
+        provider_id: &str,
+        model: &str,
+        api_kind: LlmApiKind,
+    ) -> Result<Vec<LlmWindowItem>, String> {
+        let source_refs = source_window_items
+            .iter()
+            .map(|item| item.ref_.clone())
+            .collect::<Vec<_>>();
+        let api_kind = llm_api_kind_name(api_kind).to_string();
+        let mut out = Vec::new();
+        for (idx, part) in response.message.content.iter().enumerate() {
+            let Some(raw) = part.provider_item.as_ref() else {
+                continue;
+            };
+            let raw_ref = self.store_json_blob(raw)?;
+            let artifact_type = raw
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("provider_item")
+                .to_string();
+            let encrypted = raw
+                .get("encrypted_content")
+                .and_then(Value::as_str)
+                .is_some();
+            out.push(LlmWindowItem {
+                item_id: format!("generate:{}:provider-item:{idx}", response.id),
+                kind: if artifact_type.contains("compaction") {
+                    LlmWindowItemKind::ProviderNativeArtifactRef
+                } else {
+                    LlmWindowItemKind::ProviderRawWindowRef
+                },
+                ref_: raw_ref,
+                lane: Some("Summary".into()),
+                source_range: None,
+                source_refs: source_refs.clone(),
+                provider_compatibility: Some(LlmProviderCompatibility {
+                    provider: provider_id.to_string(),
+                    api_kind: api_kind.clone(),
+                    model: Some(model.to_string()),
+                    model_family: None,
+                    artifact_type,
+                    opaque: encrypted,
+                    encrypted,
+                }),
+                estimated_tokens: None,
+                metadata: Default::default(),
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -652,6 +708,23 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             .raw
             .as_ref()
             .and_then(|raw| self.store_json_blob(raw).ok());
+        let provider_context_items = match self.store_provider_context_items(
+            &response,
+            &params.window_items,
+            &provider_id,
+            params.model.as_str(),
+            provider.api_kind,
+        ) {
+            Ok(items) => items,
+            Err(err) => {
+                return Ok(self.failure_receipt(
+                    intent,
+                    &provider_id,
+                    ReceiptStatus::Error,
+                    format!("store provider context items failed: {err}"),
+                ));
+            }
+        };
 
         let warnings_ref = if response.warnings.is_empty() {
             None
@@ -671,6 +744,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             output_ref,
             raw_output_ref,
             provider_response_id: Some(response.id.clone()),
+            provider_context_items,
             finish_reason: LlmFinishReason {
                 reason: response.finish_reason.reason.clone(),
                 raw: response.finish_reason.raw.clone(),

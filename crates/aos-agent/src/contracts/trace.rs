@@ -24,6 +24,8 @@ pub enum RunTraceEntryKind {
     InterventionRequested,
     InterventionApplied,
     ContextOperationStateChanged,
+    ContextPressureObserved,
+    ProviderContextArtifactsObserved,
     CompactionRequested,
     CompactionReceived,
     TokenCountRequested,

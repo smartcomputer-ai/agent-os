@@ -399,6 +399,105 @@ async fn llm_happy_path_ok_receipt() {
 }
 
 #[tokio::test]
+async fn llm_generate_surfaces_provider_context_items_from_responses() {
+    if !loopback_available().await {
+        eprintln!(
+            "skipping llm_generate_surfaces_provider_context_items_from_responses: loopback bind not permitted"
+        );
+        return;
+    }
+
+    let store = Arc::new(MemStore::new());
+    let message = serde_json::to_vec(&json!({"role":"user","content":"hi"})).unwrap();
+    let message_ref = HashRef::new(store.put_blob(&message).unwrap().to_hex()).unwrap();
+
+    let body = br#"{
+      "id": "resp_generate_1",
+      "model": "gpt-5.2",
+      "status": "completed",
+      "output": [
+        {
+          "id": "msg_001",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [{ "type": "output_text", "text": "hello" }]
+        },
+        {
+          "id": "cmp_001",
+          "type": "compaction",
+          "encrypted_content": "encrypted-summary"
+        }
+      ],
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 5,
+        "total_tokens": 25
+      }
+    }"#;
+    let addr = start_test_server(body, "200 OK", None).await;
+
+    let mut providers = HashMap::new();
+    providers.insert(
+        "openai-responses".into(),
+        ProviderConfig {
+            base_url: format!("http://{}", addr),
+            timeout: Duration::from_secs(2),
+            api_kind: LlmApiKind::Responses,
+        },
+    );
+    let cfg = LlmAdapterConfig {
+        providers,
+        default_provider: "openai-responses".into(),
+    };
+    let adapter = LlmAdapter::new(store.clone(), cfg);
+
+    let params = LlmGenerateParams {
+        correlation_id: None,
+        provider: "openai-responses".into(),
+        model: "gpt-5.2".into(),
+        window_items: vec![LlmWindowItem::message_ref(message_ref.clone())],
+        runtime: LlmRuntimeArgs {
+            temperature: Some("0".into()),
+            top_p: None,
+            max_tokens: Some(8),
+            tool_refs: None,
+            tool_choice: None,
+            reasoning_effort: None,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
+        },
+        api_key: Some("key".into()),
+    };
+    let intent = build_intent(
+        effect_ops::LLM_GENERATE,
+        serde_cbor::to_vec(&params).unwrap(),
+    );
+
+    let receipt = adapter.execute(&intent).await.unwrap();
+    assert_eq!(receipt.status, ReceiptStatus::Ok);
+    let payload: aos_effects::builtins::LlmGenerateReceipt =
+        serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    assert_eq!(payload.provider_context_items.len(), 1);
+    let item = payload.provider_context_items.first().unwrap();
+    assert!(matches!(
+        item.kind,
+        LlmWindowItemKind::ProviderNativeArtifactRef
+    ));
+    assert_eq!(item.source_refs, vec![message_ref]);
+    let compat = item
+        .provider_compatibility
+        .as_ref()
+        .expect("provider compatibility");
+    assert_eq!(compat.provider, "openai-responses");
+    assert_eq!(compat.api_kind, "responses");
+    assert_eq!(compat.artifact_type, "compaction");
+    assert!(compat.encrypted);
+}
+
+#[tokio::test]
 async fn llm_compact_adapter_returns_provider_native_window_items() {
     if !loopback_available().await {
         eprintln!(

@@ -466,6 +466,8 @@ pub struct LlmGenerateReceipt {
     pub raw_output_ref: Option<HashRef>,
     #[serde(default)]
     pub provider_response_id: Option<String>,
+    #[serde(default)]
+    pub provider_context_items: Vec<LlmWindowItem>,
     pub finish_reason: LlmFinishReason,
     pub token_usage: TokenUsage,
     #[serde(default)]

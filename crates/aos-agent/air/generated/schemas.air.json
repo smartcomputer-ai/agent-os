@@ -1493,6 +1493,9 @@
         "ContextOperationStateChanged": {
           "unit": {}
         },
+        "ContextPressureObserved": {
+          "unit": {}
+        },
         "Custom": {
           "record": {
             "kind": {
@@ -1516,6 +1519,9 @@
           "unit": {}
         },
         "LlmRequested": {
+          "unit": {}
+        },
+        "ProviderContextArtifactsObserved": {
           "unit": {}
         },
         "ReceiptSettled": {
