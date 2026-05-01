@@ -18,7 +18,8 @@ Primary outcome:
 4. the workflow can react to provider context pressure signals such as context-limit failures, provider compaction recommendations, provider-returned compaction artifacts, and usage returned by successful generations,
 5. OpenAI, Anthropic, and generic model backends can share the same SDK-level control flow while using different provider capabilities underneath,
 6. token counting exists as an optional facility, but it is not required on the normal generation path,
-7. session and run state can show that compaction is pending or in progress, instead of looking idle or failed while context maintenance runs.
+7. session and run state can show that compaction is pending or in progress, instead of looking idle or failed while context maintenance runs,
+8. the agent SDK moves to the compaction-ready context surface in one refactor, without legacy compatibility shims.
 
 ## Problem
 
@@ -280,6 +281,16 @@ They are also lossy. Each summary needs:
 
 Do not pretend summaries preserve the exact original conversation. Preserve originals separately in the transcript ledger.
 
+### 11) Refactor to the new surface in one pass
+
+Treat P11 as a schema and workflow refactor, not an additive compatibility layer.
+
+Replace the current message-ref-only session/context plumbing with `context_state`, `transcript_ledger_ref`, typed `active_window_items`, `ContextOperationState`, and `CompactionRecord` everywhere the agent SDK builds, renders, stores, traces, or tests model context.
+
+Do not keep parallel legacy fields, reducers, adapter branches, harness paths, or migration-only code paths for old experimental agent session state. Backward compatibility with the current experimental agent contracts is not a goal for this phase. Breaking SDK state shape, workflow internals, roadmap examples, and tests is acceptable if they are updated to the compaction-ready surface in the same change.
+
+Provider compatibility metadata is different from backward compatibility. Keep provider compatibility metadata because it prevents unsafe reuse of provider-native artifacts across incompatible providers/models. Do not keep API or state compatibility shims for the old context representation.
+
 ## Proposed Contracts
 
 ### `ActiveWindowItem`
@@ -315,13 +326,12 @@ Fields:
 1. `provider`: provider id,
 2. `model`: model id,
 3. `window_items`: active-window items or a ref to a rendered candidate window,
-4. `message_refs`: compatibility field for simple message-ref windows,
-5. `tool_definitions_ref`: optional tool definitions blob ref,
-6. `response_format_ref`: optional response format ref,
-7. `provider_options_ref`: optional provider options ref,
-8. `rendering_profile`: optional provider/API rendering mode,
-9. `candidate_plan_id`: optional plan identity for stale-result protection,
-10. `metadata`: freeform request metadata.
+4. `tool_definitions_ref`: optional tool definitions blob ref,
+5. `response_format_ref`: optional response format ref,
+6. `provider_options_ref`: optional provider options ref,
+7. `rendering_profile`: optional provider/API rendering mode,
+8. `candidate_plan_id`: optional plan identity for stale-result protection,
+9. `metadata`: freeform request metadata.
 
 ### `LlmCountTokensReceipt`
 
@@ -348,16 +358,14 @@ Fields:
 3. `strategy`: `ProviderNative | AosSummary | Auto`,
 4. `source_range`: compactable transcript ledger range,
 5. `source_items`: optional explicit active-window items,
-6. `source_refs`: compatibility field for explicit refs,
-7. `preserve_items`: active-window items that must remain verbatim,
-8. `preserve_refs`: compatibility field for refs that must remain verbatim,
-9. `recent_tail_count`: minimum recent messages to keep verbatim,
-10. `target_input_tokens`: optional target budget,
-11. `summary_prompt_ref`: optional prompt ref for AOS summary strategy,
-12. `provider_options_ref`: optional provider-specific options,
-13. `candidate_plan_id`: optional plan identity for stale-result protection,
-14. `operation_id`: workflow-assigned context operation id,
-15. `metadata`: freeform request metadata.
+6. `preserve_items`: active-window items that must remain verbatim,
+7. `recent_tail_count`: minimum recent messages to keep verbatim,
+8. `target_input_tokens`: optional target budget,
+9. `summary_prompt_ref`: optional prompt ref for AOS summary strategy,
+10. `provider_options_ref`: optional provider-specific options,
+11. `candidate_plan_id`: optional plan identity for stale-result protection,
+12. `operation_id`: workflow-assigned context operation id,
+13. `metadata`: freeform request metadata.
 
 ### `LlmCompactReceipt`
 
@@ -369,12 +377,11 @@ Fields:
 4. `compacted_range`: transcript ledger range represented by the artifacts,
 5. `compacted_through`: transcript ledger sequence marker,
 6. `active_window_items`: recommended replacement items for the compacted portion,
-7. `active_window_refs`: compatibility replacement refs for simple windows,
-8. `usage`: optional usage record, including provider compaction iterations when available,
-9. `provider`: provider id,
-10. `model`: model id,
-11. `provider_metadata_ref`: optional CBOR/JSON ref,
-12. `warnings`: list of strings or typed warning codes.
+7. `usage`: optional usage record, including provider compaction iterations when available,
+8. `provider`: provider id,
+9. `model`: model id,
+10. `provider_metadata_ref`: optional CBOR/JSON ref,
+11. `warnings`: list of strings or typed warning codes.
 
 ### `ContextPressureRecord`
 
@@ -443,7 +450,7 @@ Run state should be able to point at a blocking context operation:
 2. `pending_llm_turn_refs` remains untouched until compaction is applied or explicitly cancelled,
 3. run lifecycle remains `Running` or `WaitingInput` according to existing semantics; do not add a terminal compaction lifecycle.
 
-Existing `transcript_message_refs` can be migrated into the ledger/window split. Because this SDK is still experimental, prefer the clean split over compatibility shims.
+Replace existing `transcript_message_refs` usage with the ledger/window split in the same implementation pass. Do not keep `transcript_message_refs` as a live fallback or mirror field after P11 lands.
 
 ## Proposed Planner Prerequisites
 
@@ -495,9 +502,10 @@ Implement the narrowest useful version:
 8. add contracts for `sys/llm.count_tokens@1` for schema completeness, but adapter implementation can be minimal or stubbed in the first cut,
 9. allow the first implementation to back `sys/llm.compact@1` with a scripted or ordinary LLM summarization path,
 10. preserve provider-native artifacts from `sys/llm.generate@1` receipts as raw refs/metadata even if full provider adapter compaction support is deferred,
-11. keep live provider optimization minimal until the planner/state path is proven.
+11. remove legacy message-ref-only session/context code paths rather than keeping them beside the new surface,
+12. keep live provider optimization minimal until the planner/state path is proven.
 
-Do not implement a full summarizer, memory engine, full provider compatibility matrix, or UI in the first cut.
+Do not implement a full summarizer, memory engine, full provider compatibility matrix, or UI in the first cut. Also do not implement compatibility shims for pre-P11 experimental agent session state.
 
 ## Deferred
 
@@ -528,4 +536,5 @@ Do not implement a full summarizer, memory engine, full provider compatibility m
 10. [ ] provider-native compaction artifacts returned from ordinary generation are surfaced in receipts/traces instead of flattened away,
 11. [ ] AOS summaries are represented as normal refs with source ranges and usage metadata,
 12. [ ] token counting is represented as optional `sys/llm.count_tokens@1` and is not required on the default generation path,
-13. [ ] deterministic tests can script context-limit failures, usage-triggered compaction, pending operation state, and compaction receipts without live provider credentials.
+13. [ ] legacy `transcript_message_refs` and simple message-ref-only active-window paths are removed from the agent SDK after the new surface lands,
+14. [ ] deterministic tests can script context-limit failures, usage-triggered compaction, pending operation state, and compaction receipts without live provider credentials.
