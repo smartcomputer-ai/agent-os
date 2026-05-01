@@ -19,6 +19,7 @@ use aos_wasm_sdk::{ReduceError, Value, Workflow, WorkflowCtx};
         aos_wasm_sdk::BlobPutParams,
         aos_wasm_sdk::BlobGetParams,
         aos_wasm_sdk::LlmGenerateParams,
+        aos_wasm_sdk::LlmCompactParams,
         aos_wasm_sdk::HostSessionOpenParams,
         aos_wasm_sdk::HostExecParams,
         aos_wasm_sdk::HostSessionSignalParams,

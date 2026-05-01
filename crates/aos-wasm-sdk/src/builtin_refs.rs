@@ -39,6 +39,13 @@ impl_air_schema_ref!(aos_effect_types::TextOrSecretRef => "sys/TextOrSecretRef@1
 impl_air_schema_ref!(aos_effect_types::LlmToolChoice => "sys/LlmToolChoice@1");
 impl_air_schema_ref!(aos_effect_types::LlmRuntimeArgs => "sys/LlmRuntimeArgs@1");
 impl_air_schema_ref!(aos_effect_types::LlmGenerateParams => "sys/LlmGenerateParams@1");
+impl_air_schema_ref!(aos_effect_types::LlmCompactParams => "sys/LlmCompactParams@1");
+impl_air_schema_ref!(aos_effect_types::LlmCompactReceipt => "sys/LlmCompactReceipt@1");
+impl_air_schema_ref!(aos_effect_types::LlmCompactStrategy => "sys/LlmCompactStrategy@1");
+impl_air_schema_ref!(
+    aos_effect_types::LlmCompactionArtifactKind => "sys/LlmCompactionArtifactKind@1"
+);
+impl_air_schema_ref!(aos_effect_types::LlmTranscriptRange => "sys/LlmTranscriptRange@1");
 impl_air_schema_ref!(aos_effect_types::LlmToolCall => "sys/LlmToolCall@1");
 impl_air_schema_ref!(aos_effect_types::LlmOutputEnvelope => "sys/LlmOutputEnvelope@1");
 impl_air_schema_ref!(aos_effect_types::LlmGenerateReceipt => "sys/LlmGenerateReceipt@1");
@@ -164,6 +171,7 @@ impl_air_effect_ref!(aos_effect_types::HostFsStatParams => "sys/host.fs.stat@1")
 impl_air_effect_ref!(aos_effect_types::HostFsExistsParams => "sys/host.fs.exists@1");
 impl_air_effect_ref!(aos_effect_types::HostFsListDirParams => "sys/host.fs.list_dir@1");
 impl_air_effect_ref!(aos_effect_types::LlmGenerateParams => "sys/llm.generate@1");
+impl_air_effect_ref!(aos_effect_types::LlmCompactParams => "sys/llm.compact@1");
 impl_air_effect_ref!(aos_effect_types::VaultPutParams => "sys/vault.put@1");
 impl_air_effect_ref!(aos_effect_types::VaultRotateParams => "sys/vault.rotate@1");
 impl_air_effect_ref!(aos_effect_types::GovProposeParams => "sys/governance.propose@1");

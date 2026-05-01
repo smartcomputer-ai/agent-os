@@ -402,21 +402,21 @@ pub fn build_session_handoff_plan(request: &SessionHandoffRequest) -> SessionHan
         });
     run_overrides.default_tool_profile = Some(tool_profile.clone());
 
+    let registry = local_coding_agent_tool_registry();
+    let mut profiles = local_coding_agent_tool_profiles();
     if let Some(allowed_tools) = request.allowed_tools.clone() {
-        let registry = local_coding_agent_tool_registry();
-        let mut profiles = local_coding_agent_tool_profiles();
         profiles.insert(tool_profile.clone(), allowed_tools);
-        inputs.push(SessionInput {
-            session_id: request.session_id.clone(),
-            observed_at_ns,
-            input: SessionInputKind::ToolRegistrySet {
-                registry,
-                profiles: Some(profiles),
-                default_profile: Some(tool_profile.clone()),
-            },
-        });
-        observed_at_ns = observed_at_ns.saturating_add(1);
     }
+    inputs.push(SessionInput {
+        session_id: request.session_id.clone(),
+        observed_at_ns,
+        input: SessionInputKind::ToolRegistrySet {
+            registry,
+            profiles: Some(profiles),
+            default_profile: Some(tool_profile.clone()),
+        },
+    });
+    observed_at_ns = observed_at_ns.saturating_add(1);
 
     inputs.push(SessionInput {
         session_id: request.session_id.clone(),
@@ -689,5 +689,53 @@ mod tests {
             plan.inputs[2].input,
             SessionInputKind::RunStartRequested { .. }
         ));
+    }
+
+    #[test]
+    fn handoff_plan_emits_default_registry_without_allowed_tool_override() {
+        let plan = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::Handoff(
+            SessionHandoffRequest {
+                first_observed_at_ns: 10,
+                session_id: SessionId("s-1".into()),
+                input_ref:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                run_cause: None,
+                host_session_id: "hs_1".into(),
+                run_overrides: SessionConfig {
+                    provider: "openai-responses".into(),
+                    model: "gpt-5.3-codex".into(),
+                    reasoning_effort: None,
+                    max_tokens: Some(512),
+                    default_prompt_refs: None,
+                    default_tool_profile: None,
+                    default_tool_enable: None,
+                    default_tool_disable: None,
+                    default_tool_force: None,
+                    default_host_session_open: None,
+                },
+                allowed_tools: None,
+            },
+        )) {
+            SpawnOrHandoffSessionPlan::Handoff(plan) => plan,
+            other => panic!("unexpected plan: {other:?}"),
+        };
+
+        assert_eq!(plan.inputs.len(), 3);
+        let SessionInputKind::ToolRegistrySet {
+            registry,
+            profiles,
+            default_profile,
+        } = &plan.inputs[0].input
+        else {
+            panic!("expected ToolRegistrySet first");
+        };
+        assert!(registry.contains_key("host.exec"));
+        assert_eq!(default_profile.as_deref(), Some("openai"));
+        assert!(
+            profiles
+                .as_ref()
+                .and_then(|profiles| profiles.get("openai"))
+                .is_some_and(|tools| tools.iter().any(|tool| tool == "host.exec"))
+        );
     }
 }

@@ -10,6 +10,7 @@
       "sys/blob.put@1",
       "sys/blob.get@1",
       "sys/llm.generate@1",
+      "sys/llm.compact@1",
       "sys/host.session.open@1",
       "sys/host.exec@1",
       "sys/host.session.signal@1",
