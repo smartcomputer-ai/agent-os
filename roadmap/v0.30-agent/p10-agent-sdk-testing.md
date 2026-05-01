@@ -253,7 +253,7 @@ Done:
    `require_trace_kinds`.
 4. added `run_history_summaries` and `last_llm_usage`.
 
-### [ ] 5) Add first deterministic agent fixtures
+### [x] 5) Add first deterministic agent fixtures
 
 Add a narrow set first:
 
@@ -273,12 +273,11 @@ new agent workflows, not to port current `aos-agent-eval` cases.
 
 Progress:
 
-1. `crates/aos-harness-py/examples/agent_no_tool_llm.py` demonstrates the no-tool LLM completion
-   lane using `aos_harness.agent`.
-2. Remaining work is to turn examples into checked fixtures and add host-ready planning,
-   tool-call, intervention, and domain-event coverage.
+1. `crates/aos-harness-py/tests/test_agent_workflow.py` adds checked pytest coverage for no-tool
+   completion, host-session-ready tool planning, scripted tool-call follow-up, interrupt
+   intervention, and domain-event run cause provenance.
 
-### [ ] 6) Add replay/reopen checks
+### [x] 6) Add replay/reopen checks
 
 Required outcome:
 
@@ -289,9 +288,8 @@ Required outcome:
 
 Progress:
 
-1. `agent_no_tool_llm.py` includes a basic `WorkflowHarness.reopen()` assertion for the completed
-   no-tool run.
-2. Remaining work is to apply reopen checks consistently across the deterministic fixture suite.
+1. `crates/aos-harness-py/tests/test_agent_workflow.py` includes checked reopen coverage for the
+   no-tool deterministic run.
 
 ### [x] 7) Defer broad eval migration and Fabric modes
 
