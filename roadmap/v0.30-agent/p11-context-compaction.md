@@ -3,7 +3,7 @@
 **Priority**: P1
 **Effort**: Large
 **Risk if deferred**: High (long-running sessions will eventually overflow provider windows, and compaction decisions will be hard to audit if hidden inside provider adapters)
-**Status**: Proposed
+**Status**: In progress
 **Depends on**: `roadmap/v0.30-agent/p5-session-run-model.md`, `roadmap/v0.30-agent/p6-turn-planner.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
 
 ## Goal
@@ -358,19 +358,18 @@ Fields:
 
 Fields:
 
-1. `provider`: provider id,
-2. `model`: model id,
-3. `strategy`: `ProviderNative | AosSummary | Auto`,
-4. `source_range`: compactable transcript ledger range,
-5. `source_items`: optional explicit active-window items,
-6. `preserve_items`: active-window items that must remain verbatim,
-7. `recent_tail_count`: minimum recent messages to keep verbatim,
-8. `target_input_tokens`: optional target budget,
-9. `summary_prompt_ref`: optional prompt ref for AOS summary strategy,
-10. `provider_options_ref`: optional provider-specific options,
-11. `candidate_plan_id`: optional plan identity for stale-result protection,
-12. `operation_id`: workflow-assigned context operation id,
-13. `metadata`: freeform request metadata.
+1. `correlation_id`: optional request correlation id,
+2. `operation_id`: workflow-assigned context operation id,
+3. `provider`: provider id,
+4. `model`: model id,
+5. `strategy`: `ProviderNative | AosSummary | Auto`,
+6. `source_window_items`: active-window items selected for compaction,
+7. `preserve_window_items`: active-window items that must remain verbatim,
+8. `recent_tail_items`: recent active-window items retained verbatim,
+9. `source_range`: optional compactable transcript ledger range,
+10. `target_tokens`: optional target budget for the replacement window,
+11. `provider_options_ref`: optional provider-specific options,
+12. `api_key`: optional literal or secret ref, matching the LLM adapter credential surface.
 
 ### `LlmCompactReceipt`
 
@@ -379,14 +378,13 @@ Fields:
 1. `operation_id`: workflow-assigned context operation id,
 2. `artifact_refs`: refs to summary/provider-native artifacts,
 3. `artifact_kind`: `AosSummary | ProviderNative | Mixed`,
-4. `compacted_range`: transcript ledger range represented by the artifacts,
+4. `source_range`: transcript ledger range represented by the artifacts,
 5. `compacted_through`: transcript ledger sequence marker,
 6. `active_window_items`: recommended replacement items for the compacted portion,
-7. `usage`: optional usage record, including provider compaction iterations when available,
-8. `provider`: provider id,
-9. `model`: model id,
-10. `provider_metadata_ref`: optional CBOR/JSON ref,
-11. `warnings`: list of strings or typed warning codes.
+7. `token_usage`: optional token usage, including provider compaction iterations when available,
+8. `provider_metadata_ref`: optional CBOR/JSON ref,
+9. `warnings_ref`: optional warnings blob ref,
+10. `provider_id`: provider id that produced the artifact.
 
 ### `ContextPressureRecord`
 
@@ -457,6 +455,16 @@ Run state should be able to point at a blocking context operation:
 
 Replace existing `transcript_message_refs` usage with the ledger/window split in the same implementation pass. Do not keep `transcript_message_refs` as a live fallback or mirror field after P11 lands.
 
+Expose a low-level session input for context maintenance state changes:
+
+1. `ContextOperationUpdated { operation: Option<ContextOperationState> }` sets or clears the pending context operation,
+2. `ContextOperationPhase::Idle` clears the pending operation just like `None`,
+3. any non-idle pending operation blocks LLM generation through a planner prerequisite,
+4. `NeedsCompaction`, `Compacting`, `ApplyingCompaction`, and `Failed` map to `CompactContext`,
+5. `CountingTokens` maps to `CountTokens`.
+
+This input is the primitive for tests, operators, and future finalizer logic to initiate and track compaction without encoding compaction as a session lifecycle.
+
 ## Proposed Planner Prerequisites
 
 Extend turn planning prerequisites with:
@@ -511,6 +519,18 @@ Implement the narrowest useful version:
 12. keep live provider optimization minimal until the planner/state path is proven.
 
 Do not implement a full summarizer, memory engine, full provider compatibility matrix, or UI in the first cut. Also do not implement compatibility shims for pre-P11 experimental agent session state.
+
+### First backend
+
+Start with deterministic backends, not provider-native compaction:
+
+1. register `sys/llm.compact@1` and the `llm.compact` route alias in the adapter registry,
+2. add a `StubLlmCompactAdapter` that decodes `LlmCompactParams` and returns a deterministic `LlmCompactReceipt` with an `AosSummary` active-window item,
+3. extend `MockLlmHarness` so tests can collect compact requests and respond with a stored AOS-summary blob,
+4. let the workflow apply the compact receipt, append a `CompactionRecord`, update `compacted_through`, replace `active_window_items`, clear the pending operation, and unblock the pending LLM turn,
+5. keep OpenAI and Anthropic native compaction adapters deferred until the agent state machine and AIR surface are proven with deterministic tests.
+
+This means the first backend is effectively stub/mock plus scripted AOS-summary behavior. It is the right starting point because compaction correctness is primarily a workflow/state transition problem: provider-native implementations should only plug in after `sys/llm.compact@1` receipts, traces, and active-window replacement are deterministic.
 
 ## Deferred
 

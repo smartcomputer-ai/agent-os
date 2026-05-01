@@ -201,6 +201,96 @@ fn llm_generate_receipt_requires_token_usage_fields() {
 }
 
 #[test]
+fn llm_compact_params_and_receipt_literals_match_builtin_schemas() {
+    let schemas = SchemaIndex::new(
+        builtin_schemas()
+            .iter()
+            .map(|schema| (schema.schema.name.clone(), schema.schema.ty.clone()))
+            .collect(),
+    );
+    let message_ref =
+        hash("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let summary_ref =
+        hash("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+    let source_range = record(vec![("start_seq", nat(0)), ("end_seq", nat(1))]);
+    let source_item = record(vec![
+        ("item_id", text("ledger:0")),
+        ("kind", variant("MessageRef", null())),
+        ("ref_", message_ref.clone()),
+        ("lane", null()),
+        ("source_range", source_range.clone()),
+        ("source_refs", list(vec![message_ref])),
+        ("provider_compatibility", null()),
+        ("estimated_tokens", nat(128)),
+        ("metadata", map(vec![])),
+    ]);
+    let summary_item = record(vec![
+        ("item_id", text("compact:ctx-op-1:summary")),
+        ("kind", variant("AosSummaryRef", null())),
+        ("ref_", summary_ref.clone()),
+        ("lane", text("Summary")),
+        ("source_range", source_range.clone()),
+        ("source_refs", list(vec![summary_ref.clone()])),
+        ("provider_compatibility", null()),
+        ("estimated_tokens", nat(32)),
+        ("metadata", map(vec![])),
+    ]);
+
+    let params_schema =
+        find_builtin_schema("sys/LlmCompactParams@1").expect("llm compact params schema");
+    let params_literal = record(vec![
+        ("correlation_id", null()),
+        ("operation_id", text("ctx-op-1")),
+        ("provider", text("openai")),
+        ("model", text("gpt-5.2")),
+        ("strategy", variant("AosSummary", null())),
+        ("source_window_items", list(vec![source_item])),
+        ("preserve_window_items", list(vec![])),
+        ("recent_tail_items", list(vec![])),
+        ("source_range", source_range.clone()),
+        ("target_tokens", nat(1024)),
+        ("provider_options_ref", null()),
+        ("api_key", null()),
+    ]);
+    validate_literal(
+        &params_literal,
+        &params_schema.schema.ty,
+        &params_schema.schema.name,
+        &schemas,
+    )
+    .expect("params literal matches schema");
+
+    let receipt_schema =
+        find_builtin_schema("sys/LlmCompactReceipt@1").expect("llm compact receipt schema");
+    let receipt_literal = record(vec![
+        ("operation_id", text("ctx-op-1")),
+        ("artifact_kind", variant("AosSummary", null())),
+        ("artifact_refs", list(vec![summary_ref])),
+        ("source_range", source_range),
+        ("compacted_through", nat(1)),
+        ("active_window_items", list(vec![summary_item])),
+        (
+            "token_usage",
+            record(vec![
+                ("prompt", nat(128)),
+                ("completion", nat(32)),
+                ("total", nat(160)),
+            ]),
+        ),
+        ("provider_metadata_ref", null()),
+        ("warnings_ref", null()),
+        ("provider_id", text("llm.mock")),
+    ]);
+    validate_literal(
+        &receipt_literal,
+        &receipt_schema.schema.ty,
+        &receipt_schema.schema.name,
+        &schemas,
+    )
+    .expect("receipt literal matches schema");
+}
+
+#[test]
 fn host_target_accepts_local_and_sandbox_variants() {
     let schema = find_builtin_schema("sys/HostTarget@1").expect("host target schema");
     let schemas = SchemaIndex::new(

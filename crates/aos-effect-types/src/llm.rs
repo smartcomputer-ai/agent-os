@@ -294,6 +294,64 @@ pub struct LlmGenerateParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum LlmCompactStrategy {
+    ProviderNative,
+    AosSummary,
+    Auto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum LlmCompactionArtifactKind {
+    AosSummary,
+    ProviderNative,
+    Mixed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmCompactParams {
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    pub operation_id: String,
+    pub provider: String,
+    pub model: String,
+    pub strategy: LlmCompactStrategy,
+    pub source_window_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub preserve_window_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub recent_tail_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub source_range: Option<LlmTranscriptRange>,
+    #[serde(default)]
+    pub target_tokens: Option<u64>,
+    #[serde(default)]
+    pub provider_options_ref: Option<HashRef>,
+    #[serde(default)]
+    pub api_key: Option<TextOrSecretRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmCompactReceipt {
+    pub operation_id: String,
+    pub artifact_kind: LlmCompactionArtifactKind,
+    pub artifact_refs: Vec<HashRef>,
+    #[serde(default)]
+    pub source_range: Option<LlmTranscriptRange>,
+    #[serde(default)]
+    pub compacted_through: Option<u64>,
+    pub active_window_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub token_usage: Option<TokenUsage>,
+    #[serde(default)]
+    pub provider_metadata_ref: Option<HashRef>,
+    #[serde(default)]
+    pub warnings_ref: Option<HashRef>,
+    pub provider_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LlmFinishReason {
     pub reason: String,
     #[serde(default)]

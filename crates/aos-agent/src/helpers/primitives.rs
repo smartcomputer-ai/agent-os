@@ -11,16 +11,21 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use aos_effects::builtins::{
     BlobGetParams, BlobPutParams, HostLocalTarget, HostSessionOpenParams, HostTarget,
-    LlmGenerateParams, TextOrSecretRef,
+    LlmCompactParams, LlmGenerateParams, TextOrSecretRef,
 };
 use aos_wasm_sdk::{PendingEffect, ReduceError, Value, WorkflowCtx};
 
+use super::llm::LlmCompactStepContext;
 use super::llm::LlmStepContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEffectCommand {
     LlmGenerate {
         params: LlmGenerateParams,
+        pending: PendingEffect,
+    },
+    LlmCompact {
+        params: LlmCompactParams,
         pending: PendingEffect,
     },
     ToolEffect {
@@ -42,6 +47,7 @@ impl SessionEffectCommand {
     pub fn pending(&self) -> &PendingEffect {
         match self {
             Self::LlmGenerate { pending, .. }
+            | Self::LlmCompact { pending, .. }
             | Self::ToolEffect { pending, .. }
             | Self::BlobPut { pending, .. }
             | Self::BlobGet { pending, .. } => pending,
@@ -53,6 +59,13 @@ impl SessionEffectCommand {
             Self::LlmGenerate { params, pending } => {
                 ctx.effects().emit_raw_with_issuer_ref(
                     "sys/llm.generate@1",
+                    &params,
+                    pending.issuer_ref.as_deref(),
+                );
+            }
+            Self::LlmCompact { params, pending } => {
+                ctx.effects().emit_raw_with_issuer_ref(
+                    "sys/llm.compact@1",
                     &params,
                     pending.issuer_ref.as_deref(),
                 );
@@ -153,9 +166,20 @@ pub struct RequestLlm {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestLlmCompact {
+    pub step: LlmCompactStepContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestedLlm {
     pub pending: PendingEffect,
     pub params: LlmGenerateParams,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestedLlmCompact {
+    pub pending: PendingEffect,
+    pub params: LlmCompactParams,
 }
 
 pub fn request_llm(
@@ -178,6 +202,28 @@ pub fn request_llm(
         pending: pending.clone(),
     });
     Ok(RequestedLlm { pending, params })
+}
+
+pub fn request_llm_compact(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+    mut request: RequestLlmCompact,
+) -> Result<RequestedLlmCompact, SessionWorkflowError> {
+    let run_config = state
+        .active_run_config
+        .clone()
+        .ok_or(SessionWorkflowError::RunNotActive)?;
+    if request.step.api_key.is_none() {
+        request.step.api_key = provider_secret_ref(run_config.provider.as_str());
+    }
+    let params = crate::helpers::llm::materialize_llm_compact_params(&run_config, &request.step)
+        .map_err(map_llm_mapping_error)?;
+    let pending = begin_pending_effect(state, "sys/llm.compact@1", &params, None);
+    out.effects.push(SessionEffectCommand::LlmCompact {
+        params: params.clone(),
+        pending: pending.clone(),
+    });
+    Ok(RequestedLlmCompact { pending, params })
 }
 
 pub fn session_lifecycle_changed_payload(

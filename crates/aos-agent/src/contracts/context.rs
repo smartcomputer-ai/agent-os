@@ -192,11 +192,29 @@ pub struct ContextPressureRecord {
 #[serde(tag = "$tag", content = "$value")]
 pub enum ContextOperationPhase {
     #[default]
+    Idle,
     NeedsCompaction,
     CountingTokens,
     Compacting,
     ApplyingCompaction,
     Failed,
+}
+
+impl ContextOperationPhase {
+    pub fn blocks_generation(&self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Idle => "Idle",
+            Self::NeedsCompaction => "NeedsCompaction",
+            Self::CountingTokens => "CountingTokens",
+            Self::Compacting => "Compacting",
+            Self::ApplyingCompaction => "ApplyingCompaction",
+            Self::Failed => "Failed",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
@@ -219,6 +237,35 @@ pub struct ContextOperationState {
     pub started_at_ns: u64,
     #[aos(air_type = "time")]
     pub updated_at_ns: u64,
+}
+
+impl ContextOperationState {
+    pub fn needs_compaction(
+        operation_id: impl Into<String>,
+        reason: ContextPressureReason,
+        strategy: CompactionStrategy,
+        source_range: Option<TranscriptRange>,
+        now_ns: u64,
+    ) -> Self {
+        Self {
+            operation_id: operation_id.into(),
+            phase: ContextOperationPhase::NeedsCompaction,
+            reason,
+            candidate_plan_id: None,
+            strategy,
+            source_range,
+            source_items_ref: None,
+            effect_intent_id: None,
+            params_hash: None,
+            failure: None,
+            started_at_ns: now_ns,
+            updated_at_ns: now_ns,
+        }
+    }
+
+    pub fn blocks_generation(&self) -> bool {
+        self.phase.blocks_generation()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
@@ -255,6 +302,18 @@ pub struct ContextState {
 }
 
 impl ContextState {
+    pub fn set_pending_operation(&mut self, operation: ContextOperationState) {
+        if matches!(operation.phase, ContextOperationPhase::Idle) {
+            self.pending_context_operation = None;
+        } else {
+            self.pending_context_operation = Some(operation);
+        }
+    }
+
+    pub fn clear_pending_operation(&mut self) {
+        self.pending_context_operation = None;
+    }
+
     pub fn append_message_refs(
         &mut self,
         refs: impl IntoIterator<Item = String>,

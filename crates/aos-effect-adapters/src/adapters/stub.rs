@@ -2,8 +2,9 @@ use anyhow::Context;
 use aos_air_types::HashRef;
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, HeaderMap, HttpRequestParams,
-    HttpRequestReceipt, LlmFinishReason, LlmGenerateParams, LlmGenerateReceipt, RequestTimings,
-    TimerSetParams, TimerSetReceipt, TokenUsage,
+    HttpRequestReceipt, LlmCompactParams, LlmCompactReceipt, LlmCompactionArtifactKind,
+    LlmFinishReason, LlmGenerateParams, LlmGenerateReceipt, LlmWindowItem, LlmWindowItemKind,
+    RequestTimings, TimerSetParams, TimerSetReceipt, TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use async_trait::async_trait;
@@ -75,6 +76,69 @@ impl AsyncEffectAdapter for StubLlmAdapter {
             intent_hash: intent.intent_hash,
             status: ReceiptStatus::Ok,
             payload_cbor: encode_receipt_payload("llm.generate", &receipt_payload)?,
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        })
+    }
+}
+
+pub struct StubLlmCompactAdapter;
+
+#[async_trait]
+impl AsyncEffectAdapter for StubLlmCompactAdapter {
+    fn kind(&self) -> &str {
+        "llm.compact"
+    }
+
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+        let params: LlmCompactParams =
+            serde_cbor::from_slice(&intent.params_cbor).context("decode llm.compact params")?;
+        let artifact_ref = fake_hashref(0x41);
+        let active_window_items =
+            if params.preserve_window_items.is_empty() && params.recent_tail_items.is_empty() {
+                vec![LlmWindowItem {
+                    item_id: format!("compact:{}:summary", params.operation_id),
+                    kind: LlmWindowItemKind::AosSummaryRef,
+                    ref_: artifact_ref.clone(),
+                    lane: Some("Summary".into()),
+                    source_range: params.source_range.clone(),
+                    source_refs: params
+                        .source_window_items
+                        .iter()
+                        .map(|item| item.ref_.clone())
+                        .collect(),
+                    provider_compatibility: None,
+                    estimated_tokens: params.target_tokens,
+                    metadata: Default::default(),
+                }]
+            } else {
+                params
+                    .preserve_window_items
+                    .iter()
+                    .chain(params.recent_tail_items.iter())
+                    .cloned()
+                    .collect()
+            };
+        let receipt_payload = LlmCompactReceipt {
+            operation_id: params.operation_id,
+            artifact_kind: LlmCompactionArtifactKind::AosSummary,
+            artifact_refs: vec![artifact_ref],
+            source_range: params.source_range,
+            compacted_through: None,
+            active_window_items,
+            token_usage: Some(TokenUsage {
+                prompt: 0,
+                completion: 0,
+                total: Some(0),
+            }),
+            provider_metadata_ref: None,
+            warnings_ref: None,
+            provider_id: params.provider,
+        };
+        Ok(EffectReceipt {
+            intent_hash: intent.intent_hash,
+            status: ReceiptStatus::Ok,
+            payload_cbor: encode_receipt_payload("llm.compact", &receipt_payload)?,
             cost_cents: Some(0),
             signature: vec![0; 64],
         })

@@ -23,6 +23,10 @@ pub enum RunTraceEntryKind {
     ReceiptSettled,
     InterventionRequested,
     InterventionApplied,
+    ContextOperationStateChanged,
+    CompactionRequested,
+    CompactionReceived,
+    ActiveWindowUpdated,
     RunFinished,
     Custom {
         kind: String,

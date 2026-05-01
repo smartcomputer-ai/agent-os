@@ -1,8 +1,9 @@
 use crate::contracts::{
-    ActiveWindowItem, HostSessionStatus, RunCause, RunConfig, RunId, SessionId, SessionTurnState,
-    ToolExecutor, ToolMapper, ToolRuntimeContext, ToolSpec, TurnBudget, TurnInput, TurnInputKind,
-    TurnInputLane, TurnPlan, TurnPrerequisite, TurnPrerequisiteKind, TurnPriority, TurnReport,
-    TurnStateUpdate, TurnTokenEstimate, TurnToolChoice, TurnToolInput,
+    ActiveWindowItem, ContextOperationPhase, ContextOperationState, HostSessionStatus, RunCause,
+    RunConfig, RunId, SessionId, SessionTurnState, ToolExecutor, ToolMapper, ToolRuntimeContext,
+    ToolSpec, TurnBudget, TurnInput, TurnInputKind, TurnInputLane, TurnPlan, TurnPrerequisite,
+    TurnPrerequisiteKind, TurnPriority, TurnReport, TurnStateUpdate, TurnTokenEstimate,
+    TurnToolChoice, TurnToolInput,
 };
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
@@ -23,6 +24,7 @@ pub struct TurnRequest<'a> {
     pub registry: &'a BTreeMap<String, ToolSpec>,
     pub profiles: &'a BTreeMap<String, Vec<String>>,
     pub runtime: &'a ToolRuntimeContext,
+    pub pending_context_operation: Option<&'a ContextOperationState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,13 +134,17 @@ pub fn build_default_turn_plan(request: TurnRequest<'_>) -> Result<TurnPlan, Tur
         return Err(TurnPlanError::EmptySelection);
     }
 
-    let (selected_tool_ids, dropped_tool_count, tool_tokens, unknown_tool_count, prerequisites) =
+    let (selected_tool_ids, dropped_tool_count, tool_tokens, unknown_tool_count, mut prerequisites) =
         select_tools(
             &request,
             message_tokens,
             &mut decision_codes,
             &mut unresolved,
         )?;
+    if let Some(prerequisite) = context_operation_prerequisite(request.pending_context_operation) {
+        unresolved.push("context_operation_pending".into());
+        prerequisites.push(prerequisite);
+    }
     let selected_tool_count = selected_tool_ids.len() as u64;
 
     if !prerequisites.is_empty() {
@@ -180,6 +186,31 @@ pub fn build_default_turn_plan(request: TurnRequest<'_>) -> Result<TurnPlan, Tur
             decision_codes,
             unresolved,
         },
+    })
+}
+
+fn context_operation_prerequisite(
+    operation: Option<&ContextOperationState>,
+) -> Option<TurnPrerequisite> {
+    let operation = operation?;
+    if !operation.blocks_generation() {
+        return None;
+    }
+    let kind = if matches!(operation.phase, ContextOperationPhase::CountingTokens) {
+        TurnPrerequisiteKind::CountTokens
+    } else {
+        TurnPrerequisiteKind::CompactContext
+    };
+    Some(TurnPrerequisite {
+        prerequisite_id: format!("context_operation:{}", operation.operation_id),
+        kind,
+        reason: format!(
+            "context operation '{}' is {}",
+            operation.operation_id,
+            operation.phase.as_str()
+        ),
+        input_ids: Vec::new(),
+        tool_ids: Vec::new(),
     })
 }
 
@@ -370,7 +401,10 @@ pub fn apply_turn_state_updates(state: &mut SessionTurnState, updates: &[TurnSta
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::{HostSessionOpenConfig, HostTargetConfig, ToolExecutor};
+    use crate::contracts::{
+        CompactionStrategy, ContextPressureReason, HostSessionOpenConfig, HostTargetConfig,
+        ToolExecutor,
+    };
     use alloc::boxed::Box;
     use alloc::vec;
 
@@ -428,6 +462,7 @@ mod tests {
             registry,
             profiles: Box::leak(Box::new(BTreeMap::new())),
             runtime,
+            pending_context_operation: None,
         }
     }
 
@@ -566,6 +601,56 @@ mod tests {
         assert!(matches!(
             plan.prerequisites.first().map(|value| &value.kind),
             Some(TurnPrerequisiteKind::OpenHostSession)
+        ));
+    }
+
+    #[test]
+    fn default_planner_maps_context_operation_to_prerequisite() {
+        let mut operation = ContextOperationState::needs_compaction(
+            "ctx-op-1",
+            ContextPressureReason::UsageHighWater,
+            CompactionStrategy::AosSummary,
+            None,
+            0,
+        );
+        let inputs = vec![message(
+            "turn",
+            TurnInputLane::Conversation,
+            TurnPriority::Required,
+            'a',
+        )];
+        let registry = BTreeMap::new();
+        let run_config = RunConfig::default();
+        let runtime = ToolRuntimeContext::default();
+        let mut compact_request = request(
+            &inputs,
+            &[],
+            &registry,
+            &run_config,
+            &runtime,
+            TurnBudget::default(),
+        );
+        compact_request.pending_context_operation = Some(&operation);
+        let plan = build_default_turn_plan(compact_request).expect("plan");
+        assert!(matches!(
+            plan.prerequisites.first().map(|value| &value.kind),
+            Some(TurnPrerequisiteKind::CompactContext)
+        ));
+
+        operation.phase = ContextOperationPhase::CountingTokens;
+        let mut count_request = request(
+            &inputs,
+            &[],
+            &registry,
+            &run_config,
+            &runtime,
+            TurnBudget::default(),
+        );
+        count_request.pending_context_operation = Some(&operation);
+        let plan = build_default_turn_plan(count_request).expect("plan");
+        assert!(matches!(
+            plan.prerequisites.first().map(|value| &value.kind),
+            Some(TurnPrerequisiteKind::CountTokens)
         ));
     }
 }

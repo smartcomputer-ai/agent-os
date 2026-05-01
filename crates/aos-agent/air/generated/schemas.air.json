@@ -263,6 +263,9 @@
         "Failed": {
           "unit": {}
         },
+        "Idle": {
+          "unit": {}
+        },
         "NeedsCompaction": {
           "unit": {}
         }
@@ -1403,6 +1406,18 @@
     "name": "aos.agent/RunTraceEntryKind@1",
     "type": {
       "variant": {
+        "ActiveWindowUpdated": {
+          "unit": {}
+        },
+        "CompactionReceived": {
+          "unit": {}
+        },
+        "CompactionRequested": {
+          "unit": {}
+        },
+        "ContextOperationStateChanged": {
+          "unit": {}
+        },
         "Custom": {
           "record": {
             "kind": {
@@ -1603,6 +1618,15 @@
     "name": "aos.agent/SessionInputKind@1",
     "type": {
       "variant": {
+        "ContextOperationUpdated": {
+          "record": {
+            "operation": {
+              "option": {
+                "ref": "aos.agent/ContextOperationState@1"
+              }
+            }
+          }
+        },
         "FollowUpInputAppended": {
           "record": {
             "input_ref": {

@@ -181,6 +181,16 @@
   },
   {
     "$kind": "defeffect",
+    "name": "sys/llm.compact@1",
+    "params": "sys/LlmCompactParams@1",
+    "receipt": "sys/LlmCompactReceipt@1",
+    "impl": {
+      "module": "sys/builtin_effects@1",
+      "entrypoint": "llm.compact"
+    }
+  },
+  {
+    "$kind": "defeffect",
     "name": "sys/vault.put@1",
     "params": "sys/VaultPutParams@1",
     "receipt": "sys/VaultPutReceipt@1",

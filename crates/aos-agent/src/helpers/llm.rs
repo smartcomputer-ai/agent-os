@@ -5,11 +5,13 @@ use crate::contracts::{
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 use aos_air_types::HashRef;
 use aos_effects::builtins::{
-    LlmGenerateParams, LlmProviderCompatibility, LlmRuntimeArgs, LlmToolChoice, LlmTranscriptRange,
-    LlmWindowItem, LlmWindowItemKind, TextOrSecretRef,
+    LlmCompactParams, LlmCompactStrategy, LlmGenerateParams, LlmProviderCompatibility,
+    LlmRuntimeArgs, LlmToolChoice, LlmTranscriptRange, LlmWindowItem, LlmWindowItemKind,
+    TextOrSecretRef,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +27,20 @@ pub struct LlmStepContext {
     pub metadata: Option<BTreeMap<String, String>>,
     pub provider_options_ref: Option<String>,
     pub response_format_ref: Option<String>,
+    pub api_key: Option<TextOrSecretRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmCompactStepContext {
+    pub correlation_id: Option<String>,
+    pub operation_id: String,
+    pub source_window_items: Vec<ActiveWindowItem>,
+    pub preserve_window_items: Vec<ActiveWindowItem>,
+    pub recent_tail_items: Vec<ActiveWindowItem>,
+    pub source_range: Option<TranscriptRange>,
+    pub strategy: LlmCompactStrategy,
+    pub target_tokens: Option<u64>,
+    pub provider_options_ref: Option<String>,
     pub api_key: Option<TextOrSecretRef>,
 }
 
@@ -121,6 +137,56 @@ pub fn materialize_llm_generate_params(
     })
 }
 
+pub fn materialize_llm_compact_params(
+    run_config: &RunConfig,
+    step: &LlmCompactStepContext,
+) -> Result<LlmCompactParams, LlmMappingError> {
+    let provider = run_config.provider.trim();
+    if provider.is_empty() {
+        return Err(LlmMappingError::MissingProvider);
+    }
+
+    let model = run_config.model.trim();
+    if model.is_empty() {
+        return Err(LlmMappingError::MissingModel);
+    }
+
+    if step.source_window_items.is_empty() {
+        return Err(LlmMappingError::EmptyWindowItems);
+    }
+
+    Ok(LlmCompactParams {
+        correlation_id: step.correlation_id.clone(),
+        operation_id: step.operation_id.clone(),
+        provider: provider.into(),
+        model: model.into(),
+        strategy: step.strategy.clone(),
+        source_window_items: step
+            .source_window_items
+            .iter()
+            .map(map_window_item)
+            .collect::<Result<Vec<_>, _>>()?,
+        preserve_window_items: step
+            .preserve_window_items
+            .iter()
+            .map(map_window_item)
+            .collect::<Result<Vec<_>, _>>()?,
+        recent_tail_items: step
+            .recent_tail_items
+            .iter()
+            .map(map_window_item)
+            .collect::<Result<Vec<_>, _>>()?,
+        source_range: step.source_range.as_ref().map(map_transcript_range),
+        target_tokens: step.target_tokens,
+        provider_options_ref: step
+            .provider_options_ref
+            .as_ref()
+            .map(|value| parse_hash_ref(value.clone()))
+            .transpose()?,
+        api_key: step.api_key.clone(),
+    })
+}
+
 /// Apply prompt refs from run config to a step context.
 pub fn apply_prompt_refs_to_step_context(
     run_config: &RunConfig,
@@ -155,7 +221,7 @@ fn parse_hash_ref(value: String) -> Result<HashRef, LlmMappingError> {
     HashRef::new(value).map_err(|_| LlmMappingError::InvalidHashRef)
 }
 
-fn map_window_item(item: &ActiveWindowItem) -> Result<LlmWindowItem, LlmMappingError> {
+pub fn map_window_item(item: &ActiveWindowItem) -> Result<LlmWindowItem, LlmMappingError> {
     Ok(LlmWindowItem {
         item_id: item.item_id.clone(),
         kind: map_window_item_kind(&item.kind),
@@ -193,6 +259,46 @@ fn map_window_item_kind(kind: &ActiveWindowItemKind) -> LlmWindowItemKind {
     }
 }
 
+pub fn active_window_item_from_llm(item: &LlmWindowItem) -> ActiveWindowItem {
+    ActiveWindowItem {
+        item_id: item.item_id.clone(),
+        kind: active_window_item_kind_from_llm(&item.kind),
+        ref_: item.ref_.to_string(),
+        lane: None,
+        source_range: item.source_range.as_ref().map(transcript_range_from_llm),
+        source_refs: item
+            .source_refs
+            .iter()
+            .map(|value| value.to_string())
+            .collect(),
+        provider_compatibility: item
+            .provider_compatibility
+            .as_ref()
+            .map(provider_compatibility_from_llm),
+        estimated_tokens: item.estimated_tokens,
+        metadata: item
+            .metadata
+            .iter()
+            .map(|(key, value)| crate::contracts::ContextMetadataEntry {
+                key: key.clone(),
+                value: value.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn active_window_item_kind_from_llm(kind: &LlmWindowItemKind) -> ActiveWindowItemKind {
+    match kind {
+        LlmWindowItemKind::MessageRef => ActiveWindowItemKind::MessageRef,
+        LlmWindowItemKind::AosSummaryRef => ActiveWindowItemKind::AosSummaryRef,
+        LlmWindowItemKind::ProviderNativeArtifactRef => {
+            ActiveWindowItemKind::ProviderNativeArtifactRef
+        }
+        LlmWindowItemKind::ProviderRawWindowRef => ActiveWindowItemKind::ProviderRawWindowRef,
+        LlmWindowItemKind::Custom { kind } => ActiveWindowItemKind::Custom { kind: kind.clone() },
+    }
+}
+
 fn map_transcript_range(range: &TranscriptRange) -> LlmTranscriptRange {
     LlmTranscriptRange {
         start_seq: range.start_seq,
@@ -200,8 +306,27 @@ fn map_transcript_range(range: &TranscriptRange) -> LlmTranscriptRange {
     }
 }
 
+fn transcript_range_from_llm(range: &LlmTranscriptRange) -> TranscriptRange {
+    TranscriptRange {
+        start_seq: range.start_seq,
+        end_seq: range.end_seq,
+    }
+}
+
 fn map_provider_compatibility(value: &ProviderCompatibility) -> LlmProviderCompatibility {
     LlmProviderCompatibility {
+        provider: value.provider.clone(),
+        api_kind: value.api_kind.clone(),
+        model: value.model.clone(),
+        model_family: value.model_family.clone(),
+        artifact_type: value.artifact_type.clone(),
+        opaque: value.opaque,
+        encrypted: value.encrypted,
+    }
+}
+
+fn provider_compatibility_from_llm(value: &LlmProviderCompatibility) -> ProviderCompatibility {
+    ProviderCompatibility {
         provider: value.provider.clone(),
         api_kind: value.api_kind.clone(),
         model: value.model.clone(),

@@ -12,8 +12,9 @@ use aos_air_exec::Value as ExprValue;
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_effects::builtins::{
-    HeaderMap, HttpRequestParams, HttpRequestReceipt, LlmGenerateParams, LlmWindowItem,
-    RequestTimings, TextOrSecretRef,
+    HeaderMap, HttpRequestParams, HttpRequestReceipt, LlmCompactParams, LlmCompactReceipt,
+    LlmCompactionArtifactKind, LlmGenerateParams, LlmWindowItem, LlmWindowItemKind, RequestTimings,
+    TextOrSecretRef, TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
 use aos_kernel::Kernel;
@@ -199,6 +200,12 @@ pub struct LlmRequestContext {
     pub params: LlmGenerateParams,
 }
 
+#[derive(Debug, Clone)]
+pub struct LlmCompactRequestContext {
+    pub intent: EffectIntent,
+    pub params: LlmCompactParams,
+}
+
 /// Mock LLM harness for testing LLM effect flows.
 ///
 /// This harness intercepts `llm.generate` effects, validates parameters,
@@ -236,6 +243,32 @@ impl<S: Store + 'static> MockLlmHarness<S> {
                             .context("decode llm.generate params value")?;
                         let params = llm_params_from_cbor(raw)?;
                         out.push(LlmRequestContext { intent, params });
+                    }
+                    other => {
+                        return Err(anyhow!("unexpected effect kind {other}"));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn collect_compact_requests(
+        &mut self,
+        kernel: &mut Kernel<S>,
+    ) -> Result<Vec<LlmCompactRequestContext>> {
+        let mut out = Vec::new();
+        loop {
+            let intents = kernel.drain_effects()?;
+            if intents.is_empty() {
+                break;
+            }
+            for intent in intents {
+                match intent.effect.as_str() {
+                    effect_ops::LLM_COMPACT => {
+                        let params: LlmCompactParams = serde_cbor::from_slice(&intent.params_cbor)
+                            .context("decode llm.compact params")?;
+                        out.push(LlmCompactRequestContext { intent, params });
                     }
                     other => {
                         return Err(anyhow!("unexpected effect kind {other}"));
@@ -326,13 +359,83 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         kernel.tick_until_idle()?;
         Ok(())
     }
+
+    pub fn respond_compact_with_summary(
+        &self,
+        kernel: &mut Kernel<S>,
+        ctx: LlmCompactRequestContext,
+    ) -> Result<()> {
+        let message_refs = render_window_item_refs(
+            &ctx.params.source_window_items,
+            ctx.params.provider.as_str(),
+            ctx.params.model.as_str(),
+        )?;
+        let mut prompt_parts = Vec::with_capacity(message_refs.len());
+        for reference in &message_refs {
+            let prompt_hash = hash_from_ref(reference)?;
+            let prompt_bytes = self
+                .store
+                .get_blob(prompt_hash)
+                .context("load message blob for llm.compact")?;
+            prompt_parts.push(message_text_from_bytes(&prompt_bytes)?);
+        }
+        let summary_text = summarize(&prompt_parts.join("\n"));
+        let summary_message = serde_json::json!({
+            "role": "user",
+            "content": format!("Compacted context summary: {summary_text}")
+        });
+        let summary_bytes =
+            serde_json::to_vec(&summary_message).context("encode llm.compact summary message")?;
+        let summary_hash = self
+            .store
+            .put_blob(&summary_bytes)
+            .context("store llm.compact summary blob")?;
+        let summary_ref = HashRef::new(summary_hash.to_hex())?;
+        let summary_item = LlmWindowItem {
+            item_id: format!("compact:{}:summary", ctx.params.operation_id),
+            kind: LlmWindowItemKind::AosSummaryRef,
+            ref_: summary_ref.clone(),
+            lane: Some("Summary".into()),
+            source_range: ctx.params.source_range.clone(),
+            source_refs: message_refs,
+            provider_compatibility: None,
+            estimated_tokens: ctx.params.target_tokens,
+            metadata: Default::default(),
+        };
+        let receipt = LlmCompactReceipt {
+            operation_id: ctx.params.operation_id,
+            artifact_kind: LlmCompactionArtifactKind::AosSummary,
+            artifact_refs: vec![summary_ref],
+            source_range: ctx.params.source_range,
+            compacted_through: None,
+            active_window_items: vec![summary_item],
+            token_usage: Some(TokenUsage {
+                prompt: 120,
+                completion: 42,
+                total: Some(162),
+            }),
+            provider_metadata_ref: None,
+            warnings_ref: None,
+            provider_id: MOCK_LLM_ROUTE_ID.into(),
+        };
+        let receipt = EffectReceipt {
+            intent_hash: ctx.intent.intent_hash,
+            status: ReceiptStatus::Ok,
+            payload_cbor: serde_cbor::to_vec(&receipt)?,
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        };
+        kernel.handle_receipt(receipt)?;
+        kernel.tick_until_idle()?;
+        Ok(())
+    }
 }
 
 fn summarize(prompt: &str) -> String {
     let prefix: String = prompt.chars().take(120).collect();
     let digest = Sha256::digest(prompt.as_bytes());
     let suffix = hex::encode(digest)[..8].to_string();
-    format!("{prefix} …{suffix}")
+    format!("{prefix} ...{suffix}")
 }
 
 fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {

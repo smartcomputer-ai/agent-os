@@ -16,6 +16,7 @@ pub const HOST_FS_STAT: &str = "sys/host.fs.stat@1";
 pub const HOST_FS_EXISTS: &str = "sys/host.fs.exists@1";
 pub const HOST_FS_LIST_DIR: &str = "sys/host.fs.list_dir@1";
 pub const LLM_GENERATE: &str = "sys/llm.generate@1";
+pub const LLM_COMPACT: &str = "sys/llm.compact@1";
 pub const VAULT_PUT: &str = "sys/vault.put@1";
 pub const VAULT_ROTATE: &str = "sys/vault.rotate@1";
 pub const INTROSPECT_MANIFEST: &str = "sys/introspect.manifest@1";

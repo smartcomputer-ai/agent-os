@@ -1,16 +1,20 @@
 use super::{
-    DefaultTurnPlanner, LlmStepContext, RequestLlm, SessionEffectCommand, SessionWorkflowOutput,
-    TurnPlanError, TurnRequest, allocate_run_id, can_apply_host_command, pop_follow_up_if_ready,
-    request_llm, transition_lifecycle,
+    DefaultTurnPlanner, LlmCompactStepContext, LlmStepContext, RequestLlm, RequestLlmCompact,
+    SessionEffectCommand, SessionWorkflowOutput, TurnPlanError, TurnRequest, allocate_run_id,
+    can_apply_host_command, pop_follow_up_if_ready, request_llm, request_llm_compact,
+    transition_lifecycle,
 };
 use crate::contracts::{
-    ActiveWindowItem, HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
-    PendingBlobPutKind, QueuedRunStart, RunCause, RunConfig, RunFailure, RunInterrupt,
-    RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry, RunTraceEntryKind,
-    RunTraceRef, RunTraceSummary, SessionConfig, SessionInputKind, SessionLifecycle, SessionState,
-    SessionStatus, SessionWorkflowEvent, StagedToolFollowUpTurn, ToolBatchPlan, ToolCallStatus,
-    ToolOverrideScope, ToolSpec, TurnBudget, TurnInput, TurnInputKind, TurnInputLane,
-    TurnObservation, TurnPlan, TurnPrerequisiteKind, TurnPriority, TurnToolChoice, TurnToolInput,
+    ActiveWindowItem, CompactionArtifactKind, CompactionRecord, CompactionStrategy,
+    ContextOperationPhase, ContextOperationState, HostCommandKind, HostSessionOpenConfig,
+    HostTargetConfig, PendingBlobGetKind, PendingBlobPutKind, QueuedRunStart, RunCause, RunConfig,
+    RunFailure, RunInterrupt, RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace,
+    RunTraceEntry, RunTraceEntryKind, RunTraceRef, RunTraceSummary, SessionConfig,
+    SessionInputKind, SessionLifecycle, SessionState, SessionStatus, SessionWorkflowEvent,
+    StagedToolFollowUpTurn, ToolBatchPlan, ToolCallStatus, ToolOverrideScope, ToolSpec,
+    TranscriptLedgerEntryKind, TranscriptRange, TurnBudget, TurnInput, TurnInputKind,
+    TurnInputLane, TurnObservation, TurnPlan, TurnPrerequisiteKind, TurnPriority, TurnToolChoice,
+    TurnToolInput,
 };
 use crate::helpers::TurnPlanner;
 use crate::tools::{ToolEffectOp, map_tool_receipt_to_llm_result};
@@ -22,7 +26,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use aos_effects::builtins::{
     HostLocalTarget, HostMount, HostSandboxTarget, HostSessionOpenParams, HostTarget,
-    LlmGenerateReceipt,
+    LlmCompactReceipt, LlmCompactStrategy, LlmCompactionArtifactKind, LlmGenerateReceipt,
 };
 use aos_wasm_sdk::{EffectReceiptEnvelope, EffectReceiptRejected};
 
@@ -323,6 +327,9 @@ pub fn apply_session_workflow_event_with_catalog_and_limits(
                 SessionInputKind::TurnObserved(observation) => {
                     on_turn_observed(state, observation);
                 }
+                SessionInputKind::ContextOperationUpdated { operation } => {
+                    on_context_operation_updated(state, operation.clone(), &mut out)?;
+                }
                 SessionInputKind::HostSessionUpdated {
                     host_session_id,
                     host_session_status,
@@ -620,6 +627,48 @@ fn on_follow_up_input_appended(
     );
     state.queued_follow_up_runs.push(queued);
     Ok(())
+}
+
+fn on_context_operation_updated(
+    state: &mut SessionState,
+    operation: Option<ContextOperationState>,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    match operation {
+        Some(operation) => state.context_state.set_pending_operation(operation),
+        None => state.context_state.clear_pending_operation(),
+    }
+    trace_context_operation_state(state);
+    sync_current_run_execution(state);
+    dispatch_pending_llm_turn(state, out)
+}
+
+fn trace_context_operation_state(state: &mut SessionState) {
+    let mut refs = Vec::new();
+    let mut metadata = BTreeMap::new();
+    let summary = if let Some(operation) = state.context_state.pending_context_operation.as_ref() {
+        refs.push(trace_ref(
+            "context_operation_id",
+            operation.operation_id.clone(),
+        ));
+        metadata.insert("phase".into(), operation.phase.as_str().into());
+        metadata.insert("reason".into(), format!("{:?}", operation.reason));
+        metadata.insert("strategy".into(), format!("{:?}", operation.strategy));
+        if let Some(candidate_plan_id) = operation.candidate_plan_id.as_ref() {
+            refs.push(trace_ref("candidate_plan_id", candidate_plan_id.clone()));
+        }
+        "context operation updated"
+    } else {
+        metadata.insert("phase".into(), "Idle".into());
+        "context operation cleared"
+    };
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ContextOperationStateChanged,
+        summary,
+        refs,
+        metadata,
+    );
 }
 
 fn on_run_steer_requested(
@@ -933,6 +982,160 @@ fn handle_llm_generate_receipt(
     Ok(())
 }
 
+fn handle_llm_compact_receipt(
+    state: &mut SessionState,
+    envelope: &EffectReceiptEnvelope,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    if envelope.status != "ok" {
+        mark_context_operation_failed(state, "llm.compact receipt status not ok");
+        return Ok(());
+    }
+
+    let Some(receipt): Option<LlmCompactReceipt> = envelope.decode_receipt_payload().ok() else {
+        mark_context_operation_failed(state, "invalid llm.compact receipt payload");
+        return Ok(());
+    };
+
+    apply_llm_compact_receipt(state, receipt)?;
+    dispatch_pending_llm_turn(state, out)
+}
+
+fn apply_llm_compact_receipt(
+    state: &mut SessionState,
+    receipt: LlmCompactReceipt,
+) -> Result<(), SessionWorkflowError> {
+    let Some(mut operation) = state.context_state.pending_context_operation.clone() else {
+        return Ok(());
+    };
+    if operation.operation_id != receipt.operation_id {
+        mark_context_operation_failed(state, "llm.compact receipt operation mismatch");
+        return Ok(());
+    }
+    if receipt.active_window_items.is_empty() {
+        mark_context_operation_failed(state, "llm.compact receipt missing active window");
+        return Ok(());
+    }
+
+    operation.phase = ContextOperationPhase::ApplyingCompaction;
+    operation.updated_at_ns = state.updated_at;
+    state.context_state.set_pending_operation(operation.clone());
+    trace_context_operation_state(state);
+
+    let active_window_items = receipt
+        .active_window_items
+        .iter()
+        .map(crate::helpers::llm::active_window_item_from_llm)
+        .collect::<Vec<_>>();
+    let compacted_through = receipt.compacted_through.or_else(|| {
+        receipt
+            .source_range
+            .as_ref()
+            .map(|range| range.end_seq)
+            .or(operation.source_range.as_ref().map(|range| range.end_seq))
+    });
+    let source_range = receipt
+        .source_range
+        .as_ref()
+        .map(|range| TranscriptRange {
+            start_seq: range.start_seq,
+            end_seq: range.end_seq,
+        })
+        .or(operation.source_range.clone())
+        .unwrap_or_else(|| TranscriptRange {
+            start_seq: 0,
+            end_seq: compacted_through.unwrap_or(0),
+        });
+    let artifact_kind = compaction_artifact_kind(receipt.artifact_kind);
+    let usage = receipt
+        .token_usage
+        .as_ref()
+        .map(|usage| crate::contracts::LlmUsageRecord {
+            prompt_tokens: usage.prompt,
+            completion_tokens: usage.completion,
+            total_tokens: usage.total,
+            reasoning_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        });
+    let record = CompactionRecord {
+        operation_id: receipt.operation_id.clone(),
+        strategy: operation.strategy.clone(),
+        artifact_kind,
+        artifact_refs: receipt
+            .artifact_refs
+            .iter()
+            .map(|value| value.to_string())
+            .collect(),
+        source_range,
+        source_refs: active_window_items
+            .iter()
+            .flat_map(|item| item.source_refs.clone())
+            .collect(),
+        active_window_items: active_window_items.clone(),
+        provider_compatibility: active_window_items
+            .iter()
+            .find_map(|item| item.provider_compatibility.clone()),
+        usage,
+        created_at_ns: state.updated_at,
+        warnings: Vec::new(),
+    };
+
+    state.context_state.active_window_items = active_window_items;
+    state.context_state.compacted_through = compacted_through;
+    state.context_state.last_compaction = Some(record.clone());
+    state.context_state.compaction_records.push(record);
+    state.context_state.clear_pending_operation();
+    if let Some(items) = state.pending_llm_turn_items.as_mut() {
+        *items = state.context_state.active_window_items.clone();
+    }
+    sync_current_run_execution(state);
+
+    push_run_trace(
+        state,
+        RunTraceEntryKind::CompactionReceived,
+        "context compaction receipt applied",
+        vec![trace_ref(
+            "context_operation_id",
+            receipt.operation_id.clone(),
+        )],
+        BTreeMap::from([("provider_id".into(), receipt.provider_id)]),
+    );
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ActiveWindowUpdated,
+        "active window replaced by compaction result",
+        state
+            .context_state
+            .active_window_items
+            .iter()
+            .map(|item| trace_ref("window_item_ref", item.ref_.clone()))
+            .collect(),
+        BTreeMap::new(),
+    );
+    Ok(())
+}
+
+fn mark_context_operation_failed(state: &mut SessionState, failure: &str) {
+    let Some(mut operation) = state.context_state.pending_context_operation.clone() else {
+        return;
+    };
+    operation.phase = ContextOperationPhase::Failed;
+    operation.failure = Some(failure.into());
+    operation.updated_at_ns = state.updated_at;
+    state.context_state.set_pending_operation(operation);
+    trace_context_operation_state(state);
+    sync_current_run_execution(state);
+}
+
+fn compaction_artifact_kind(value: LlmCompactionArtifactKind) -> CompactionArtifactKind {
+    match value {
+        LlmCompactionArtifactKind::AosSummary => CompactionArtifactKind::AosSummary,
+        LlmCompactionArtifactKind::ProviderNative => CompactionArtifactKind::ProviderNative,
+        LlmCompactionArtifactKind::Mixed => CompactionArtifactKind::Mixed,
+    }
+}
+
 fn llm_usage_record_from_receipt(receipt: &LlmGenerateReceipt) -> crate::contracts::LlmUsageRecord {
     crate::contracts::LlmUsageRecord {
         prompt_tokens: receipt.token_usage.prompt,
@@ -1022,6 +1225,7 @@ fn on_receipt_envelope(
                 let _ = handle_standalone_host_session_open_receipt(state, envelope, out)?;
             }
             "sys/llm.generate@1" => handle_llm_generate_receipt(state, envelope, out)?,
+            "sys/llm.compact@1" => handle_llm_compact_receipt(state, envelope, out)?,
             _ => {}
         }
         recompute_in_flight_effects(state);
@@ -1060,6 +1264,7 @@ fn on_receipt_rejected(
                 let _ = handle_standalone_host_session_open_receipt(state, &envelope, out)?;
             }
             "sys/llm.generate@1" => fail_run(state)?,
+            "sys/llm.compact@1" => mark_context_operation_failed(state, "llm.compact rejected"),
             _ => {}
         }
         recompute_in_flight_effects(state);
@@ -1341,6 +1546,24 @@ pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
     let steer_refs = state.queued_steer_refs.clone();
     let plan = build_turn_plan_for_pending_turn(state, window_items, planner, budget)?;
 
+    if plan.prerequisites.iter().any(|item| {
+        matches!(
+            item.kind,
+            TurnPrerequisiteKind::CompactContext | TurnPrerequisiteKind::CountTokens
+        )
+    }) {
+        if plan
+            .prerequisites
+            .iter()
+            .any(|item| matches!(item.kind, TurnPrerequisiteKind::CompactContext))
+        {
+            request_context_compaction(state, out, &plan)?;
+        }
+        trace_context_operation_blocked_turn(state, &plan);
+        sync_current_run_execution(state);
+        return Ok(());
+    }
+
     if plan
         .prerequisites
         .iter()
@@ -1432,6 +1655,108 @@ pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
     Ok(())
 }
 
+fn request_context_compaction(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+    plan: &TurnPlan,
+) -> Result<(), SessionWorkflowError> {
+    if state.pending_effects.contains_effect("sys/llm.compact@1") {
+        return Ok(());
+    }
+    let Some(mut operation) = state.context_state.pending_context_operation.clone() else {
+        return Ok(());
+    };
+    if matches!(
+        operation.phase,
+        ContextOperationPhase::Compacting | ContextOperationPhase::ApplyingCompaction
+    ) {
+        return Ok(());
+    }
+
+    let run_seq = state
+        .active_run_id
+        .as_ref()
+        .map(|id| id.run_seq)
+        .unwrap_or(0);
+    let requested = request_llm_compact(
+        state,
+        out,
+        RequestLlmCompact {
+            step: LlmCompactStepContext {
+                correlation_id: Some(format!("run-{run_seq}-compact")),
+                operation_id: operation.operation_id.clone(),
+                source_window_items: plan.active_window_items.clone(),
+                preserve_window_items: Vec::new(),
+                recent_tail_items: Vec::new(),
+                source_range: operation.source_range.clone(),
+                strategy: llm_compact_strategy(operation.strategy.clone()),
+                target_tokens: None,
+                provider_options_ref: plan.provider_options_ref.clone(),
+                api_key: None,
+            },
+        },
+    )?;
+
+    operation.phase = ContextOperationPhase::Compacting;
+    operation.params_hash = Some(requested.pending.params_hash.clone());
+    operation.updated_at_ns = state.updated_at;
+    state.context_state.set_pending_operation(operation);
+    trace_context_operation_state(state);
+    Ok(())
+}
+
+fn llm_compact_strategy(value: CompactionStrategy) -> LlmCompactStrategy {
+    match value {
+        CompactionStrategy::ProviderNative => LlmCompactStrategy::ProviderNative,
+        CompactionStrategy::AosSummary => LlmCompactStrategy::AosSummary,
+        CompactionStrategy::Auto => LlmCompactStrategy::Auto,
+    }
+}
+
+fn trace_context_operation_blocked_turn(state: &mut SessionState, plan: &TurnPlan) {
+    let Some(operation) = state.context_state.pending_context_operation.as_ref() else {
+        return;
+    };
+    let operation_id = operation.operation_id.clone();
+    let operation_phase = operation.phase.as_str().to_string();
+    let operation_reason = format!("{:?}", operation.reason);
+    let mut refs = vec![trace_ref("context_operation_id", operation_id.clone())];
+    refs.extend(
+        plan.prerequisites
+            .iter()
+            .filter(|prerequisite| {
+                matches!(
+                    prerequisite.kind,
+                    TurnPrerequisiteKind::CompactContext | TurnPrerequisiteKind::CountTokens
+                )
+            })
+            .map(|prerequisite| trace_ref("prerequisite_id", prerequisite.prerequisite_id.clone())),
+    );
+    let mut metadata = BTreeMap::new();
+    metadata.insert("phase".into(), operation_phase);
+    metadata.insert("reason".into(), operation_reason);
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ContextOperationStateChanged,
+        "llm dispatch blocked by context operation",
+        refs,
+        metadata,
+    );
+    if plan
+        .prerequisites
+        .iter()
+        .any(|prerequisite| matches!(prerequisite.kind, TurnPrerequisiteKind::CompactContext))
+    {
+        push_run_trace(
+            state,
+            RunTraceEntryKind::CompactionRequested,
+            "context compaction required before llm dispatch",
+            vec![trace_ref("context_operation_id", operation_id)],
+            BTreeMap::new(),
+        );
+    }
+}
+
 pub fn build_turn_plan_for_pending_turn<P: TurnPlanner>(
     state: &mut SessionState,
     mut turn_items: Vec<ActiveWindowItem>,
@@ -1466,9 +1791,15 @@ pub fn build_turn_plan_for_pending_turn<P: TurnPlanner>(
     if run_config.host_session_open.is_none() {
         run_config.host_session_open = state.session_config.default_host_session_open.clone();
     }
+    let compacted_through = state.context_state.compacted_through.unwrap_or(0);
     let transcript_refs = state
         .context_state
-        .ledger_message_refs()
+        .transcript_ledger
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry.kind, TranscriptLedgerEntryKind::MessageRef))
+        .filter(|entry| entry.seq >= compacted_through)
+        .map(|entry| entry.ref_.clone())
         .into_iter()
         .filter(|value| !turn_refs.iter().any(|turn| *turn == *value))
         .collect::<Vec<_>>();
@@ -1487,6 +1818,7 @@ pub fn build_turn_plan_for_pending_turn<P: TurnPlanner>(
             registry: &state.tool_registry,
             profiles: &state.tool_profiles,
             runtime: &state.tool_runtime_context,
+            pending_context_operation: state.context_state.pending_context_operation.as_ref(),
         })
         .map_err(turn_plan_error_to_workflow_error)?;
     add_workflow_prerequisites(state, &mut plan);
@@ -2035,6 +2367,33 @@ fn trace_workflow_output(state: &mut SessionState, out: &SessionWorkflowOutput) 
                     metadata,
                 );
             }
+            SessionEffectCommand::LlmCompact { params, pending } => {
+                let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
+                if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+                    refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+                }
+                refs.push(trace_ref(
+                    "context_operation_id",
+                    params.operation_id.clone(),
+                ));
+                refs.extend(
+                    params
+                        .source_window_items
+                        .iter()
+                        .map(|item| trace_ref("window_item_ref", item.ref_.to_string())),
+                );
+                let mut metadata = BTreeMap::new();
+                metadata.insert("provider".into(), params.provider.clone());
+                metadata.insert("model".into(), params.model.clone());
+                metadata.insert("strategy".into(), format!("{:?}", params.strategy));
+                push_run_trace(
+                    state,
+                    RunTraceEntryKind::CompactionRequested,
+                    "llm compaction requested",
+                    refs,
+                    metadata,
+                );
+            }
             SessionEffectCommand::ToolEffect { kind, pending, .. } => {
                 let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
                 if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
@@ -2171,10 +2530,11 @@ fn trace_stream_frame(state: &mut SessionState, frame: &aos_wasm_sdk::EffectStre
 mod tests {
     use super::*;
     use crate::contracts::{
-        CauseRef, HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, RunCauseOrigin,
-        RunId, SessionId, SessionInput, ToolCallObserved, ToolProfileBuilder, ToolRegistryBuilder,
-        TurnInput, TurnInputKind, TurnInputLane, TurnPrerequisiteKind, TurnPriority, TurnReport,
-        TurnToolChoice, local_coding_agent_tool_profile_for_provider,
+        CauseRef, CompactionStrategy, ContextOperationState, ContextPressureReason,
+        HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, RunCauseOrigin, RunId,
+        SessionId, SessionInput, ToolCallObserved, ToolProfileBuilder, ToolRegistryBuilder,
+        TranscriptRange, TurnInput, TurnInputKind, TurnInputLane, TurnPrerequisiteKind,
+        TurnPriority, TurnReport, TurnToolChoice, local_coding_agent_tool_profile_for_provider,
         local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
         tool_bundle_host_sandbox,
     };
@@ -2185,8 +2545,9 @@ mod tests {
         WorkspaceEmptyRootReceipt, WorkspaceResolveReceipt, WorkspaceWriteRefReceipt,
     };
     use aos_effects::builtins::{
-        BlobGetReceipt, BlobPutReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
-        LlmToolCall, LlmUsageDetails, TokenUsage,
+        BlobGetReceipt, BlobPutReceipt, LlmCompactReceipt, LlmCompactionArtifactKind,
+        LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCall, LlmTranscriptRange,
+        LlmUsageDetails, LlmWindowItem, LlmWindowItemKind, TokenUsage,
     };
 
     fn fake_hash(ch: char) -> String {
@@ -2524,6 +2885,188 @@ mod tests {
                     .iter()
                     .any(|trace_ref| trace_ref.kind == "window_item_ref")
         }));
+    }
+
+    #[test]
+    fn run_request_blocks_llm_when_context_needs_compaction() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                0,
+                SessionInputKind::ContextOperationUpdated {
+                    operation: Some(ContextOperationState::needs_compaction(
+                        "ctx-op-1",
+                        ContextPressureReason::UsageHighWater,
+                        CompactionStrategy::AosSummary,
+                        Some(TranscriptRange {
+                            start_seq: 0,
+                            end_seq: 1,
+                        }),
+                        0,
+                    )),
+                },
+            ),
+        )
+        .expect("context operation update");
+        assert_eq!(
+            state
+                .context_state
+                .pending_context_operation
+                .as_ref()
+                .map(|operation| operation.operation_id.as_str()),
+            Some("ctx-op-1")
+        );
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("reduce");
+
+        assert_eq!(out.effects.len(), 1, "compaction effect must be emitted");
+        assert!(matches!(
+            out.effects.first(),
+            Some(SessionEffectCommand::LlmCompact { pending, .. })
+                if pending.effect == "sys/llm.compact@1"
+        ));
+        assert!(state.pending_llm_turn_items.is_some());
+        let run = state.current_run.as_ref().expect("current run");
+        assert_eq!(
+            run.blocked_on_context_operation.as_deref(),
+            Some("ctx-op-1")
+        );
+        let plan = run.turn_plan.as_ref().expect("turn plan");
+        assert!(plan.prerequisites.iter().any(|prerequisite| {
+            matches!(prerequisite.kind, TurnPrerequisiteKind::CompactContext)
+                && prerequisite.prerequisite_id == "context_operation:ctx-op-1"
+        }));
+        assert!(
+            run.trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::ContextOperationStateChanged))
+        );
+        assert!(
+            run.trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::CompactionRequested))
+        );
+        assert!(
+            !run.trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::LlmRequested))
+        );
+    }
+
+    #[test]
+    fn llm_compact_receipt_replaces_active_window_and_unblocks_llm() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                0,
+                SessionInputKind::ContextOperationUpdated {
+                    operation: Some(ContextOperationState::needs_compaction(
+                        "ctx-op-1",
+                        ContextPressureReason::UsageHighWater,
+                        CompactionStrategy::AosSummary,
+                        Some(TranscriptRange {
+                            start_seq: 0,
+                            end_seq: 1,
+                        }),
+                        0,
+                    )),
+                },
+            ),
+        )
+        .expect("context operation update");
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let compact_pending = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmCompact { pending, .. } => Some(pending.clone()),
+                _ => None,
+            })
+            .expect("llm.compact emitted");
+        let summary_ref = fake_hash('e');
+        let receipt = LlmCompactReceipt {
+            operation_id: "ctx-op-1".into(),
+            artifact_kind: LlmCompactionArtifactKind::AosSummary,
+            artifact_refs: vec![HashRef::new(summary_ref.clone()).expect("summary ref")],
+            source_range: Some(LlmTranscriptRange {
+                start_seq: 0,
+                end_seq: 1,
+            }),
+            compacted_through: Some(1),
+            active_window_items: vec![LlmWindowItem {
+                item_id: "compact:ctx-op-1:summary".into(),
+                kind: LlmWindowItemKind::AosSummaryRef,
+                ref_: HashRef::new(summary_ref.clone()).expect("summary ref"),
+                lane: Some("Summary".into()),
+                source_range: Some(LlmTranscriptRange {
+                    start_seq: 0,
+                    end_seq: 1,
+                }),
+                source_refs: vec![hash_ref('a')],
+                provider_compatibility: None,
+                estimated_tokens: Some(32),
+                metadata: Default::default(),
+            }],
+            token_usage: Some(TokenUsage {
+                prompt: 10,
+                completion: 5,
+                total: Some(15),
+            }),
+            provider_metadata_ref: None,
+            warnings_ref: None,
+            provider_id: "llm.mock".into(),
+        };
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                2,
+                "sys/llm.compact@1",
+                Some(compact_pending.params_hash),
+                "ok",
+                &receipt,
+            ),
+        )
+        .expect("compact receipt");
+
+        assert!(state.context_state.pending_context_operation.is_none());
+        assert_eq!(state.context_state.compaction_records.len(), 1);
+        assert_eq!(
+            active_window_refs(&state.context_state.active_window_items),
+            vec![summary_ref.clone()]
+        );
+        assert!(matches!(
+            out.effects.first(),
+            Some(SessionEffectCommand::LlmGenerate { params, .. })
+                if params.window_items.iter().map(|item| item.ref_.to_string()).collect::<Vec<_>>() == vec![summary_ref.clone()]
+        ));
+        let trace = &state.current_run.as_ref().expect("current run").trace;
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::CompactionReceived))
+        );
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::ActiveWindowUpdated))
+        );
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::LlmRequested))
+        );
     }
 
     #[test]
@@ -3423,6 +3966,10 @@ mod tests {
             RunTraceEntryKind::ReceiptSettled => "ReceiptSettled",
             RunTraceEntryKind::InterventionRequested => "InterventionRequested",
             RunTraceEntryKind::InterventionApplied => "InterventionApplied",
+            RunTraceEntryKind::ContextOperationStateChanged => "ContextOperationStateChanged",
+            RunTraceEntryKind::CompactionRequested => "CompactionRequested",
+            RunTraceEntryKind::CompactionReceived => "CompactionReceived",
+            RunTraceEntryKind::ActiveWindowUpdated => "ActiveWindowUpdated",
             RunTraceEntryKind::RunFinished => "RunFinished",
             RunTraceEntryKind::Custom { .. } => "Custom",
         }
