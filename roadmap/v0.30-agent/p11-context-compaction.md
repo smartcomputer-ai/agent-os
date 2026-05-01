@@ -3,7 +3,7 @@
 **Priority**: P1
 **Effort**: Large
 **Risk if deferred**: High (long-running sessions will eventually overflow provider windows, and compaction decisions will be hard to audit if hidden inside provider adapters)
-**Status**: In progress
+**Status**: Complete for v0.30 first-cut scope; deferred quality, UI, memory/RAG, and broader provider optimization work remains future scope
 **Depends on**: `roadmap/v0.30-agent/p5-session-run-model.md`, `roadmap/v0.30-agent/p6-turn-planner.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
 
 ## Progress
@@ -24,10 +24,11 @@ Completed so far:
 12. `sys/llm.generate@1` context-limit failures now become traceable context pressure and a compaction prerequisite instead of terminal run failure.
 13. generation usage crossing the high-water mark records pending context pressure, but compaction is requested lazily only when a later LLM turn is dispatched.
 14. provider-native context artifacts returned from ordinary `sys/llm.generate@1` receipts are preserved as typed window items in the receipt and traced without mutating the active window implicitly.
+15. Python workflow harness helpers and tests can script context-limit failures, high-water lazy compaction, explicit compaction receipts, provider context artifacts, and replay/reopen across the compiled workflow boundary.
 
 Still open:
 
-1. broader deterministic harness coverage for provider-returned context-management recommendations beyond OpenAI-style compaction artifacts.
+1. no first-cut P11 implementation items remain; deferred quality, UI, memory/RAG, and broader provider optimization work is listed below.
 
 ## Goal
 
@@ -534,7 +535,7 @@ Implement the narrowest useful version:
 4. [x] make the workflow able to observe context-limit generation failures and turn them into context pressure plus a compaction prerequisite instead of terminal run failure,
 5. [x] make the workflow able to trigger compaction before the next turn from returned generation usage crossing a high-water mark,
 6. [x] make the workflow able to apply a scripted compaction receipt,
-7. [~] add deterministic harness tests that script context-limit failures, usage-triggered compaction, pending compaction state, and compaction receipts,
+7. [x] add deterministic harness tests that script context-limit failures, usage-triggered compaction, pending compaction state, and compaction receipts,
 8. [x] add contracts for `sys/llm.count_tokens@1` for schema completeness, but adapter implementation can be minimal or stubbed in the first cut,
 9. [x] allow the first implementation to back `sys/llm.compact@1` with a scripted or ordinary LLM summarization path,
 10. [x] preserve provider-native artifacts from `sys/llm.generate@1` receipts as raw refs/metadata even if full provider adapter compaction support is deferred,
@@ -549,7 +550,7 @@ Start with deterministic backends, then plug in provider-native compaction once 
 
 1. [x] register `sys/llm.compact@1` and the `llm.compact` route alias in the adapter registry,
 2. [x] add a `StubLlmCompactAdapter` that decodes `LlmCompactParams` and returns a deterministic `LlmCompactReceipt` with an `AosSummary` active-window item,
-3. [~] extend `MockLlmHarness` so tests can collect compact requests and respond with a stored AOS-summary blob,
+3. [x] extend `MockLlmHarness` so tests can collect compact requests and respond with a stored AOS-summary blob,
 4. [x] let the workflow apply the compact receipt, append a `CompactionRecord`, update `compacted_through`, replace `active_window_items`, clear the pending operation, and unblock the pending LLM turn,
 5. [x] add `aos-llm` compact APIs for OpenAI Responses `POST /v1/responses/compact` and Anthropic Messages `context_management.edits` with `compact_20260112`,
 6. [x] wire configured `aos-effect-adapters` LLM providers to `sys/llm.compact@1`, with stub/mock behavior only when no real LLM adapter config is present.
@@ -586,4 +587,4 @@ This means the first implementation proves workflow correctness with stub/mock p
 11. [x] AOS summaries are represented as normal refs with source ranges and usage metadata,
 12. [x] token counting is represented as optional `sys/llm.count_tokens@1` and is not required on the default generation path,
 13. [x] legacy `transcript_message_refs` and simple message-ref-only active-window paths are removed from the agent SDK after the new surface lands,
-14. [~] deterministic tests can script context-limit failures, usage-triggered compaction, pending operation state, and compaction receipts without live provider credentials.
+14. [x] deterministic tests can script context-limit failures, usage-triggered compaction, pending operation state, and compaction receipts without live provider credentials.

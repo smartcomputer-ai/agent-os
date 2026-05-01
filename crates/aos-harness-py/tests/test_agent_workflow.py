@@ -7,26 +7,35 @@ import pytest
 from aos_harness import blob_put_ok
 from aos_harness.agent import (
     BLOB_GET,
+    LLM_COMPACT,
     LLM_GENERATE,
     agent_workflow,
+    apply_llm_compact_ok,
+    apply_llm_generate_error,
     apply_llm_generate_ok,
     cause_ref,
     current_run,
     current_turn_plan,
     domain_event_run_cause,
+    expect_llm_compact,
     expect_llm_generate,
     find_effect,
     host_session_updated,
     last_llm_usage,
+    llm_provider_compatibility,
     llm_tool_call,
+    llm_window_item,
     require_trace_kinds,
     respond_blob_get_bytes,
     respond_llm_output_blob,
     respond_llm_tool_calls_blob,
+    run_completed,
     run_interrupt_requested,
     run_requested,
     run_start_requested,
+    run_trace_entries,
     run_trace_kinds,
+    selected_message_refs,
     selected_tool_ids,
     send_session_input,
     session_config,
@@ -45,6 +54,8 @@ OUTPUT_REF = "sha256:" + ("c" * 64)
 CALLS_REF = "sha256:" + ("d" * 64)
 ARGS_REF = "sha256:" + ("e" * 64)
 REASON_REF = "sha256:" + ("f" * 64)
+SUMMARY_REF = "sha256:" + ("7" * 64)
+PROVIDER_ITEM_REF = "sha256:" + ("8" * 64)
 
 
 def hash_ref(ch: str) -> str:
@@ -194,7 +205,7 @@ def test_host_session_ready_tools_appear_in_turn_plan(harness):
     plan = current_turn_plan(state)
     assert plan is not None
     assert selected_tool_ids(plan) == ["host.exec", "host.fs.apply_patch"]
-    assert plan["message_refs"] == [PROMPT_REF, INPUT_REF]
+    assert selected_message_refs(plan) == [PROMPT_REF, INPUT_REF]
 
 
 def test_scripted_tool_call_path_queues_follow_up_llm_turn(harness):
@@ -240,7 +251,7 @@ def test_scripted_tool_call_path_queues_follow_up_llm_turn(harness):
     if not any(effect.get("effect") == LLM_GENERATE for effect in follow_up_effects):
         follow_up_effects = settle_blob_puts(harness, follow_up_effects)
     follow_up_llm = expect_llm_generate(follow_up_effects)
-    assert INPUT_REF in follow_up_llm["params"]["message_refs"]
+    assert INPUT_REF in selected_message_refs(follow_up_llm["params"])
 
     state = session_state(harness)
     assert trace_contains_kind(state, "ToolCallsObserved")
@@ -299,7 +310,7 @@ def test_domain_event_run_cause_records_provenance(harness):
     harness.run_to_idle()
 
     llm = expect_llm_generate(harness.pull_effects())
-    assert llm["params"]["message_refs"] == [hash_ref("8"), hash_ref("7"), INPUT_REF]
+    assert selected_message_refs(llm["params"]) == [hash_ref("8"), hash_ref("7"), INPUT_REF]
     run = current_run(session_state(harness))
     assert run is not None
     assert run["cause"]["kind"] == "example/work_item_ready"
@@ -337,3 +348,141 @@ def test_no_tool_completion_reopens_with_same_state(harness):
 
     reopened = harness.reopen()
     assert session_state(reopened) == state
+
+
+def test_context_limit_failure_requests_compaction_and_resumes_llm(harness):
+    llm = expect_llm_generate(start_chat_run(harness))
+    apply_llm_generate_error(
+        harness,
+        llm,
+        output_ref=OUTPUT_REF,
+        raw_output_ref=REASON_REF,
+        provider_id="openai-responses",
+        finish_reason="error",
+        finish_reason_raw="context length exceeded: too many input tokens",
+        prompt_tokens=128_000,
+        completion_tokens=0,
+        total_tokens=128_000,
+    )
+    harness.run_to_idle()
+
+    compact = expect_llm_compact(harness.pull_effects(), provider="openai", model="gpt-5.2")
+    state = session_state(harness)
+    operation = state["context_state"]["pending_context_operation"]
+    assert operation["reason"]["$tag"] == "ProviderContextLimit"
+    assert current_run(state)["blocked_on_context_operation"] == operation["operation_id"]
+    require_trace_kinds(
+        state,
+        ["ContextPressureObserved", "ContextOperationStateChanged", "CompactionRequested"],
+    )
+
+    summary_item = llm_window_item(
+        item_id="compact:ctx-op:summary",
+        kind="AosSummaryRef",
+        ref=SUMMARY_REF,
+        source_range={"start_seq": 0, "end_seq": 1},
+        source_refs=[INPUT_REF],
+    )
+    apply_llm_compact_ok(
+        harness,
+        compact,
+        artifact_refs=[SUMMARY_REF],
+        active_window_items=[summary_item],
+        source_range={"start_seq": 0, "end_seq": 1},
+        compacted_through=1,
+        provider_id="openai-responses",
+        prompt_tokens=100,
+        completion_tokens=20,
+        total_tokens=120,
+    )
+    harness.run_to_idle()
+
+    resumed = expect_llm_generate(harness.pull_effects())
+    refs = [item["ref_"] for item in resumed["params"]["window_items"]]
+    assert refs == [SUMMARY_REF]
+    state = session_state(harness)
+    assert state["context_state"]["pending_context_operation"] is None
+    assert state["context_state"]["compaction_records"]
+    require_trace_kinds(state, ["CompactionReceived", "ActiveWindowUpdated", "LlmRequested"])
+
+    reopened = harness.reopen()
+    assert session_state(reopened) == state
+
+
+def test_high_water_usage_compacts_only_on_next_llm_turn(harness):
+    llm = expect_llm_generate(start_chat_run(harness))
+    apply_llm_generate_ok(
+        harness,
+        llm,
+        output_ref=OUTPUT_REF,
+        provider_id="openai-responses",
+        prompt_tokens=64_000,
+        completion_tokens=5,
+        total_tokens=64_005,
+    )
+    harness.run_to_idle()
+
+    effects = harness.pull_effects()
+    assert not any(effect.get("effect") == LLM_COMPACT for effect in effects)
+    output_blob_get = find_effect(effects, BLOB_GET)
+    respond_llm_output_blob(harness, output_blob_get, assistant_text="done")
+    harness.run_to_idle()
+
+    state = session_state(harness)
+    assert state["context_state"]["pending_context_operation"]["reason"]["$tag"] == "UsageHighWater"
+    assert current_run(state)["lifecycle"]["$tag"] == "WaitingInput"
+
+    send_session_input(harness, SESSION_ID, 10, run_completed())
+    harness.run_to_idle()
+    assert current_run(session_state(harness)) is None
+
+    send_session_input(
+        harness,
+        SESSION_ID,
+        11,
+        run_requested(hash_ref("9"), run_overrides=run_config()),
+    )
+    harness.run_to_idle()
+    compact = expect_llm_compact(harness.pull_effects())
+    assert compact["params"]["operation_id"].startswith("ctx-op:usage-high-water")
+
+
+def test_provider_context_artifacts_from_generate_are_visible_in_trace(harness):
+    llm = expect_llm_generate(start_chat_run(harness))
+    provider_item = llm_window_item(
+        item_id="generate:resp_1:provider-item:0",
+        kind="ProviderNativeArtifactRef",
+        ref=PROVIDER_ITEM_REF,
+        lane="Summary",
+        source_refs=[INPUT_REF],
+        provider_compatibility=llm_provider_compatibility(
+            provider="openai-responses",
+            api_kind="responses",
+            model="gpt-5.2",
+            artifact_type="compaction",
+            opaque=True,
+            encrypted=True,
+        ),
+    )
+    apply_llm_generate_ok(
+        harness,
+        llm,
+        output_ref=OUTPUT_REF,
+        provider_id="openai-responses",
+        provider_response_id="resp_1",
+        provider_context_items=[provider_item],
+        prompt_tokens=100,
+        completion_tokens=10,
+        total_tokens=110,
+    )
+    harness.run_to_idle()
+
+    state = session_state(harness)
+    require_trace_kinds(state, ["LlmReceived", "ProviderContextArtifactsObserved"])
+    provider_trace = next(
+        entry
+        for entry in run_trace_entries(state)
+        if entry["kind"]["$tag"] == "ProviderContextArtifactsObserved"
+    )
+    assert provider_trace["metadata"]["provider_context_item_count"] == "1"
+    assert any(ref["ref_"] == PROVIDER_ITEM_REF for ref in provider_trace["refs"])

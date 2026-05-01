@@ -19,6 +19,7 @@ SESSION_WORKFLOW_EVENT = "aos.agent/SessionWorkflowEvent@1"
 SESSION_INPUT = "aos.agent/SessionInput@1"
 
 LLM_GENERATE = "sys/llm.generate@1"
+LLM_COMPACT = "sys/llm.compact@1"
 BLOB_GET = "sys/blob.get@1"
 
 
@@ -45,6 +46,15 @@ def _effect_params(effect: Mapping[str, Any]) -> Mapping[str, Any]:
     if isinstance(params, Mapping):
         return params
     raise TypeError("effect.params must be an object")
+
+
+def _intent_hash(effect: Mapping[str, Any]) -> bytes:
+    value = effect.get("intent_hash")
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, list) and all(isinstance(item, int) for item in value):
+        return bytes(value)
+    raise TypeError("effect.intent_hash must be bytes or a list of byte values")
 
 
 def _tag(value: Any) -> str:
@@ -500,11 +510,48 @@ def expect_llm_generate(
             return False
         if model is not None and params.get("model") != model:
             return False
-        if message_refs is not None and params.get("message_refs") != list(message_refs):
+        if message_refs is not None and _window_item_refs(params) != list(message_refs):
             return False
         return True
 
     return find_effect(effects, LLM_GENERATE, predicate=matches, index=index)
+
+
+def _window_item_refs(value: Mapping[str, Any]) -> list[str]:
+    raw_message_refs = value.get("message_refs")
+    if isinstance(raw_message_refs, Sequence) and not isinstance(raw_message_refs, (str, bytes)):
+        return [str(ref) for ref in raw_message_refs]
+    items = value.get("window_items")
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+        items = value.get("active_window_items")
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+        return []
+    refs = []
+    for item in items:
+        if isinstance(item, Mapping) and isinstance(item.get("ref_"), str):
+            refs.append(str(item["ref_"]))
+    return refs
+
+
+def expect_llm_compact(
+    effects: Iterable[Mapping[str, Any]],
+    *,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    operation_id: Optional[str] = None,
+    index: int = 0,
+) -> dict[str, Any]:
+    def matches(effect: Mapping[str, Any]) -> bool:
+        params = _effect_params(effect)
+        if provider is not None and params.get("provider") != provider:
+            return False
+        if model is not None and params.get("model") != model:
+            return False
+        if operation_id is not None and params.get("operation_id") != operation_id:
+            return False
+        return True
+
+    return find_effect(effects, LLM_COMPACT, predicate=matches, index=index)
 
 
 def llm_output_envelope_bytes(
@@ -562,7 +609,29 @@ def apply_llm_generate_ok(
     cost_cents: Optional[int] = None,
     warnings_ref: Optional[str] = None,
     rate_limit_ref: Optional[str] = None,
+    provider_context_items: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> ReceiptObject:
+    if provider_context_items:
+        receipt = harness.receipt_ok(
+            _intent_hash(effect),
+            llm_generate_receipt(
+                output_ref=output_ref,
+                provider_id=provider_id,
+                finish_reason=finish_reason,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                raw_output_ref=raw_output_ref,
+                provider_response_id=provider_response_id,
+                cost_cents=cost_cents,
+                warnings_ref=warnings_ref,
+                rate_limit_ref=rate_limit_ref,
+                provider_context_items=provider_context_items,
+            ),
+        )
+        harness.apply_receipt_object(receipt)
+        return receipt
+
     receipt = llm_generate_ok(
         harness,
         effect,
@@ -577,6 +646,169 @@ def apply_llm_generate_ok(
         cost_cents=cost_cents,
         warnings_ref=warnings_ref,
         rate_limit_ref=rate_limit_ref,
+    )
+    harness.apply_receipt_object(receipt)
+    return receipt
+
+
+def llm_generate_receipt(
+    *,
+    output_ref: str,
+    provider_id: str = "test-provider",
+    finish_reason: str = "stop",
+    finish_reason_raw: Optional[str] = None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: Optional[int] = None,
+    raw_output_ref: Optional[str] = None,
+    provider_response_id: Optional[str] = None,
+    cost_cents: Optional[int] = None,
+    warnings_ref: Optional[str] = None,
+    rate_limit_ref: Optional[str] = None,
+    provider_context_items: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> dict[str, Any]:
+    return {
+        "output_ref": output_ref,
+        "raw_output_ref": raw_output_ref,
+        "provider_response_id": provider_response_id,
+        "provider_context_items": [dict(item) for item in provider_context_items or []],
+        "finish_reason": {
+            "reason": finish_reason,
+            "raw": finish_reason_raw,
+        },
+        "token_usage": {
+            "prompt": prompt_tokens,
+            "completion": completion_tokens,
+            "total": total_tokens,
+        },
+        "usage_details": None,
+        "warnings_ref": warnings_ref,
+        "rate_limit_ref": rate_limit_ref,
+        "cost_cents": cost_cents,
+        "provider_id": provider_id,
+    }
+
+
+def apply_llm_generate_error(
+    harness: "WorkflowHarness",
+    effect: Mapping[str, Any],
+    *,
+    output_ref: str,
+    provider_id: str = "test-provider",
+    finish_reason: str = "error",
+    finish_reason_raw: Optional[str] = None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: Optional[int] = None,
+    raw_output_ref: Optional[str] = None,
+) -> ReceiptObject:
+    receipt = harness.receipt_error(
+        _intent_hash(effect),
+        llm_generate_receipt(
+            output_ref=output_ref,
+            provider_id=provider_id,
+            finish_reason=finish_reason,
+            finish_reason_raw=finish_reason_raw,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            raw_output_ref=raw_output_ref,
+        ),
+    )
+    harness.apply_receipt_object(receipt)
+    return receipt
+
+
+def llm_window_item(
+    *,
+    item_id: str,
+    kind: str,
+    ref: str,
+    lane: Optional[str] = None,
+    source_range: Optional[Mapping[str, Any]] = None,
+    source_refs: Optional[Sequence[str]] = None,
+    provider_compatibility: Optional[Mapping[str, Any]] = None,
+    estimated_tokens: Optional[int] = None,
+    metadata: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    return {
+        "item_id": item_id,
+        "kind": _unit_variant(kind),
+        "ref_": ref,
+        "lane": lane,
+        "source_range": dict(source_range) if source_range is not None else None,
+        "source_refs": list(source_refs or []),
+        "provider_compatibility": dict(provider_compatibility)
+        if provider_compatibility is not None
+        else None,
+        "estimated_tokens": estimated_tokens,
+        "metadata": dict(metadata or {}),
+    }
+
+
+def llm_provider_compatibility(
+    *,
+    provider: str,
+    api_kind: str,
+    artifact_type: str,
+    model: Optional[str] = None,
+    model_family: Optional[str] = None,
+    opaque: bool = False,
+    encrypted: bool = False,
+) -> dict[str, Any]:
+    return {
+        "provider": provider,
+        "api_kind": api_kind,
+        "model": model,
+        "model_family": model_family,
+        "artifact_type": artifact_type,
+        "opaque": opaque,
+        "encrypted": encrypted,
+    }
+
+
+def apply_llm_compact_ok(
+    harness: "WorkflowHarness",
+    effect: Mapping[str, Any],
+    *,
+    operation_id: Optional[str] = None,
+    artifact_kind: str = "AosSummary",
+    artifact_refs: Sequence[str],
+    active_window_items: Sequence[Mapping[str, Any]],
+    source_range: Optional[Mapping[str, Any]] = None,
+    compacted_through: Optional[int] = None,
+    provider_id: str = "test-provider",
+    prompt_tokens: Optional[int] = None,
+    completion_tokens: Optional[int] = None,
+    total_tokens: Optional[int] = None,
+    provider_metadata_ref: Optional[str] = None,
+    warnings_ref: Optional[str] = None,
+) -> ReceiptObject:
+    params = _effect_params(effect)
+    resolved_operation_id = operation_id or params.get("operation_id")
+    if not isinstance(resolved_operation_id, str):
+        raise TypeError("operation_id must be supplied or present in effect.params.operation_id")
+    token_usage = None
+    if prompt_tokens is not None or completion_tokens is not None or total_tokens is not None:
+        token_usage = {
+            "prompt": prompt_tokens or 0,
+            "completion": completion_tokens or 0,
+            "total": total_tokens,
+        }
+    receipt = harness.receipt_ok(
+        _intent_hash(effect),
+        {
+            "operation_id": resolved_operation_id,
+            "artifact_kind": _unit_variant(artifact_kind),
+            "artifact_refs": list(artifact_refs),
+            "source_range": dict(source_range) if source_range is not None else None,
+            "compacted_through": compacted_through,
+            "active_window_items": [dict(item) for item in active_window_items],
+            "token_usage": token_usage,
+            "provider_metadata_ref": provider_metadata_ref,
+            "warnings_ref": warnings_ref,
+            "provider_id": provider_id,
+        },
     )
     harness.apply_receipt_object(receipt)
     return receipt
@@ -681,12 +913,17 @@ def current_turn_plan(
 def selected_message_refs(state_or_plan: Any, session_id: Optional[str] = None) -> list[str]:
     plan = (
         state_or_plan
-        if isinstance(state_or_plan, Mapping) and "message_refs" in state_or_plan
+        if isinstance(state_or_plan, Mapping)
+        and (
+            "message_refs" in state_or_plan
+            or "window_items" in state_or_plan
+            or "active_window_items" in state_or_plan
+        )
         else current_turn_plan(state_or_plan, session_id)
     )
     if not isinstance(plan, Mapping):
         return []
-    return [str(ref) for ref in plan.get("message_refs", [])]
+    return _window_item_refs(plan)
 
 
 def selected_tool_ids(state_or_plan: Any, session_id: Optional[str] = None) -> list[str]:
@@ -788,26 +1025,33 @@ def last_llm_usage(state_or_run: Any, session_id: Optional[str] = None) -> Optio
 
 __all__ = [
     "BLOB_GET",
+    "LLM_COMPACT",
     "LLM_GENERATE",
     "SESSION_INPUT",
     "SESSION_WORKFLOW",
     "SESSION_WORKFLOW_EVENT",
     "agent_workflow",
+    "apply_llm_compact_ok",
+    "apply_llm_generate_error",
     "apply_llm_generate_ok",
     "cause_ref",
     "current_run",
     "current_turn_plan",
     "direct_run_cause",
     "domain_event_run_cause",
+    "expect_llm_compact",
     "expect_llm_generate",
     "find_effect",
     "follow_up_input_appended",
     "host_session_updated",
     "last_llm_usage",
     "last_trace_kind",
+    "llm_generate_receipt",
     "llm_output_envelope_bytes",
+    "llm_provider_compatibility",
     "llm_tool_call",
     "llm_tool_calls_bytes",
+    "llm_window_item",
     "respond_blob_get_bytes",
     "respond_llm_output_blob",
     "respond_llm_tool_calls_blob",
