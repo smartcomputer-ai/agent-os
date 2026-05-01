@@ -49,12 +49,43 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+create_venv() {
+  if python3 -m venv "${venv_dir}" 2>/tmp/aos-setup-python-venv.err; then
+    return 0
+  fi
+
+  echo "python3 -m venv failed:" >&2
+  sed 's/^/  /' /tmp/aos-setup-python-venv.err >&2 || true
+
+  if command -v uv >/dev/null 2>&1; then
+    echo "falling back to: uv venv --seed ${venv_dir}" >&2
+    uv venv --seed "${venv_dir}"
+    return 0
+  fi
+
+  cat >&2 <<'EOF'
+could not create a Python environment with pip.
+
+Install python3-venv/ensurepip for your system Python, or install uv and rerun:
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+EOF
+  return 1
+}
+
+venv_has_pip() {
+  [[ -x "${venv_dir}/bin/python" ]] && "${venv_dir}/bin/python" -m pip --version >/dev/null 2>&1
+}
+
 if (( recreate == 1 )) && [[ -d "${venv_dir}" ]]; then
   rm -rf "${venv_dir}"
 fi
 
 if [[ ! -d "${venv_dir}" ]]; then
-  python3 -m venv "${venv_dir}"
+  create_venv
+elif ! venv_has_pip; then
+  echo "${venv_dir} exists but pip is missing; recreating it" >&2
+  rm -rf "${venv_dir}"
+  create_venv
 fi
 
 # shellcheck disable=SC1091

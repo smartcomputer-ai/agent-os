@@ -3,7 +3,7 @@
 **Priority**: P1
 **Effort**: Medium
 **Risk if deferred**: Medium (new agent workflows will lack a first-class deterministic Python lane and will keep leaning on ad hoc live evals)
-**Status**: Proposed
+**Status**: Completed
 **Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p6-turn-planner.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
 
 ## Goal
