@@ -4,7 +4,7 @@
 **Effort**: High  
 **Risk if deferred**: High (agent failures will remain hard to diagnose, and steer/interrupt behavior will stay ad hoc)
 **Status**: Complete; host/Fabric signaling is P8 scope and broader harness fixtures are P10 scope
-**Depends on**: `roadmap/v0.30-agent/p5-session-run-model.md`, `roadmap/v0.30-agent/p6-turn-planner.md`
+**Depends on**: `roadmap/v0.23-agent/p5-session-run-model.md`, `roadmap/v0.23-agent/p6-turn-planner.md`
 
 ## Goal
 
@@ -237,7 +237,7 @@ Required outcome:
 2. Demiurge task status includes current run lifecycle and last meaningful trace event,
 3. failure output includes typed cause and relevant output refs,
 4. existing `aos-agent-eval` live behavior still works as the provider/tool acceptance lane,
-5. trace fixture requirements align with `roadmap/v0.30-agent/p10-agent-sdk-testing.md`.
+5. trace fixture requirements align with `roadmap/v0.23-agent/p10-agent-sdk-testing.md`.
 
 Current cut:
 

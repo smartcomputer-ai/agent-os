@@ -4,7 +4,7 @@
 **Effort**: High
 **Risk if deferred**: High (`aos-agent` will keep splitting prompt/context/tool/skill decisions across unrelated helpers, making future context engineering harder to reason about)
 **Status**: Implemented in `aos-agent`
-**Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p5-session-run-model.md`
+**Depends on**: `roadmap/v0.23-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.23-agent/p5-session-run-model.md`
 
 ## Goal
 

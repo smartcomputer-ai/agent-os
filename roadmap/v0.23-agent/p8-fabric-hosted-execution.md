@@ -4,7 +4,7 @@
 **Effort**: Medium  
 **Risk if deferred**: Medium (the agent can still improve locally, but hosted/sandbox execution will remain an adapter detail rather than a proven harness mode)  
 **Status**: Complete for v0.30 SDK scope; Fabric-backed fixtures, intervention signaling, and Demiurge selection are deferred proof/product work  
-**Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
+**Depends on**: `roadmap/v0.23-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.23-agent/p7-run-traces-and-intervention.md`
 
 ## Goal
 
@@ -145,7 +145,7 @@ Add a focused fixture that proves:
 
 This can use a fake controller for deterministic tests and live Fabric tests behind explicit feature/env flags.
 The deterministic path should be expressed through `aos-harness-py` as described in
-`roadmap/v0.30-agent/p10-agent-sdk-testing.md`; live Fabric coverage should remain an explicit
+`roadmap/v0.23-agent/p10-agent-sdk-testing.md`; live Fabric coverage should remain an explicit
 gated acceptance lane.
 
 Deferred:

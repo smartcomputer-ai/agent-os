@@ -17,7 +17,7 @@ It starts with the high-level shape and then zooms into the relevant state machi
 11. context compaction and token counting,
 12. host session readiness.
 
-The diagrams describe the current v0.30 first-cut shape after P4-P11 of `roadmap/v0.30-agent/`.
+The diagrams describe the current v0.30 first-cut shape after P4-P11 of `roadmap/v0.23-agent/`.
 
 ## High-Level Model
 
