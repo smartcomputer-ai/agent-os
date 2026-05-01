@@ -2,11 +2,6 @@
 
 This guide explains how `aos-agent` fits together as a deterministic agent SDK layer on top of AOS.
 
-Note: this guide still describes the current implementation shape. P6 has been reset to
-`p6-turn-planner.md`, which deliberately supersedes the narrower context-engine model by planning
-message refs, tools, skills, runtime hints, and turn controls together. Update this guide after the
-TurnPlanner implementation lands.
-
 It starts with the high-level shape and then zooms into the relevant state machines:
 
 1. session workflow event reduction,
@@ -14,14 +9,14 @@ It starts with the high-level shape and then zooms into the relevant state machi
 3. session lifecycle,
 4. run lifecycle,
 5. LLM turn dispatch,
-6. context planning,
+6. turn planning,
 7. tool batch execution,
 8. blob indirection,
 9. interventions,
 10. traces,
 11. host session readiness.
 
-The diagrams describe the intended current shape after P4-P7 of `roadmap/v0.30-agent/`.
+The diagrams describe the current shape after P4-P8 of `roadmap/v0.30-agent/`.
 
 ## High-Level Model
 
@@ -30,7 +25,7 @@ The diagrams describe the intended current shape after P4-P7 of `roadmap/v0.30-a
 1. sessions,
 2. runs,
 3. run causes,
-4. context planning,
+4. turn planning,
 5. LLM turn dispatch,
 6. tool execution batches,
 7. intervention state,
@@ -63,6 +58,7 @@ flowchart TD
 
   State --> CurrentRun[RunState]
   State --> RunHistory[RunRecord history]
+  CurrentRun --> TurnPlan[TurnPlan]
   CurrentRun --> Trace[RunTrace]
   RunHistory --> TraceSummary[RunTraceSummary]
 ```
@@ -95,9 +91,9 @@ flowchart TD
   SessionState --> Status[status]
   SessionState --> Lifecycle[lifecycle]
   SessionState --> Config[session_config]
-  SessionState --> Context[context_state]
+  SessionState --> TurnState[turn_state]
   SessionState --> Transcript[transcript_message_refs]
-  SessionState --> Tools[tool registry/profile/effective tools]
+  SessionState --> Tools[tool_registry / tool_profiles / tool_runtime_context]
   SessionState --> Runtime[active pending effects/blob gets/blob puts/tool batch]
   SessionState --> Intervention[queued_steer_refs / queued_follow_up_runs / run_interrupt]
   SessionState --> CurrentRun[current_run]
@@ -106,9 +102,10 @@ flowchart TD
   CurrentRun --> RunIdentity[run_id]
   CurrentRun --> RunCause[cause]
   CurrentRun --> RunConfig[config]
-  CurrentRun --> ContextPlan[context_plan]
+  CurrentRun --> TurnPlan[turn_plan]
   CurrentRun --> RunRuntime[pending effects / active tool batch / queued LLM turn]
   CurrentRun --> RunIntervention[queued_steer_refs / interrupt]
+  CurrentRun --> Usage[last_llm_usage]
   CurrentRun --> Trace[trace]
   CurrentRun --> Outcome[outcome]
 
@@ -123,6 +120,7 @@ pub struct SessionState {
     pub session_id: SessionId,
     pub status: SessionStatus,
     pub lifecycle: SessionLifecycle,
+    pub turn_state: SessionTurnState,
     pub current_run: Option<RunState>,
     pub run_history: Vec<RunRecord>,
     pub transcript_message_refs: Vec<String>,
@@ -131,7 +129,12 @@ pub struct SessionState {
     pub pending_effects: PendingEffects,
     pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
     pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
-    pub effective_tools: EffectiveToolSet,
+    pub staged_tool_follow_up_turn: Option<StagedToolFollowUpTurn>,
+    pub tool_refs_materialized: bool,
+    pub tool_registry: BTreeMap<String, ToolSpec>,
+    pub tool_profiles: BTreeMap<String, Vec<String>>,
+    pub tool_profile: String,
+    pub tool_runtime_context: ToolRuntimeContext,
     pub queued_steer_refs: Vec<String>,
     pub queued_follow_up_runs: Vec<QueuedRunStart>,
     pub run_interrupt: Option<RunInterrupt>,
@@ -145,13 +148,20 @@ pub struct RunState {
     pub cause: RunCause,
     pub config: RunConfig,
     pub input_refs: Vec<String>,
-    pub context_plan: Option<ContextPlan>,
+    pub turn_plan: Option<TurnPlan>,
     pub trace: RunTrace,
     pub queued_steer_refs: Vec<String>,
     pub interrupt: Option<RunInterrupt>,
     pub active_tool_batch: Option<ActiveToolBatch>,
+    pub pending_effects: PendingEffects,
+    pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
+    pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
+    pub staged_tool_follow_up_turn: Option<StagedToolFollowUpTurn>,
     pub pending_llm_turn_refs: Option<Vec<String>>,
     pub last_output_ref: Option<String>,
+    pub last_llm_usage: Option<LlmUsageRecord>,
+    pub tool_refs_materialized: bool,
+    pub in_flight_effects: u64,
     pub outcome: Option<RunOutcome>,
 }
 ```
@@ -364,6 +374,7 @@ pub struct RunRecord {
     pub cause: RunCause,
     pub input_refs: Vec<String>,
     pub outcome: Option<RunOutcome>,
+    pub last_llm_usage: Option<LlmUsageRecord>,
     pub trace_summary: RunTraceSummary,
     pub started_at: u64,
     pub ended_at: u64,
@@ -548,44 +559,76 @@ Selected run config:
 }
 ```
 
-## Context Planning
+## Turn Planning
 
-The context engine selects which refs become the next LLM message list.
+The turn planner selects the complete next model request shape. It owns message refs, selected tool ids, response-format refs, provider-options refs, budget decisions, planner state updates, and prerequisites such as opening a host session or materializing tool definitions.
 
 Sources include:
 
 1. run prompt refs,
 2. transcript refs,
-3. run input refs,
-4. pinned context inputs,
-5. summaries,
-6. domain/workspace/memory/skill refs supplied by embedding workflows.
+3. current turn refs,
+4. queued steer refs,
+5. run-cause payload and subject refs,
+6. session-level pinned and durable turn inputs,
+7. summaries, memory, skill, domain, artifact, and runtime-hint refs supplied by embedding workflows.
 
 ```mermaid
 flowchart TD
-  PromptRefs[prompt refs] --> Inputs[ContextInput candidates]
+  PromptRefs[prompt refs] --> Inputs[TurnInput candidates]
   Transcript[transcript_message_refs] --> Inputs
-  RunInput[run input refs] --> Inputs
-  Pinned[pinned_inputs] --> Inputs
-  Summaries[summary_refs] --> Inputs
+  TurnRefs[pending_llm_turn_refs] --> Inputs
+  Steer[queued_steer_refs] --> Inputs
+  Cause[RunCause payload/subjects] --> Inputs
+  SessionTurnState[pinned_inputs / durable_inputs] --> Planner
 
-  Inputs --> Engine[DefaultContextEngine or custom ContextEngine]
-  Engine --> Plan[ContextPlan]
-  Plan --> Selected[selected_refs]
-  Plan --> Actions[actions: summarize/compact/materialize/custom]
-  Plan --> Report[ContextReport]
-  Selected --> LLM[LLM message_refs]
-  Report --> Trace[ContextPlanned trace entry]
+  Registry[tool_registry] --> ToolInputs[TurnToolInput candidates]
+  Profiles[tool_profiles + selected profile] --> ToolInputs
+  Overrides[session/run enable-disable-force] --> ToolInputs
+  Runtime[ToolRuntimeContext] --> Planner
+
+  Inputs --> Planner[DefaultTurnPlanner or custom TurnPlanner]
+  ToolInputs --> Planner
+  Planner --> Plan[TurnPlan]
+  Plan --> Messages[message_refs]
+  Plan --> Tools[selected_tool_ids]
+  Plan --> Controls[tool_choice / response_format_ref / provider_options_ref]
+  Plan --> Prereqs[prerequisites]
+  Plan --> Report[TurnReport]
+  Messages --> LLM[sys/llm.generate message_refs]
+  Tools --> ToolRefs[tool_refs for LLM runtime]
+  Report --> Trace[TurnPlanned trace entry]
 ```
 
-Context plan:
+Turn inputs are lane-aware and priority-aware:
 
 ```rust
-pub struct ContextPlan {
-    pub selected_refs: Vec<String>,
-    pub selections: Vec<ContextSelection>,
-    pub actions: Vec<ContextAction>,
-    pub report: ContextReport,
+pub struct TurnInput {
+    pub input_id: String,
+    pub lane: TurnInputLane,
+    pub kind: TurnInputKind,
+    pub priority: TurnPriority,
+    pub content_ref: String,
+    pub estimated_tokens: Option<u64>,
+    pub source_kind: Option<String>,
+    pub source_id: Option<String>,
+    pub correlation_id: Option<String>,
+    pub tags: Vec<String>,
+}
+```
+
+Turn plan:
+
+```rust
+pub struct TurnPlan {
+    pub message_refs: Vec<String>,
+    pub selected_tool_ids: Vec<String>,
+    pub tool_choice: Option<TurnToolChoice>,
+    pub response_format_ref: Option<String>,
+    pub provider_options_ref: Option<String>,
+    pub prerequisites: Vec<TurnPrerequisite>,
+    pub state_updates: Vec<TurnStateUpdate>,
+    pub report: TurnReport,
 }
 ```
 
@@ -593,38 +636,56 @@ Example:
 
 ```json
 {
-  "selected_refs": [
+  "message_refs": [
     "sha256:0101010101010101010101010101010101010101010101010101010101010101",
     "sha256:1111111111111111111111111111111111111111111111111111111111111111"
   ],
-  "selections": [
-    {
-      "input_id": "prompt:0",
-      "selected": true,
-      "reason": "required prompt",
-      "content_ref": "sha256:0101010101010101010101010101010101010101010101010101010101010101"
-    },
-    {
-      "input_id": "turn:0",
-      "selected": true,
-      "reason": "recent transcript",
-      "content_ref": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-    }
+  "selected_tool_ids": [
+    "host.fs.read_file"
   ],
-  "actions": [],
+  "tool_choice": { "$tag": "Auto" },
+  "response_format_ref": null,
+  "provider_options_ref": null,
+  "prerequisites": [],
+  "state_updates": [],
   "report": {
-    "engine": "aos.agent/default-context",
-    "selected_count": 2,
-    "dropped_count": 0,
-    "budget": {
-      "max_refs": null,
-      "reserve_output_tokens": 1200
+    "planner": "aos.agent/default-turn",
+    "selected_message_count": 2,
+    "dropped_message_count": 0,
+    "selected_tool_count": 1,
+    "dropped_tool_count": 0,
+    "token_estimate": {
+      "message_tokens": 0,
+      "tool_tokens": 0,
+      "total_input_tokens": 0,
+      "unknown_message_count": 2,
+      "unknown_tool_count": 1
     },
-    "decisions": [],
-    "unresolved": [],
-    "compaction_recommended": false,
-    "compaction_required": false
+    "budget": {
+      "max_input_tokens": null,
+      "reserve_output_tokens": 1200,
+      "max_message_refs": null,
+      "max_tool_refs": null
+    },
+    "decision_codes": [
+      "selected_turn:session=session-123:run=1"
+    ],
+    "unresolved": []
   }
+}
+```
+
+If selected tools are not yet materialized, the workflow adds a technical `MaterializeToolDefinitions` prerequisite after planning. If host-backed tool candidates need a host session and `host_session_open` config exists, the planner returns an `OpenHostSession` prerequisite before dispatching the LLM turn.
+
+Embedding workflows can update planner state through `SessionInputKind::TurnObserved`. The current contract supports observed inputs, input removal, and custom planner-state refs:
+
+```rust
+pub enum TurnObservation {
+    InputObserved(TurnInput),
+    InputRemoved { input_id: String },
+    CustomStateRefUpdated(PlannerStateRef),
+    CustomStateRefRemoved { planner_id: String, key: String },
+    Noop,
 }
 ```
 
@@ -637,11 +698,13 @@ stateDiagram-v2
   [*] --> NoQueuedTurn
 
   NoQueuedTurn --> QueuedTurn: set_pending_llm_turn(message_refs)
-  QueuedTurn --> WaitingToolRefs: tools enabled and tool refs not materialized
-  WaitingToolRefs --> QueuedTurn: tool definition blobs materialized
 
-  QueuedTurn --> ContextPlanning: dispatch_pending_llm_turn
-  ContextPlanning --> LlmEffectPending: sys/llm.generate emitted
+  QueuedTurn --> TurnPlanning: dispatch_pending_llm_turn_with_planner
+  TurnPlanning --> WaitingHostSession: OpenHostSession prerequisite
+  WaitingHostSession --> QueuedTurn: HostSessionUpdated Ready
+  TurnPlanning --> WaitingToolRefs: MaterializeToolDefinitions prerequisite
+  WaitingToolRefs --> QueuedTurn: tool definition blobs materialized
+  TurnPlanning --> LlmEffectPending: sys/llm.generate emitted
   LlmEffectPending --> LlmReceiptAdmitted: LLM receipt admitted
   LlmReceiptAdmitted --> OutputBlobPending: sys/blob.get output_ref
   OutputBlobPending --> WaitingInput: output has no tool_calls_ref
@@ -659,8 +722,10 @@ Dispatch guards:
 2. `pending_llm_turn_refs` must be present,
 3. no interrupt may be pending,
 4. pending effects/blob gets/blob puts must be empty,
-5. no active unsettled tool batch may exist,
-6. tool definitions must be materialized if tools are enabled.
+5. no active unsettled tool batch or staged tool follow-up may exist,
+6. the turn planner must produce at least one message ref,
+7. host-backed selected tools require a ready host session or an `OpenHostSession` prerequisite,
+8. selected tool definitions must be materialized before LLM dispatch.
 
 LLM step before mapping:
 
@@ -743,6 +808,8 @@ LLM receipt:
 }
 ```
 
+The workflow records aggregate usage from the receipt in `current_run.last_llm_usage`, copies it into `RunRecord.last_llm_usage` when the run finishes, and also exposes usage fields on the `LlmReceived` trace metadata.
+
 The receipt points to an output blob:
 
 ```json
@@ -757,26 +824,30 @@ If `tool_calls_ref` is absent, the run enters `WaitingInput`.
 
 If `tool_calls_ref` is present, the workflow fetches the tool call list blob and starts a tool batch.
 
-## Tool Availability and Effective Tool Set
+## Tool Candidate Selection
 
-Tools are selected from:
+There is no separate `EffectiveToolSet` state now. Tool candidates are built from registry/profile/config, and the turn planner decides which tool ids are selected for the next LLM turn.
 
-1. registry,
-2. profile,
-3. availability rules,
-4. run/session enable-disable-force overrides,
-5. host session readiness.
+Tools are sourced from:
+
+1. `tool_registry`,
+2. the configured run profile, session default profile, or current `tool_profile`,
+3. session/run enable-disable-force overrides,
+4. `ToolRuntimeContext`, especially host session readiness,
+5. the turn budget.
 
 ```mermaid
 flowchart TD
-  Registry[tool_registry] --> Profile[tool_profile]
-  Profiles[tool_profiles] --> Profile
-  Profile --> Rules[availability rules]
-  Runtime[ToolRuntimeContext] --> Rules
-  Overrides[session/run tool overrides] --> Select[effective tool selection]
-  Rules --> Select
-  Select --> Effective[EffectiveToolSet]
-  Effective --> ToolRefs[tool_refs for LLM]
+  Registry[tool_registry] --> Candidates[TurnToolInput candidates]
+  Profiles[tool_profiles + selected profile] --> Candidates
+  Overrides[session/run enable-disable-force] --> Candidates
+  Runtime[ToolRuntimeContext] --> Planner[TurnPlanner]
+  Budget[TurnBudget] --> Planner
+  Candidates --> Planner
+  Planner --> Selected[selected_tool_ids]
+  Planner --> Dropped[dropped/unresolved tool candidates]
+  Planner --> Prereqs[OpenHostSession / MaterializeToolDefinitions]
+  Selected --> ToolRefs[tool_refs for LLM runtime]
 ```
 
 Tool spec:
@@ -790,7 +861,6 @@ pub struct ToolSpec {
     pub args_schema_json: String,
     pub mapper: ToolMapper,
     pub executor: ToolExecutor,
-    pub availability_rules: Vec<ToolAvailabilityRule>,
     pub parallelism_hint: ToolParallelismHint,
 }
 ```
@@ -811,9 +881,6 @@ Example:
       "effect": "sys/host.fs.read_file@1"
     }
   },
-  "availability_rules": [
-    { "$tag": "HostSessionReady" }
-  ],
   "parallelism_hint": {
     "parallel_safe": true,
     "resource_key": null
@@ -821,32 +888,27 @@ Example:
 }
 ```
 
-Effective tool:
+Selected tool ids live on the turn plan:
 
 ```json
 {
-  "profile_id": "local_coding",
-  "profile_requires_host_session": true,
-  "ordered_tools": [
-    {
-      "tool_id": "host.fs.read_file",
-      "tool_name": "read_file",
-      "tool_ref": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-      "description": "Read a UTF-8 file from the active host session.",
-      "args_schema_json": "{\"type\":\"object\"}",
-      "mapper": { "$tag": "HostFsReadFile" },
-      "executor": {
-        "$tag": "Effect",
-        "$value": {
-          "effect": "sys/host.fs.read_file@1"
-        }
-      },
-      "parallel_safe": true,
-      "resource_key": null
-    }
-  ]
+  "selected_tool_ids": [
+    "host.fs.read_file"
+  ],
+  "tool_choice": { "$tag": "Auto" },
+  "prerequisites": [],
+  "report": {
+    "selected_tool_count": 1,
+    "dropped_tool_count": 0,
+    "decision_codes": [
+      "selected_turn:session=session-123:run=1"
+    ],
+    "unresolved": []
+  }
 }
 ```
+
+Host-backed effect tools are blocked until `ToolRuntimeContext.host_session_status == Ready`. If a host-open config exists, the planner returns `OpenHostSession`; otherwise it drops those tools and records `host_session_not_ready` as unresolved. `HostLoop` tools do not require an AOS host session.
 
 ## Tool Batch State Machine
 
@@ -1031,7 +1093,7 @@ pub enum PendingBlobPutKind {
 
 ## Interventions
 
-P7 keeps interventions at the agent/LLM level. Host/Fabric session signaling, especially exec cancellation, belongs to P8.
+Interventions stay at the agent/LLM level. Host/Fabric session signaling, especially exec cancellation, is modeled through host effects and admitted receipts rather than hidden side channels.
 
 The ref-based intervention input variants are:
 
@@ -1181,8 +1243,8 @@ Run traces are deterministic state, not debug logs. They are built from admitted
 
 ```mermaid
 flowchart TD
-  RunStarted --> ContextPlanned
-  ContextPlanned --> LlmRequested
+  RunStarted --> TurnPlanned
+  TurnPlanned --> LlmRequested
   LlmRequested --> LlmReceived
   LlmReceived --> ToolCallsObserved
   ToolCallsObserved --> ToolBatchPlanned
@@ -1191,7 +1253,7 @@ flowchart TD
   EffectEmitted --> StreamFrameObserved
   EffectEmitted --> ReceiptSettled
   DomainEventEmitted --> ReceiptSettled
-  ReceiptSettled --> LlmRequested
+  ReceiptSettled --> TurnPlanned
   LlmReceived --> RunFinished
   InterventionRequested --> InterventionApplied
   InterventionRequested --> RunFinished
@@ -1202,7 +1264,7 @@ Trace kind enum:
 ```rust
 pub enum RunTraceEntryKind {
     RunStarted,
-    ContextPlanned,
+    TurnPlanned,
     LlmRequested,
     LlmReceived,
     ToolCallsObserved,
@@ -1237,7 +1299,7 @@ Example trace:
 {
   "max_entries": 256,
   "dropped_entries": 0,
-  "next_seq": 6,
+  "next_seq": 5,
   "entries": [
     {
       "seq": 0,
@@ -1258,8 +1320,8 @@ Example trace:
     {
       "seq": 1,
       "observed_at_ns": 1710000000000000000,
-      "kind": { "$tag": "ContextPlanned" },
-      "summary": "context planned",
+      "kind": { "$tag": "TurnPlanned" },
+      "summary": "turn plan selected model inputs and tools",
       "refs": [
         {
           "kind": "selected_ref",
@@ -1268,9 +1330,10 @@ Example trace:
         }
       ],
       "metadata": {
-        "engine": "aos.agent/default-context",
-        "selected_count": "1",
-        "dropped_count": "0"
+        "planner": "aos.agent/default-turn",
+        "selected_message_count": "1",
+        "dropped_message_count": "0",
+        "selected_tool_count": "0"
       }
     },
     {
@@ -1379,7 +1442,7 @@ Runtime context:
 }
 ```
 
-The tool selector uses this to evaluate `ToolAvailabilityRule::HostSessionReady` and `ToolAvailabilityRule::HostSessionNotReady`.
+The turn planner uses this to decide whether host-backed effect tools can be selected. If host-backed tool candidates are blocked and the selected run config has `host_session_open` available, the planner returns an `OpenHostSession` prerequisite and the workflow emits `sys/host.session.open@1` before re-planning.
 
 Host session open config:
 
@@ -1407,7 +1470,7 @@ Host session open config:
 }
 ```
 
-Host/Fabric signaling is intentionally not part of P7. The agent state now has the run-level interrupt primitive that P8 can connect to host effects, Fabric sessions, exec progress, and receipts.
+Host/Fabric signaling is intentionally not part of the core intervention primitive. The agent state has the run-level interrupt primitive that host effects, Fabric sessions, exec progress, and receipts can connect to from the edge.
 
 ## End-to-End Example: Direct Chat Run
 
@@ -1421,8 +1484,8 @@ sequenceDiagram
   UI->>Agent: RunRequested(input_ref)
   Agent->>Agent: allocate RunState
   Agent->>Agent: trace RunStarted
-  Agent->>Agent: context plan
-  Agent->>Agent: trace ContextPlanned
+  Agent->>Agent: build TurnPlan
+  Agent->>Agent: trace TurnPlanned
   Agent->>LLM: sys/llm.generate(message_refs)
   Agent->>Agent: trace LlmRequested
   LLM-->>Agent: LlmGenerateReceipt(output_ref)
@@ -1453,6 +1516,7 @@ sequenceDiagram
   participant Tool as tool effect/domain event
 
   UI->>Agent: RunRequested(input_ref)
+  Agent->>Agent: build TurnPlan with selected_tool_ids
   Agent->>Blob: sys/blob.put(tool definitions) if needed
   Blob-->>Agent: tool_ref receipts
   Agent->>LLM: sys/llm.generate(message_refs, tool_refs)
@@ -1468,6 +1532,7 @@ sequenceDiagram
   Blob-->>Agent: results_ref
   Agent->>Blob: sys/blob.put(follow-up message)
   Blob-->>Agent: follow-up message ref
+  Agent->>Agent: build next TurnPlan
   Agent->>LLM: sys/llm.generate(transcript + follow-up)
 ```
 
@@ -1475,7 +1540,7 @@ Trace path:
 
 ```text
 RunStarted
-ContextPlanned
+TurnPlanned
 LlmRequested
 LlmReceived
 ToolCallsObserved
@@ -1483,6 +1548,7 @@ ToolBatchPlanned
 EffectEmitted / DomainEventEmitted
 StreamFrameObserved
 ReceiptSettled
+TurnPlanned
 LlmRequested
 ...
 RunFinished
@@ -1499,8 +1565,8 @@ sequenceDiagram
   Operator->>Agent: RunSteerRequested(instruction_ref)
   Agent->>Agent: queued_steer_refs += instruction_ref
   Agent->>Agent: trace InterventionRequested
-  Agent->>Agent: next dispatch builds context
-  Agent->>Agent: append steer ref to message_refs
+  Agent->>Agent: next dispatch builds TurnPlan
+  Agent->>Agent: planner includes steer ref in message_refs
   Agent->>Agent: trace InterventionApplied
   Agent->>LLM: sys/llm.generate(message_refs + instruction_ref)
 ```
@@ -1530,7 +1596,7 @@ sequenceDiagram
   end
 ```
 
-The workflow does not claim external work stopped unless admitted runtime state has become quiescent. P8 can add host/Fabric signal effects that attempt to stop external work earlier, but their result must still come back through admitted receipts or stream frames.
+The workflow does not claim external work stopped unless admitted runtime state has become quiescent. Host/Fabric signal effects can attempt to stop external work earlier, but their result must still come back through admitted receipts or stream frames.
 
 ## How To Read aos-agent State
 
@@ -1541,13 +1607,16 @@ For live inspection, the most useful fields are:
 3. `current_run.lifecycle`: active run lifecycle.
 4. `current_run.cause`: why the run exists.
 5. `transcript_message_refs`: durable session message history.
-6. `current_run.context_plan.selected_refs`: what the next/last LLM turn actually saw.
-7. `pending_llm_turn_refs`: whether an LLM turn is waiting to dispatch.
-8. `active_tool_batch`: current tool execution, statuses, and results.
-9. `pending_effects`, `pending_blob_gets`, `pending_blob_puts`: runtime work still open.
-10. `queued_steer_refs`, `queued_follow_up_runs`, `run_interrupt`: interventions waiting or applied.
-11. `current_run.trace.entries`: active diagnostic trace.
-12. `run_history[*].trace_summary`: compact completed run trace summary.
+6. `turn_state`: pinned/durable inputs and the last turn-planner report.
+7. `current_run.turn_plan.message_refs`: what the next/last LLM turn actually saw.
+8. `current_run.turn_plan.selected_tool_ids`: which tools were exposed to that turn.
+9. `current_run.last_llm_usage`: aggregate usage from the last admitted LLM receipt.
+10. `pending_llm_turn_refs`: whether an LLM turn is waiting to dispatch.
+11. `active_tool_batch`: current tool execution, statuses, and results.
+12. `pending_effects`, `pending_blob_gets`, `pending_blob_puts`: runtime work still open.
+13. `queued_steer_refs`, `queued_follow_up_runs`, `run_interrupt`: interventions waiting or applied.
+14. `current_run.trace.entries`: active diagnostic trace.
+15. `run_history[*].trace_summary`: compact completed run trace summary.
 
 ## Mental Model Summary
 
@@ -1555,7 +1624,7 @@ For live inspection, the most useful fields are:
 flowchart TD
   Session[Session] --> Runs[Runs]
   Runs --> Cause[Cause/provenance]
-  Runs --> Context[Context plan]
+  Runs --> TurnPlan[Turn plan]
   Runs --> LLM[LLM turns]
   LLM --> Tools[Tool batches]
   Tools --> Effects[Effects/domain events]
@@ -1573,7 +1642,7 @@ flowchart TD
 The core SDK stays small by making most axes open-ended:
 
 1. `RunCause.kind` and `RunCauseOrigin` describe why a run exists without adding a new API for every product.
-2. `ContextInputScope::Custom` and `ContextInputKind::Custom` allow embedding workflows to add context domains.
+2. `TurnInputLane::Custom` and `TurnInputKind::Custom` allow embedding workflows to add context domains.
 3. `RunTraceEntryKind::Custom` allows product-specific trace points without changing the core trace contract.
 4. `ToolExecutor::{Effect, DomainEvent, HostLoop}` lets tools target AOS effects, native workflows, or host loops.
 5. Intervention payloads are refs, so the SDK does not own raw UI text, policy, or host cancellation semantics.
