@@ -503,11 +503,15 @@ pub(super) fn handle_blob_put_receipt(
                                 refs.push(value.clone());
                             }
                         }
-                        let mut next_refs = turn.base_message_refs.clone();
-                        next_refs.extend(refs);
-                        state.transcript_message_refs = next_refs.clone();
+                        state.context_state.active_window_items = turn.base_window_items.clone();
+                        state.context_state.append_message_refs(
+                            refs,
+                            "tool_follow_up",
+                            state.updated_at,
+                        );
+                        let next_items = state.context_state.active_window_items.clone();
                         state.staged_tool_follow_up_turn = None;
-                        set_pending_llm_turn(state, next_refs, out)?;
+                        set_pending_llm_turn(state, next_items, out)?;
                     }
                 }
             }

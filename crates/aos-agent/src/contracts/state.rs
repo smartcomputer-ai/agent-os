@@ -1,7 +1,7 @@
 use super::{
-    ActiveToolBatch, LlmUsageRecord, RunConfig, RunId, RunLifecycle, RunTrace, RunTraceSummary,
-    SessionConfig, SessionId, SessionLifecycle, SessionStatus, SessionTurnState, ToolBatchId,
-    ToolRuntimeContext, ToolSpec, TurnPlan,
+    ActiveToolBatch, ActiveWindowItem, ContextState, LlmUsageRecord, RunConfig, RunId,
+    RunLifecycle, RunTrace, RunTraceSummary, SessionConfig, SessionId, SessionLifecycle,
+    SessionStatus, SessionTurnState, ToolBatchId, ToolRuntimeContext, ToolSpec, TurnPlan,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -64,8 +64,7 @@ pub struct PendingBlobPut {
 #[aos(schema = "aos.agent/StagedToolFollowUpTurn@1")]
 pub struct StagedToolFollowUpTurn {
     pub tool_batch_id: ToolBatchId,
-    #[aos(air_type = "hash")]
-    pub base_message_refs: Vec<String>,
+    pub base_window_items: Vec<ActiveWindowItem>,
     pub expected_messages: u64,
     #[aos(map_key_air_type = "nat", air_type = "hash")]
     pub blob_refs_by_index: BTreeMap<u64, String>,
@@ -212,8 +211,8 @@ pub struct RunState {
     #[aos(map_key_air_type = "hash", schema_ref = SharedPendingBlobPut)]
     pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
     pub staged_tool_follow_up_turn: Option<StagedToolFollowUpTurn>,
-    #[aos(air_type = "hash")]
-    pub pending_llm_turn_refs: Option<Vec<String>>,
+    pub pending_llm_turn_items: Option<Vec<ActiveWindowItem>>,
+    pub blocked_on_context_operation: Option<String>,
     #[aos(air_type = "hash")]
     pub last_output_ref: Option<String>,
     pub last_llm_usage: Option<LlmUsageRecord>,
@@ -265,10 +264,8 @@ pub struct SessionState {
     #[aos(map_key_air_type = "hash", schema_ref = SharedPendingBlobPut)]
     pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
     pub staged_tool_follow_up_turn: Option<StagedToolFollowUpTurn>,
-    #[aos(air_type = "hash")]
-    pub pending_llm_turn_refs: Option<Vec<String>>,
-    #[aos(air_type = "hash")]
-    pub transcript_message_refs: Vec<String>,
+    pub pending_llm_turn_items: Option<Vec<ActiveWindowItem>>,
+    pub context_state: ContextState,
     #[aos(air_type = "hash")]
     pub last_output_ref: Option<String>,
     pub tool_refs_materialized: bool,
@@ -308,8 +305,8 @@ impl Default for SessionState {
             pending_blob_gets: SharedBlobGets::new(),
             pending_blob_puts: SharedBlobPuts::new(),
             staged_tool_follow_up_turn: None,
-            pending_llm_turn_refs: None,
-            transcript_message_refs: Vec::new(),
+            pending_llm_turn_items: None,
+            context_state: ContextState::default(),
             last_output_ref: None,
             tool_refs_materialized: false,
             in_flight_effects: 0,

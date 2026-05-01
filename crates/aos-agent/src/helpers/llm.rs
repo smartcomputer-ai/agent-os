@@ -1,15 +1,22 @@
-use crate::contracts::{ReasoningEffort, RunConfig};
+use crate::contracts::{
+    ActiveWindowItem, ActiveWindowItemKind, ProviderCompatibility, ReasoningEffort, RunConfig,
+    TranscriptRange,
+};
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_air_types::HashRef;
-use aos_effects::builtins::{LlmGenerateParams, LlmRuntimeArgs, LlmToolChoice, TextOrSecretRef};
+use aos_effects::builtins::{
+    LlmGenerateParams, LlmProviderCompatibility, LlmRuntimeArgs, LlmToolChoice, LlmTranscriptRange,
+    LlmWindowItem, LlmWindowItemKind, TextOrSecretRef,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct LlmStepContext {
     pub correlation_id: Option<String>,
-    pub message_refs: Vec<String>,
+    pub window_items: Vec<ActiveWindowItem>,
     pub temperature: Option<String>,
     pub top_p: Option<String>,
     pub tool_refs: Option<Vec<String>>,
@@ -25,7 +32,7 @@ pub struct LlmStepContext {
 pub enum LlmMappingError {
     MissingProvider,
     MissingModel,
-    EmptyMessageRefs,
+    EmptyWindowItems,
     InvalidHashRef,
 }
 
@@ -34,7 +41,7 @@ impl LlmMappingError {
         match self {
             Self::MissingProvider => "missing provider",
             Self::MissingModel => "missing model",
-            Self::EmptyMessageRefs => "message_refs must not be empty",
+            Self::EmptyWindowItems => "window_items must not be empty",
             Self::InvalidHashRef => "invalid hash ref",
         }
     }
@@ -62,15 +69,14 @@ pub fn materialize_llm_generate_params(
         return Err(LlmMappingError::MissingModel);
     }
 
-    if step.message_refs.is_empty() {
-        return Err(LlmMappingError::EmptyMessageRefs);
+    if step.window_items.is_empty() {
+        return Err(LlmMappingError::EmptyWindowItems);
     }
 
-    let message_refs = step
-        .message_refs
+    let window_items = step
+        .window_items
         .iter()
-        .cloned()
-        .map(parse_hash_ref)
+        .map(map_window_item)
         .collect::<Result<Vec<_>, _>>()?;
     let tool_refs = step
         .tool_refs
@@ -98,7 +104,7 @@ pub fn materialize_llm_generate_params(
         correlation_id: step.correlation_id.clone(),
         provider: provider.into(),
         model: model.into(),
-        message_refs,
+        window_items,
         runtime: LlmRuntimeArgs {
             temperature: step.temperature.clone(),
             top_p: step.top_p.clone(),
@@ -120,9 +126,18 @@ pub fn apply_prompt_refs_to_step_context(
     run_config: &RunConfig,
     mut step: LlmStepContext,
 ) -> LlmStepContext {
-    let mut message_refs = run_config.prompt_refs.clone().unwrap_or_default();
-    message_refs.extend(core::mem::take(&mut step.message_refs));
-    step.message_refs = message_refs;
+    let mut window_items = run_config
+        .prompt_refs
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+        .map(|(idx, ref_)| {
+            ActiveWindowItem::message_ref(format!("prompt:{idx}"), ref_, None, None, None)
+        })
+        .collect::<Vec<_>>();
+    window_items.extend(core::mem::take(&mut step.window_items));
+    step.window_items = window_items;
     step
 }
 
@@ -138,6 +153,63 @@ pub fn materialize_llm_generate_params_with_prompt_refs(
 
 fn parse_hash_ref(value: String) -> Result<HashRef, LlmMappingError> {
     HashRef::new(value).map_err(|_| LlmMappingError::InvalidHashRef)
+}
+
+fn map_window_item(item: &ActiveWindowItem) -> Result<LlmWindowItem, LlmMappingError> {
+    Ok(LlmWindowItem {
+        item_id: item.item_id.clone(),
+        kind: map_window_item_kind(&item.kind),
+        ref_: parse_hash_ref(item.ref_.clone())?,
+        lane: item.lane.as_ref().map(|lane| format!("{lane:?}")),
+        source_range: item.source_range.as_ref().map(map_transcript_range),
+        source_refs: item
+            .source_refs
+            .iter()
+            .cloned()
+            .map(parse_hash_ref)
+            .collect::<Result<Vec<_>, _>>()?,
+        provider_compatibility: item
+            .provider_compatibility
+            .as_ref()
+            .map(map_provider_compatibility),
+        estimated_tokens: item.estimated_tokens,
+        metadata: item
+            .metadata
+            .iter()
+            .map(|entry| (entry.key.clone(), entry.value.clone()))
+            .collect(),
+    })
+}
+
+fn map_window_item_kind(kind: &ActiveWindowItemKind) -> LlmWindowItemKind {
+    match kind {
+        ActiveWindowItemKind::MessageRef => LlmWindowItemKind::MessageRef,
+        ActiveWindowItemKind::AosSummaryRef => LlmWindowItemKind::AosSummaryRef,
+        ActiveWindowItemKind::ProviderNativeArtifactRef => {
+            LlmWindowItemKind::ProviderNativeArtifactRef
+        }
+        ActiveWindowItemKind::ProviderRawWindowRef => LlmWindowItemKind::ProviderRawWindowRef,
+        ActiveWindowItemKind::Custom { kind } => LlmWindowItemKind::Custom { kind: kind.clone() },
+    }
+}
+
+fn map_transcript_range(range: &TranscriptRange) -> LlmTranscriptRange {
+    LlmTranscriptRange {
+        start_seq: range.start_seq,
+        end_seq: range.end_seq,
+    }
+}
+
+fn map_provider_compatibility(value: &ProviderCompatibility) -> LlmProviderCompatibility {
+    LlmProviderCompatibility {
+        provider: value.provider.clone(),
+        api_kind: value.api_kind.clone(),
+        model: value.model.clone(),
+        model_family: value.model_family.clone(),
+        artifact_type: value.artifact_type.clone(),
+        opaque: value.opaque,
+        encrypted: value.encrypted,
+    }
 }
 
 fn reasoning_effort_text(value: ReasoningEffort) -> String {
@@ -169,6 +241,18 @@ mod tests {
         HashRef::new(hash(seed)).expect("valid hash ref")
     }
 
+    fn window_item(seed: char) -> ActiveWindowItem {
+        ActiveWindowItem::message_ref(format!("test:{seed}"), hash(seed), None, None, None)
+    }
+
+    fn window_refs(items: &[LlmWindowItem]) -> Vec<HashRef> {
+        items.iter().map(|item| item.ref_.clone()).collect()
+    }
+
+    fn active_refs(items: &[ActiveWindowItem]) -> Vec<String> {
+        items.iter().map(|item| item.ref_.clone()).collect()
+    }
+
     fn run_config() -> RunConfig {
         RunConfig {
             provider: "openai".into(),
@@ -193,7 +277,7 @@ mod tests {
 
         let step = LlmStepContext {
             correlation_id: Some("run-1-turn-1".into()),
-            message_refs: vec![hash('a')],
+            window_items: vec![window_item('a')],
             temperature: Some("0.2".into()),
             top_p: Some("0.9".into()),
             tool_refs: Some(vec![hash('b')]),
@@ -248,13 +332,13 @@ mod tests {
     fn applies_run_prompt_refs_to_step_context() {
         let run = run_config();
         let step = LlmStepContext {
-            message_refs: vec![hash('a')],
+            window_items: vec![window_item('a')],
             ..LlmStepContext::default()
         };
 
         let mapped =
             materialize_llm_generate_params_with_prompt_refs(&run, step).expect("map params");
-        assert_eq!(mapped.message_refs, vec![hash_ref('a')]);
+        assert_eq!(window_refs(&mapped.window_items), vec![hash_ref('a')]);
         assert_eq!(mapped.runtime.tool_refs, None);
     }
 
@@ -265,14 +349,17 @@ mod tests {
             ..run_config()
         };
         let step = LlmStepContext {
-            message_refs: vec![hash('a')],
+            window_items: vec![window_item('a')],
             tool_refs: Some(vec![hash('z')]),
             ..LlmStepContext::default()
         };
 
         let applied = apply_prompt_refs_to_step_context(&run, step);
         assert_eq!(applied.tool_refs, Some(vec![hash('z')]));
-        assert_eq!(applied.message_refs, vec![hash('r'), hash('a')]);
+        assert_eq!(
+            active_refs(&applied.window_items),
+            vec![hash('r'), hash('a')]
+        );
     }
 
     #[test]
@@ -282,13 +369,16 @@ mod tests {
             ..run_config()
         };
         let step = LlmStepContext {
-            message_refs: vec![hash('a')],
+            window_items: vec![window_item('a')],
             ..LlmStepContext::default()
         };
 
         let mapped = materialize_llm_generate_params_with_prompt_refs(&run, step)
             .expect("map with direct prompt refs");
-        assert_eq!(mapped.message_refs, vec![hash_ref('r'), hash_ref('a')]);
+        assert_eq!(
+            window_refs(&mapped.window_items),
+            vec![hash_ref('r'), hash_ref('a')]
+        );
     }
 
     #[test]
@@ -296,7 +386,7 @@ mod tests {
         let mut run = run_config();
         run.provider = " ".into();
         let step = LlmStepContext {
-            message_refs: vec![hash('a')],
+            window_items: vec![window_item('a')],
             ..LlmStepContext::default()
         };
 
@@ -310,7 +400,7 @@ mod tests {
 
         let msg_err = materialize_llm_generate_params(&run_config(), &LlmStepContext::default())
             .expect_err("messages");
-        assert_eq!(msg_err, LlmMappingError::EmptyMessageRefs);
+        assert_eq!(msg_err, LlmMappingError::EmptyWindowItems);
     }
 
     #[test]
@@ -321,7 +411,7 @@ mod tests {
             ..run_config()
         };
         let step = LlmStepContext {
-            message_refs: vec![hash('f')],
+            window_items: vec![window_item('f')],
             ..LlmStepContext::default()
         };
 

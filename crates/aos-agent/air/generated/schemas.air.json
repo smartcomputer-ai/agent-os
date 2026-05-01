@@ -54,6 +54,80 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/ActiveWindowItem@1",
+    "type": {
+      "record": {
+        "estimated_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "item_id": {
+          "text": {}
+        },
+        "kind": {
+          "ref": "aos.agent/ActiveWindowItemKind@1"
+        },
+        "lane": {
+          "option": {
+            "ref": "aos.agent/TurnInputLane@1"
+          }
+        },
+        "metadata": {
+          "list": {
+            "ref": "aos.agent/ContextMetadataEntry@1"
+          }
+        },
+        "provider_compatibility": {
+          "option": {
+            "ref": "aos.agent/ProviderCompatibility@1"
+          }
+        },
+        "ref_": {
+          "hash": {}
+        },
+        "source_range": {
+          "option": {
+            "ref": "aos.agent/TranscriptRange@1"
+          }
+        },
+        "source_refs": {
+          "list": {
+            "hash": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ActiveWindowItemKind@1",
+    "type": {
+      "variant": {
+        "AosSummaryRef": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "MessageRef": {
+          "unit": {}
+        },
+        "ProviderNativeArtifactRef": {
+          "unit": {}
+        },
+        "ProviderRawWindowRef": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/CauseRef@1",
     "type": {
       "record": {
@@ -67,6 +141,315 @@
           "option": {
             "hash": {}
           }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/CompactionArtifactKind@1",
+    "type": {
+      "variant": {
+        "AosSummary": {
+          "unit": {}
+        },
+        "Mixed": {
+          "unit": {}
+        },
+        "ProviderNative": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/CompactionRecord@1",
+    "type": {
+      "record": {
+        "active_window_items": {
+          "list": {
+            "ref": "aos.agent/ActiveWindowItem@1"
+          }
+        },
+        "artifact_kind": {
+          "ref": "aos.agent/CompactionArtifactKind@1"
+        },
+        "artifact_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "created_at_ns": {
+          "time": {}
+        },
+        "operation_id": {
+          "text": {}
+        },
+        "provider_compatibility": {
+          "option": {
+            "ref": "aos.agent/ProviderCompatibility@1"
+          }
+        },
+        "source_range": {
+          "ref": "aos.agent/TranscriptRange@1"
+        },
+        "source_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "strategy": {
+          "ref": "aos.agent/CompactionStrategy@1"
+        },
+        "usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
+          }
+        },
+        "warnings": {
+          "list": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/CompactionStrategy@1",
+    "type": {
+      "variant": {
+        "AosSummary": {
+          "unit": {}
+        },
+        "Auto": {
+          "unit": {}
+        },
+        "ProviderNative": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextMetadataEntry@1",
+    "type": {
+      "record": {
+        "key": {
+          "text": {}
+        },
+        "value": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextOperationPhase@1",
+    "type": {
+      "variant": {
+        "ApplyingCompaction": {
+          "unit": {}
+        },
+        "Compacting": {
+          "unit": {}
+        },
+        "CountingTokens": {
+          "unit": {}
+        },
+        "Failed": {
+          "unit": {}
+        },
+        "NeedsCompaction": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextOperationState@1",
+    "type": {
+      "record": {
+        "candidate_plan_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "effect_intent_id": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "failure": {
+          "option": {
+            "text": {}
+          }
+        },
+        "operation_id": {
+          "text": {}
+        },
+        "params_hash": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "phase": {
+          "ref": "aos.agent/ContextOperationPhase@1"
+        },
+        "reason": {
+          "ref": "aos.agent/ContextPressureReason@1"
+        },
+        "source_items_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "source_range": {
+          "option": {
+            "ref": "aos.agent/TranscriptRange@1"
+          }
+        },
+        "started_at_ns": {
+          "time": {}
+        },
+        "strategy": {
+          "ref": "aos.agent/CompactionStrategy@1"
+        },
+        "updated_at_ns": {
+          "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextPressureReason@1",
+    "type": {
+      "variant": {
+        "CountTokensOverBudget": {
+          "unit": {}
+        },
+        "LocalWindowPolicy": {
+          "unit": {}
+        },
+        "Manual": {
+          "unit": {}
+        },
+        "ProviderContextLimit": {
+          "unit": {}
+        },
+        "ProviderRecommended": {
+          "unit": {}
+        },
+        "Unknown": {
+          "unit": {}
+        },
+        "UsageHighWater": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextPressureRecord@1",
+    "type": {
+      "record": {
+        "candidate_plan_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_kind": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "model": {
+          "option": {
+            "text": {}
+          }
+        },
+        "observed_at_ns": {
+          "time": {}
+        },
+        "observed_usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
+          }
+        },
+        "provider": {
+          "option": {
+            "text": {}
+          }
+        },
+        "reason": {
+          "ref": "aos.agent/ContextPressureReason@1"
+        },
+        "recommended_strategy": {
+          "option": {
+            "ref": "aos.agent/CompactionStrategy@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextState@1",
+    "type": {
+      "record": {
+        "active_window_items": {
+          "list": {
+            "ref": "aos.agent/ActiveWindowItem@1"
+          }
+        },
+        "compacted_through": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "compaction_records": {
+          "list": {
+            "ref": "aos.agent/CompactionRecord@1"
+          }
+        },
+        "last_compaction": {
+          "option": {
+            "ref": "aos.agent/CompactionRecord@1"
+          }
+        },
+        "last_context_pressure": {
+          "option": {
+            "ref": "aos.agent/ContextPressureRecord@1"
+          }
+        },
+        "last_llm_usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
+          }
+        },
+        "last_token_count_ref": {
+          "option": {
+            "text": {}
+          }
+        },
+        "pending_context_operation": {
+          "option": {
+            "ref": "aos.agent/ContextOperationState@1"
+          }
+        },
+        "transcript_ledger": {
+          "ref": "aos.agent/TranscriptLedger@1"
         }
       }
     }
@@ -451,6 +834,39 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/ProviderCompatibility@1",
+    "type": {
+      "record": {
+        "api_kind": {
+          "text": {}
+        },
+        "artifact_type": {
+          "text": {}
+        },
+        "encrypted": {
+          "bool": {}
+        },
+        "model": {
+          "option": {
+            "text": {}
+          }
+        },
+        "model_family": {
+          "option": {
+            "text": {}
+          }
+        },
+        "opaque": {
+          "bool": {}
+        },
+        "provider": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/QueuedRunStart@1",
     "type": {
       "record": {
@@ -813,6 +1229,11 @@
             "ref": "aos.agent/ActiveToolBatch@1"
           }
         },
+        "blocked_on_context_operation": {
+          "option": {
+            "text": {}
+          }
+        },
         "cause": {
           "ref": "aos.agent/RunCause@1"
         },
@@ -880,10 +1301,10 @@
             }
           }
         },
-        "pending_llm_turn_refs": {
+        "pending_llm_turn_items": {
           "option": {
             "list": {
-              "hash": {}
+              "ref": "aos.agent/ActiveWindowItem@1"
             }
           }
         },
@@ -1476,6 +1897,9 @@
             "ref": "aos.agent/ActiveToolBatch@1"
           }
         },
+        "context_state": {
+          "ref": "aos.agent/ContextState@1"
+        },
         "created_at": {
           "time": {}
         },
@@ -1536,10 +1960,10 @@
             }
           }
         },
-        "pending_llm_turn_refs": {
+        "pending_llm_turn_items": {
           "option": {
             "list": {
-              "hash": {}
+              "ref": "aos.agent/ActiveWindowItem@1"
             }
           }
         },
@@ -1607,11 +2031,6 @@
         },
         "tool_runtime_context": {
           "ref": "aos.agent/ToolRuntimeContext@1"
-        },
-        "transcript_message_refs": {
-          "list": {
-            "hash": {}
-          }
         },
         "turn_state": {
           "ref": "aos.agent/SessionTurnState@1"
@@ -1753,9 +2172,9 @@
     "name": "aos.agent/StagedToolFollowUpTurn@1",
     "type": {
       "record": {
-        "base_message_refs": {
+        "base_window_items": {
           "list": {
-            "hash": {}
+            "ref": "aos.agent/ActiveWindowItem@1"
           }
         },
         "blob_refs_by_index": {
@@ -2089,6 +2508,83 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/TranscriptLedger@1",
+    "type": {
+      "record": {
+        "entries": {
+          "list": {
+            "ref": "aos.agent/TranscriptLedgerEntry@1"
+          }
+        },
+        "next_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TranscriptLedgerEntry@1",
+    "type": {
+      "record": {
+        "appended_at_ns": {
+          "time": {}
+        },
+        "kind": {
+          "ref": "aos.agent/TranscriptLedgerEntryKind@1"
+        },
+        "ref_": {
+          "hash": {}
+        },
+        "seq": {
+          "nat": {}
+        },
+        "source": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TranscriptLedgerEntryKind@1",
+    "type": {
+      "variant": {
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "MessageRef": {
+          "unit": {}
+        },
+        "ProviderArtifactRef": {
+          "unit": {}
+        },
+        "SummaryRef": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TranscriptRange@1",
+    "type": {
+      "record": {
+        "end_seq": {
+          "nat": {}
+        },
+        "start_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/TurnBudget@1",
     "type": {
       "record": {
@@ -2274,9 +2770,9 @@
     "name": "aos.agent/TurnPlan@1",
     "type": {
       "record": {
-        "message_refs": {
+        "active_window_items": {
           "list": {
-            "hash": {}
+            "ref": "aos.agent/ActiveWindowItem@1"
           }
         },
         "prerequisites": {
@@ -2347,6 +2843,12 @@
     "name": "aos.agent/TurnPrerequisiteKind@1",
     "type": {
       "variant": {
+        "CompactContext": {
+          "unit": {}
+        },
+        "CountTokens": {
+          "unit": {}
+        },
         "Custom": {
           "record": {
             "kind": {

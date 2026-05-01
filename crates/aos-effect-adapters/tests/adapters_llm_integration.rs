@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,7 +7,9 @@ use aos_air_types::HashRef;
 use aos_effect_adapters::adapters::llm::LlmAdapter;
 use aos_effect_adapters::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_effect_adapters::traits::AsyncEffectAdapter;
-use aos_effects::builtins::{LlmGenerateParams, LlmRuntimeArgs};
+use aos_effects::builtins::{
+    LlmGenerateParams, LlmProviderCompatibility, LlmRuntimeArgs, LlmWindowItem, LlmWindowItemKind,
+};
 use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::{MemStore, Store};
 use serde_cbor;
@@ -145,7 +147,9 @@ async fn llm_errors_missing_api_key() {
         correlation_id: None,
         provider: "openai".into(),
         model: "gpt-5.2".into(),
-        message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
+        window_items: vec![LlmWindowItem::message_ref(
+            HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap(),
+        )],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,
@@ -181,7 +185,9 @@ async fn llm_unknown_provider_errors() {
         correlation_id: None,
         provider: "missing".into(),
         model: "gpt".into(),
-        message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
+        window_items: vec![LlmWindowItem::message_ref(
+            HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap(),
+        )],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,
@@ -230,7 +236,7 @@ async fn llm_message_ref_missing_errors() {
         correlation_id: None,
         provider: "openai".into(),
         model: "gpt".into(),
-        message_refs: vec![missing_ref],
+        window_items: vec![LlmWindowItem::message_ref(missing_ref)],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,
@@ -249,6 +255,77 @@ async fn llm_message_ref_missing_errors() {
         effect_ops::LLM_GENERATE,
         serde_cbor::to_vec(&params).unwrap(),
     );
+    let receipt = adapter.execute(&intent).await.unwrap();
+    assert_eq!(receipt.status, ReceiptStatus::Error);
+}
+
+#[tokio::test]
+async fn llm_rejects_incompatible_provider_native_window_item() {
+    let store = Arc::new(MemStore::new());
+    let mut providers = HashMap::new();
+    providers.insert(
+        "openai".into(),
+        ProviderConfig {
+            base_url: "http://127.0.0.1:0".into(),
+            timeout: Duration::from_secs(5),
+            api_kind: LlmApiKind::ChatCompletions,
+        },
+    );
+    let cfg = LlmAdapterConfig {
+        providers,
+        default_provider: "openai".into(),
+    };
+    let adapter = LlmAdapter::new(store.clone(), cfg);
+
+    let artifact_ref = HashRef::new(
+        store
+            .put_blob(b"opaque-provider-artifact")
+            .unwrap()
+            .to_hex(),
+    )
+    .expect("artifact ref");
+    let params = LlmGenerateParams {
+        correlation_id: None,
+        provider: "openai".into(),
+        model: "gpt".into(),
+        window_items: vec![LlmWindowItem {
+            item_id: "provider-native:anthropic:1".into(),
+            kind: LlmWindowItemKind::ProviderNativeArtifactRef,
+            ref_: artifact_ref,
+            lane: Some("Summary".into()),
+            source_range: None,
+            source_refs: Vec::new(),
+            provider_compatibility: Some(LlmProviderCompatibility {
+                provider: "anthropic".into(),
+                api_kind: "messages".into(),
+                model: None,
+                model_family: Some("claude".into()),
+                artifact_type: "context_management_block".into(),
+                opaque: true,
+                encrypted: false,
+            }),
+            estimated_tokens: Some(12),
+            metadata: BTreeMap::new(),
+        }],
+        runtime: LlmRuntimeArgs {
+            temperature: Some("0".into()),
+            top_p: None,
+            max_tokens: Some(16),
+            tool_refs: None,
+            tool_choice: None,
+            reasoning_effort: None,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
+        },
+        api_key: Some("key".into()),
+    };
+    let intent = build_intent(
+        effect_ops::LLM_GENERATE,
+        serde_cbor::to_vec(&params).unwrap(),
+    );
+
     let receipt = adapter.execute(&intent).await.unwrap();
     assert_eq!(receipt.status, ReceiptStatus::Error);
 }
@@ -292,7 +369,7 @@ async fn llm_happy_path_ok_receipt() {
         correlation_id: None,
         provider: "mock".into(),
         model: "gpt-mock".into(),
-        message_refs: vec![message_ref],
+        window_items: vec![LlmWindowItem::message_ref(message_ref)],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,
@@ -382,7 +459,7 @@ async fn llm_runtime_refs_roundtrip_into_provider_request_body() {
         correlation_id: Some("run-1".into()),
         provider: "mock".into(),
         model: "gpt-mock".into(),
-        message_refs: vec![message_ref],
+        window_items: vec![LlmWindowItem::message_ref(message_ref)],
         runtime: LlmRuntimeArgs {
             temperature: Some("0".into()),
             top_p: None,

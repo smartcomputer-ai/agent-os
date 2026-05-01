@@ -16,6 +16,28 @@ use aos_kernel::secret::{
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use indexmap::IndexMap;
 
+fn llm_window_item_value(ref_: String) -> serde_cbor::Value {
+    use serde_cbor::Value;
+    let mut kind = BTreeMap::new();
+    kind.insert(Value::Text("$tag".into()), Value::Text("MessageRef".into()));
+    kind.insert(Value::Text("$value".into()), Value::Null);
+
+    let mut item = BTreeMap::new();
+    item.insert(Value::Text("item_id".into()), Value::Text("input".into()));
+    item.insert(Value::Text("kind".into()), Value::Map(kind));
+    item.insert(Value::Text("ref_".into()), Value::Text(ref_.clone()));
+    item.insert(Value::Text("lane".into()), Value::Null);
+    item.insert(Value::Text("source_range".into()), Value::Null);
+    item.insert(
+        Value::Text("source_refs".into()),
+        Value::Array(vec![Value::Text(ref_)]),
+    );
+    item.insert(Value::Text("provider_compatibility".into()), Value::Null);
+    item.insert(Value::Text("estimated_tokens".into()), Value::Null);
+    item.insert(Value::Text("metadata".into()), Value::Map(BTreeMap::new()));
+    Value::Map(item)
+}
+
 /// SecretRef CBOR value in canonical variant form.
 fn secret_ref_value(alias: &str, version: u64) -> serde_cbor::Value {
     use serde_cbor::Value;
@@ -252,8 +274,10 @@ fn env_resolver_injects_llm_api_key() {
     runtime.insert(Value::Text("max_tokens".into()), Value::Integer(16));
     params.insert(Value::Text("runtime".into()), Value::Map(runtime));
     params.insert(
-        Value::Text("message_refs".into()),
-        Value::Array(vec![Value::Text(Hash::of_bytes(b"input").to_hex())]),
+        Value::Text("window_items".into()),
+        Value::Array(vec![llm_window_item_value(
+            Hash::of_bytes(b"input").to_hex(),
+        )]),
     );
     params.insert(
         Value::Text("api_key".into()),

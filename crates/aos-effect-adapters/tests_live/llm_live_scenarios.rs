@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::ReceiptStatus;
-use aos_effects::builtins::LlmGenerateParams;
+use aos_effects::builtins::{LlmGenerateParams, LlmWindowItem, LlmWindowItemKind};
 use aos_kernel::MemStore;
 use serde_json::{Value, json};
 
@@ -23,7 +23,7 @@ pub(crate) async fn run_plain_completion(case: &ProviderRuntime) {
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![message_ref],
+        window_items: vec![LlmWindowItem::message_ref(message_ref)],
         runtime: default_runtime(),
         api_key: Some(case.api_key.clone().into()),
     };
@@ -62,7 +62,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![turn1_ref],
+        window_items: vec![LlmWindowItem::message_ref(turn1_ref)],
         runtime: default_runtime(),
         api_key: Some(case.api_key.clone().into()),
     };
@@ -86,7 +86,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
             correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
-            message_refs: vec![retry_ref],
+            window_items: vec![LlmWindowItem::message_ref(retry_ref)],
             runtime: default_runtime(),
             api_key: Some(case.api_key.clone().into()),
         };
@@ -120,7 +120,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![turn2_ref],
+        window_items: vec![LlmWindowItem::message_ref(turn2_ref)],
         runtime: default_runtime(),
         api_key: Some(case.api_key.clone().into()),
     };
@@ -148,7 +148,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
             correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
-            message_refs: vec![retry_ref],
+            window_items: vec![LlmWindowItem::message_ref(retry_ref)],
             runtime: default_runtime(),
             api_key: Some(case.api_key.clone().into()),
         };
@@ -179,7 +179,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![turn3_ref],
+        window_items: vec![LlmWindowItem::message_ref(turn3_ref)],
         runtime: default_runtime(),
         api_key: Some(case.api_key.clone().into()),
     };
@@ -202,7 +202,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
             correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
-            message_refs: vec![retry_ref],
+            window_items: vec![LlmWindowItem::message_ref(retry_ref)],
             runtime: default_runtime(),
             api_key: Some(case.api_key.clone().into()),
         };
@@ -223,6 +223,63 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
     assert!(
         !turn3_text.trim().is_empty(),
         "expected assistant text for multi-turn turn3 on {}",
+        case.provider_id
+    );
+}
+
+pub(crate) async fn run_typed_window_items(case: &ProviderRuntime) {
+    let token = "LIVE_WINDOW_ITEM_TOKEN_9173";
+    let store = Arc::new(MemStore::new());
+    let adapter = make_adapter(store.clone(), case);
+
+    let summary_ref = store_json(
+        &store,
+        &json!({
+            "role": "user",
+            "content": format!("Context summary: the required answer token is {token}.")
+        }),
+    );
+    let question_ref = store_json(
+        &store,
+        &json!({
+            "role": "user",
+            "content": "What is the required answer token? Reply with the token only."
+        }),
+    );
+
+    let params = LlmGenerateParams {
+        correlation_id: None,
+        provider: case.provider_id.clone(),
+        model: case.model.clone(),
+        window_items: vec![
+            LlmWindowItem {
+                item_id: "summary:live-window-items".into(),
+                kind: LlmWindowItemKind::AosSummaryRef,
+                ref_: summary_ref.clone(),
+                lane: Some("Summary".into()),
+                source_range: None,
+                source_refs: vec![summary_ref],
+                provider_compatibility: None,
+                estimated_tokens: Some(16),
+                metadata: Default::default(),
+            },
+            LlmWindowItem::message_ref(question_ref),
+        ],
+        runtime: default_runtime(),
+        api_key: Some(case.api_key.clone().into()),
+    };
+
+    let receipt = adapter
+        .execute(&build_intent(&params))
+        .await
+        .expect("execute");
+    let payload = assert_ok_receipt(&store, case, "typed window items", &receipt);
+    let text = decode_envelope(&store, &payload)
+        .assistant_text
+        .unwrap_or_default();
+    assert!(
+        text.contains(token),
+        "expected typed window-item response to contain token `{token}` for {} (got: {text})",
         case.provider_id
     );
 }
@@ -275,7 +332,7 @@ pub(crate) async fn run_runtime_refs_smoke(case: &ProviderRuntime) {
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![message_ref],
+        window_items: vec![LlmWindowItem::message_ref(message_ref)],
         runtime,
         api_key: Some(case.api_key.clone().into()),
     };
@@ -320,7 +377,7 @@ pub(crate) async fn run_invalid_api_key(case: &ProviderRuntime) {
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![message_ref],
+        window_items: vec![LlmWindowItem::message_ref(message_ref)],
         runtime: default_runtime(),
         api_key: Some("invalid-live-adapter-key".into()),
     };

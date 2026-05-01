@@ -57,6 +57,7 @@ pub enum SessionWorkflowError {
     RunAlreadyActive,
     RunNotActive,
     EmptyMessageRefs,
+    UnrenderableActiveWindowItem,
     TooManyPendingEffects,
     InvalidHashRef,
     ToolProfileUnknown,
@@ -77,7 +78,10 @@ impl SessionWorkflowError {
             Self::UnknownModel => "run config model unknown",
             Self::RunAlreadyActive => "run already active",
             Self::RunNotActive => "run not active",
-            Self::EmptyMessageRefs => "llm message_refs must not be empty",
+            Self::EmptyMessageRefs => "llm window_items must not be empty",
+            Self::UnrenderableActiveWindowItem => {
+                "active window item cannot be rendered for provider"
+            }
             Self::TooManyPendingEffects => "too many pending effects",
             Self::InvalidHashRef => "invalid hash ref",
             Self::ToolProfileUnknown => "tool profile unknown",

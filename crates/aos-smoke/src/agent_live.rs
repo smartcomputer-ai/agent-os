@@ -17,6 +17,7 @@ use aos_effect_adapters::config::{
 use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::builtins::{
     LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolChoice,
+    LlmWindowItem,
 };
 use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::Store;
@@ -113,7 +114,7 @@ enum SearchPhase {
 #[derive(Debug, Clone, Default)]
 struct StepContext {
     correlation_id: Option<String>,
-    message_refs: Vec<String>,
+    window_items: Vec<String>,
     temperature: Option<String>,
     top_p: Option<String>,
     tool_refs: Option<Vec<String>>,
@@ -222,7 +223,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         };
         let step_ctx = StepContext {
             correlation_id: Some(format!("live-run-turn-{llm_turn}")),
-            message_refs: vec![history_ref],
+            window_items: vec![history_ref],
             temperature: None,
             top_p: None,
             tool_refs: turn_tool_refs,
@@ -474,13 +475,17 @@ fn to_core_llm_params(
     let model = run_config.model.trim();
     ensure!(!model.is_empty(), "run model missing");
 
-    let mut message_refs = run_config.prompt_refs.clone().unwrap_or_default();
-    message_refs.extend(step_ctx.message_refs.clone());
-    ensure!(!message_refs.is_empty(), "message_refs must not be empty");
+    let mut window_refs = run_config.prompt_refs.clone().unwrap_or_default();
+    window_refs.extend(step_ctx.window_items.clone());
+    ensure!(!window_refs.is_empty(), "window_items must not be empty");
 
-    let message_refs = message_refs
+    let window_items = window_refs
         .into_iter()
-        .map(|value| HashRef::new(value).map_err(|err| anyhow!("invalid message ref: {err}")))
+        .map(|value| {
+            HashRef::new(value)
+                .map(LlmWindowItem::message_ref)
+                .map_err(|err| anyhow!("invalid window item ref: {err}"))
+        })
         .collect::<Result<Vec<_>>>()?;
 
     let tool_refs = step_ctx
@@ -512,7 +517,7 @@ fn to_core_llm_params(
         correlation_id: step_ctx.correlation_id.clone(),
         provider: provider.into(),
         model: model.into(),
-        message_refs,
+        window_items,
         runtime: LlmRuntimeArgs {
             temperature: step_ctx.temperature.clone(),
             top_p: step_ctx.top_p.clone(),

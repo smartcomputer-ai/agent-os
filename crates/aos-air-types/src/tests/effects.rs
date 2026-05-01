@@ -93,14 +93,31 @@ fn http_request_receipt_literal_matches_builtin_schema() {
 #[test]
 fn llm_generate_params_literal_matches_builtin_schema() {
     let schema = find_builtin_schema("sys/LlmGenerateParams@1").expect("llm params schema");
+    let schemas = SchemaIndex::new(
+        builtin_schemas()
+            .iter()
+            .map(|schema| (schema.schema.name.clone(), schema.schema.ty.clone()))
+            .collect(),
+    );
     let literal = record(vec![
         ("provider", text("openai")),
         ("model", text("gpt-5.2")),
         (
-            "message_refs",
-            list(vec![hash(
-                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            )]),
+            "window_items",
+            list(vec![record(vec![
+                ("item_id", text("msg-1")),
+                ("kind", variant("MessageRef", null())),
+                (
+                    "ref_",
+                    hash("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                ),
+                ("lane", null()),
+                ("source_range", null()),
+                ("source_refs", list(vec![])),
+                ("provider_compatibility", null()),
+                ("estimated_tokens", null()),
+                ("metadata", map(vec![])),
+            ])]),
         ),
         (
             "runtime",
@@ -124,7 +141,8 @@ fn llm_generate_params_literal_matches_builtin_schema() {
         ),
         ("api_key", null()),
     ]);
-    validate_value_literal(&literal, &schema.schema.ty).expect("literal matches schema");
+    validate_literal(&literal, &schema.schema.ty, &schema.schema.name, &schemas)
+        .expect("literal matches schema");
 }
 
 #[test]

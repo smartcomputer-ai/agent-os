@@ -85,11 +85,47 @@ struct LlmRuntimeArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "$tag", content = "$value")]
+enum LlmWindowItemKind {
+    MessageRef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LlmWindowItem {
+    item_id: String,
+    kind: LlmWindowItemKind,
+    #[serde(rename = "ref_")]
+    ref_: String,
+    lane: Option<String>,
+    source_range: Option<String>,
+    source_refs: Vec<String>,
+    provider_compatibility: Option<String>,
+    estimated_tokens: Option<u64>,
+    metadata: BTreeMap<String, String>,
+}
+
+impl LlmWindowItem {
+    fn message_ref(ref_: String) -> Self {
+        Self {
+            item_id: ref_.clone(),
+            kind: LlmWindowItemKind::MessageRef,
+            ref_: ref_.clone(),
+            lane: None,
+            source_range: None,
+            source_refs: vec![ref_],
+            provider_compatibility: None,
+            estimated_tokens: None,
+            metadata: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct LlmGenerateParams {
     correlation_id: Option<String>,
     provider: String,
     model: String,
-    message_refs: Vec<String>,
+    window_items: Vec<LlmWindowItem>,
     runtime: LlmRuntimeArgs,
     api_key: Option<String>,
 }
@@ -193,7 +229,7 @@ fn handle_receipt(
                 correlation_id: None,
                 provider: "mock".into(),
                 model: "mock-summarizer".into(),
-                message_refs: vec![body_ref],
+                window_items: vec![LlmWindowItem::message_ref(body_ref)],
                 runtime: LlmRuntimeArgs {
                     temperature: Some("0".into()),
                     top_p: None,

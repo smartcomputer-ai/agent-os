@@ -512,6 +512,132 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/LlmTranscriptRange@1",
+    "type": {
+      "record": {
+        "start_seq": {
+          "nat": {}
+        },
+        "end_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmWindowItemKind@1",
+    "type": {
+      "variant": {
+        "MessageRef": {
+          "unit": {}
+        },
+        "AosSummaryRef": {
+          "unit": {}
+        },
+        "ProviderNativeArtifactRef": {
+          "unit": {}
+        },
+        "ProviderRawWindowRef": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmProviderCompatibility@1",
+    "type": {
+      "record": {
+        "provider": {
+          "text": {}
+        },
+        "api_kind": {
+          "text": {}
+        },
+        "model": {
+          "option": {
+            "text": {}
+          }
+        },
+        "model_family": {
+          "option": {
+            "text": {}
+          }
+        },
+        "artifact_type": {
+          "text": {}
+        },
+        "opaque": {
+          "bool": {}
+        },
+        "encrypted": {
+          "bool": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmWindowItem@1",
+    "type": {
+      "record": {
+        "item_id": {
+          "text": {}
+        },
+        "kind": {
+          "ref": "sys/LlmWindowItemKind@1"
+        },
+        "ref_": {
+          "hash": {}
+        },
+        "lane": {
+          "option": {
+            "text": {}
+          }
+        },
+        "source_range": {
+          "option": {
+            "ref": "sys/LlmTranscriptRange@1"
+          }
+        },
+        "source_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "provider_compatibility": {
+          "option": {
+            "ref": "sys/LlmProviderCompatibility@1"
+          }
+        },
+        "estimated_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "metadata": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "text": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/LlmGenerateParams@1",
     "type": {
       "record": {
@@ -526,9 +652,9 @@
         "model": {
           "text": {}
         },
-        "message_refs": {
+        "window_items": {
           "list": {
-            "hash": {}
+            "ref": "sys/LlmWindowItem@1"
           }
         },
         "runtime": {

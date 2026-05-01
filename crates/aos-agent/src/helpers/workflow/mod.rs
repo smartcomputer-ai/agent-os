@@ -4,7 +4,7 @@ use super::{
     request_llm, transition_lifecycle,
 };
 use crate::contracts::{
-    HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
+    ActiveWindowItem, HostCommandKind, HostSessionOpenConfig, HostTargetConfig, PendingBlobGetKind,
     PendingBlobPutKind, QueuedRunStart, RunCause, RunConfig, RunFailure, RunInterrupt,
     RunLifecycle, RunOutcome, RunRecord, RunState, RunTrace, RunTraceEntry, RunTraceEntryKind,
     RunTraceRef, RunTraceSummary, SessionConfig, SessionInputKind, SessionLifecycle, SessionState,
@@ -538,7 +538,8 @@ fn on_run_start_requested(
         pending_blob_gets: aos_wasm_sdk::SharedBlobGets::new(),
         pending_blob_puts: aos_wasm_sdk::SharedBlobPuts::new(),
         staged_tool_follow_up_turn: None,
-        pending_llm_turn_refs: None,
+        pending_llm_turn_items: None,
+        blocked_on_context_operation: None,
         last_output_ref: None,
         last_llm_usage: None,
         tool_refs_materialized: false,
@@ -570,7 +571,7 @@ fn on_run_start_requested(
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
     state.staged_tool_follow_up_turn = None;
-    state.pending_llm_turn_refs = None;
+    state.pending_llm_turn_items = None;
     state.queued_steer_refs.clear();
     state.run_interrupt = None;
     state.last_output_ref = None;
@@ -579,10 +580,12 @@ fn on_run_start_requested(
     }
     state.tool_refs_materialized = false;
 
-    state
-        .transcript_message_refs
-        .extend(cause.input_refs.iter().cloned());
-    set_pending_llm_turn(state, state.transcript_message_refs.clone(), out)
+    state.context_state.append_message_refs(
+        cause.input_refs.iter().cloned(),
+        "run_input",
+        state.updated_at,
+    );
+    set_pending_llm_turn(state, state.context_state.active_window_items.clone(), out)
 }
 
 fn on_follow_up_input_appended(
@@ -665,7 +668,7 @@ fn on_run_interrupt_requested(
         BTreeMap::new(),
     );
     state.run_interrupt = Some(interrupt);
-    state.pending_llm_turn_refs = None;
+    state.pending_llm_turn_items = None;
     sync_current_run_execution(state);
     finish_interrupted_run_if_quiescent(state, out)
 }
@@ -1110,7 +1113,12 @@ fn sync_current_run_execution(state: &mut SessionState) {
     run.pending_blob_gets = state.pending_blob_gets.clone();
     run.pending_blob_puts = state.pending_blob_puts.clone();
     run.staged_tool_follow_up_turn = state.staged_tool_follow_up_turn.clone();
-    run.pending_llm_turn_refs = state.pending_llm_turn_refs.clone();
+    run.pending_llm_turn_items = state.pending_llm_turn_items.clone();
+    run.blocked_on_context_operation = state
+        .context_state
+        .pending_context_operation
+        .as_ref()
+        .map(|operation| operation.operation_id.clone());
     run.queued_steer_refs = state.queued_steer_refs.clone();
     run.interrupt = state.run_interrupt.clone();
     run.last_output_ref = state.last_output_ref.clone();
@@ -1223,7 +1231,7 @@ fn handle_completed_tool_batch(
     }
     state.staged_tool_follow_up_turn = Some(StagedToolFollowUpTurn {
         tool_batch_id: completion.tool_batch_id.clone(),
-        base_message_refs: state.transcript_message_refs.clone(),
+        base_window_items: state.context_state.active_window_items.clone(),
         expected_messages,
         blob_refs_by_index: BTreeMap::new(),
     });
@@ -1267,10 +1275,10 @@ fn build_tool_batch_follow_up_messages(completion: &CompletedToolBatch) -> Vec<s
 
 fn set_pending_llm_turn(
     state: &mut SessionState,
-    message_refs: Vec<String>,
+    items: Vec<ActiveWindowItem>,
     out: &mut SessionWorkflowOutput,
 ) -> Result<(), SessionWorkflowError> {
-    state.pending_llm_turn_refs = Some(message_refs);
+    state.pending_llm_turn_items = Some(items);
     dispatch_pending_llm_turn(state, out)
 }
 
@@ -1291,13 +1299,29 @@ fn dispatch_pending_llm_turn(
     )
 }
 
+fn render_active_window_message_refs(
+    items: &[ActiveWindowItem],
+) -> Result<Vec<String>, SessionWorkflowError> {
+    let mut refs = Vec::new();
+    for item in items {
+        let Some(ref_) = item.renderable_message_ref() else {
+            return Err(SessionWorkflowError::UnrenderableActiveWindowItem);
+        };
+        refs.push(ref_.to_string());
+    }
+    if refs.is_empty() {
+        return Err(SessionWorkflowError::EmptyMessageRefs);
+    }
+    Ok(refs)
+}
+
 pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
     state: &mut SessionState,
     out: &mut SessionWorkflowOutput,
     planner: &P,
     budget: TurnBudget,
 ) -> Result<(), SessionWorkflowError> {
-    if state.pending_llm_turn_refs.is_none() {
+    if state.pending_llm_turn_items.is_none() {
         return Ok(());
     }
     if state.run_interrupt.is_some() {
@@ -1311,11 +1335,11 @@ pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
         return Ok(());
     }
 
-    let Some(message_refs) = state.pending_llm_turn_refs.clone() else {
+    let Some(window_items) = state.pending_llm_turn_items.clone() else {
         return Ok(());
     };
     let steer_refs = state.queued_steer_refs.clone();
-    let plan = build_turn_plan_for_pending_turn(state, message_refs, planner, budget)?;
+    let plan = build_turn_plan_for_pending_turn(state, window_items, planner, budget)?;
 
     if plan
         .prerequisites
@@ -1365,7 +1389,7 @@ pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
         .as_ref()
         .map(|id| id.run_seq)
         .unwrap_or(0);
-    state.pending_llm_turn_refs = None;
+    state.pending_llm_turn_items = None;
 
     request_llm(
         state,
@@ -1376,7 +1400,7 @@ pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
                     "run-{run_seq}-turn-{}",
                     state.next_tool_batch_seq + 1
                 )),
-                message_refs: plan.message_refs.clone(),
+                window_items: plan.active_window_items.clone(),
                 temperature: None,
                 top_p: None,
                 tool_refs: selected_tool_refs(state, &plan),
@@ -1410,14 +1434,23 @@ pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
 
 pub fn build_turn_plan_for_pending_turn<P: TurnPlanner>(
     state: &mut SessionState,
-    mut turn_refs: Vec<String>,
+    mut turn_items: Vec<ActiveWindowItem>,
     planner: &P,
     budget: TurnBudget,
 ) -> Result<TurnPlan, SessionWorkflowError> {
     let steer_refs = state.queued_steer_refs.clone();
     if !steer_refs.is_empty() {
-        turn_refs.extend(steer_refs.iter().cloned());
+        turn_items.extend(steer_refs.iter().cloned().map(|ref_| {
+            ActiveWindowItem::message_ref(
+                alloc::format!("steer:{ref_}"),
+                ref_,
+                Some(TurnInputLane::Steer),
+                None,
+                None,
+            )
+        }));
     }
+    let turn_refs = render_active_window_message_refs(&turn_items)?;
     let (run_id, prompt_refs, cause, mut run_config) = {
         let run = state
             .current_run
@@ -1434,10 +1467,10 @@ pub fn build_turn_plan_for_pending_turn<P: TurnPlanner>(
         run_config.host_session_open = state.session_config.default_host_session_open.clone();
     }
     let transcript_refs = state
-        .transcript_message_refs
-        .iter()
-        .filter(|value| !turn_refs.iter().any(|turn| turn == *value))
-        .cloned()
+        .context_state
+        .ledger_message_refs()
+        .into_iter()
+        .filter(|value| !turn_refs.iter().any(|turn| *turn == *value))
         .collect::<Vec<_>>();
     let inputs = build_turn_inputs(&prompt_refs, &transcript_refs, &turn_refs, Some(&cause));
     let tools = build_turn_tool_inputs(state, Some(&run_config))?;
@@ -1486,16 +1519,15 @@ fn apply_turn_plan_to_state(
     state: &mut SessionState,
     plan: TurnPlan,
 ) -> Result<TurnPlan, SessionWorkflowError> {
-    if plan.message_refs.is_empty() {
+    if plan.active_window_items.is_empty() {
         return Err(SessionWorkflowError::EmptyMessageRefs);
     }
     crate::helpers::apply_turn_state_updates(&mut state.turn_state, &plan.state_updates);
     state.turn_state.last_report = Some(plan.report.clone());
     let refs = plan
-        .message_refs
+        .active_window_items
         .iter()
-        .cloned()
-        .map(|value| trace_ref("selected_ref", value))
+        .map(|item| trace_ref("selected_ref", item.ref_.clone()))
         .collect::<Vec<_>>();
     let mut metadata = BTreeMap::new();
     metadata.insert("planner".into(), plan.report.planner.clone());
@@ -1922,7 +1954,7 @@ fn clear_active_run(state: &mut SessionState) {
     state.pending_blob_gets.clear();
     state.pending_blob_puts.clear();
     state.staged_tool_follow_up_turn = None;
-    state.pending_llm_turn_refs = None;
+    state.pending_llm_turn_items = None;
     state.queued_steer_refs.clear();
     state.run_interrupt = None;
     state.tool_refs_materialized = false;
@@ -1978,9 +2010,9 @@ fn trace_workflow_output(state: &mut SessionState, out: &SessionWorkflowOutput) 
                 }
                 refs.extend(
                     params
-                        .message_refs
+                        .window_items
                         .iter()
-                        .map(|value| trace_ref("message_ref", value.to_string())),
+                        .map(|item| trace_ref("window_item_ref", item.ref_.to_string())),
                 );
                 if let Some(tool_refs) = params.runtime.tool_refs.as_ref() {
                     refs.extend(
@@ -2165,6 +2197,10 @@ mod tests {
         out
     }
 
+    fn active_window_refs(items: &[ActiveWindowItem]) -> Vec<String> {
+        items.iter().map(|item| item.ref_.clone()).collect()
+    }
+
     fn session_input(observed_at_ns: u64, input: SessionInputKind) -> SessionWorkflowEvent {
         SessionWorkflowEvent::Input(SessionInput {
             session_id: SessionId("s-1".into()),
@@ -2297,7 +2333,7 @@ mod tests {
         ));
         assert_eq!(state.pending_effects.len(), 1);
         assert!(state.pending_blob_puts.is_empty());
-        assert!(state.pending_llm_turn_refs.is_some());
+        assert!(state.pending_llm_turn_items.is_some());
         assert_eq!(state.in_flight_effects, 1);
         let plan = state
             .current_run
@@ -2441,9 +2477,9 @@ mod tests {
             })
             .expect("expected llm.generate");
         let message_refs = params
-            .message_refs
+            .window_items
             .iter()
-            .map(ToString::to_string)
+            .map(|item| item.ref_.to_string())
             .collect::<Vec<_>>();
         assert_eq!(message_refs, vec![prompt_ref.clone(), input_ref.clone()]);
 
@@ -2452,7 +2488,10 @@ mod tests {
             .as_ref()
             .and_then(|run| run.turn_plan.as_ref())
             .expect("turn plan");
-        assert_eq!(plan.message_refs, vec![prompt_ref, input_ref]);
+        assert_eq!(
+            active_window_refs(&plan.active_window_items),
+            vec![prompt_ref, input_ref]
+        );
         assert_eq!(plan.report.planner, "aos.agent/default-turn");
         assert_eq!(state.turn_state.last_report.as_ref(), Some(&plan.report));
     }
@@ -2483,7 +2522,7 @@ mod tests {
                 && entry
                     .refs
                     .iter()
-                    .any(|trace_ref| trace_ref.kind == "message_ref")
+                    .any(|trace_ref| trace_ref.kind == "window_item_ref")
         }));
     }
 
@@ -2542,11 +2581,19 @@ mod tests {
             cause: RunCause::direct_input(input_ref.clone()),
             config,
             input_refs: vec![input_ref.clone()],
-            pending_llm_turn_refs: Some(vec![input_ref.clone()]),
+            pending_llm_turn_items: Some(vec![ActiveWindowItem::message_ref(
+                "test:pending",
+                input_ref.clone(),
+                Some(TurnInputLane::Conversation),
+                None,
+                None,
+            )]),
             ..RunState::default()
         });
-        state.transcript_message_refs = vec![input_ref.clone()];
-        state.pending_llm_turn_refs = Some(vec![input_ref]);
+        state
+            .context_state
+            .append_message_refs(vec![input_ref.clone()], "test", state.updated_at);
+        state.pending_llm_turn_items = Some(state.context_state.active_window_items.clone());
         state
     }
 
@@ -2575,9 +2622,9 @@ mod tests {
             .find_map(|effect| match effect {
                 SessionEffectCommand::LlmGenerate { params, .. } => Some(
                     params
-                        .message_refs
+                        .window_items
                         .iter()
-                        .map(ToString::to_string)
+                        .map(|item| item.ref_.to_string())
                         .collect::<Vec<_>>(),
                 ),
                 _ => None,
@@ -2637,7 +2684,7 @@ mod tests {
             Some(2)
         );
         assert_eq!(
-            state.transcript_message_refs,
+            state.context_state.ledger_message_refs(),
             vec![fake_hash('a'), follow_up]
         );
     }
@@ -2709,7 +2756,18 @@ mod tests {
             }
 
             Ok(TurnPlan {
-                message_refs: selected_refs,
+                active_window_items: selected_refs
+                    .into_iter()
+                    .map(|ref_| {
+                        ActiveWindowItem::message_ref(
+                            alloc::format!("selected:{ref_}"),
+                            ref_,
+                            Some(TurnInputLane::Conversation),
+                            None,
+                            None,
+                        )
+                    })
+                    .collect(),
                 selected_tool_ids: request
                     .tools
                     .iter()
@@ -2780,8 +2838,18 @@ mod tests {
             input_refs: vec![input_ref.clone()],
             ..RunState::default()
         });
-        state.transcript_message_refs = vec![transcript_ref.clone(), input_ref.clone()];
-        state.pending_llm_turn_refs = Some(vec![input_ref.clone()]);
+        state.context_state.append_message_refs(
+            vec![transcript_ref.clone(), input_ref.clone()],
+            "test",
+            state.updated_at,
+        );
+        state.pending_llm_turn_items = Some(vec![ActiveWindowItem::message_ref(
+            "test:pending",
+            input_ref.clone(),
+            Some(TurnInputLane::Conversation),
+            None,
+            None,
+        )]);
 
         let mut out = SessionWorkflowOutput::default();
         dispatch_pending_llm_turn_with_planner(
@@ -2806,9 +2874,9 @@ mod tests {
             })
             .expect("expected llm.generate");
         let message_refs = params
-            .message_refs
+            .window_items
             .iter()
-            .map(ToString::to_string)
+            .map(|item| item.ref_.to_string())
             .collect::<Vec<_>>();
         assert_eq!(message_refs, vec![bootstrap_ref.clone(), input_ref.clone()]);
 
@@ -2817,12 +2885,15 @@ mod tests {
             .as_ref()
             .and_then(|run| run.turn_plan.as_ref())
             .expect("turn plan");
-        assert_eq!(plan.message_refs, vec![bootstrap_ref, input_ref.clone()]);
+        assert_eq!(
+            active_window_refs(&plan.active_window_items),
+            vec![bootstrap_ref, input_ref.clone()]
+        );
         assert_eq!(plan.report.planner, "test/repo-bootstrap-first");
         assert_eq!(plan.report.dropped_message_count, 1);
         assert_eq!(state.turn_state.last_report.as_ref(), Some(&plan.report));
         assert_eq!(
-            state.transcript_message_refs,
+            state.context_state.ledger_message_refs(),
             vec![transcript_ref, input_ref]
         );
     }
@@ -2841,7 +2912,7 @@ mod tests {
         assert_eq!(state.status, SessionStatus::Open);
         assert!(state.current_run.is_none());
         assert!(state.run_history.is_empty());
-        assert!(state.transcript_message_refs.is_empty());
+        assert!(state.context_state.ledger_message_refs().is_empty());
     }
 
     #[test]
@@ -2850,7 +2921,10 @@ mod tests {
         state.session_id = SessionId("s-1".into());
 
         apply_session_workflow_event(&mut state, &run_request_event(1)).expect("first run");
-        assert_eq!(state.transcript_message_refs, vec![fake_hash('a')]);
+        assert_eq!(
+            state.context_state.ledger_message_refs(),
+            vec![fake_hash('a')]
+        );
         assert!(state.current_run.is_some());
         apply_session_workflow_event(
             &mut state,
@@ -2885,7 +2959,7 @@ mod tests {
         assert_eq!(state.run_history.len(), 1);
         assert_eq!(state.next_run_seq, 2);
         assert_eq!(
-            state.transcript_message_refs,
+            state.context_state.ledger_message_refs(),
             vec![fake_hash('a'), second_input]
         );
         assert_eq!(
@@ -3287,9 +3361,9 @@ mod tests {
             .find_map(|effect| match effect {
                 SessionEffectCommand::LlmGenerate { params, .. } => Some((
                     params
-                        .message_refs
+                        .window_items
                         .iter()
-                        .map(ToString::to_string)
+                        .map(|item| item.ref_.to_string())
                         .collect::<Vec<_>>(),
                     params.runtime.tool_refs.as_ref().map_or(0, Vec::len),
                 )),
@@ -3315,14 +3389,14 @@ mod tests {
             .collect::<Vec<_>>();
 
         Ok(TurnPlanFixtureObservation {
-            initial_message_refs: initial_plan.message_refs,
+            initial_message_refs: active_window_refs(&initial_plan.active_window_items),
             initial_selected_tool_ids: initial_plan.selected_tool_ids,
             initial_prerequisite_kinds: initial_plan
                 .prerequisites
                 .iter()
                 .map(|item| alloc::format!("{:?}", item.kind))
                 .collect(),
-            final_message_refs: final_plan.message_refs,
+            final_message_refs: active_window_refs(&final_plan.active_window_items),
             final_selected_tool_ids: final_plan.selected_tool_ids,
             final_prerequisite_kinds: final_plan
                 .prerequisites

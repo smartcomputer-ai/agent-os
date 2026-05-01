@@ -92,7 +92,7 @@ flowchart TD
   SessionState --> Lifecycle[lifecycle]
   SessionState --> Config[session_config]
   SessionState --> TurnState[turn_state]
-  SessionState --> Transcript[transcript_message_refs]
+  SessionState --> ContextState[context_state ledger / active window / pending context op]
   SessionState --> Tools[tool_registry / tool_profiles / tool_runtime_context]
   SessionState --> Runtime[active pending effects/blob gets/blob puts/tool batch]
   SessionState --> Intervention[queued_steer_refs / queued_follow_up_runs / run_interrupt]
@@ -121,10 +121,11 @@ pub struct SessionState {
     pub status: SessionStatus,
     pub lifecycle: SessionLifecycle,
     pub turn_state: SessionTurnState,
+    pub context_state: SessionContextState,
     pub current_run: Option<RunState>,
     pub run_history: Vec<RunRecord>,
-    pub transcript_message_refs: Vec<String>,
-    pub pending_llm_turn_refs: Option<Vec<String>>,
+    pub pending_llm_turn_items: Option<Vec<ActiveWindowItem>>,
+    pub blocked_on_context_operation: Option<String>,
     pub active_tool_batch: Option<ActiveToolBatch>,
     pub pending_effects: PendingEffects,
     pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
@@ -157,7 +158,8 @@ pub struct RunState {
     pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
     pub pending_blob_puts: SharedBlobPuts<PendingBlobPut>,
     pub staged_tool_follow_up_turn: Option<StagedToolFollowUpTurn>,
-    pub pending_llm_turn_refs: Option<Vec<String>>,
+    pub pending_llm_turn_items: Option<Vec<ActiveWindowItem>>,
+    pub blocked_on_context_operation: Option<String>,
     pub last_output_ref: Option<String>,
     pub last_llm_usage: Option<LlmUsageRecord>,
     pub tool_refs_materialized: bool,
@@ -428,9 +430,9 @@ flowchart TD
   Cause --> Validate
   Validate --> Allocate[allocate RunId]
   Allocate --> Running[SessionLifecycle::Running / RunLifecycle::Running]
-  Running --> Transcript[append input_refs to transcript_message_refs]
+  Running --> Transcript[append input_refs to context_state transcript ledger]
   Running --> TraceStart[trace RunStarted]
-  TraceStart --> QueueLLM[pending_llm_turn_refs = transcript_message_refs]
+  TraceStart --> QueueLLM[pending_llm_turn_items = initial active-window items]
 ```
 
 The full cause object is the key open-ended primitive. It avoids hard-coding "chat" or "software factory" into the SDK.
@@ -576,8 +578,8 @@ Sources include:
 ```mermaid
 flowchart TD
   PromptRefs[prompt refs] --> Inputs[TurnInput candidates]
-  Transcript[transcript_message_refs] --> Inputs
-  TurnRefs[pending_llm_turn_refs] --> Inputs
+  Transcript[context_state transcript ledger] --> Inputs
+  TurnRefs[pending_llm_turn_items] --> Inputs
   Steer[queued_steer_refs] --> Inputs
   Cause[RunCause payload/subjects] --> Inputs
   SessionTurnState[pinned_inputs / durable_inputs] --> Planner
@@ -590,12 +592,12 @@ flowchart TD
   Inputs --> Planner[DefaultTurnPlanner or custom TurnPlanner]
   ToolInputs --> Planner
   Planner --> Plan[TurnPlan]
-  Plan --> Messages[message_refs]
+  Plan --> Window[active_window_items]
   Plan --> Tools[selected_tool_ids]
   Plan --> Controls[tool_choice / response_format_ref / provider_options_ref]
   Plan --> Prereqs[prerequisites]
   Plan --> Report[TurnReport]
-  Messages --> LLM[sys/llm.generate message_refs]
+  Window --> LLM[sys/llm.generate window_items]
   Tools --> ToolRefs[tool_refs for LLM runtime]
   Report --> Trace[TurnPlanned trace entry]
 ```
@@ -621,7 +623,7 @@ Turn plan:
 
 ```rust
 pub struct TurnPlan {
-    pub message_refs: Vec<String>,
+    pub active_window_items: Vec<ActiveWindowItem>,
     pub selected_tool_ids: Vec<String>,
     pub tool_choice: Option<TurnToolChoice>,
     pub response_format_ref: Option<String>,
@@ -636,9 +638,17 @@ Example:
 
 ```json
 {
-  "message_refs": [
-    "sha256:0101010101010101010101010101010101010101010101010101010101010101",
-    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  "active_window_items": [
+    {
+      "item_id": "message:sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "kind": { "$tag": "MessageRef" },
+      "content_ref": "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+    },
+    {
+      "item_id": "message:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "kind": { "$tag": "MessageRef" },
+      "content_ref": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    }
   ],
   "selected_tool_ids": [
     "host.fs.read_file"
@@ -697,7 +707,7 @@ An LLM turn is a queued intent inside an active run. It is dispatched only when 
 stateDiagram-v2
   [*] --> NoQueuedTurn
 
-  NoQueuedTurn --> QueuedTurn: set_pending_llm_turn(message_refs)
+  NoQueuedTurn --> QueuedTurn: set_pending_llm_turn(active_window_items)
 
   QueuedTurn --> TurnPlanning: dispatch_pending_llm_turn_with_planner
   TurnPlanning --> WaitingHostSession: OpenHostSession prerequisite
@@ -710,7 +720,7 @@ stateDiagram-v2
   OutputBlobPending --> WaitingInput: output has no tool_calls_ref
   OutputBlobPending --> ToolCallsBlobPending: output has tool_calls_ref
   ToolCallsBlobPending --> ToolBatchActive: tool calls decoded and batch started
-  ToolBatchActive --> QueuedTurn: tool results produce follow-up message refs
+  ToolBatchActive --> QueuedTurn: tool results produce follow-up active-window items
 
   QueuedTurn --> Interrupted: run_interrupt present before dispatch
   LlmEffectPending --> Interrupted: receipt admitted, then no follow-up dispatch
@@ -719,11 +729,11 @@ stateDiagram-v2
 Dispatch guards:
 
 1. there must be an active run,
-2. `pending_llm_turn_refs` must be present,
+2. `pending_llm_turn_items` must be present,
 3. no interrupt may be pending,
 4. pending effects/blob gets/blob puts must be empty,
 5. no active unsettled tool batch or staged tool follow-up may exist,
-6. the turn planner must produce at least one message ref,
+6. the turn planner must produce at least one renderable active-window item,
 7. host-backed selected tools require a ready host session or an `OpenHostSession` prerequisite,
 8. selected tool definitions must be materialized before LLM dispatch.
 
@@ -732,7 +742,7 @@ LLM step before mapping:
 ```rust
 pub struct LlmStepContext {
     pub correlation_id: Option<String>,
-    pub message_refs: Vec<String>,
+    pub window_items: Vec<ActiveWindowItem>,
     pub temperature: Option<String>,
     pub top_p: Option<String>,
     pub tool_refs: Option<Vec<String>>,
@@ -752,9 +762,23 @@ Effect params sent to `sys/llm.generate@1`:
   "correlation_id": "session-123/run/1/llm/1",
   "provider": "openai",
   "model": "gpt-5.2",
-  "message_refs": [
-    "sha256:0101010101010101010101010101010101010101010101010101010101010101",
-    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  "window_items": [
+    {
+      "item_id": "message:sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "kind": { "$tag": "MessageRef" },
+      "ref_": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "source_refs": [
+        "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+      ]
+    },
+    {
+      "item_id": "message:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "kind": { "$tag": "MessageRef" },
+      "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "source_refs": [
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    }
   ],
   "runtime": {
     "temperature": null,
@@ -1124,13 +1148,13 @@ flowchart TD
   ActiveRun -->|no| Reject[RunNotActive]
   ActiveRun -->|yes| QueueSteer[queued_steer_refs]
   QueueSteer --> TraceSteer[trace InterventionRequested]
-  QueueSteer --> NextLLM[injected into next LLM message_refs]
+  QueueSteer --> NextLLM[injected into next active-window items]
   NextLLM --> TraceApplied[trace InterventionApplied]
 
   Interrupt[RunInterruptRequested reason_ref] --> ActiveRun2{active run?}
   ActiveRun2 -->|no| Reject2[RunNotActive]
   ActiveRun2 -->|yes| MarkInterrupt[run_interrupt]
-  MarkInterrupt --> BlockDispatch[clear pending_llm_turn_refs / block further dispatch]
+  MarkInterrupt --> BlockDispatch[clear pending_llm_turn_items / block further dispatch]
   BlockDispatch --> Quiescent{runtime work quiescent?}
   Quiescent -->|no| WaitReceipts[wait for receipts/rejections/stream frames]
   WaitReceipts --> Quiescent
@@ -1486,7 +1510,7 @@ sequenceDiagram
   Agent->>Agent: trace RunStarted
   Agent->>Agent: build TurnPlan
   Agent->>Agent: trace TurnPlanned
-  Agent->>LLM: sys/llm.generate(message_refs)
+  Agent->>LLM: sys/llm.generate(window_items)
   Agent->>Agent: trace LlmRequested
   LLM-->>Agent: LlmGenerateReceipt(output_ref)
   Agent->>Agent: trace LlmReceived
@@ -1519,7 +1543,7 @@ sequenceDiagram
   Agent->>Agent: build TurnPlan with selected_tool_ids
   Agent->>Blob: sys/blob.put(tool definitions) if needed
   Blob-->>Agent: tool_ref receipts
-  Agent->>LLM: sys/llm.generate(message_refs, tool_refs)
+  Agent->>LLM: sys/llm.generate(window_items, tool_refs)
   LLM-->>Agent: LlmGenerateReceipt(output_ref)
   Agent->>Blob: sys/blob.get(output_ref)
   Blob-->>Agent: LlmOutputEnvelope(tool_calls_ref)
@@ -1533,7 +1557,7 @@ sequenceDiagram
   Agent->>Blob: sys/blob.put(follow-up message)
   Blob-->>Agent: follow-up message ref
   Agent->>Agent: build next TurnPlan
-  Agent->>LLM: sys/llm.generate(transcript + follow-up)
+  Agent->>LLM: sys/llm.generate(active window + follow-up)
 ```
 
 Trace path:
@@ -1566,9 +1590,9 @@ sequenceDiagram
   Agent->>Agent: queued_steer_refs += instruction_ref
   Agent->>Agent: trace InterventionRequested
   Agent->>Agent: next dispatch builds TurnPlan
-  Agent->>Agent: planner includes steer ref in message_refs
+  Agent->>Agent: planner includes steer ref in active_window_items
   Agent->>Agent: trace InterventionApplied
-  Agent->>LLM: sys/llm.generate(message_refs + instruction_ref)
+  Agent->>LLM: sys/llm.generate(window_items + instruction_ref)
 ```
 
 This is not a host/session signal. It is an instruction ref inserted into the next model turn.
@@ -1583,7 +1607,7 @@ sequenceDiagram
 
   Operator->>Agent: RunInterruptRequested(reason_ref)
   Agent->>Agent: run_interrupt = Some(...)
-  Agent->>Agent: pending_llm_turn_refs = None
+  Agent->>Agent: pending_llm_turn_items = None
   Agent->>Agent: trace InterventionRequested
   Agent->>Agent: check pending effects/blob/tool work
   alt no open runtime work
@@ -1606,12 +1630,12 @@ For live inspection, the most useful fields are:
 2. `lifecycle`: current run-shaped state of the session.
 3. `current_run.lifecycle`: active run lifecycle.
 4. `current_run.cause`: why the run exists.
-5. `transcript_message_refs`: durable session message history.
+5. `context_state.transcript_ledger`: durable session message history.
 6. `turn_state`: pinned/durable inputs and the last turn-planner report.
-7. `current_run.turn_plan.message_refs`: what the next/last LLM turn actually saw.
+7. `current_run.turn_plan.active_window_items`: what the next/last LLM turn actually saw.
 8. `current_run.turn_plan.selected_tool_ids`: which tools were exposed to that turn.
 9. `current_run.last_llm_usage`: aggregate usage from the last admitted LLM receipt.
-10. `pending_llm_turn_refs`: whether an LLM turn is waiting to dispatch.
+10. `pending_llm_turn_items`: whether an LLM turn is waiting to dispatch.
 11. `active_tool_batch`: current tool execution, statuses, and results.
 12. `pending_effects`, `pending_blob_gets`, `pending_blob_puts`: runtime work still open.
 13. `queued_steer_refs`, `queued_follow_up_runs`, `run_interrupt`: interventions waiting or applied.

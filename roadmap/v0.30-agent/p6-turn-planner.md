@@ -12,7 +12,7 @@ Replace the narrow context engine with a deterministic turn planner.
 
 The planner decides the next LLM request shape:
 
-1. ordered `message_refs`,
+1. ordered typed `active_window_items`,
 2. selected tool ids,
 3. `tool_choice`,
 4. optional response-format and provider-options refs,
@@ -75,13 +75,15 @@ high-water marks, provider-returned compaction artifacts, and context-limit fail
 post-turn workflow/finalizer logic. The planner requests work; it does not run compaction or apply
 active-window mutations.
 
-### 3) Message refs remain the primitive
+### 3) Active window items are the primitive
 
 Do not add a system-message or prompt-template subsystem.
 
-`message_refs` point to JSON message blobs whose roles may be `system`, `developer`, `user`,
-`assistant`, or `tool`. Role semantics stay in the blob. Planner metadata is only for ordering,
-budgeting, token estimates, and reporting.
+`active_window_items` are the ordered model-visible context. Normal message refs remain valid window
+items, and their blobs carry roles such as `system`, `developer`, `user`, `assistant`, or `tool`.
+The active window can also contain AOS summary refs and provider-native compaction artifacts once
+P11 lands. Role semantics stay in the blob or provider-native artifact. Planner metadata is only
+for ordering, budgeting, token estimates, compatibility checks, and reporting.
 
 ### 4) Candidates are normalized
 
@@ -208,7 +210,7 @@ pub struct TurnRequest<'a> {
 }
 
 pub struct TurnPlan {
-    pub message_refs: Vec<String>,
+    pub active_window_items: Vec<ActiveWindowItem>,
     pub selected_tool_ids: Vec<String>,
     pub tool_choice: Option<LlmToolChoice>,
     pub response_format_ref: Option<String>,
@@ -216,6 +218,15 @@ pub struct TurnPlan {
     pub prerequisites: Vec<TurnPrerequisite>,
     pub state_updates: Vec<TurnStateUpdate>,
     pub report: TurnReport,
+}
+
+pub struct ActiveWindowItem {
+    pub item_id: String,
+    pub kind: ActiveWindowItemKind,
+    pub content_ref: String,
+    pub lane: Option<TurnInputLane>,
+    pub source_refs: Vec<String>,
+    pub estimated_tokens: Option<u64>,
 }
 ```
 
@@ -390,8 +401,9 @@ optional token estimates. The planner should receive candidates, not source-spec
 
 ### [x] 3) Make LLM dispatch consume `TurnPlan`
 
-Run start and tool follow-up turns call the planner. Planner-selected `message_refs`, tool ids,
-`tool_choice`, `provider_options_ref`, and `response_format_ref` feed `sys/llm.generate@1`.
+Run start and tool follow-up turns call the planner. Planner-selected `active_window_items`, tool
+ids, `tool_choice`, `provider_options_ref`, and `response_format_ref` feed
+`sys/llm.generate@1.window_items`.
 Blocking prerequisites delay dispatch until explicitly satisfied. Run state and trace expose the
 latest turn plan/report.
 
@@ -401,7 +413,7 @@ Selected tools become planner output. `EffectiveToolSet` becomes derived state o
 `ToolAvailabilityRule::HostSessionReady` and `HostSessionNotReady` are removed from generic tool
 specs. Host/Fabric availability decisions live in default planner logic and host mappers.
 
-### [x] 5) Keep instructions as message refs
+### [x] 5) Keep instructions as normal active-window message refs
 
 `SessionConfig.default_prompt_refs` and `RunConfig.prompt_refs` become `TurnInput` candidates. Those
 refs may point to `system` or `developer` message blobs. Default ordering keeps stable instruction
@@ -469,7 +481,8 @@ state refs into the planner.
 ## Acceptance Criteria
 
 1. [x] One pre-turn planner call produces the complete next LLM request shape.
-2. [x] System/developer/user/assistant/tool messages remain ordered refs in `message_refs`.
+2. [x] System/developer/user/assistant/tool messages remain ordered normal message-ref items in
+   `active_window_items`.
 3. [x] Tool selection is planner output, not a separate workflow-global `EffectiveToolSet` decision.
 4. [x] Host-specific availability rules are removed from generic tool specs.
 5. [x] Skills participate as generic source-tagged candidates, not core SDK skill state.

@@ -1,8 +1,8 @@
 use crate::contracts::{
-    HostSessionStatus, RunCause, RunConfig, RunId, SessionId, SessionTurnState, ToolExecutor,
-    ToolMapper, ToolRuntimeContext, ToolSpec, TurnBudget, TurnInput, TurnInputKind, TurnInputLane,
-    TurnPlan, TurnPrerequisite, TurnPrerequisiteKind, TurnPriority, TurnReport, TurnStateUpdate,
-    TurnTokenEstimate, TurnToolChoice, TurnToolInput,
+    ActiveWindowItem, HostSessionStatus, RunCause, RunConfig, RunId, SessionId, SessionTurnState,
+    ToolExecutor, ToolMapper, ToolRuntimeContext, ToolSpec, TurnBudget, TurnInput, TurnInputKind,
+    TurnInputLane, TurnPlan, TurnPrerequisite, TurnPrerequisiteKind, TurnPriority, TurnReport,
+    TurnStateUpdate, TurnTokenEstimate, TurnToolChoice, TurnToolInput,
 };
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
@@ -57,7 +57,7 @@ pub fn build_default_turn_plan(request: TurnRequest<'_>) -> Result<TurnPlan, Tur
         )
     });
 
-    let mut message_refs = Vec::new();
+    let mut active_window_items = Vec::new();
     let mut response_format_ref = None;
     let mut provider_options_ref = None;
     let mut seen_refs = BTreeSet::new();
@@ -77,8 +77,10 @@ pub fn build_default_turn_plan(request: TurnRequest<'_>) -> Result<TurnPlan, Tur
                     continue;
                 }
                 let required = matches!(input.priority, TurnPriority::Required);
-                if over_message_ref_budget(message_refs.len(), request.budget.max_message_refs)
-                    && !required
+                if over_message_ref_budget(
+                    active_window_items.len(),
+                    request.budget.max_message_refs,
+                ) && !required
                 {
                     dropped_message_count = dropped_message_count.saturating_add(1);
                     decision_codes.push(format!("drop_message_ref_budget:{}", input.input_id));
@@ -100,7 +102,13 @@ pub fn build_default_turn_plan(request: TurnRequest<'_>) -> Result<TurnPlan, Tur
                     unknown_message_count = unknown_message_count.saturating_add(1);
                 }
                 selected_message_count = selected_message_count.saturating_add(1);
-                message_refs.push(input.content_ref);
+                active_window_items.push(ActiveWindowItem::message_ref(
+                    input.input_id,
+                    input.content_ref,
+                    Some(input.lane),
+                    input.estimated_tokens,
+                    None,
+                ));
             }
             TurnInputKind::ResponseFormatRef => {
                 if response_format_ref.is_none() {
@@ -120,7 +128,7 @@ pub fn build_default_turn_plan(request: TurnRequest<'_>) -> Result<TurnPlan, Tur
         }
     }
 
-    if message_refs.is_empty() {
+    if active_window_items.is_empty() {
         return Err(TurnPlanError::EmptySelection);
     }
 
@@ -150,7 +158,7 @@ pub fn build_default_turn_plan(request: TurnRequest<'_>) -> Result<TurnPlan, Tur
     ));
 
     Ok(TurnPlan {
-        message_refs,
+        active_window_items,
         tool_choice: if selected_tool_ids.is_empty() {
             None
         } else {
@@ -446,7 +454,13 @@ mod tests {
         ))
         .expect("plan");
 
-        assert_eq!(plan.message_refs, vec![hash('a'), hash('b'), hash('c')]);
+        assert_eq!(
+            plan.active_window_items
+                .iter()
+                .map(|item| item.ref_.clone())
+                .collect::<Vec<_>>(),
+            vec![hash('a'), hash('b'), hash('c')]
+        );
         assert_eq!(plan.report.selected_message_count, 3);
     }
 
@@ -488,7 +502,13 @@ mod tests {
         ))
         .expect("plan");
 
-        assert_eq!(plan.message_refs, vec![hash('a'), hash('b')]);
+        assert_eq!(
+            plan.active_window_items
+                .iter()
+                .map(|item| item.ref_.clone())
+                .collect::<Vec<_>>(),
+            vec![hash('a'), hash('b')]
+        );
         assert_eq!(plan.report.dropped_message_count, 1);
         assert_eq!(plan.report.token_estimate.unknown_message_count, 1);
     }

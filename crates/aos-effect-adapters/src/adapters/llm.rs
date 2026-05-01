@@ -4,7 +4,7 @@ use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_effects::builtins::{
     LlmFinishReason, LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCall,
-    LlmToolCallList, LlmToolChoice, LlmUsageDetails, TokenUsage,
+    LlmToolCallList, LlmToolChoice, LlmUsageDetails, LlmWindowItem, TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use aos_kernel::Store;
@@ -134,6 +134,27 @@ impl<S: Store> LlmAdapter<S> {
             messages.append(&mut loaded);
         }
         Ok(messages)
+    }
+
+    fn render_window_item_refs(
+        items: &[LlmWindowItem],
+        provider: &str,
+        model: &str,
+    ) -> Result<Vec<HashRef>, String> {
+        let mut refs = Vec::with_capacity(items.len());
+        for item in items {
+            let Some(ref_) = item.renderable_message_ref(provider, model) else {
+                return Err(format!(
+                    "window item '{}' is not renderable for provider '{}' model '{}'",
+                    item.item_id, provider, model
+                ));
+            };
+            refs.push(ref_.clone());
+        }
+        if refs.is_empty() {
+            return Err("window_items empty".into());
+        }
+        Ok(refs)
     }
 
     fn load_message(&self, reference: &HashRef) -> Result<Vec<Message>, String> {
@@ -274,16 +295,18 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        if params.message_refs.is_empty() {
-            return Ok(self.failure_receipt(
-                intent,
-                &provider_id,
-                ReceiptStatus::Error,
-                "message_refs empty",
-            ));
-        }
+        let message_refs = match Self::render_window_item_refs(
+            &params.window_items,
+            &provider_id,
+            params.model.as_str(),
+        ) {
+            Ok(refs) => refs,
+            Err(err) => {
+                return Ok(self.failure_receipt(intent, &provider_id, ReceiptStatus::Error, err));
+            }
+        };
 
-        let messages = match self.load_messages(&params.message_refs) {
+        let messages = match self.load_messages(&message_refs) {
             Ok(messages) => messages,
             Err(err) => {
                 return Ok(self.failure_receipt(intent, &provider_id, ReceiptStatus::Error, err));

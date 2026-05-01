@@ -462,7 +462,7 @@ fn map_llm_mapping_error(err: LlmMappingError) -> SessionWorkflowError {
     match err {
         LlmMappingError::MissingProvider => SessionWorkflowError::MissingProvider,
         LlmMappingError::MissingModel => SessionWorkflowError::MissingModel,
-        LlmMappingError::EmptyMessageRefs => SessionWorkflowError::EmptyMessageRefs,
+        LlmMappingError::EmptyWindowItems => SessionWorkflowError::EmptyMessageRefs,
         LlmMappingError::InvalidHashRef => SessionWorkflowError::InvalidHashRef,
     }
 }
@@ -494,7 +494,10 @@ pub fn map_workflow_error(err: SessionWorkflowError) -> ReduceError {
         SessionWorkflowError::RunAlreadyActive => ReduceError::new("run already active"),
         SessionWorkflowError::RunNotActive => ReduceError::new("run not active"),
         SessionWorkflowError::EmptyMessageRefs => {
-            ReduceError::new("llm message_refs must not be empty")
+            ReduceError::new("llm window_items must not be empty")
+        }
+        SessionWorkflowError::UnrenderableActiveWindowItem => {
+            ReduceError::new("active window item cannot be rendered for provider")
         }
         SessionWorkflowError::TooManyPendingEffects => ReduceError::new("too many pending effects"),
         SessionWorkflowError::InvalidHashRef => ReduceError::new("invalid hash ref"),

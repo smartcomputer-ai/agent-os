@@ -291,6 +291,11 @@ Do not keep parallel legacy fields, reducers, adapter branches, harness paths, o
 
 Provider compatibility metadata is different from backward compatibility. Keep provider compatibility metadata because it prevents unsafe reuse of provider-native artifacts across incompatible providers/models. Do not keep API or state compatibility shims for the old context representation.
 
+Refactor effect contracts in place. `sys/llm.generate@1` should move from message-ref-only
+`message_refs` to typed `window_items` without introducing a parallel contract version or adapter
+fallback path. The `@1` contract is still experimental in this roadmap phase; keeping one
+compaction-ready surface is more important than preserving the old shape.
+
 ## Proposed Contracts
 
 ### `ActiveWindowItem`
@@ -447,7 +452,7 @@ Add or evolve session state toward a session-scoped `context_state`:
 Run state should be able to point at a blocking context operation:
 
 1. `blocked_on_context_operation`: optional operation id,
-2. `pending_llm_turn_refs` remains untouched until compaction is applied or explicitly cancelled,
+2. `pending_llm_turn_items` remains untouched until compaction is applied or explicitly cancelled,
 3. run lifecycle remains `Running` or `WaitingInput` according to existing semantics; do not add a terminal compaction lifecycle.
 
 Replace existing `transcript_message_refs` usage with the ledger/window split in the same implementation pass. Do not keep `transcript_message_refs` as a live fallback or mirror field after P11 lands.
@@ -492,7 +497,7 @@ Compaction traces should include refs and metadata, not inline prompt/history te
 
 Implement the narrowest useful version:
 
-1. add contracts for `sys/llm.compact@1`, `ActiveWindowItem`, `ProviderCompatibility`, `ContextPressureRecord`, `ContextOperationState`, and `CompactionRecord`,
+1. add contracts for `sys/llm.compact@1`, `ActiveWindowItem`, `ProviderCompatibility`, `ContextPressureRecord`, `ContextOperationState`, and `CompactionRecord`; refactor `sys/llm.generate@1` in place to accept typed `window_items`,
 2. add state fields for `active_window_items`, `compaction_records`, `pending_context_operation`, latest generation usage, latest context-pressure diagnostics, and latest compaction diagnostics,
 3. add `CompactContext` planner prerequisites and run blocking state,
 4. make the workflow able to observe context-limit generation failures and turn them into context pressure plus a compaction prerequisite instead of terminal run failure,

@@ -1,3 +1,4 @@
+use super::ActiveWindowItem;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_wasm_sdk::AirSchema;
@@ -137,6 +138,8 @@ pub enum TurnPrerequisiteKind {
     #[default]
     MaterializeToolDefinitions,
     OpenHostSession,
+    CompactContext,
+    CountTokens,
     Custom {
         kind: String,
     },
@@ -202,8 +205,7 @@ pub struct SessionTurnState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, AirSchema)]
 #[aos(schema = "aos.agent/TurnPlan@1")]
 pub struct TurnPlan {
-    #[aos(air_type = "hash")]
-    pub message_refs: Vec<String>,
+    pub active_window_items: Vec<ActiveWindowItem>,
     pub selected_tool_ids: Vec<String>,
     pub tool_choice: Option<TurnToolChoice>,
     #[aos(air_type = "hash")]
