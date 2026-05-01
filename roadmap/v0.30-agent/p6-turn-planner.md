@@ -23,9 +23,11 @@ The planner decides the next LLM request shape:
 This is the context-engineering boundary for `aos-agent`: what the model can see and what the model
 can do should be planned together.
 
-Post-turn maintenance is not part of the pre-turn decision. Compaction, summarization, memory
-writes, reflection, and skill learning are considered only after the LLM output, tool results,
-token usage, and run state are known.
+Post-turn maintenance is not part of the pre-turn decision. Usage-triggered compaction,
+summarization, memory writes, reflection, and skill learning are considered after the LLM output,
+tool results, token usage, and run state are known. A later compaction phase may feed a blocking
+pre-turn prerequisite back into the planner when session state already says the next generation must
+compact first.
 
 ## Current Fit
 
@@ -66,6 +68,12 @@ Do not decide compaction or summarization before the model turn.
 A later `TurnFinalizer`-style hook may request compaction, summarization, memory refresh/write,
 skill-resolution refresh, or custom maintenance after the turn is complete. P6 should leave this
 hook explicit and replayable, but it does not implement those systems.
+
+P11 extends this split: the pre-turn planner may return a blocking `CompactContext` prerequisite
+when existing session state already says the next generation must compact first, but usage
+high-water marks, provider-returned compaction artifacts, and context-limit failures are observed by
+post-turn workflow/finalizer logic. The planner requests work; it does not run compaction or apply
+active-window mutations.
 
 ### 3) Message refs remain the primitive
 
@@ -335,6 +343,9 @@ pub struct TurnPrerequisite {
 }
 ```
 
+P11 extends this prerequisite vocabulary with `CompactContext` and `CountTokens`; those are context
+maintenance requests, not hidden planner work.
+
 Post-turn maintenance can use a smaller later hook:
 
 ```rust
@@ -348,7 +359,8 @@ pub struct PostTurnPlan {
 }
 
 pub enum PostTurnActionKind {
-    Compact,
+    CompactContext,
+    CountTokens,
     Summarize,
     RefreshMemory,
     WriteMemory,
@@ -405,8 +417,10 @@ source metadata. P9 can add skill descriptors and resolvers without changing LLM
 ### [x] 7) Preserve memory and compaction hooks
 
 Memory refs and completed summary refs are normalized turn inputs. Pre-turn budget selection remains
-deterministic. Post-turn compaction/summarization/memory actions are explicit requests. No memory
-retrieval, embedding update, or summarization runs inside the planner.
+deterministic. Pre-turn compaction is represented only as an explicit prerequisite when already
+required by session state. Post-turn compaction/summarization/memory actions are explicit requests.
+No memory retrieval, embedding update, active-window mutation, or summarization runs inside the
+planner.
 
 ### [x] 8) Define durable planner state semantics
 
@@ -461,7 +475,7 @@ state refs into the planner.
 5. [x] Skills participate as generic source-tagged candidates, not core SDK skill state.
 6. [x] Token estimates and unknown-token counts are represented in the plan/report.
 7. [x] Prompt-cache-friendly stable ordering is a default planner invariant.
-8. [x] Compaction, summarization, and memory writes are post-turn actions, not pre-turn guesses.
+8. [x] Usage-triggered compaction, summarization, and memory writes are post-turn actions, while pre-turn compaction is only an explicit prerequisite from existing session state.
 9. [x] A custom planner can reuse base session/run/tool orchestration.
 10. [x] Planner state is durable, replayable, and extensible through namespaced refs.
 11. [x] P6 records `TurnPlanned` as the canonical pre-LLM trace point, with P7 follow-up called out

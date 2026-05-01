@@ -42,8 +42,9 @@ The current sequence is:
    - keep `aos-agent-eval` as the live provider/tool acceptance lane during migration.
 8. `p11-context-compaction.md`
    - add explicit token-counting and compaction effects,
-   - split full transcript history from the active model window,
-   - make compaction an auditable planner/workflow state transition.
+   - split full transcript history from typed active model windows,
+   - preserve provider-native compaction artifacts without treating them as portable memory,
+   - make compaction an auditable planner/finalizer/workflow state transition with pending operation state.
 
 `p10-agent-sdk-testing.md` and `p11-context-compaction.md` are numbered late because they are
 cross-cutting, not because they should wait until all other work is complete. Start using P10 as soon
