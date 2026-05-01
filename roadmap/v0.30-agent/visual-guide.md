@@ -14,9 +14,10 @@ It starts with the high-level shape and then zooms into the relevant state machi
 8. blob indirection,
 9. interventions,
 10. traces,
-11. host session readiness.
+11. context compaction and token counting,
+12. host session readiness.
 
-The diagrams describe the current shape after P4-P8 of `roadmap/v0.30-agent/`.
+The diagrams describe the current v0.30 first-cut shape after P4-P11 of `roadmap/v0.30-agent/`.
 
 ## High-Level Model
 
@@ -30,7 +31,8 @@ The diagrams describe the current shape after P4-P8 of `roadmap/v0.30-agent/`.
 6. tool execution batches,
 7. intervention state,
 8. run traces,
-9. typed session inputs and emitted lifecycle events.
+9. context ledger and active model window management,
+10. typed session inputs and emitted lifecycle events.
 
 The SDK workflow helpers are deterministic. External work is always represented as effects and later admitted receipts, receipt rejections, or stream frames.
 
@@ -47,16 +49,21 @@ flowchart TD
   Workflow --> Events[Domain events]
 
   Effects --> LLM[sys/llm.generate]
+  Effects --> LlmCompact[sys/llm.compact]
+  Effects --> LlmCount[sys/llm.count_tokens]
   Effects --> Blob[sys/blob.get / sys/blob.put]
   Effects --> ToolEffects[tool-mapped effects]
   Events --> LifecycleEvents[aos.agent lifecycle events]
   Events --> ToolDomainEvents[tool-mapped domain events]
 
   LLM --> Receipts
+  LlmCompact --> Receipts
+  LlmCount --> Receipts
   Blob --> Receipts
   ToolEffects --> Receipts
 
   State --> CurrentRun[RunState]
+  State --> Context[ContextState]
   State --> RunHistory[RunRecord history]
   CurrentRun --> TurnPlan[TurnPlan]
   CurrentRun --> Trace[RunTrace]
@@ -106,6 +113,11 @@ flowchart TD
   CurrentRun --> RunRuntime[pending effects / active tool batch / queued LLM turn]
   CurrentRun --> RunIntervention[queued_steer_refs / interrupt]
   CurrentRun --> Usage[last_llm_usage]
+  ContextState --> Ledger[transcript_ledger]
+  ContextState --> ActiveWindow[active_window_items]
+  ContextState --> ContextOps[pending_context_operation]
+  ContextState --> Compactions[compaction_records]
+  ContextState --> Counts[last_token_count]
   CurrentRun --> Trace[trace]
   CurrentRun --> Outcome[outcome]
 
@@ -121,11 +133,10 @@ pub struct SessionState {
     pub status: SessionStatus,
     pub lifecycle: SessionLifecycle,
     pub turn_state: SessionTurnState,
-    pub context_state: SessionContextState,
+    pub context_state: ContextState,
     pub current_run: Option<RunState>,
     pub run_history: Vec<RunRecord>,
     pub pending_llm_turn_items: Option<Vec<ActiveWindowItem>>,
-    pub blocked_on_context_operation: Option<String>,
     pub active_tool_batch: Option<ActiveToolBatch>,
     pub pending_effects: PendingEffects,
     pub pending_blob_gets: SharedBlobGets<PendingBlobGet>,
@@ -139,6 +150,38 @@ pub struct SessionState {
     pub queued_steer_refs: Vec<String>,
     pub queued_follow_up_runs: Vec<QueuedRunStart>,
     pub run_interrupt: Option<RunInterrupt>,
+}
+```
+
+`ContextState` owns the durable transcript ledger and the current model window separately. The transcript ledger is append-only audit history; `active_window_items` is the provider-renderable window selected for the next model call and may be replaced by compaction.
+
+```rust
+pub struct ContextState {
+    pub transcript_ledger: TranscriptLedger,
+    pub active_window_items: Vec<ActiveWindowItem>,
+    pub compaction_records: Vec<CompactionRecord>,
+    pub compacted_through: Option<u64>,
+    pub pending_context_operation: Option<ContextOperationState>,
+    pub last_llm_usage: Option<LlmUsageRecord>,
+    pub last_context_pressure: Option<ContextPressureRecord>,
+    pub last_token_count: Option<LlmTokenCountRecord>,
+    pub last_compaction: Option<CompactionRecord>,
+}
+```
+
+Active-window items are typed so the workflow can distinguish normal message refs, AOS-owned summaries, provider-native compaction artifacts, and provider raw window items:
+
+```rust
+pub struct ActiveWindowItem {
+    pub item_id: String,
+    pub kind: ActiveWindowItemKind,
+    pub ref_: String,
+    pub lane: Option<TurnInputLane>,
+    pub source_range: Option<TranscriptRange>,
+    pub source_refs: Vec<String>,
+    pub provider_compatibility: Option<ProviderCompatibility>,
+    pub estimated_tokens: Option<u64>,
+    pub metadata: Vec<ContextMetadataEntry>,
 }
 ```
 
@@ -227,6 +270,9 @@ Receipts and stream frames are not special side channels. They are admitted thro
     "issuer_ref": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
     "receipt": {
       "output_ref": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "raw_output_ref": null,
+      "provider_response_id": "resp_123",
+      "provider_context_items": [],
       "finish_reason": { "reason": "tool_calls", "raw": null },
       "token_usage": { "prompt": 1200, "completion": 180, "total": 1380 },
       "provider_id": "openai"
@@ -435,6 +481,8 @@ flowchart TD
   TraceStart --> QueueLLM[pending_llm_turn_items = initial active-window items]
 ```
 
+`RunRequested` and `RunStartRequested` append message refs to `context_state.transcript_ledger`, create matching `ActiveWindowItem::MessageRef` entries, and queue those active-window items for turn planning. Later compaction can replace the active window without deleting transcript history.
+
 The full cause object is the key open-ended primitive. It avoids hard-coding "chat" or "software factory" into the SDK.
 
 ```rust
@@ -563,7 +611,7 @@ Selected run config:
 
 ## Turn Planning
 
-The turn planner selects the complete next model request shape. It owns message refs, selected tool ids, response-format refs, provider-options refs, budget decisions, planner state updates, and prerequisites such as opening a host session or materializing tool definitions.
+The turn planner selects the complete next model request shape. It owns active-window items, selected tool ids, response-format refs, provider-options refs, budget decisions, planner state updates, and prerequisites such as opening a host session, materializing tool definitions, token counting, or compaction.
 
 Sources include:
 
@@ -574,6 +622,7 @@ Sources include:
 5. run-cause payload and subject refs,
 6. session-level pinned and durable turn inputs,
 7. summaries, memory, skill, domain, artifact, and runtime-hint refs supplied by embedding workflows.
+8. any pending context operation that must block generation until token counting or compaction finishes.
 
 ```mermaid
 flowchart TD
@@ -599,6 +648,7 @@ flowchart TD
   Plan --> Report[TurnReport]
   Window --> LLM[sys/llm.generate window_items]
   Tools --> ToolRefs[tool_refs for LLM runtime]
+  Prereqs --> ContextOps[CompactContext / CountTokens]
   Report --> Trace[TurnPlanned trace entry]
 ```
 
@@ -640,14 +690,30 @@ Example:
 {
   "active_window_items": [
     {
-      "item_id": "message:sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "item_id": "ledger:0",
       "kind": { "$tag": "MessageRef" },
-      "content_ref": "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+      "ref_": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "lane": { "$tag": "System" },
+      "source_range": { "start_seq": 0, "end_seq": 1 },
+      "source_refs": [
+        "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": []
     },
     {
-      "item_id": "message:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "item_id": "ledger:1",
       "kind": { "$tag": "MessageRef" },
-      "content_ref": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "lane": { "$tag": "Conversation" },
+      "source_range": { "start_seq": 1, "end_seq": 2 },
+      "source_refs": [
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": []
     }
   ],
   "selected_tool_ids": [
@@ -685,7 +751,7 @@ Example:
 }
 ```
 
-If selected tools are not yet materialized, the workflow adds a technical `MaterializeToolDefinitions` prerequisite after planning. If host-backed tool candidates need a host session and `host_session_open` config exists, the planner returns an `OpenHostSession` prerequisite before dispatching the LLM turn.
+If selected tools are not yet materialized, the workflow adds a technical `MaterializeToolDefinitions` prerequisite after planning. If host-backed tool candidates need a host session and `host_session_open` config exists, the planner returns an `OpenHostSession` prerequisite before dispatching the LLM turn. If `context_state.pending_context_operation` blocks generation, the planner returns `CompactContext` or `CountTokens`; the workflow emits `sys/llm.compact@1` or `sys/llm.count_tokens@1` and retries the pending turn after the receipt is applied.
 
 Embedding workflows can update planner state through `SessionInputKind::TurnObserved`. The current contract supports observed inputs, input removal, and custom planner-state refs:
 
@@ -714,8 +780,11 @@ stateDiagram-v2
   WaitingHostSession --> QueuedTurn: HostSessionUpdated Ready
   TurnPlanning --> WaitingToolRefs: MaterializeToolDefinitions prerequisite
   WaitingToolRefs --> QueuedTurn: tool definition blobs materialized
+  TurnPlanning --> WaitingContext: CompactContext / CountTokens prerequisite
+  WaitingContext --> QueuedTurn: llm.compact / llm.count_tokens receipt applied
   TurnPlanning --> LlmEffectPending: sys/llm.generate emitted
   LlmEffectPending --> LlmReceiptAdmitted: LLM receipt admitted
+  LlmEffectPending --> WaitingContext: context-limit error receipt
   LlmReceiptAdmitted --> OutputBlobPending: sys/blob.get output_ref
   OutputBlobPending --> WaitingInput: output has no tool_calls_ref
   OutputBlobPending --> ToolCallsBlobPending: output has tool_calls_ref
@@ -735,7 +804,8 @@ Dispatch guards:
 5. no active unsettled tool batch or staged tool follow-up may exist,
 6. the turn planner must produce at least one renderable active-window item,
 7. host-backed selected tools require a ready host session or an `OpenHostSession` prerequisite,
-8. selected tool definitions must be materialized before LLM dispatch.
+8. selected tool definitions must be materialized before LLM dispatch,
+9. pending context operations must complete before generation.
 
 LLM step before mapping:
 
@@ -764,20 +834,30 @@ Effect params sent to `sys/llm.generate@1`:
   "model": "gpt-5.2",
   "window_items": [
     {
-      "item_id": "message:sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "item_id": "ledger:0",
       "kind": { "$tag": "MessageRef" },
       "ref_": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "lane": "System",
+      "source_range": { "start_seq": 0, "end_seq": 1 },
       "source_refs": [
         "sha256:0101010101010101010101010101010101010101010101010101010101010101"
-      ]
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": {}
     },
     {
-      "item_id": "message:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "item_id": "ledger:1",
       "kind": { "$tag": "MessageRef" },
       "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "lane": "Conversation",
+      "source_range": { "start_seq": 1, "end_seq": 2 },
       "source_refs": [
         "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      ]
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": {}
     }
   ],
   "runtime": {
@@ -797,10 +877,7 @@ Effect params sent to `sys/llm.generate@1`:
     "provider_options_ref": null,
     "response_format_ref": null
   },
-  "api_key": {
-    "$tag": "SecretRef",
-    "$value": "openai"
-  }
+  "api_key": null
 }
 ```
 
@@ -811,6 +888,7 @@ LLM receipt:
   "output_ref": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
   "raw_output_ref": null,
   "provider_response_id": "resp_123",
+  "provider_context_items": [],
   "finish_reason": {
     "reason": "tool_calls",
     "raw": null
@@ -832,7 +910,9 @@ LLM receipt:
 }
 ```
 
-The workflow records aggregate usage from the receipt in `current_run.last_llm_usage`, copies it into `RunRecord.last_llm_usage` when the run finishes, and also exposes usage fields on the `LlmReceived` trace metadata.
+The workflow records aggregate usage from the receipt in `current_run.last_llm_usage` and `context_state.last_llm_usage`, copies it into `RunRecord.last_llm_usage` when the run finishes, and also exposes usage fields on the `LlmReceived` trace metadata.
+
+If `provider_context_items` is non-empty, those provider-native artifacts are preserved as typed window items in the receipt and traced with `ProviderContextArtifactsObserved`. The workflow does not implicitly mutate `context_state.active_window_items` from an ordinary generate receipt; active-window replacement still happens through an explicit compaction operation.
 
 The receipt points to an output blob:
 
@@ -847,6 +927,148 @@ The receipt points to an output blob:
 If `tool_calls_ref` is absent, the run enters `WaitingInput`.
 
 If `tool_calls_ref` is present, the workflow fetches the tool call list blob and starts a tool batch.
+
+## Context Window, Compaction, And Token Counting
+
+Context management is explicit workflow state, not hidden adapter behavior. The workflow keeps two separate concepts:
+
+1. `transcript_ledger`: append-only audit history of message, summary, and provider artifact refs.
+2. `active_window_items`: the typed context window sent to the next model call.
+
+```mermaid
+flowchart TD
+  Inputs[Run input refs / tool follow-up refs] --> Ledger[transcript_ledger append]
+  Ledger --> Active[active_window_items]
+  Active --> Planner[TurnPlanner]
+  Planner --> Generate[sys/llm.generate window_items]
+
+  Generate --> Usage[LlmGenerateReceipt usage]
+  Generate --> ProviderItems[provider_context_items]
+  Generate --> ContextError[context-limit error]
+
+  Usage --> HighWater{prompt_tokens >= high-water?}
+  HighWater -->|yes| Pressure[ContextPressureObserved]
+  ProviderItems --> ArtifactTrace[ProviderContextArtifactsObserved]
+  ContextError --> Pressure
+
+  Pressure --> PendingOp[pending_context_operation]
+  PendingOp --> Prereq[CompactContext prerequisite]
+  Prereq --> Compact[sys/llm.compact]
+  Compact --> CompactReceipt[LlmCompactReceipt]
+  CompactReceipt --> Records[compaction_records append]
+  CompactReceipt --> Replace[replace active_window_items]
+  Replace --> Retry[retry blocked LLM turn]
+
+  CountReq[explicit CountTokens prerequisite] --> Count[sys/llm.count_tokens]
+  Count --> CountReceipt[LlmCountTokensReceipt]
+  CountReceipt --> LastCount[last_token_count]
+```
+
+Context pressure can come from:
+
+1. provider context-limit or provider-required compaction failures on `sys/llm.generate@1`,
+2. successful generation usage crossing the high-water mark,
+3. provider-returned context-management metadata or artifacts,
+4. manual/operator context-operation inputs,
+5. explicit token-count results that show the candidate turn is over budget.
+
+Provider context-limit failures are not terminal run failures. If the admitted error receipt decodes as an `LlmGenerateReceipt` with context-limit text in `finish_reason`, the workflow records `ContextPressureRecord`, creates a `ContextOperationState` in `NeedsCompaction`, restores the blocked LLM turn, and emits `sys/llm.compact@1`.
+
+High-water usage is intentionally lazy. A successful `sys/llm.generate@1` receipt can set `pending_context_operation`, but the workflow still fetches and applies the output normally. Compaction is requested only when a later LLM turn is about to dispatch and the planner sees the pending `CompactContext` prerequisite.
+
+```rust
+pub struct ContextPressureRecord {
+    pub reason: ContextPressureReason,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub candidate_plan_id: Option<String>,
+    pub observed_usage: Option<LlmUsageRecord>,
+    pub error_kind: Option<String>,
+    pub error_ref: Option<String>,
+    pub recommended_strategy: Option<CompactionStrategy>,
+    pub observed_at_ns: u64,
+}
+```
+
+```rust
+pub struct ContextOperationState {
+    pub operation_id: String,
+    pub phase: ContextOperationPhase,
+    pub reason: ContextPressureReason,
+    pub candidate_plan_id: Option<String>,
+    pub strategy: CompactionStrategy,
+    pub source_range: Option<TranscriptRange>,
+    pub source_items_ref: Option<String>,
+    pub effect_intent_id: Option<String>,
+    pub params_hash: Option<String>,
+    pub failure: Option<String>,
+    pub started_at_ns: u64,
+    pub updated_at_ns: u64,
+}
+```
+
+Compaction params:
+
+```json
+{
+  "correlation_id": "run-1-compact",
+  "operation_id": "ctx-op:usage-high-water:run-1:1710000000000000200",
+  "provider": "openai",
+  "model": "gpt-5.2",
+  "strategy": { "$tag": "Auto" },
+  "source_window_items": [
+    {
+      "item_id": "ledger:0",
+      "kind": { "$tag": "MessageRef" },
+      "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "source_refs": [
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    }
+  ],
+  "preserve_window_items": [],
+  "recent_tail_items": [],
+  "source_range": { "start_seq": 0, "end_seq": 1 },
+  "target_tokens": null,
+  "provider_options_ref": null,
+  "api_key": null
+}
+```
+
+Compaction receipt:
+
+```json
+{
+  "operation_id": "ctx-op:usage-high-water:run-1:1710000000000000200",
+  "artifact_kind": { "$tag": "AosSummary" },
+  "artifact_refs": [
+    "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+  ],
+  "source_range": { "start_seq": 0, "end_seq": 1 },
+  "compacted_through": 1,
+  "active_window_items": [
+    {
+      "item_id": "compact:ctx-op:summary",
+      "kind": { "$tag": "AosSummaryRef" },
+      "ref_": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "lane": { "$tag": "Summary" },
+      "source_range": { "start_seq": 0, "end_seq": 1 },
+      "source_refs": [
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      ],
+      "provider_compatibility": null,
+      "estimated_tokens": null,
+      "metadata": []
+    }
+  ],
+  "token_usage": { "prompt": 100, "completion": 20, "total": 120 },
+  "provider_metadata_ref": null,
+  "warnings_ref": null,
+  "provider_id": "openai"
+}
+```
+
+Token counting is optional and non-mutating. `sys/llm.count_tokens@1` can use provider token-count APIs when configured, or local estimates otherwise. Its receipt updates `context_state.last_token_count` and emits `TokenCountReceived`; it is not required on the default generation path.
 
 ## Tool Candidate Selection
 
@@ -1209,7 +1431,7 @@ Steer example:
 }
 ```
 
-If the next planned LLM message refs were:
+If the next planned LLM active-window refs were:
 
 ```json
 [
@@ -1218,7 +1440,7 @@ If the next planned LLM message refs were:
 ]
 ```
 
-then the steer instruction is appended to that next turn:
+then the steer instruction is appended to the next turn as another active-window item:
 
 ```json
 [
@@ -1278,6 +1500,13 @@ flowchart TD
   EffectEmitted --> ReceiptSettled
   DomainEventEmitted --> ReceiptSettled
   ReceiptSettled --> TurnPlanned
+  LlmReceived --> ContextPressureObserved
+  ContextPressureObserved --> ContextOperationStateChanged
+  ContextOperationStateChanged --> CompactionRequested
+  CompactionRequested --> CompactionReceived
+  CompactionReceived --> ActiveWindowUpdated
+  TokenCountRequested --> TokenCountReceived
+  LlmReceived --> ProviderContextArtifactsObserved
   LlmReceived --> RunFinished
   InterventionRequested --> InterventionApplied
   InterventionRequested --> RunFinished
@@ -1299,6 +1528,14 @@ pub enum RunTraceEntryKind {
     ReceiptSettled,
     InterventionRequested,
     InterventionApplied,
+    ContextOperationStateChanged,
+    ContextPressureObserved,
+    ProviderContextArtifactsObserved,
+    CompactionRequested,
+    CompactionReceived,
+    TokenCountRequested,
+    TokenCountReceived,
+    ActiveWindowUpdated,
     RunFinished,
     Custom { kind: String },
 }
@@ -1367,7 +1604,7 @@ Example trace:
       "summary": "LLM turn requested",
       "refs": [
         {
-          "kind": "message_ref",
+          "kind": "window_item_ref",
           "ref_": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
           "value": null
         }
@@ -1578,6 +1815,65 @@ LlmRequested
 RunFinished
 ```
 
+## End-to-End Example: Context-Limit Retry Through Compaction
+
+```mermaid
+sequenceDiagram
+  participant Agent as aos-agent session workflow
+  participant LLM as sys/llm.generate
+  participant Compact as sys/llm.compact
+
+  Agent->>LLM: sys/llm.generate(window_items)
+  LLM-->>Agent: error LlmGenerateReceipt(context length exceeded)
+  Agent->>Agent: trace ContextPressureObserved
+  Agent->>Agent: pending_context_operation = NeedsCompaction
+  Agent->>Agent: restore pending_llm_turn_items
+  Agent->>Compact: sys/llm.compact(source_window_items)
+  Agent->>Agent: trace CompactionRequested
+  Compact-->>Agent: LlmCompactReceipt(active_window_items)
+  Agent->>Agent: append CompactionRecord
+  Agent->>Agent: replace context_state.active_window_items
+  Agent->>Agent: clear pending_context_operation
+  Agent->>LLM: retry sys/llm.generate(compacted window)
+```
+
+Trace path:
+
+```text
+LlmRequested
+ReceiptSettled
+ContextPressureObserved
+ContextOperationStateChanged
+CompactionRequested
+CompactionReceived
+ActiveWindowUpdated
+TurnPlanned
+LlmRequested
+```
+
+## End-to-End Example: Usage High-Water Lazy Compaction
+
+```mermaid
+sequenceDiagram
+  participant Agent as aos-agent session workflow
+  participant LLM as sys/llm.generate
+  participant Blob as sys/blob
+  participant Compact as sys/llm.compact
+  participant UI
+
+  Agent->>LLM: sys/llm.generate(window_items)
+  LLM-->>Agent: LlmGenerateReceipt(prompt_tokens over high-water)
+  Agent->>Agent: record UsageHighWater context pressure
+  Agent->>Blob: sys/blob.get(output_ref)
+  Blob-->>Agent: LlmOutputEnvelope(no tool_calls_ref)
+  Agent->>Agent: Running -> WaitingInput
+  UI->>Agent: later RunRequested / FollowUpInputAppended
+  Agent->>Agent: planner sees pending CompactContext
+  Agent->>Compact: sys/llm.compact(source_window_items)
+```
+
+The high-water receipt does not cause compaction at the end of the triggering turn. It schedules a context prerequisite for the next LLM turn.
+
 ## End-to-End Example: Steer During Active Run
 
 ```mermaid
@@ -1631,16 +1927,19 @@ For live inspection, the most useful fields are:
 3. `current_run.lifecycle`: active run lifecycle.
 4. `current_run.cause`: why the run exists.
 5. `context_state.transcript_ledger`: durable session message history.
-6. `turn_state`: pinned/durable inputs and the last turn-planner report.
-7. `current_run.turn_plan.active_window_items`: what the next/last LLM turn actually saw.
-8. `current_run.turn_plan.selected_tool_ids`: which tools were exposed to that turn.
-9. `current_run.last_llm_usage`: aggregate usage from the last admitted LLM receipt.
-10. `pending_llm_turn_items`: whether an LLM turn is waiting to dispatch.
-11. `active_tool_batch`: current tool execution, statuses, and results.
-12. `pending_effects`, `pending_blob_gets`, `pending_blob_puts`: runtime work still open.
-13. `queued_steer_refs`, `queued_follow_up_runs`, `run_interrupt`: interventions waiting or applied.
-14. `current_run.trace.entries`: active diagnostic trace.
-15. `run_history[*].trace_summary`: compact completed run trace summary.
+6. `context_state.active_window_items`: current model window, after any explicit compaction.
+7. `context_state.pending_context_operation`: whether generation is blocked on token counting or compaction.
+8. `context_state.last_context_pressure`, `last_token_count`, and `last_compaction`: latest context-maintenance diagnostics.
+9. `turn_state`: pinned/durable inputs and the last turn-planner report.
+10. `current_run.turn_plan.active_window_items`: what the next/last LLM turn actually saw.
+11. `current_run.turn_plan.selected_tool_ids`: which tools were exposed to that turn.
+12. `current_run.last_llm_usage`: aggregate usage from the last admitted LLM receipt.
+13. `pending_llm_turn_items`: whether an LLM turn is waiting to dispatch.
+14. `active_tool_batch`: current tool execution, statuses, and results.
+15. `pending_effects`, `pending_blob_gets`, `pending_blob_puts`: runtime work still open.
+16. `queued_steer_refs`, `queued_follow_up_runs`, `run_interrupt`: interventions waiting or applied.
+17. `current_run.trace.entries`: active diagnostic trace.
+18. `run_history[*].trace_summary`: compact completed run trace summary.
 
 ## Mental Model Summary
 
@@ -1649,8 +1948,12 @@ flowchart TD
   Session[Session] --> Runs[Runs]
   Runs --> Cause[Cause/provenance]
   Runs --> TurnPlan[Turn plan]
+  Runs --> Context[Transcript ledger / active window]
   Runs --> LLM[LLM turns]
   LLM --> Tools[Tool batches]
+  LLM --> ContextOps[Context pressure / token count / compaction]
+  ContextOps --> Context
+  Context --> TurnPlan
   Tools --> Effects[Effects/domain events]
   Effects --> Receipts[Receipts/rejections/stream frames]
   Receipts --> Session
@@ -1667,8 +1970,9 @@ The core SDK stays small by making most axes open-ended:
 
 1. `RunCause.kind` and `RunCauseOrigin` describe why a run exists without adding a new API for every product.
 2. `TurnInputLane::Custom` and `TurnInputKind::Custom` allow embedding workflows to add context domains.
-3. `RunTraceEntryKind::Custom` allows product-specific trace points without changing the core trace contract.
-4. `ToolExecutor::{Effect, DomainEvent, HostLoop}` lets tools target AOS effects, native workflows, or host loops.
-5. Intervention payloads are refs, so the SDK does not own raw UI text, policy, or host cancellation semantics.
+3. `ActiveWindowItemKind::{ProviderNativeArtifactRef, ProviderRawWindowRef, Custom}` lets providers preserve context artifacts without making them portable by accident.
+4. `RunTraceEntryKind::Custom` allows product-specific trace points without changing the core trace contract.
+5. `ToolExecutor::{Effect, DomainEvent, HostLoop}` lets tools target AOS effects, native workflows, or host loops.
+6. Intervention payloads are refs, so the SDK does not own raw UI text, policy, or host cancellation semantics.
 
 That is the desired boundary: `aos-agent` provides deterministic agent primitives; AOS workflows and adapters compose those primitives into chat agents, long-running agents, self-improving agents, hosted coding agents, and future Fabric-backed execution.
