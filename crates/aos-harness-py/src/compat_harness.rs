@@ -583,18 +583,41 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         })
     }
 
+    fn receipt_with_status_typed<T: Serialize>(
+        &self,
+        intent_hash: [u8; 32],
+        status: ReceiptStatus,
+        payload: &T,
+    ) -> Result<EffectReceipt> {
+        Ok(EffectReceipt {
+            intent_hash,
+            status,
+            payload_cbor: to_canonical_cbor(payload)?,
+            cost_cents: None,
+            signature: Vec::new(),
+        })
+    }
+
+    fn receipt_ok_typed<T: Serialize>(
+        &self,
+        intent_hash: [u8; 32],
+        payload: &T,
+    ) -> Result<EffectReceipt> {
+        self.receipt_with_status_typed(intent_hash, ReceiptStatus::Ok, payload)
+    }
+
     fn receipt_timer_set_ok(
         &self,
         intent_hash: [u8; 32],
         delivered_at_ns: u64,
         key: Option<String>,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(
+        self.receipt_ok_typed(
             intent_hash,
-            &serde_json::to_value(TimerSetReceipt {
+            &TimerSetReceipt {
                 delivered_at_ns,
                 key,
-            })?,
+            },
         )
     }
 
@@ -603,7 +626,7 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         intent_hash: [u8; 32],
         payload: &BlobPutReceipt,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(intent_hash, &serde_json::to_value(payload)?)
+        self.receipt_ok_typed(intent_hash, payload)
     }
 
     fn receipt_blob_get_ok(
@@ -611,7 +634,7 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         intent_hash: [u8; 32],
         payload: &BlobGetReceipt,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(intent_hash, &serde_json::to_value(payload)?)
+        self.receipt_ok_typed(intent_hash, payload)
     }
 
     fn receipt_llm_generate_ok(
@@ -619,7 +642,7 @@ impl<S: Store + Clone + Send + Sync + 'static> WorkflowHarnessCore<S> {
         intent_hash: [u8; 32],
         payload: &LlmGenerateReceipt,
     ) -> Result<EffectReceipt> {
-        self.receipt_ok(intent_hash, &serde_json::to_value(payload)?)
+        self.receipt_ok_typed(intent_hash, payload)
     }
 
     fn state_json(&self, workflow: &str, key: Option<&[u8]>) -> Result<JsonValue> {

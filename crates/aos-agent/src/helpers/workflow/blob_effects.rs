@@ -8,19 +8,20 @@ use aos_effects::builtins::{
 use aos_wasm_sdk::PendingEffect;
 
 use crate::contracts::{
-    PendingBlobGet, PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, SessionState,
-    ToolCallObserved, ToolCallStatus,
+    PendingBlobGet, PendingBlobGetKind, PendingBlobPut, PendingBlobPutKind, RunTraceEntryKind,
+    SessionState, ToolCallObserved, ToolCallStatus,
 };
-use crate::helpers::{SessionEffectCommand, SessionReduceOutput};
+use crate::helpers::{SessionEffectCommand, SessionWorkflowOutput};
 
 use super::tool_batch::{fail_tool_call, set_tool_call_status};
 use super::{
-    RunToolBatch, SessionReduceError, TOOL_RESULT_BLOB_MAX_BYTES, continue_tool_batch,
-    dispatch_queued_llm_turn, fail_run, queue_llm_turn, run_tool_batch,
-    transition_to_waiting_input_if_running,
+    RunToolBatch, SessionWorkflowError, TOOL_RESULT_BLOB_MAX_BYTES, continue_tool_batch,
+    dispatch_pending_llm_turn, fail_run, finish_interrupted_run_if_quiescent, push_run_trace,
+    run_tool_batch, set_pending_llm_turn, trace_ref, transition_to_waiting_input_if_running,
 };
+use alloc::collections::BTreeMap;
 
-pub(super) fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
+pub(super) fn has_open_tool_definition_puts(state: &SessionState) -> bool {
     state.pending_blob_puts.values().any(|shared| {
         shared
             .waiters
@@ -29,7 +30,7 @@ pub(super) fn has_pending_tool_definition_puts(state: &SessionState) -> bool {
     })
 }
 
-fn has_pending_tool_result_blob_get(
+fn has_open_tool_result_blob_get(
     state: &SessionState,
     tool_batch_id: &crate::contracts::ToolBatchId,
     call_id: &str,
@@ -52,8 +53,8 @@ pub(super) fn enqueue_blob_get(
     state: &mut SessionState,
     blob_ref: HashRef,
     kind: PendingBlobGetKind,
-    out: &mut SessionReduceOutput,
-) -> Result<String, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<String, SessionWorkflowError> {
     let params = BlobGetParams { blob_ref };
     let pending_entry = PendingBlobGet {
         kind,
@@ -84,7 +85,7 @@ pub(super) fn enqueue_blob_put(
     state: &mut SessionState,
     bytes: Vec<u8>,
     kind: PendingBlobPutKind,
-    out: &mut SessionReduceOutput,
+    out: &mut SessionWorkflowOutput,
 ) -> String {
     let params = BlobPutParams {
         bytes,
@@ -208,8 +209,8 @@ fn inject_blob_inline_text_into_value(
 fn on_llm_output_blob(
     state: &mut SessionState,
     receipt: BlobGetReceipt,
-    out: &mut SessionReduceOutput,
-) -> Result<bool, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<bool, SessionWorkflowError> {
     state.last_output_ref = Some(receipt.blob_ref.as_str().into());
     let output: LlmOutputEnvelope = match serde_json::from_slice(&receipt.bytes) {
         Ok(value) => value,
@@ -218,6 +219,10 @@ fn on_llm_output_blob(
             return Ok(true);
         }
     };
+    if state.run_interrupt.is_some() {
+        finish_interrupted_run_if_quiescent(state, out)?;
+        return Ok(true);
+    }
     if let Some(tool_calls_ref) = output.tool_calls_ref {
         enqueue_blob_get(state, tool_calls_ref, PendingBlobGetKind::LlmToolCalls, out)?;
     } else {
@@ -230,8 +235,8 @@ fn on_llm_tool_calls_blob(
     state: &mut SessionState,
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
     receipt: BlobGetReceipt,
-    out: &mut SessionReduceOutput,
-) -> Result<bool, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<bool, SessionWorkflowError> {
     let calls: LlmToolCallList = match serde_json::from_slice(&receipt.bytes) {
         Ok(value) => value,
         Err(_) => {
@@ -253,6 +258,22 @@ fn on_llm_tool_calls_blob(
             provider_call_id: call.provider_call_id,
         })
         .collect::<Vec<_>>();
+    let mut refs = Vec::new();
+    let mut metadata = BTreeMap::new();
+    metadata.insert("call_count".into(), observed.len().to_string());
+    for call in &observed {
+        refs.push(trace_ref("tool_call_id", call.call_id.clone()));
+        if let Some(arguments_ref) = call.arguments_ref.as_ref() {
+            refs.push(trace_ref("arguments_ref", arguments_ref.clone()));
+        }
+    }
+    push_run_trace(
+        state,
+        RunTraceEntryKind::ToolCallsObserved,
+        "llm tool calls observed",
+        refs,
+        metadata,
+    );
     run_tool_batch(
         state,
         RunToolBatch {
@@ -270,8 +291,8 @@ fn on_tool_call_arguments_blob(
     tool_batch_id: crate::contracts::ToolBatchId,
     call_id: String,
     receipt: Option<BlobGetReceipt>,
-    out: &mut SessionReduceOutput,
-) -> Result<bool, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<bool, SessionWorkflowError> {
     let Some(receipt) = receipt else {
         if let Some(batch) = state.active_tool_batch.as_mut()
             && batch.tool_batch_id == tool_batch_id
@@ -331,8 +352,8 @@ fn on_tool_result_blob(
     call_id: String,
     blob_ref: String,
     receipt: Option<BlobGetReceipt>,
-    out: &mut SessionReduceOutput,
-) -> Result<bool, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<bool, SessionWorkflowError> {
     let (inline_text, truncated, error_text) = if let Some(receipt) = receipt {
         let (text, truncated) = decode_blob_inline_text(&receipt.bytes);
         (text, truncated, None)
@@ -358,7 +379,7 @@ fn on_tool_result_blob(
         result.output_json = updated_output;
     }
 
-    let pending = has_pending_tool_result_blob_get(state, &tool_batch_id, call_id.as_str());
+    let pending = has_open_tool_result_blob_get(state, &tool_batch_id, call_id.as_str());
     if !pending
         && let Some(batch) = state.active_tool_batch.as_mut()
         && batch.tool_batch_id == tool_batch_id
@@ -374,11 +395,11 @@ fn on_tool_result_blob(
     Ok(true)
 }
 
-pub(super) fn handle_pending_blob_get_receipt(
+pub(super) fn handle_blob_get_receipt(
     state: &mut SessionState,
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<bool, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<bool, SessionWorkflowError> {
     let Some(matched) = state.pending_blob_gets.settle(envelope) else {
         return Ok(false);
     };
@@ -443,11 +464,11 @@ pub(super) fn handle_pending_blob_get_receipt(
     Ok(true)
 }
 
-pub(super) fn handle_pending_blob_put_receipt(
+pub(super) fn handle_blob_put_receipt(
     state: &mut SessionState,
     envelope: &aos_wasm_sdk::EffectReceiptEnvelope,
-    out: &mut SessionReduceOutput,
-) -> Result<bool, SessionReduceError> {
+    out: &mut SessionWorkflowOutput,
+) -> Result<bool, SessionWorkflowError> {
     let Some(matched) = state.pending_blob_puts.settle(envelope) else {
         return Ok(false);
     };
@@ -462,22 +483,17 @@ pub(super) fn handle_pending_blob_put_receipt(
                 if let Some(spec) = state.tool_registry.get_mut(&tool_id) {
                     spec.tool_ref = blob_ref.clone();
                 }
-                for tool in &mut state.effective_tools.ordered_tools {
-                    if tool.tool_id == tool_id {
-                        tool.tool_ref = blob_ref.clone();
-                    }
-                }
-                if !has_pending_tool_definition_puts(state) {
+                if !has_open_tool_definition_puts(state) {
                     state.tool_refs_materialized = true;
-                    dispatch_queued_llm_turn(state, out)?;
+                    dispatch_pending_llm_turn(state, out)?;
                 }
             }
-            PendingBlobPutKind::FollowUpMessage { index } => {
+            PendingBlobPutKind::ToolFollowUpMessage { index } => {
                 let Some(receipt) = matched.receipt.clone().ok() else {
                     fail_run(state)?;
                     return Ok(true);
                 };
-                if let Some(turn) = state.pending_follow_up_turn.as_mut() {
+                if let Some(turn) = state.staged_tool_follow_up_turn.as_mut() {
                     turn.blob_refs_by_index
                         .insert(index, receipt.blob_ref.as_str().to_string());
                     if turn.blob_refs_by_index.len() as u64 >= turn.expected_messages {
@@ -487,11 +503,15 @@ pub(super) fn handle_pending_blob_put_receipt(
                                 refs.push(value.clone());
                             }
                         }
-                        let mut next_refs = turn.base_message_refs.clone();
-                        next_refs.extend(refs);
-                        state.conversation_message_refs = next_refs.clone();
-                        state.pending_follow_up_turn = None;
-                        queue_llm_turn(state, next_refs, out)?;
+                        state.context_state.active_window_items = turn.base_window_items.clone();
+                        state.context_state.append_message_refs(
+                            refs,
+                            "tool_follow_up",
+                            state.updated_at,
+                        );
+                        let next_items = state.context_state.active_window_items.clone();
+                        state.staged_tool_follow_up_turn = None;
+                        set_pending_llm_turn(state, next_items, out)?;
                     }
                 }
             }

@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use aos_agent::{
-    HostSessionStatus, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, default_tool_profile_for_provider, default_tool_profiles,
-    default_tool_registry,
+    HostSessionStatus, SessionConfig, SessionId, SessionInput, SessionInputKind, SessionLifecycle,
+    SessionState, local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
+    local_coding_agent_tool_registry,
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
@@ -33,8 +33,7 @@ use tempfile::TempDir;
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
 const WORKFLOW_MODULE_NAME: &str = "aos.agent/SessionWorkflow_wasm@1";
-const DIRECT_EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
-const EVAL_ASSETS_ROOT: &str = "crates/aos-agent-eval/fixtures/eval-world/air";
+const DIRECT_EVENT_SCHEMA: &str = "aos.agent/SessionInput@1";
 const CASES_ROOT: &str = "crates/aos-agent-eval/cases";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
@@ -144,9 +143,7 @@ impl EvalInvocation {
         fs::create_dir_all(&workspaces_root)
             .with_context(|| format!("create workspaces root {}", workspaces_root.display()))?;
 
-        let assets_root = workspace_root().join(EVAL_ASSETS_ROOT);
         let sdk_air_root = workspace_root().join(SDK_AIR_ROOT);
-        let import_roots = vec![sdk_air_root];
         let module_patches = vec![EvalModulePatch {
             module_name: WORKFLOW_MODULE_NAME,
             build: EvalModuleBuild::CargoBin {
@@ -156,8 +153,8 @@ impl EvalInvocation {
         }];
         let host = EvalHost::prepare(EvalHostConfig {
             world_root: &world_root,
-            assets_root: &assets_root,
-            import_roots: &import_roots,
+            assets_root: &sdk_air_root,
+            import_roots: &[],
             workspace_root: workspace_root().as_path(),
             workflow_name: WORKFLOW_NAME,
             event_schema: DIRECT_EVENT_SCHEMA,
@@ -358,7 +355,7 @@ fn run_attempt(
         .run
         .tool_profile
         .clone()
-        .unwrap_or_else(|| default_tool_profile_for_provider(&provider.provider_id));
+        .unwrap_or_else(|| local_coding_agent_tool_profile_for_provider(&provider.provider_id));
 
     install_tool_registry(
         &mut invocation.host,
@@ -374,7 +371,7 @@ fn run_attempt(
             &mut invocation.host,
             &mut invocation.clock,
             &session_id,
-            SessionIngressKind::HostSessionUpdated {
+            SessionInputKind::HostSessionUpdated {
                 host_session_id: Some(host_session_id),
                 host_session_status: Some(HostSessionStatus::Ready),
             },
@@ -393,7 +390,7 @@ fn run_attempt(
         &mut invocation.host,
         &mut invocation.clock,
         &session_id,
-        SessionIngressKind::RunRequested {
+        SessionInputKind::RunRequested {
             input_ref: input_ref.as_str().to_string(),
             run_overrides: Some(SessionConfig {
                 provider: provider.provider_id.clone(),
@@ -405,6 +402,7 @@ fn run_attempt(
                 default_tool_enable: case.run.tool_enable.clone(),
                 default_tool_disable: case.run.tool_disable.clone(),
                 default_tool_force: case.run.tool_force.clone(),
+                default_host_session_open: None,
             }),
         },
     )?;
@@ -567,13 +565,13 @@ fn send_session_event(
     host: &mut EvalHost,
     clock: &mut u64,
     session_id: &SessionId,
-    kind: SessionIngressKind,
+    kind: SessionInputKind,
 ) -> Result<()> {
     *clock = clock.saturating_add(1);
-    host.send_event(&SessionIngress {
+    host.send_event(&SessionInput {
         session_id: session_id.clone(),
         observed_at_ns: *clock,
-        ingress: kind,
+        input: kind,
     })
 }
 
@@ -584,8 +582,8 @@ fn install_tool_registry(
     default_profile: &str,
     allowed_tools: Option<&[String]>,
 ) -> Result<()> {
-    let registry = default_tool_registry();
-    let mut profiles = default_tool_profiles();
+    let registry = local_coding_agent_tool_registry();
+    let mut profiles = local_coding_agent_tool_profiles();
 
     if let Some(allowed) = allowed_tools {
         if allowed.is_empty() {
@@ -609,7 +607,7 @@ fn install_tool_registry(
         host,
         clock,
         session_id,
-        SessionIngressKind::ToolRegistrySet {
+        SessionInputKind::ToolRegistrySet {
             registry,
             profiles: Some(profiles),
             default_profile: Some(default_profile.to_string()),
@@ -797,8 +795,8 @@ fn collect_conversation_observations(
     let mut tool_outputs = Vec::new();
     let mut tool_arguments = Vec::new();
 
-    for blob_ref in &state.conversation_message_refs {
-        let Ok(value) = load_json_blob(store, blob_ref) else {
+    for blob_ref in state.context_state.ledger_message_refs() {
+        let Ok(value) = load_json_blob(store, &blob_ref) else {
             continue;
         };
         walk_message_value(

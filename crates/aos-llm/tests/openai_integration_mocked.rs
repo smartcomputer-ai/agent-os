@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::thread;
 
 use aos_llm::{
-    Client, GenerateOptions, Message, OpenAIAdapter, OpenAIAdapterConfig, OpenAICompatibleAdapter,
-    OpenAICompatibleAdapterConfig, Request, StreamEventType, StreamEventTypeOrString, Tool,
-    generate,
+    Client, CompactionItemKind, CompactionRequest, GenerateOptions, Message, OpenAIAdapter,
+    OpenAIAdapterConfig, OpenAICompatibleAdapter, OpenAICompatibleAdapterConfig, ProviderAdapter,
+    Request, StreamEventType, StreamEventTypeOrString, Tool, generate,
 };
 use futures::StreamExt;
 use serde_json::json;
@@ -179,6 +179,81 @@ async fn client_complete_openai_responses_adapter_returns_response() {
     assert_eq!(response.provider, "openai");
     assert_eq!(response.text(), "Hello from mocked integration");
     assert_eq!(response.usage.reasoning_tokens, Some(2));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn openai_responses_adapter_compact_posts_to_compact_endpoint() {
+    let body = json!({
+        "id": "resp_compact_1",
+        "object": "response.compaction",
+        "created_at": 1764967971_u64,
+        "output": [
+            {
+                "id": "msg_000",
+                "type": "message",
+                "status": "completed",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "hello" }]
+            },
+            {
+                "id": "cmp_001",
+                "type": "compaction",
+                "encrypted_content": "encrypted-summary"
+            }
+        ],
+        "usage": {
+            "input_tokens": 139,
+            "input_tokens_details": { "cached_tokens": 3 },
+            "output_tokens": 438,
+            "output_tokens_details": { "reasoning_tokens": 64 },
+            "total_tokens": 577
+        }
+    })
+    .to_string();
+
+    let base_url = spawn_sequence_response_server(
+        "/responses/compact",
+        vec![MockResponsePlan {
+            status: 200,
+            content_type: "application/json",
+            body,
+            must_contain: vec![
+                "\"model\":\"gpt-5.2\"",
+                "\"input\"",
+                "\"type\":\"message\"",
+                "\"role\":\"user\"",
+            ],
+        }],
+    );
+    let mut config = OpenAIAdapterConfig::new("test-key");
+    config.base_url = base_url;
+    let adapter = OpenAIAdapter::new(config).expect("adapter");
+
+    let response = adapter
+        .compact(CompactionRequest {
+            model: "gpt-5.2".into(),
+            messages: vec![Message::user("hello")],
+            provider: Some("openai".into()),
+            target_tokens: Some(1024),
+            provider_options: None,
+        })
+        .await
+        .expect("compact");
+
+    assert_eq!(response.provider, "openai");
+    assert_eq!(response.id, "resp_compact_1");
+    assert_eq!(response.output_items.len(), 2);
+    assert_eq!(
+        response.output_items[1].kind,
+        CompactionItemKind::Compaction
+    );
+    assert_eq!(
+        response.output_items[1].encrypted_content.as_deref(),
+        Some("encrypted-summary")
+    );
+    assert_eq!(response.usage.input_tokens, 139);
+    assert_eq!(response.usage.reasoning_tokens, Some(64));
+    assert_eq!(response.usage.cache_read_tokens, Some(3));
 }
 
 #[tokio::test(flavor = "current_thread")]

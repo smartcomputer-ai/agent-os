@@ -183,15 +183,234 @@ pub struct LlmRuntimeArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmTranscriptRange {
+    pub start_seq: u64,
+    pub end_seq: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum LlmWindowItemKind {
+    MessageRef,
+    AosSummaryRef,
+    ProviderNativeArtifactRef,
+    ProviderRawWindowRef,
+    Custom { kind: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmProviderCompatibility {
+    pub provider: String,
+    pub api_kind: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub model_family: Option<String>,
+    pub artifact_type: String,
+    pub opaque: bool,
+    pub encrypted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmWindowItem {
+    pub item_id: String,
+    pub kind: LlmWindowItemKind,
+    pub ref_: HashRef,
+    #[serde(default)]
+    pub lane: Option<String>,
+    #[serde(default)]
+    pub source_range: Option<LlmTranscriptRange>,
+    #[serde(default)]
+    pub source_refs: Vec<HashRef>,
+    #[serde(default)]
+    pub provider_compatibility: Option<LlmProviderCompatibility>,
+    #[serde(default)]
+    pub estimated_tokens: Option<u64>,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl LlmWindowItem {
+    pub fn message_ref(ref_: HashRef) -> Self {
+        Self {
+            item_id: ref_.to_string(),
+            kind: LlmWindowItemKind::MessageRef,
+            ref_: ref_.clone(),
+            lane: None,
+            source_range: None,
+            source_refs: alloc::vec![ref_],
+            provider_compatibility: None,
+            estimated_tokens: None,
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    pub fn renderable_message_ref(&self, provider: &str, model: &str) -> Option<&HashRef> {
+        match self.kind {
+            LlmWindowItemKind::MessageRef | LlmWindowItemKind::AosSummaryRef => Some(&self.ref_),
+            LlmWindowItemKind::ProviderNativeArtifactRef
+            | LlmWindowItemKind::ProviderRawWindowRef => {
+                if self.is_provider_compatible(provider, model) {
+                    Some(&self.ref_)
+                } else {
+                    None
+                }
+            }
+            LlmWindowItemKind::Custom { .. } => None,
+        }
+    }
+
+    fn is_provider_compatible(&self, provider: &str, model: &str) -> bool {
+        let Some(compatibility) = self.provider_compatibility.as_ref() else {
+            return false;
+        };
+        if compatibility.provider != provider {
+            return false;
+        }
+        if compatibility
+            .model
+            .as_ref()
+            .is_some_and(|compatible_model| compatible_model != model)
+        {
+            return false;
+        }
+        compatibility
+            .model_family
+            .as_ref()
+            .is_none_or(|family| model.starts_with(family))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LlmGenerateParams {
     #[serde(default)]
     pub correlation_id: Option<String>,
     pub provider: String,
     pub model: String,
-    pub message_refs: Vec<HashRef>,
+    pub window_items: Vec<LlmWindowItem>,
     pub runtime: LlmRuntimeArgs,
     #[serde(default)]
     pub api_key: Option<TextOrSecretRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum LlmTokenCountQuality {
+    Exact,
+    ProviderEstimate,
+    LocalEstimate,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmTokenCountByRef {
+    pub ref_: HashRef,
+    pub tokens: u64,
+    pub quality: LlmTokenCountQuality,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmCountTokensParams {
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    pub provider: String,
+    pub model: String,
+    pub window_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub tool_definitions_ref: Option<HashRef>,
+    #[serde(default)]
+    pub response_format_ref: Option<HashRef>,
+    #[serde(default)]
+    pub provider_options_ref: Option<HashRef>,
+    #[serde(default)]
+    pub rendering_profile: Option<String>,
+    #[serde(default)]
+    pub candidate_plan_id: Option<String>,
+    #[serde(default)]
+    pub metadata: alloc::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub api_key: Option<TextOrSecretRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmCountTokensReceipt {
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub original_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub counts_by_ref: Vec<LlmTokenCountByRef>,
+    #[serde(default)]
+    pub tool_tokens: Option<u64>,
+    #[serde(default)]
+    pub response_format_tokens: Option<u64>,
+    pub quality: LlmTokenCountQuality,
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub candidate_plan_id: Option<String>,
+    #[serde(default)]
+    pub provider_metadata_ref: Option<HashRef>,
+    #[serde(default)]
+    pub warnings_ref: Option<HashRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum LlmCompactStrategy {
+    ProviderNative,
+    AosSummary,
+    Auto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum LlmCompactionArtifactKind {
+    AosSummary,
+    ProviderNative,
+    Mixed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmCompactParams {
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    pub operation_id: String,
+    pub provider: String,
+    pub model: String,
+    pub strategy: LlmCompactStrategy,
+    pub source_window_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub preserve_window_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub recent_tail_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub source_range: Option<LlmTranscriptRange>,
+    #[serde(default)]
+    pub target_tokens: Option<u64>,
+    #[serde(default)]
+    pub provider_options_ref: Option<HashRef>,
+    #[serde(default)]
+    pub api_key: Option<TextOrSecretRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmCompactReceipt {
+    pub operation_id: String,
+    pub artifact_kind: LlmCompactionArtifactKind,
+    pub artifact_refs: Vec<HashRef>,
+    #[serde(default)]
+    pub source_range: Option<LlmTranscriptRange>,
+    #[serde(default)]
+    pub compacted_through: Option<u64>,
+    pub active_window_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub token_usage: Option<TokenUsage>,
+    #[serde(default)]
+    pub provider_metadata_ref: Option<HashRef>,
+    #[serde(default)]
+    pub warnings_ref: Option<HashRef>,
+    pub provider_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -247,6 +466,8 @@ pub struct LlmGenerateReceipt {
     pub raw_output_ref: Option<HashRef>,
     #[serde(default)]
     pub provider_response_id: Option<String>,
+    #[serde(default)]
+    pub provider_context_items: Vec<LlmWindowItem>,
     pub finish_reason: LlmFinishReason,
     pub token_usage: TokenUsage,
     #[serde(default)]

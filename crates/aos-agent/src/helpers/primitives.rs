@@ -1,25 +1,36 @@
 use crate::contracts::{
-    HostSessionStatus, RunId, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionLifecycleChanged, SessionState, default_tool_profile_for_provider,
-    default_tool_profiles, default_tool_registry,
+    HostSessionStatus, RunCause, RunId, RunLifecycleChanged, RunState, SessionConfig, SessionId,
+    SessionInput, SessionInputKind, SessionLifecycle, SessionLifecycleChanged, SessionState,
+    SessionStatus, SessionStatusChanged, local_coding_agent_tool_profile_for_provider,
+    local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
 };
-use crate::helpers::workflow::SessionReduceError;
+use crate::helpers::workflow::SessionWorkflowError;
 use crate::{helpers::llm::LlmMappingError, tools::ToolEffectOp};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use aos_effects::builtins::{
     BlobGetParams, BlobPutParams, HostLocalTarget, HostSessionOpenParams, HostTarget,
-    LlmGenerateParams, TextOrSecretRef,
+    LlmCompactParams, LlmCountTokensParams, LlmGenerateParams, TextOrSecretRef,
 };
 use aos_wasm_sdk::{PendingEffect, ReduceError, Value, WorkflowCtx};
 
-use super::llm::{LlmStepContext, materialize_llm_generate_params_with_prompt_refs};
+use super::llm::LlmCompactStepContext;
+use super::llm::LlmCountTokensStepContext;
+use super::llm::LlmStepContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEffectCommand {
     LlmGenerate {
         params: LlmGenerateParams,
+        pending: PendingEffect,
+    },
+    LlmCompact {
+        params: LlmCompactParams,
+        pending: PendingEffect,
+    },
+    LlmCountTokens {
+        params: LlmCountTokensParams,
         pending: PendingEffect,
     },
     ToolEffect {
@@ -41,6 +52,8 @@ impl SessionEffectCommand {
     pub fn pending(&self) -> &PendingEffect {
         match self {
             Self::LlmGenerate { pending, .. }
+            | Self::LlmCompact { pending, .. }
+            | Self::LlmCountTokens { pending, .. }
             | Self::ToolEffect { pending, .. }
             | Self::BlobPut { pending, .. }
             | Self::BlobGet { pending, .. } => pending,
@@ -52,6 +65,20 @@ impl SessionEffectCommand {
             Self::LlmGenerate { params, pending } => {
                 ctx.effects().emit_raw_with_issuer_ref(
                     "sys/llm.generate@1",
+                    &params,
+                    pending.issuer_ref.as_deref(),
+                );
+            }
+            Self::LlmCompact { params, pending } => {
+                ctx.effects().emit_raw_with_issuer_ref(
+                    "sys/llm.compact@1",
+                    &params,
+                    pending.issuer_ref.as_deref(),
+                );
+            }
+            Self::LlmCountTokens { params, pending } => {
+                ctx.effects().emit_raw_with_issuer_ref(
+                    "sys/llm.count_tokens@1",
                     &params,
                     pending.issuer_ref.as_deref(),
                 );
@@ -106,7 +133,7 @@ impl SessionDomainEventCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SessionReduceOutput {
+pub struct SessionWorkflowOutput {
     pub effects: alloc::vec::Vec<SessionEffectCommand>,
     pub domain_events: alloc::vec::Vec<SessionDomainEventCommand>,
 }
@@ -122,6 +149,7 @@ pub struct SessionHandoffRequest {
     pub first_observed_at_ns: u64,
     pub session_id: SessionId,
     pub input_ref: String,
+    pub run_cause: Option<RunCause>,
     pub host_session_id: String,
     pub run_overrides: SessionConfig,
     pub allowed_tools: Option<Vec<String>>,
@@ -129,7 +157,7 @@ pub struct SessionHandoffRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionHandoffPlan {
-    pub ingresses: Vec<SessionIngress>,
+    pub inputs: Vec<SessionInput>,
     pub next_observed_at_ns: u64,
 }
 
@@ -151,24 +179,46 @@ pub struct RequestLlm {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestLlmCompact {
+    pub step: LlmCompactStepContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestLlmCountTokens {
+    pub step: LlmCountTokensStepContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestedLlm {
     pub pending: PendingEffect,
     pub params: LlmGenerateParams,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestedLlmCompact {
+    pub pending: PendingEffect,
+    pub params: LlmCompactParams,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestedLlmCountTokens {
+    pub pending: PendingEffect,
+    pub params: LlmCountTokensParams,
+}
+
 pub fn request_llm(
     state: &mut SessionState,
-    out: &mut SessionReduceOutput,
+    out: &mut SessionWorkflowOutput,
     mut request: RequestLlm,
-) -> Result<RequestedLlm, SessionReduceError> {
+) -> Result<RequestedLlm, SessionWorkflowError> {
     let run_config = state
         .active_run_config
         .clone()
-        .ok_or(SessionReduceError::RunNotActive)?;
+        .ok_or(SessionWorkflowError::RunNotActive)?;
     if request.step.api_key.is_none() {
         request.step.api_key = provider_secret_ref(run_config.provider.as_str());
     }
-    let params = materialize_llm_generate_params_with_prompt_refs(&run_config, request.step)
+    let params = crate::helpers::llm::materialize_llm_generate_params(&run_config, &request.step)
         .map_err(map_llm_mapping_error)?;
     let pending = begin_pending_effect(state, "sys/llm.generate@1", &params, None);
     out.effects.push(SessionEffectCommand::LlmGenerate {
@@ -176,6 +226,51 @@ pub fn request_llm(
         pending: pending.clone(),
     });
     Ok(RequestedLlm { pending, params })
+}
+
+pub fn request_llm_compact(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+    mut request: RequestLlmCompact,
+) -> Result<RequestedLlmCompact, SessionWorkflowError> {
+    let run_config = state
+        .active_run_config
+        .clone()
+        .ok_or(SessionWorkflowError::RunNotActive)?;
+    if request.step.api_key.is_none() {
+        request.step.api_key = provider_secret_ref(run_config.provider.as_str());
+    }
+    let params = crate::helpers::llm::materialize_llm_compact_params(&run_config, &request.step)
+        .map_err(map_llm_mapping_error)?;
+    let pending = begin_pending_effect(state, "sys/llm.compact@1", &params, None);
+    out.effects.push(SessionEffectCommand::LlmCompact {
+        params: params.clone(),
+        pending: pending.clone(),
+    });
+    Ok(RequestedLlmCompact { pending, params })
+}
+
+pub fn request_llm_count_tokens(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+    mut request: RequestLlmCountTokens,
+) -> Result<RequestedLlmCountTokens, SessionWorkflowError> {
+    let run_config = state
+        .active_run_config
+        .clone()
+        .ok_or(SessionWorkflowError::RunNotActive)?;
+    if request.step.api_key.is_none() {
+        request.step.api_key = provider_secret_ref(run_config.provider.as_str());
+    }
+    let params =
+        crate::helpers::llm::materialize_llm_count_tokens_params(&run_config, &request.step)
+            .map_err(map_llm_mapping_error)?;
+    let pending = begin_pending_effect(state, "sys/llm.count_tokens@1", &params, None);
+    out.effects.push(SessionEffectCommand::LlmCountTokens {
+        params: params.clone(),
+        pending: pending.clone(),
+    });
+    Ok(RequestedLlmCountTokens { pending, params })
 }
 
 pub fn session_lifecycle_changed_payload(
@@ -221,6 +316,113 @@ pub fn emit_session_lifecycle_changed(
         .send();
 }
 
+pub fn session_status_changed_payload(
+    state: &SessionState,
+    prev_status: SessionStatus,
+    observed_at_ns: u64,
+) -> Option<SessionStatusChanged> {
+    if prev_status == state.status || state.session_id.0.is_empty() {
+        return None;
+    }
+    Some(SessionStatusChanged {
+        session_id: state.session_id.clone(),
+        observed_at_ns,
+        from: prev_status,
+        to: state.status,
+    })
+}
+
+pub fn run_lifecycle_changed_payload(
+    state: &SessionState,
+    prev_run: Option<&RunState>,
+    observed_at_ns: u64,
+) -> Option<RunLifecycleChanged> {
+    let current = state.current_run.as_ref();
+    match (prev_run, current) {
+        (Some(prev), Some(current)) if prev.lifecycle != current.lifecycle => {
+            Some(RunLifecycleChanged {
+                session_id: state.session_id.clone(),
+                run_id: current.run_id.clone(),
+                observed_at_ns,
+                from: prev.lifecycle,
+                to: current.lifecycle,
+                cause: current.cause.clone(),
+                output_ref: current
+                    .outcome
+                    .as_ref()
+                    .and_then(|outcome| outcome.output_ref.clone()),
+            })
+        }
+        (None, Some(current)) => Some(RunLifecycleChanged {
+            session_id: state.session_id.clone(),
+            run_id: current.run_id.clone(),
+            observed_at_ns,
+            from: crate::contracts::RunLifecycle::Queued,
+            to: current.lifecycle,
+            cause: current.cause.clone(),
+            output_ref: current
+                .outcome
+                .as_ref()
+                .and_then(|outcome| outcome.output_ref.clone()),
+        }),
+        (Some(prev), None) => {
+            let record = state
+                .run_history
+                .iter()
+                .rev()
+                .find(|record| record.run_id == prev.run_id)?;
+            Some(RunLifecycleChanged {
+                session_id: state.session_id.clone(),
+                run_id: record.run_id.clone(),
+                observed_at_ns,
+                from: prev.lifecycle,
+                to: record.lifecycle,
+                cause: record.cause.clone(),
+                output_ref: record
+                    .outcome
+                    .as_ref()
+                    .and_then(|outcome| outcome.output_ref.clone()),
+            })
+        }
+        _ => None,
+    }
+}
+
+pub fn emit_session_status_changed(
+    ctx: &mut WorkflowCtx<SessionState, Value>,
+    prev_status: SessionStatus,
+) {
+    let observed_at_ns = ctx
+        .logical_now_ns()
+        .or_else(|| ctx.now_ns())
+        .unwrap_or(ctx.state.updated_at);
+    let Some(payload) = session_status_changed_payload(&ctx.state, prev_status, observed_at_ns)
+    else {
+        return;
+    };
+    ctx.intent("aos.agent/SessionStatusChanged@1")
+        .payload(&payload)
+        .send();
+}
+
+pub fn emit_run_lifecycle_changed(
+    ctx: &mut WorkflowCtx<SessionState, Value>,
+    prev_run: Option<RunState>,
+) {
+    let observed_at_ns = ctx
+        .logical_now_ns()
+        .or_else(|| ctx.now_ns())
+        .unwrap_or(ctx.state.updated_at);
+    let Some(payload) =
+        run_lifecycle_changed_payload(&ctx.state, prev_run.as_ref(), observed_at_ns)
+    else {
+        return;
+    };
+    ctx.intent("aos.agent/RunLifecycleChanged@1")
+        .payload(&payload)
+        .send();
+}
+
 pub fn local_session_open_params(request: &LocalSessionSpawnRequest) -> HostSessionOpenParams {
     HostSessionOpenParams {
         target: HostTarget::local(HostLocalTarget {
@@ -235,63 +437,66 @@ pub fn local_session_open_params(request: &LocalSessionSpawnRequest) -> HostSess
 }
 
 pub fn build_session_handoff_plan(request: &SessionHandoffRequest) -> SessionHandoffPlan {
-    let mut ingresses = Vec::new();
+    let mut inputs = Vec::new();
     let mut observed_at_ns = request.first_observed_at_ns;
     let mut run_overrides = request.run_overrides.clone();
 
     let tool_profile = run_overrides
         .default_tool_profile
         .clone()
-        .unwrap_or_else(|| default_tool_profile_for_provider(run_overrides.provider.as_str()));
+        .unwrap_or_else(|| {
+            local_coding_agent_tool_profile_for_provider(run_overrides.provider.as_str())
+        });
     run_overrides.default_tool_profile = Some(tool_profile.clone());
 
+    let registry = local_coding_agent_tool_registry();
+    let mut profiles = local_coding_agent_tool_profiles();
     if let Some(allowed_tools) = request.allowed_tools.clone() {
-        let registry = default_tool_registry();
-        let mut profiles = default_tool_profiles();
         profiles.insert(tool_profile.clone(), allowed_tools);
-        ingresses.push(SessionIngress {
-            session_id: request.session_id.clone(),
-            observed_at_ns,
-            ingress: SessionIngressKind::ToolRegistrySet {
-                registry,
-                profiles: Some(profiles),
-                default_profile: Some(tool_profile.clone()),
-            },
-        });
-        observed_at_ns = observed_at_ns.saturating_add(1);
     }
-
-    ingresses.push(SessionIngress {
+    inputs.push(SessionInput {
         session_id: request.session_id.clone(),
         observed_at_ns,
-        ingress: SessionIngressKind::HostSessionUpdated {
+        input: SessionInputKind::ToolRegistrySet {
+            registry,
+            profiles: Some(profiles),
+            default_profile: Some(tool_profile.clone()),
+        },
+    });
+    observed_at_ns = observed_at_ns.saturating_add(1);
+
+    inputs.push(SessionInput {
+        session_id: request.session_id.clone(),
+        observed_at_ns,
+        input: SessionInputKind::HostSessionUpdated {
             host_session_id: Some(request.host_session_id.clone()),
             host_session_status: Some(HostSessionStatus::Ready),
         },
     });
     observed_at_ns = observed_at_ns.saturating_add(1);
 
-    ingresses.push(SessionIngress {
+    inputs.push(SessionInput {
         session_id: request.session_id.clone(),
         observed_at_ns,
-        ingress: SessionIngressKind::RunRequested {
-            input_ref: request.input_ref.clone(),
+        input: SessionInputKind::RunStartRequested {
+            cause: request
+                .run_cause
+                .clone()
+                .unwrap_or_else(|| RunCause::direct_input(request.input_ref.clone())),
             run_overrides: Some(run_overrides),
         },
     });
     observed_at_ns = observed_at_ns.saturating_add(1);
 
     SessionHandoffPlan {
-        ingresses,
+        inputs,
         next_observed_at_ns: observed_at_ns,
     }
 }
 
-pub fn emit_session_ingresses<S>(ctx: &mut WorkflowCtx<S, Value>, ingresses: &[SessionIngress]) {
-    for ingress in ingresses {
-        ctx.intent("aos.agent/SessionIngress@1")
-            .payload(ingress)
-            .send();
+pub fn emit_session_inputs<S>(ctx: &mut WorkflowCtx<S, Value>, inputs: &[SessionInput]) {
+    for input in inputs {
+        ctx.intent("aos.agent/SessionInput@1").payload(input).send();
     }
 }
 
@@ -346,12 +551,12 @@ fn synthesize_pending_issuer_ref(state: &SessionState, effect: &str) -> String {
     }
 }
 
-fn map_llm_mapping_error(err: LlmMappingError) -> SessionReduceError {
+fn map_llm_mapping_error(err: LlmMappingError) -> SessionWorkflowError {
     match err {
-        LlmMappingError::MissingProvider => SessionReduceError::MissingProvider,
-        LlmMappingError::MissingModel => SessionReduceError::MissingModel,
-        LlmMappingError::EmptyMessageRefs => SessionReduceError::EmptyMessageRefs,
-        LlmMappingError::InvalidHashRef => SessionReduceError::InvalidHashRef,
+        LlmMappingError::MissingProvider => SessionWorkflowError::MissingProvider,
+        LlmMappingError::MissingModel => SessionWorkflowError::MissingModel,
+        LlmMappingError::EmptyWindowItems => SessionWorkflowError::EmptyMessageRefs,
+        LlmMappingError::InvalidHashRef => SessionWorkflowError::InvalidHashRef,
     }
 }
 
@@ -366,28 +571,33 @@ fn provider_secret_ref(provider: &str) -> Option<TextOrSecretRef> {
     None
 }
 
-pub fn map_reduce_error(err: SessionReduceError) -> ReduceError {
+pub fn map_workflow_error(err: SessionWorkflowError) -> ReduceError {
     match err {
-        SessionReduceError::InvalidLifecycleTransition => {
+        SessionWorkflowError::InvalidLifecycleTransition => {
             ReduceError::new("invalid lifecycle transition")
         }
-        SessionReduceError::HostCommandRejected => ReduceError::new("host command rejected"),
-        SessionReduceError::ToolBatchAlreadyActive => ReduceError::new("tool batch already active"),
-        SessionReduceError::MissingProvider => ReduceError::new("run config provider missing"),
-        SessionReduceError::MissingModel => ReduceError::new("run config model missing"),
-        SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),
-        SessionReduceError::UnknownModel => ReduceError::new("run config model unknown"),
-        SessionReduceError::RunAlreadyActive => ReduceError::new("run already active"),
-        SessionReduceError::RunNotActive => ReduceError::new("run not active"),
-        SessionReduceError::EmptyMessageRefs => {
-            ReduceError::new("llm message_refs must not be empty")
+        SessionWorkflowError::HostCommandRejected => ReduceError::new("host command rejected"),
+        SessionWorkflowError::ToolBatchAlreadyActive => {
+            ReduceError::new("tool batch already active")
         }
-        SessionReduceError::TooManyPendingEffects => ReduceError::new("too many pending effects"),
-        SessionReduceError::InvalidHashRef => ReduceError::new("invalid hash ref"),
-        SessionReduceError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
-        SessionReduceError::UnknownToolOverride => ReduceError::new("unknown tool override"),
-        SessionReduceError::InvalidToolRegistry => ReduceError::new("invalid tool registry"),
-        SessionReduceError::AmbiguousPendingToolEffect => {
+        SessionWorkflowError::MissingProvider => ReduceError::new("run config provider missing"),
+        SessionWorkflowError::MissingModel => ReduceError::new("run config model missing"),
+        SessionWorkflowError::UnknownProvider => ReduceError::new("run config provider unknown"),
+        SessionWorkflowError::UnknownModel => ReduceError::new("run config model unknown"),
+        SessionWorkflowError::RunAlreadyActive => ReduceError::new("run already active"),
+        SessionWorkflowError::RunNotActive => ReduceError::new("run not active"),
+        SessionWorkflowError::EmptyMessageRefs => {
+            ReduceError::new("llm window_items must not be empty")
+        }
+        SessionWorkflowError::UnrenderableActiveWindowItem => {
+            ReduceError::new("active window item cannot be rendered for provider")
+        }
+        SessionWorkflowError::TooManyPendingEffects => ReduceError::new("too many pending effects"),
+        SessionWorkflowError::InvalidHashRef => ReduceError::new("invalid hash ref"),
+        SessionWorkflowError::ToolProfileUnknown => ReduceError::new("tool profile unknown"),
+        SessionWorkflowError::UnknownToolOverride => ReduceError::new("unknown tool override"),
+        SessionWorkflowError::InvalidToolRegistry => ReduceError::new("invalid tool registry"),
+        SessionWorkflowError::AmbiguousPendingToolEffect => {
             ReduceError::new("ambiguous pending tool effect")
         }
     }
@@ -484,13 +694,14 @@ mod tests {
     }
 
     #[test]
-    fn handoff_plan_emits_registry_host_and_run_requested_in_order() {
+    fn handoff_plan_emits_registry_host_and_run_start_requested_in_order() {
         let plan = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::Handoff(
             SessionHandoffRequest {
                 first_observed_at_ns: 10,
                 session_id: SessionId("s-1".into()),
                 input_ref:
                     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                run_cause: None,
                 host_session_id: "hs_1".into(),
                 run_overrides: SessionConfig {
                     provider: "openai".into(),
@@ -502,6 +713,7 @@ mod tests {
                     default_tool_enable: Some(vec!["shell".into()]),
                     default_tool_disable: None,
                     default_tool_force: None,
+                    default_host_session_open: None,
                 },
                 allowed_tools: Some(vec!["shell".into(), "apply_patch".into()]),
             },
@@ -510,19 +722,67 @@ mod tests {
             other => panic!("unexpected plan: {other:?}"),
         };
 
-        assert_eq!(plan.ingresses.len(), 3);
+        assert_eq!(plan.inputs.len(), 3);
         assert_eq!(plan.next_observed_at_ns, 13);
         assert!(matches!(
-            plan.ingresses[0].ingress,
-            SessionIngressKind::ToolRegistrySet { .. }
+            plan.inputs[0].input,
+            SessionInputKind::ToolRegistrySet { .. }
         ));
         assert!(matches!(
-            plan.ingresses[1].ingress,
-            SessionIngressKind::HostSessionUpdated { .. }
+            plan.inputs[1].input,
+            SessionInputKind::HostSessionUpdated { .. }
         ));
         assert!(matches!(
-            plan.ingresses[2].ingress,
-            SessionIngressKind::RunRequested { .. }
+            plan.inputs[2].input,
+            SessionInputKind::RunStartRequested { .. }
         ));
+    }
+
+    #[test]
+    fn handoff_plan_emits_default_registry_without_allowed_tool_override() {
+        let plan = match spawn_or_handoff_session(SpawnOrHandoffSessionRequest::Handoff(
+            SessionHandoffRequest {
+                first_observed_at_ns: 10,
+                session_id: SessionId("s-1".into()),
+                input_ref:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                run_cause: None,
+                host_session_id: "hs_1".into(),
+                run_overrides: SessionConfig {
+                    provider: "openai-responses".into(),
+                    model: "gpt-5.3-codex".into(),
+                    reasoning_effort: None,
+                    max_tokens: Some(512),
+                    default_prompt_refs: None,
+                    default_tool_profile: None,
+                    default_tool_enable: None,
+                    default_tool_disable: None,
+                    default_tool_force: None,
+                    default_host_session_open: None,
+                },
+                allowed_tools: None,
+            },
+        )) {
+            SpawnOrHandoffSessionPlan::Handoff(plan) => plan,
+            other => panic!("unexpected plan: {other:?}"),
+        };
+
+        assert_eq!(plan.inputs.len(), 3);
+        let SessionInputKind::ToolRegistrySet {
+            registry,
+            profiles,
+            default_profile,
+        } = &plan.inputs[0].input
+        else {
+            panic!("expected ToolRegistrySet first");
+        };
+        assert!(registry.contains_key("host.exec"));
+        assert_eq!(default_profile.as_deref(), Some("openai"));
+        assert!(
+            profiles
+                .as_ref()
+                .and_then(|profiles| profiles.get("openai"))
+                .is_some_and(|tools| tools.iter().any(|tool| tool == "host.exec"))
+        );
     }
 }

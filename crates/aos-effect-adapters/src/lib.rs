@@ -10,7 +10,8 @@ use adapters::registry::AdapterRegistry;
 #[cfg(not(feature = "adapter-http"))]
 use adapters::stub::StubHttpAdapter;
 use adapters::stub::{
-    StubLlmAdapter, StubTimerAdapter, StubVaultPutAdapter, StubVaultRotateAdapter,
+    StubLlmAdapter, StubLlmCountTokensAdapter, StubTimerAdapter, StubVaultPutAdapter,
+    StubVaultRotateAdapter,
 };
 use aos_effects::effect_ops;
 use aos_kernel::Store;
@@ -78,16 +79,28 @@ pub fn default_registry<S: Store + 'static>(
     {
         if let Some(llm_cfg) = &config.llm {
             registry.register(Box::new(adapters::llm::LlmAdapter::new(
+                store.clone(),
+                llm_cfg.clone(),
+            )));
+            registry.register(Box::new(adapters::llm::LlmCountTokensAdapter::new(
+                store.clone(),
+                llm_cfg.clone(),
+            )));
+            registry.register(Box::new(adapters::llm::LlmCompactAdapter::new(
                 store,
                 llm_cfg.clone(),
             )));
         } else {
             registry.register(Box::new(StubLlmAdapter));
+            registry.register(Box::new(StubLlmCountTokensAdapter));
+            registry.register(Box::new(adapters::stub::StubLlmCompactAdapter));
         }
     }
     #[cfg(not(feature = "adapter-llm"))]
     {
         registry.register(Box::new(StubLlmAdapter));
+        registry.register(Box::new(StubLlmCountTokensAdapter));
+        registry.register(Box::new(adapters::stub::StubLlmCompactAdapter));
     }
 
     register_builtin_route_aliases(&mut registry);
@@ -128,6 +141,8 @@ fn register_builtin_route_aliases(registry: &mut AdapterRegistry) {
         ("host.fs.exists", effect_ops::HOST_FS_EXISTS),
         ("host.fs.list_dir", effect_ops::HOST_FS_LIST_DIR),
         ("llm.generate", effect_ops::LLM_GENERATE),
+        ("llm.count_tokens", effect_ops::LLM_COUNT_TOKENS),
+        ("llm.compact", effect_ops::LLM_COMPACT),
         ("vault.put", effect_ops::VAULT_PUT),
         ("vault.rotate", effect_ops::VAULT_ROTATE),
     ] {
@@ -228,6 +243,10 @@ mod tests {
 
         assert!(registry.has_route("llm.generate"));
         assert!(registry.has_route(effect_ops::LLM_GENERATE));
+        assert!(registry.has_route("llm.count_tokens"));
+        assert!(registry.has_route(effect_ops::LLM_COUNT_TOKENS));
+        assert!(registry.has_route("llm.compact"));
+        assert!(registry.has_route(effect_ops::LLM_COMPACT));
         assert!(registry.has_route("llm.default"));
         assert!(registry.has_route("host.exec"));
         assert!(registry.has_route(effect_ops::HOST_EXEC));

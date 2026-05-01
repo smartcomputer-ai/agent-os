@@ -108,6 +108,8 @@ pub struct ContentPart {
     pub tool_result: Option<ToolResultData>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<ThinkingData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_item: Option<Value>,
 }
 
 impl ContentPart {
@@ -121,6 +123,7 @@ impl ContentPart {
             tool_call: None,
             tool_result: None,
             thinking: None,
+            provider_item: None,
         }
     }
 
@@ -134,6 +137,7 @@ impl ContentPart {
             tool_call: None,
             tool_result: None,
             thinking: None,
+            provider_item: None,
         }
     }
 
@@ -147,6 +151,7 @@ impl ContentPart {
             tool_call: None,
             tool_result: None,
             thinking: None,
+            provider_item: None,
         }
     }
 
@@ -160,6 +165,7 @@ impl ContentPart {
             tool_call: None,
             tool_result: None,
             thinking: None,
+            provider_item: None,
         }
     }
 
@@ -173,6 +179,7 @@ impl ContentPart {
             tool_call: Some(data),
             tool_result: None,
             thinking: None,
+            provider_item: None,
         }
     }
 
@@ -186,6 +193,7 @@ impl ContentPart {
             tool_call: None,
             tool_result: Some(data),
             thinking: None,
+            provider_item: None,
         }
     }
 
@@ -199,6 +207,21 @@ impl ContentPart {
             tool_call: None,
             tool_result: None,
             thinking: Some(data),
+            provider_item: None,
+        }
+    }
+
+    pub fn provider_item(kind: impl Into<String>, value: Value) -> Self {
+        Self {
+            kind: ContentKindOrString::Other(kind.into()),
+            text: None,
+            image: None,
+            audio: None,
+            document: None,
+            tool_call: None,
+            tool_result: None,
+            thinking: None,
+            provider_item: Some(value),
         }
     }
 }
@@ -412,6 +435,98 @@ pub struct Response {
     pub provider: String,
     pub message: Message,
     pub finish_reason: FinishReason,
+    pub usage: Usage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<Warning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimitInfo>,
+}
+
+/// Provider-neutral request for explicit context compaction.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompactionRequest {
+    pub model: String,
+    pub messages: Vec<Message>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_options: Option<Value>,
+}
+
+/// Provider-neutral request for input token counting.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TokenCountRequest {
+    pub model: String,
+    pub messages: Vec<Message>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ToolDefinition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_options: Option<Value>,
+}
+
+/// Quality of a token count result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenCountQuality {
+    Exact,
+    ProviderEstimate,
+    LocalEstimate,
+    Unknown,
+}
+
+/// Provider-neutral token count response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TokenCountResponse {
+    pub input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_input_tokens: Option<u64>,
+    pub quality: TokenCountQuality,
+    pub model: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<Warning>,
+}
+
+/// Coarse kind for provider compaction output items.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionItemKind {
+    Compaction,
+    Message,
+    Other,
+}
+
+/// One provider output item returned by an explicit compaction call.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompactionItem {
+    pub id: Option<String>,
+    pub kind: CompactionItemKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encrypted_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    pub raw: Value,
+}
+
+/// Provider-neutral response from explicit context compaction.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompactionResponse {
+    pub id: String,
+    pub model: String,
+    pub provider: String,
+    pub output_items: Vec<CompactionItem>,
     pub usage: Usage,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<Value>,

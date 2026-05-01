@@ -46,7 +46,7 @@ pub enum ToolBatchReceiptMatch {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionReduceError {
+pub enum SessionWorkflowError {
     InvalidLifecycleTransition,
     HostCommandRejected,
     ToolBatchAlreadyActive,
@@ -57,6 +57,7 @@ pub enum SessionReduceError {
     RunAlreadyActive,
     RunNotActive,
     EmptyMessageRefs,
+    UnrenderableActiveWindowItem,
     TooManyPendingEffects,
     InvalidHashRef,
     ToolProfileUnknown,
@@ -65,7 +66,7 @@ pub enum SessionReduceError {
     AmbiguousPendingToolEffect,
 }
 
-impl SessionReduceError {
+impl SessionWorkflowError {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::InvalidLifecycleTransition => "invalid lifecycle transition",
@@ -77,7 +78,10 @@ impl SessionReduceError {
             Self::UnknownModel => "run config model unknown",
             Self::RunAlreadyActive => "run already active",
             Self::RunNotActive => "run not active",
-            Self::EmptyMessageRefs => "llm message_refs must not be empty",
+            Self::EmptyMessageRefs => "llm window_items must not be empty",
+            Self::UnrenderableActiveWindowItem => {
+                "active window item cannot be rendered for provider"
+            }
             Self::TooManyPendingEffects => "too many pending effects",
             Self::InvalidHashRef => "invalid hash ref",
             Self::ToolProfileUnknown => "tool profile unknown",
@@ -88,16 +92,16 @@ impl SessionReduceError {
     }
 }
 
-impl core::fmt::Display for SessionReduceError {
+impl core::fmt::Display for SessionWorkflowError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl core::error::Error for SessionReduceError {}
+impl core::error::Error for SessionWorkflowError {}
 
 pub(super) fn pending_effect_lookup_err_to_session_err(
     _err: PendingEffectLookupError,
-) -> SessionReduceError {
-    SessionReduceError::AmbiguousPendingToolEffect
+) -> SessionWorkflowError {
+    SessionWorkflowError::AmbiguousPendingToolEffect
 }

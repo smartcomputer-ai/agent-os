@@ -90,6 +90,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         output_ref: output_ref.clone(),
         raw_output_ref: None,
         provider_response_id: None,
+        provider_context_items: Vec::new(),
         finish_reason: LlmFinishReason {
             reason: "stop".into(),
             raw: None,

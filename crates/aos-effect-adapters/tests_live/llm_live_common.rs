@@ -7,10 +7,11 @@ use std::time::Duration;
 
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effect_adapters::adapters::llm::LlmAdapter;
+use aos_effect_adapters::adapters::llm::{LlmAdapter, LlmCountTokensAdapter};
 use aos_effect_adapters::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_effects::builtins::{
-    LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolCallList,
+    LlmCountTokensParams, LlmCountTokensReceipt, LlmGenerateParams, LlmGenerateReceipt,
+    LlmOutputEnvelope, LlmRuntimeArgs, LlmToolCallList,
 };
 use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::{MemStore, Store};
@@ -199,6 +200,12 @@ pub(crate) fn build_intent(params: &LlmGenerateParams) -> EffectIntent {
         .expect("build intent")
 }
 
+pub(crate) fn build_count_tokens_intent(params: &LlmCountTokensParams) -> EffectIntent {
+    let params_cbor = serde_cbor::to_vec(params).expect("encode params");
+    EffectIntent::from_raw_params(effect_ops::LLM_COUNT_TOKENS, params_cbor, [0u8; 32])
+        .expect("build count_tokens intent")
+}
+
 fn hash_from_ref(reference: &HashRef) -> Hash {
     Hash::from_hex_str(reference.as_str()).expect("valid hash ref")
 }
@@ -256,8 +263,34 @@ pub(crate) fn make_adapter(store: Arc<MemStore>, case: &ProviderRuntime) -> LlmA
     LlmAdapter::new(store, config)
 }
 
+pub(crate) fn make_count_tokens_adapter(
+    store: Arc<MemStore>,
+    case: &ProviderRuntime,
+) -> LlmCountTokensAdapter<MemStore> {
+    let mut providers = HashMap::new();
+    providers.insert(
+        case.provider_id.clone(),
+        ProviderConfig {
+            base_url: case.base_url.clone(),
+            timeout: Duration::from_secs(120),
+            api_kind: case.api_kind,
+        },
+    );
+    let config = LlmAdapterConfig {
+        providers,
+        default_provider: case.provider_id.clone(),
+    };
+    LlmCountTokensAdapter::new(store, config)
+}
+
 pub(crate) fn decode_receipt_payload(receipt: &aos_effects::EffectReceipt) -> LlmGenerateReceipt {
     serde_cbor::from_slice(&receipt.payload_cbor).expect("decode llm receipt")
+}
+
+pub(crate) fn decode_count_tokens_receipt_payload(
+    receipt: &aos_effects::EffectReceipt,
+) -> LlmCountTokensReceipt {
+    serde_cbor::from_slice(&receipt.payload_cbor).expect("decode llm count_tokens receipt")
 }
 
 pub(crate) fn error_text_from_receipt(

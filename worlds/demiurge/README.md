@@ -1,13 +1,13 @@
 # Demiurge v0.13 (Task-Driven)
 
-`worlds/demiurge` is a task-ingress orchestrator for `aos.agent/SessionWorkflow@1`.
+`worlds/demiurge` is a task-input orchestrator for `aos.agent/SessionWorkflow@1`.
 
 ## What It Does
 
 1. Accepts `demiurge/TaskSubmitted@1`.
 2. Writes task text as a user message blob.
 3. Opens a host session for the provided `workdir`.
-4. Emits `aos.agent/SessionIngress@1` events to bootstrap and run the agent session.
+4. Emits `aos.agent/SessionInput@1` events to bootstrap and run the agent session.
 5. Tracks `aos.agent/SessionLifecycleChanged@1` and emits `demiurge/TaskFinished@1`.
 
 ## Input Event

@@ -214,7 +214,7 @@ fn dispatch_run(
             "provider": choice.provider_id,
             "model": choice.model,
             "api_key_alias": choice.api_key_alias,
-            "message_refs": [history_hash.to_hex()],
+            "window_refs": [history_hash.to_hex()],
             "tool_refs": tool_refs,
             "tool_choice": tool_choice_value,
             "max_tokens": 768

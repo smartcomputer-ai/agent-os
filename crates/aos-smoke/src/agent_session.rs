@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Result, ensure};
 use aos_agent::{
-    HostCommand, HostCommandKind, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
+    HostCommand, HostCommandKind, SessionConfig, SessionId, SessionInput, SessionInputKind,
     SessionLifecycle, SessionState,
 };
 use aos_effect_adapters::config::EffectAdapterConfig;
@@ -11,7 +11,7 @@ use aos_node::WorldConfig;
 use crate::example_host::{ExampleHost, ExampleHostConfig, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
+const EVENT_SCHEMA: &str = "aos.agent/SessionInput@1";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
@@ -21,16 +21,15 @@ pub fn run(example_root: &Path) -> Result<()> {
     assert_run_request_validation(example_root)?;
 
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
-    let import_roots = vec![sdk_air_root];
     let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root,
-            assets_root: None,
+            assets_root: Some(&sdk_air_root),
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
             module_crate: "",
         },
-        &import_roots,
+        &[],
         Some(ExampleHostConfig {
             world: WorldConfig::default(),
             adapters: EffectAdapterConfig {
@@ -59,7 +58,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     host.send_event(&session_event(
         2,
-        SessionIngressKind::HostCommandReceived(HostCommand {
+        SessionInputKind::HostCommandReceived(HostCommand {
             command_id: "cmd-cancel".into(),
             issued_at: 2,
             command: HostCommandKind::Cancel {
@@ -100,7 +99,7 @@ pub fn run(example_root: &Path) -> Result<()> {
             .is_some_and(|cfg| cfg.provider == "anthropic" && cfg.model == "claude-sonnet-4-5"),
         "unexpected run2 active_run_config"
     );
-    host.send_event(&session_event(4, SessionIngressKind::RunCompleted))?;
+    host.send_event(&session_event(4, SessionInputKind::RunCompleted))?;
 
     let state = host.read_state::<SessionState>()?;
     ensure!(
@@ -136,16 +135,15 @@ pub fn run(example_root: &Path) -> Result<()> {
 
 fn assert_run_request_validation(example_root: &Path) -> Result<()> {
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
-    let import_roots = vec![sdk_air_root];
     let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root,
-            assets_root: None,
+            assets_root: Some(&sdk_air_root),
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
             module_crate: "",
         },
-        &import_roots,
+        &[],
         Some(ExampleHostConfig {
             world: WorldConfig::default(),
             adapters: EffectAdapterConfig {
@@ -189,10 +187,10 @@ fn run_requested_event_with_config(
     observed_at_ns: u64,
     provider: &str,
     model: &str,
-) -> SessionIngress {
+) -> SessionInput {
     session_event(
         observed_at_ns,
-        SessionIngressKind::RunRequested {
+        SessionInputKind::RunRequested {
             input_ref: fake_hash('a'),
             run_overrides: Some(SessionConfig {
                 provider: provider.into(),
@@ -201,19 +199,20 @@ fn run_requested_event_with_config(
                 max_tokens: Some(512),
                 default_prompt_refs: Some(vec![fake_hash('e')]),
                 default_tool_profile: None,
-                default_tool_enable: Some(vec!["host.session.open".into()]),
+                default_tool_enable: None,
                 default_tool_disable: None,
                 default_tool_force: None,
+                default_host_session_open: None,
             }),
         },
     )
 }
 
-fn session_event(observed_at_ns: u64, ingress: SessionIngressKind) -> SessionIngress {
-    SessionIngress {
+fn session_event(observed_at_ns: u64, input: SessionInputKind) -> SessionInput {
+    SessionInput {
         session_id: SessionId(SESSION_ID.into()),
         observed_at_ns,
-        ingress,
+        input,
     }
 }
 

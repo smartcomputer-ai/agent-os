@@ -4,6 +4,10 @@ pub mod types;
 
 use crate::contracts::{ToolMapper, ToolRuntimeContext};
 use alloc::string::String;
+pub use supported::{
+    CompositeToolAction, continue_composite_tool, is_composite_tool_mapper, resume_composite_tool,
+    start_composite_tool,
+};
 use supported::{map_args as map_supported_args, map_receipt as map_supported_receipt};
 pub use types::{ToolEffectOp, ToolMappedArgs, ToolMappedReceipt, ToolMappingError};
 

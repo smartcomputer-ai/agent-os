@@ -277,14 +277,14 @@ async function loadChatTranscript(chatId: string): Promise<ChatTranscript> {
     if (!kind || seq == null || !record) continue;
 
     if (kind === "domain_event") {
-      if (asString(record.schema) !== "aos.agent/SessionIngress@1") continue;
+      if (asString(record.schema) !== "aos.agent/SessionInput@1") continue;
       const domain = decodeCborFromJournal<JsonRecord>(record.value);
       if (!domain) continue;
       if (asString(domain.session_id) !== chatId) continue;
 
-      const ingress = asRecord(domain.ingress);
-      if (!ingress || asString(ingress.$tag) !== "RunRequested") continue;
-      const payload = asRecord(ingress.$value);
+      const input = asRecord(domain.input);
+      if (!input || asString(input.$tag) !== "RunRequested") continue;
+      const payload = asRecord(input.$value);
       const input_ref = asString(payload?.input_ref);
       if (!input_ref) continue;
 

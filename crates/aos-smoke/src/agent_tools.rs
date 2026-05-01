@@ -3,8 +3,9 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use aos_agent::{
-    HostSessionStatus, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, ToolCallStatus, default_tool_registry,
+    HostSessionStatus, SessionConfig, SessionId, SessionInput, SessionInputKind, SessionLifecycle,
+    SessionState, ToolCallStatus, ToolRegistryBuilder, tool_bundle_host_local, tool_bundle_inspect,
+    tool_bundle_workspace,
 };
 use aos_air_types::{HashRef, Manifest};
 use aos_cbor::{Hash, to_canonical_cbor};
@@ -37,7 +38,7 @@ use serde_json::{Value, json};
 use crate::example_host::{ExampleHost, ExampleHostConfig, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
+const EVENT_SCHEMA: &str = "aos.agent/SessionInput@1";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
 const SDK_WASM_BIN: &str = "session_workflow";
@@ -116,16 +117,15 @@ const APPLY_BLOB_HASH: &str =
 
 pub fn run(example_root: &Path) -> Result<()> {
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
-    let import_roots = vec![sdk_air_root];
     let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root,
-            assets_root: None,
+            assets_root: Some(&sdk_air_root),
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
             module_crate: "",
         },
-        &import_roots,
+        &[],
         Some(ExampleHostConfig {
             world: WorldConfig::default(),
             adapters: EffectAdapterConfig {
@@ -144,7 +144,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     send_session_event(
         &mut host,
         &mut clock,
-        SessionIngressKind::HostSessionUpdated {
+        SessionInputKind::HostSessionUpdated {
             host_session_id: Some(SEEDED_SESSION_ID.into()),
             host_session_status: Some(HostSessionStatus::Ready),
         },
@@ -161,7 +161,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     send_session_event(
         &mut host,
         &mut clock,
-        SessionIngressKind::RunRequested {
+        SessionInputKind::RunRequested {
             input_ref: input_ref.as_str().to_string(),
             run_overrides: Some(SessionConfig {
                 provider: "openai-responses".into(),
@@ -173,6 +173,7 @@ pub fn run(example_root: &Path) -> Result<()> {
                 default_tool_enable: None,
                 default_tool_disable: None,
                 default_tool_force: None,
+                default_host_session_open: None,
             }),
         },
     )?;
@@ -186,7 +187,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let state_after_tools: SessionState = host.read_state()?;
     ensure!(
         state_after_tools.lifecycle == SessionLifecycle::WaitingInput,
-        "expected WaitingInput after scripted tool + follow-up llm flow, got {:?}; active_tool_batch={:?}; pending_effects={:?}; llm_results={:?}; pending_follow_up={:?}",
+        "expected WaitingInput after scripted tool + follow-up llm flow, got {:?}; active_tool_batch={:?}; pending_effects={:?}; llm_results={:?}; staged_tool_follow_up_turn={:?}",
         state_after_tools.lifecycle,
         state_after_tools
             .active_tool_batch
@@ -200,7 +201,7 @@ pub fn run(example_root: &Path) -> Result<()> {
             .active_tool_batch
             .as_ref()
             .map(|batch| &batch.llm_results),
-        state_after_tools.pending_follow_up_turn
+        state_after_tools.staged_tool_follow_up_turn
     );
     let batch = state_after_tools
         .active_tool_batch
@@ -286,7 +287,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         script.llm_turn
     );
 
-    send_session_event(&mut host, &mut clock, SessionIngressKind::RunCompleted)?;
+    send_session_event(&mut host, &mut clock, SessionInputKind::RunCompleted)?;
     let final_state: SessionState = host.read_state()?;
     ensure!(
         final_state.lifecycle == SessionLifecycle::Completed,
@@ -444,6 +445,7 @@ impl AgentToolsScript {
                 output_ref,
                 raw_output_ref: None,
                 provider_response_id: Some(format!("resp-{}", self.llm_turn)),
+                provider_context_items: Vec::new(),
                 finish_reason: LlmFinishReason {
                     reason: if self.llm_turn == 1 {
                         "tool_calls".into()
@@ -1005,7 +1007,12 @@ impl AgentToolsScript {
 }
 
 fn configure_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()> {
-    let mut registry = default_tool_registry();
+    let mut registry = ToolRegistryBuilder::new()
+        .with_bundle(tool_bundle_host_local())
+        .with_bundle(tool_bundle_inspect())
+        .with_bundle(tool_bundle_workspace())
+        .build()
+        .map_err(|err| anyhow!(err))?;
     let ordered = vec![
         TOOL_SESSION_OPEN.to_string(),
         TOOL_FS_WRITE.to_string(),
@@ -1035,7 +1042,7 @@ fn configure_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()
     send_session_event(
         host,
         clock,
-        SessionIngressKind::ToolRegistrySet {
+        SessionInputKind::ToolRegistrySet {
             registry,
             profiles: Some(profiles),
             default_profile: Some(TOOL_PROFILE.into()),
@@ -1046,13 +1053,13 @@ fn configure_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Result<()
 fn send_session_event(
     host: &mut ExampleHost,
     clock: &mut u64,
-    kind: SessionIngressKind,
+    kind: SessionInputKind,
 ) -> Result<()> {
     *clock = clock.saturating_add(1);
-    host.send_event(&SessionIngress {
+    host.send_event(&SessionInput {
         session_id: SessionId(SESSION_ID.into()),
         observed_at_ns: *clock,
-        ingress: kind,
+        input: kind,
     })
 }
 

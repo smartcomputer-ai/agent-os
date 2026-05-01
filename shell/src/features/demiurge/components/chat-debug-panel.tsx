@@ -29,7 +29,7 @@ function findString(node: unknown, key: string): string | undefined {
 
 function getTraceEventHash(entries: unknown[]): string | undefined {
   const prioritySchemas = [
-    "aos.agent/SessionIngress@1",
+    "aos.agent/SessionInput@1",
     "demiurge/ToolCallRequested@1",
   ];
   for (const schema of prioritySchemas) {

@@ -1,6 +1,9 @@
 use crate::{
     SessionId, SessionState, SessionWorkflowEvent,
-    helpers::{apply_session_workflow_event, emit_session_lifecycle_changed, map_reduce_error},
+    helpers::{
+        apply_session_workflow_event, emit_run_lifecycle_changed, emit_session_lifecycle_changed,
+        emit_session_status_changed, map_workflow_error,
+    },
 };
 use aos_wasm_sdk::{ReduceError, Value, Workflow, WorkflowCtx};
 
@@ -16,6 +19,8 @@ use aos_wasm_sdk::{ReduceError, Value, Workflow, WorkflowCtx};
         aos_wasm_sdk::BlobPutParams,
         aos_wasm_sdk::BlobGetParams,
         aos_wasm_sdk::LlmGenerateParams,
+        aos_wasm_sdk::LlmCountTokensParams,
+        aos_wasm_sdk::LlmCompactParams,
         aos_wasm_sdk::HostSessionOpenParams,
         aos_wasm_sdk::HostExecParams,
         aos_wasm_sdk::HostSessionSignalParams,
@@ -54,15 +59,20 @@ impl Workflow for SessionWorkflow {
         event: Self::Event,
         ctx: &mut WorkflowCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
+        let prev_status = ctx.state.status;
         let prev_lifecycle = ctx.state.lifecycle;
+        let prev_run = ctx.state.current_run.clone();
         let prev_run_id = ctx.state.active_run_id.clone();
-        let out = apply_session_workflow_event(&mut ctx.state, &event).map_err(map_reduce_error)?;
+        let out =
+            apply_session_workflow_event(&mut ctx.state, &event).map_err(map_workflow_error)?;
         for domain_event in out.domain_events {
             domain_event.emit(ctx);
         }
         for effect in out.effects {
             effect.emit(ctx);
         }
+        emit_session_status_changed(ctx, prev_status);
+        emit_run_lifecycle_changed(ctx, prev_run);
         emit_session_lifecycle_changed(ctx, prev_lifecycle, prev_run_id);
         Ok(())
     }

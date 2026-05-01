@@ -54,56 +54,405 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/EffectiveTool@1",
+    "name": "aos.agent/ActiveWindowItem@1",
     "type": {
       "record": {
-        "args_schema_json": {
-          "text": {}
-        },
-        "description": {
-          "text": {}
-        },
-        "executor": {
-          "ref": "aos.agent/ToolExecutor@1"
-        },
-        "mapper": {
-          "ref": "aos.agent/ToolMapper@1"
-        },
-        "parallel_safe": {
-          "bool": {}
-        },
-        "resource_key": {
+        "estimated_tokens": {
           "option": {
-            "text": {}
+            "nat": {}
           }
         },
-        "tool_id": {
+        "item_id": {
           "text": {}
         },
-        "tool_name": {
-          "text": {}
+        "kind": {
+          "ref": "aos.agent/ActiveWindowItemKind@1"
         },
-        "tool_ref": {
+        "lane": {
+          "option": {
+            "ref": "aos.agent/TurnInputLane@1"
+          }
+        },
+        "metadata": {
+          "list": {
+            "ref": "aos.agent/ContextMetadataEntry@1"
+          }
+        },
+        "provider_compatibility": {
+          "option": {
+            "ref": "aos.agent/ProviderCompatibility@1"
+          }
+        },
+        "ref_": {
           "hash": {}
+        },
+        "source_range": {
+          "option": {
+            "ref": "aos.agent/TranscriptRange@1"
+          }
+        },
+        "source_refs": {
+          "list": {
+            "hash": {}
+          }
         }
       }
     }
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/EffectiveToolSet@1",
+    "name": "aos.agent/ActiveWindowItemKind@1",
     "type": {
-      "record": {
-        "ordered_tools": {
-          "list": {
-            "ref": "aos.agent/EffectiveTool@1"
+      "variant": {
+        "AosSummaryRef": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
           }
         },
-        "profile_id": {
+        "MessageRef": {
+          "unit": {}
+        },
+        "ProviderNativeArtifactRef": {
+          "unit": {}
+        },
+        "ProviderRawWindowRef": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/CauseRef@1",
+    "type": {
+      "record": {
+        "id": {
           "text": {}
         },
-        "profile_requires_host_session": {
-          "bool": {}
+        "kind": {
+          "text": {}
+        },
+        "ref_": {
+          "option": {
+            "hash": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/CompactionArtifactKind@1",
+    "type": {
+      "variant": {
+        "AosSummary": {
+          "unit": {}
+        },
+        "Mixed": {
+          "unit": {}
+        },
+        "ProviderNative": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/CompactionRecord@1",
+    "type": {
+      "record": {
+        "active_window_items": {
+          "list": {
+            "ref": "aos.agent/ActiveWindowItem@1"
+          }
+        },
+        "artifact_kind": {
+          "ref": "aos.agent/CompactionArtifactKind@1"
+        },
+        "artifact_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "created_at_ns": {
+          "time": {}
+        },
+        "operation_id": {
+          "text": {}
+        },
+        "provider_compatibility": {
+          "option": {
+            "ref": "aos.agent/ProviderCompatibility@1"
+          }
+        },
+        "source_range": {
+          "ref": "aos.agent/TranscriptRange@1"
+        },
+        "source_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "strategy": {
+          "ref": "aos.agent/CompactionStrategy@1"
+        },
+        "usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
+          }
+        },
+        "warnings": {
+          "list": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/CompactionStrategy@1",
+    "type": {
+      "variant": {
+        "AosSummary": {
+          "unit": {}
+        },
+        "Auto": {
+          "unit": {}
+        },
+        "ProviderNative": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextMetadataEntry@1",
+    "type": {
+      "record": {
+        "key": {
+          "text": {}
+        },
+        "value": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextOperationPhase@1",
+    "type": {
+      "variant": {
+        "ApplyingCompaction": {
+          "unit": {}
+        },
+        "Compacting": {
+          "unit": {}
+        },
+        "CountingTokens": {
+          "unit": {}
+        },
+        "Failed": {
+          "unit": {}
+        },
+        "Idle": {
+          "unit": {}
+        },
+        "NeedsCompaction": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextOperationState@1",
+    "type": {
+      "record": {
+        "candidate_plan_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "effect_intent_id": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "failure": {
+          "option": {
+            "text": {}
+          }
+        },
+        "operation_id": {
+          "text": {}
+        },
+        "params_hash": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "phase": {
+          "ref": "aos.agent/ContextOperationPhase@1"
+        },
+        "reason": {
+          "ref": "aos.agent/ContextPressureReason@1"
+        },
+        "source_items_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "source_range": {
+          "option": {
+            "ref": "aos.agent/TranscriptRange@1"
+          }
+        },
+        "started_at_ns": {
+          "time": {}
+        },
+        "strategy": {
+          "ref": "aos.agent/CompactionStrategy@1"
+        },
+        "updated_at_ns": {
+          "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextPressureReason@1",
+    "type": {
+      "variant": {
+        "CountTokensOverBudget": {
+          "unit": {}
+        },
+        "LocalWindowPolicy": {
+          "unit": {}
+        },
+        "Manual": {
+          "unit": {}
+        },
+        "ProviderContextLimit": {
+          "unit": {}
+        },
+        "ProviderRecommended": {
+          "unit": {}
+        },
+        "Unknown": {
+          "unit": {}
+        },
+        "UsageHighWater": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextPressureRecord@1",
+    "type": {
+      "record": {
+        "candidate_plan_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_kind": {
+          "option": {
+            "text": {}
+          }
+        },
+        "error_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "model": {
+          "option": {
+            "text": {}
+          }
+        },
+        "observed_at_ns": {
+          "time": {}
+        },
+        "observed_usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
+          }
+        },
+        "provider": {
+          "option": {
+            "text": {}
+          }
+        },
+        "reason": {
+          "ref": "aos.agent/ContextPressureReason@1"
+        },
+        "recommended_strategy": {
+          "option": {
+            "ref": "aos.agent/CompactionStrategy@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ContextState@1",
+    "type": {
+      "record": {
+        "active_window_items": {
+          "list": {
+            "ref": "aos.agent/ActiveWindowItem@1"
+          }
+        },
+        "compacted_through": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "compaction_records": {
+          "list": {
+            "ref": "aos.agent/CompactionRecord@1"
+          }
+        },
+        "last_compaction": {
+          "option": {
+            "ref": "aos.agent/CompactionRecord@1"
+          }
+        },
+        "last_context_pressure": {
+          "option": {
+            "ref": "aos.agent/ContextPressureRecord@1"
+          }
+        },
+        "last_llm_usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
+          }
+        },
+        "last_token_count": {
+          "option": {
+            "ref": "aos.agent/LlmTokenCountRecord@1"
+          }
+        },
+        "pending_context_operation": {
+          "option": {
+            "ref": "aos.agent/ContextOperationState@1"
+          }
+        },
+        "transcript_ledger": {
+          "ref": "aos.agent/TranscriptLedger@1"
         }
       }
     }
@@ -124,13 +473,6 @@
                 }
               }
             },
-            "FollowUp": {
-              "record": {
-                "text": {
-                  "text": {}
-                }
-              }
-            },
             "Noop": {
               "unit": {}
             },
@@ -139,13 +481,6 @@
             },
             "Resume": {
               "unit": {}
-            },
-            "Steer": {
-              "record": {
-                "text": {
-                  "text": {}
-                }
-              }
             }
           }
         },
@@ -154,6 +489,51 @@
         },
         "issued_at": {
           "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostMountConfig@1",
+    "type": {
+      "record": {
+        "guest_path": {
+          "text": {}
+        },
+        "host_path": {
+          "text": {}
+        },
+        "mode": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostSessionOpenConfig@1",
+    "type": {
+      "record": {
+        "labels": {
+          "option": {
+            "map": {
+              "key": {
+                "text": {}
+              },
+              "value": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "session_ttl_ns": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "target": {
+          "ref": "aos.agent/HostTargetConfig@1"
         }
       }
     }
@@ -174,6 +554,207 @@
         },
         "Ready": {
           "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostTargetConfig@1",
+    "type": {
+      "variant": {
+        "Local": {
+          "record": {
+            "env": {
+              "option": {
+                "map": {
+                  "key": {
+                    "text": {}
+                  },
+                  "value": {
+                    "text": {}
+                  }
+                }
+              }
+            },
+            "mounts": {
+              "option": {
+                "list": {
+                  "ref": "aos.agent/HostMountConfig@1"
+                }
+              }
+            },
+            "network_mode": {
+              "option": {
+                "text": {}
+              }
+            },
+            "workdir": {
+              "option": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "Sandbox": {
+          "record": {
+            "cpu_limit_millis": {
+              "option": {
+                "nat": {}
+              }
+            },
+            "env": {
+              "option": {
+                "map": {
+                  "key": {
+                    "text": {}
+                  },
+                  "value": {
+                    "text": {}
+                  }
+                }
+              }
+            },
+            "image": {
+              "text": {}
+            },
+            "memory_limit_bytes": {
+              "option": {
+                "nat": {}
+              }
+            },
+            "mounts": {
+              "option": {
+                "list": {
+                  "ref": "aos.agent/HostMountConfig@1"
+                }
+              }
+            },
+            "network_mode": {
+              "option": {
+                "text": {}
+              }
+            },
+            "runtime_class": {
+              "option": {
+                "text": {}
+              }
+            },
+            "workdir": {
+              "option": {
+                "text": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmTokenCountQuality@1",
+    "type": {
+      "variant": {
+        "Exact": {
+          "unit": {}
+        },
+        "LocalEstimate": {
+          "unit": {}
+        },
+        "ProviderEstimate": {
+          "unit": {}
+        },
+        "Unknown": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmTokenCountRecord@1",
+    "type": {
+      "record": {
+        "candidate_plan_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "counted_at_ns": {
+          "time": {}
+        },
+        "input_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "model": {
+          "text": {}
+        },
+        "original_input_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "provider": {
+          "text": {}
+        },
+        "provider_metadata_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "quality": {
+          "ref": "aos.agent/LlmTokenCountQuality@1"
+        },
+        "response_format_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "tool_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "warnings_ref": {
+          "option": {
+            "hash": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmUsageRecord@1",
+    "type": {
+      "record": {
+        "cache_read_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "cache_write_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "completion_tokens": {
+          "nat": {}
+        },
+        "prompt_tokens": {
+          "nat": {}
+        },
+        "reasoning_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "total_tokens": {
+          "option": {
+            "nat": {}
+          }
         }
       }
     }
@@ -248,48 +829,19 @@
     "name": "aos.agent/PendingBlobPutKind@1",
     "type": {
       "variant": {
-        "FollowUpMessage": {
-          "record": {
-            "index": {
-              "nat": {}
-            }
-          }
-        },
         "ToolDefinition": {
           "record": {
             "tool_id": {
               "text": {}
             }
           }
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "aos.agent/PendingFollowUpTurn@1",
-    "type": {
-      "record": {
-        "base_message_refs": {
-          "list": {
-            "hash": {}
-          }
         },
-        "blob_refs_by_index": {
-          "map": {
-            "key": {
+        "ToolFollowUpMessage": {
+          "record": {
+            "index": {
               "nat": {}
-            },
-            "value": {
-              "hash": {}
             }
           }
-        },
-        "expected_messages": {
-          "nat": {}
-        },
-        "tool_batch_id": {
-          "ref": "aos.agent/ToolBatchId@1"
         }
       }
     }
@@ -343,6 +895,75 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/PlannerStateRef@1",
+    "type": {
+      "record": {
+        "key": {
+          "text": {}
+        },
+        "planner_id": {
+          "text": {}
+        },
+        "state_ref": {
+          "hash": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ProviderCompatibility@1",
+    "type": {
+      "record": {
+        "api_kind": {
+          "text": {}
+        },
+        "artifact_type": {
+          "text": {}
+        },
+        "encrypted": {
+          "bool": {}
+        },
+        "model": {
+          "option": {
+            "text": {}
+          }
+        },
+        "model_family": {
+          "option": {
+            "text": {}
+          }
+        },
+        "opaque": {
+          "bool": {}
+        },
+        "provider": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/QueuedRunStart@1",
+    "type": {
+      "record": {
+        "cause": {
+          "ref": "aos.agent/RunCause@1"
+        },
+        "queued_at": {
+          "time": {}
+        },
+        "run_overrides": {
+          "option": {
+            "ref": "aos.agent/SessionConfig@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/ReasoningEffort@1",
     "type": {
       "variant": {
@@ -360,9 +981,97 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/RunCause@1",
+    "type": {
+      "record": {
+        "input_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "kind": {
+          "text": {}
+        },
+        "origin": {
+          "ref": "aos.agent/RunCauseOrigin@1"
+        },
+        "payload_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "payload_schema": {
+          "option": {
+            "text": {}
+          }
+        },
+        "subject_refs": {
+          "list": {
+            "ref": "aos.agent/CauseRef@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunCauseOrigin@1",
+    "type": {
+      "variant": {
+        "DirectIngress": {
+          "record": {
+            "request_ref": {
+              "option": {
+                "hash": {}
+              }
+            },
+            "source": {
+              "text": {}
+            }
+          }
+        },
+        "DomainEvent": {
+          "record": {
+            "event_ref": {
+              "option": {
+                "hash": {}
+              }
+            },
+            "key": {
+              "option": {
+                "text": {}
+              }
+            },
+            "schema": {
+              "text": {}
+            }
+          }
+        },
+        "Internal": {
+          "record": {
+            "reason": {
+              "text": {}
+            },
+            "ref_": {
+              "option": {
+                "hash": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/RunConfig@1",
     "type": {
       "record": {
+        "host_session_open": {
+          "option": {
+            "ref": "aos.agent/HostSessionOpenConfig@1"
+          }
+        },
         "max_tokens": {
           "option": {
             "nat": {}
@@ -417,6 +1126,20 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/RunFailure@1",
+    "type": {
+      "record": {
+        "code": {
+          "text": {}
+        },
+        "detail": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/RunId@1",
     "type": {
       "record": {
@@ -431,9 +1154,476 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/RunInterrupt@1",
+    "type": {
+      "record": {
+        "reason_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "requested_at": {
+          "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunLifecycle@1",
+    "type": {
+      "variant": {
+        "Cancelled": {
+          "unit": {}
+        },
+        "Completed": {
+          "unit": {}
+        },
+        "Failed": {
+          "unit": {}
+        },
+        "Interrupted": {
+          "unit": {}
+        },
+        "Queued": {
+          "unit": {}
+        },
+        "Running": {
+          "unit": {}
+        },
+        "WaitingInput": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunLifecycleChanged@1",
+    "type": {
+      "record": {
+        "cause": {
+          "ref": "aos.agent/RunCause@1"
+        },
+        "from": {
+          "ref": "aos.agent/RunLifecycle@1"
+        },
+        "observed_at_ns": {
+          "time": {}
+        },
+        "output_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "run_id": {
+          "ref": "aos.agent/RunId@1"
+        },
+        "session_id": {
+          "ref": "aos.agent/SessionId@1"
+        },
+        "to": {
+          "ref": "aos.agent/RunLifecycle@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunOutcome@1",
+    "type": {
+      "record": {
+        "cancelled_reason": {
+          "option": {
+            "text": {}
+          }
+        },
+        "failure": {
+          "option": {
+            "ref": "aos.agent/RunFailure@1"
+          }
+        },
+        "interrupted_reason_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "output_ref": {
+          "option": {
+            "hash": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunRecord@1",
+    "type": {
+      "record": {
+        "cause": {
+          "ref": "aos.agent/RunCause@1"
+        },
+        "ended_at": {
+          "time": {}
+        },
+        "input_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "last_llm_usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
+          }
+        },
+        "lifecycle": {
+          "ref": "aos.agent/RunLifecycle@1"
+        },
+        "outcome": {
+          "option": {
+            "ref": "aos.agent/RunOutcome@1"
+          }
+        },
+        "run_id": {
+          "ref": "aos.agent/RunId@1"
+        },
+        "started_at": {
+          "time": {}
+        },
+        "trace_summary": {
+          "ref": "aos.agent/RunTraceSummary@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunState@1",
+    "type": {
+      "record": {
+        "active_tool_batch": {
+          "option": {
+            "ref": "aos.agent/ActiveToolBatch@1"
+          }
+        },
+        "blocked_on_context_operation": {
+          "option": {
+            "text": {}
+          }
+        },
+        "cause": {
+          "ref": "aos.agent/RunCause@1"
+        },
+        "config": {
+          "ref": "aos.agent/RunConfig@1"
+        },
+        "in_flight_effects": {
+          "nat": {}
+        },
+        "input_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "interrupt": {
+          "option": {
+            "ref": "aos.agent/RunInterrupt@1"
+          }
+        },
+        "last_llm_usage": {
+          "option": {
+            "ref": "aos.agent/LlmUsageRecord@1"
+          }
+        },
+        "last_output_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "lifecycle": {
+          "ref": "aos.agent/RunLifecycle@1"
+        },
+        "outcome": {
+          "option": {
+            "ref": "aos.agent/RunOutcome@1"
+          }
+        },
+        "pending_blob_gets": {
+          "map": {
+            "key": {
+              "hash": {}
+            },
+            "value": {
+              "ref": "aos.agent/SharedPendingBlobGet@1"
+            }
+          }
+        },
+        "pending_blob_puts": {
+          "map": {
+            "key": {
+              "hash": {}
+            },
+            "value": {
+              "ref": "aos.agent/SharedPendingBlobPut@1"
+            }
+          }
+        },
+        "pending_effects": {
+          "map": {
+            "key": {
+              "hash": {}
+            },
+            "value": {
+              "ref": "sys/PendingEffect@1"
+            }
+          }
+        },
+        "pending_llm_turn_items": {
+          "option": {
+            "list": {
+              "ref": "aos.agent/ActiveWindowItem@1"
+            }
+          }
+        },
+        "queued_steer_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "run_id": {
+          "ref": "aos.agent/RunId@1"
+        },
+        "staged_tool_follow_up_turn": {
+          "option": {
+            "ref": "aos.agent/StagedToolFollowUpTurn@1"
+          }
+        },
+        "started_at": {
+          "time": {}
+        },
+        "tool_refs_materialized": {
+          "bool": {}
+        },
+        "trace": {
+          "ref": "aos.agent/RunTrace@1"
+        },
+        "turn_plan": {
+          "option": {
+            "ref": "aos.agent/TurnPlan@1"
+          }
+        },
+        "updated_at": {
+          "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTrace@1",
+    "type": {
+      "record": {
+        "dropped_entries": {
+          "nat": {}
+        },
+        "entries": {
+          "list": {
+            "ref": "aos.agent/RunTraceEntry@1"
+          }
+        },
+        "max_entries": {
+          "nat": {}
+        },
+        "next_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTraceEntry@1",
+    "type": {
+      "record": {
+        "kind": {
+          "ref": "aos.agent/RunTraceEntryKind@1"
+        },
+        "metadata": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "text": {}
+            }
+          }
+        },
+        "observed_at_ns": {
+          "time": {}
+        },
+        "refs": {
+          "list": {
+            "ref": "aos.agent/RunTraceRef@1"
+          }
+        },
+        "seq": {
+          "nat": {}
+        },
+        "summary": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTraceEntryKind@1",
+    "type": {
+      "variant": {
+        "ActiveWindowUpdated": {
+          "unit": {}
+        },
+        "CompactionReceived": {
+          "unit": {}
+        },
+        "CompactionRequested": {
+          "unit": {}
+        },
+        "ContextOperationStateChanged": {
+          "unit": {}
+        },
+        "ContextPressureObserved": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "DomainEventEmitted": {
+          "unit": {}
+        },
+        "EffectEmitted": {
+          "unit": {}
+        },
+        "InterventionApplied": {
+          "unit": {}
+        },
+        "InterventionRequested": {
+          "unit": {}
+        },
+        "LlmReceived": {
+          "unit": {}
+        },
+        "LlmRequested": {
+          "unit": {}
+        },
+        "ProviderContextArtifactsObserved": {
+          "unit": {}
+        },
+        "ReceiptSettled": {
+          "unit": {}
+        },
+        "RunFinished": {
+          "unit": {}
+        },
+        "RunStarted": {
+          "unit": {}
+        },
+        "StreamFrameObserved": {
+          "unit": {}
+        },
+        "TokenCountReceived": {
+          "unit": {}
+        },
+        "TokenCountRequested": {
+          "unit": {}
+        },
+        "ToolBatchPlanned": {
+          "unit": {}
+        },
+        "ToolCallsObserved": {
+          "unit": {}
+        },
+        "TurnPlanned": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTraceRef@1",
+    "type": {
+      "record": {
+        "kind": {
+          "text": {}
+        },
+        "ref_": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "value": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunTraceSummary@1",
+    "type": {
+      "record": {
+        "dropped_entries": {
+          "nat": {}
+        },
+        "entry_count": {
+          "nat": {}
+        },
+        "first_seq": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "last_kind": {
+          "option": {
+            "ref": "aos.agent/RunTraceEntryKind@1"
+          }
+        },
+        "last_observed_at_ns": {
+          "option": {
+            "time": {}
+          }
+        },
+        "last_seq": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "last_summary": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/SessionConfig@1",
     "type": {
       "record": {
+        "default_host_session_open": {
+          "option": {
+            "ref": "aos.agent/HostSessionOpenConfig@1"
+          }
+        },
         "default_prompt_refs": {
           "option": {
             "list": {
@@ -495,11 +1685,11 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/SessionIngress@1",
+    "name": "aos.agent/SessionInput@1",
     "type": {
       "record": {
-        "ingress": {
-          "ref": "aos.agent/SessionIngressKind@1"
+        "input": {
+          "ref": "aos.agent/SessionInputKind@1"
         },
         "observed_at_ns": {
           "time": {}
@@ -512,9 +1702,30 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/SessionIngressKind@1",
+    "name": "aos.agent/SessionInputKind@1",
     "type": {
       "variant": {
+        "ContextOperationUpdated": {
+          "record": {
+            "operation": {
+              "option": {
+                "ref": "aos.agent/ContextOperationState@1"
+              }
+            }
+          }
+        },
+        "FollowUpInputAppended": {
+          "record": {
+            "input_ref": {
+              "hash": {}
+            },
+            "run_overrides": {
+              "option": {
+                "ref": "aos.agent/SessionConfig@1"
+              }
+            }
+          }
+        },
         "HostCommandReceived": {
           "ref": "aos.agent/HostCommand@1"
         },
@@ -557,6 +1768,15 @@
             }
           }
         },
+        "RunInterruptRequested": {
+          "record": {
+            "reason_ref": {
+              "option": {
+                "hash": {}
+              }
+            }
+          }
+        },
         "RunRequested": {
           "record": {
             "input_ref": {
@@ -568,6 +1788,56 @@
               }
             }
           }
+        },
+        "RunStartRequested": {
+          "record": {
+            "cause": {
+              "ref": "aos.agent/RunCause@1"
+            },
+            "run_overrides": {
+              "option": {
+                "ref": "aos.agent/SessionConfig@1"
+              }
+            }
+          }
+        },
+        "RunSteerRequested": {
+          "record": {
+            "instruction_ref": {
+              "hash": {}
+            }
+          }
+        },
+        "SessionArchived": {
+          "unit": {}
+        },
+        "SessionClosed": {
+          "unit": {}
+        },
+        "SessionConfigUpdated": {
+          "record": {
+            "config": {
+              "ref": "aos.agent/SessionConfig@1"
+            }
+          }
+        },
+        "SessionExpired": {
+          "unit": {}
+        },
+        "SessionOpened": {
+          "record": {
+            "config": {
+              "option": {
+                "ref": "aos.agent/SessionConfig@1"
+              }
+            }
+          }
+        },
+        "SessionPaused": {
+          "unit": {}
+        },
+        "SessionResumed": {
+          "unit": {}
         },
         "ToolOverridesSet": {
           "record": {
@@ -636,6 +1906,9 @@
               }
             }
           }
+        },
+        "TurnObserved": {
+          "ref": "aos.agent/TurnObservation@1"
         }
       }
     }
@@ -658,6 +1931,9 @@
           "unit": {}
         },
         "Idle": {
+          "unit": {}
+        },
+        "Interrupted": {
           "unit": {}
         },
         "Paused": {
@@ -732,16 +2008,16 @@
             "ref": "aos.agent/ActiveToolBatch@1"
           }
         },
-        "conversation_message_refs": {
-          "list": {
-            "hash": {}
-          }
+        "context_state": {
+          "ref": "aos.agent/ContextState@1"
         },
         "created_at": {
           "time": {}
         },
-        "effective_tools": {
-          "ref": "aos.agent/EffectiveToolSet@1"
+        "current_run": {
+          "option": {
+            "ref": "aos.agent/RunState@1"
+          }
         },
         "in_flight_effects": {
           "nat": {}
@@ -795,26 +2071,31 @@
             }
           }
         },
-        "pending_follow_up": {
-          "list": {
-            "text": {}
-          }
-        },
-        "pending_follow_up_turn": {
-          "option": {
-            "ref": "aos.agent/PendingFollowUpTurn@1"
-          }
-        },
-        "pending_steer": {
-          "list": {
-            "text": {}
-          }
-        },
-        "queued_llm_message_refs": {
+        "pending_llm_turn_items": {
           "option": {
             "list": {
-              "hash": {}
+              "ref": "aos.agent/ActiveWindowItem@1"
             }
+          }
+        },
+        "queued_follow_up_runs": {
+          "list": {
+            "ref": "aos.agent/QueuedRunStart@1"
+          }
+        },
+        "queued_steer_refs": {
+          "list": {
+            "hash": {}
+          }
+        },
+        "run_history": {
+          "list": {
+            "ref": "aos.agent/RunRecord@1"
+          }
+        },
+        "run_interrupt": {
+          "option": {
+            "ref": "aos.agent/RunInterrupt@1"
           }
         },
         "session_config": {
@@ -822,6 +2103,14 @@
         },
         "session_id": {
           "ref": "aos.agent/SessionId@1"
+        },
+        "staged_tool_follow_up_turn": {
+          "option": {
+            "ref": "aos.agent/StagedToolFollowUpTurn@1"
+          }
+        },
+        "status": {
+          "ref": "aos.agent/SessionStatus@1"
         },
         "tool_profile": {
           "text": {}
@@ -854,8 +2143,82 @@
         "tool_runtime_context": {
           "ref": "aos.agent/ToolRuntimeContext@1"
         },
+        "turn_state": {
+          "ref": "aos.agent/SessionTurnState@1"
+        },
         "updated_at": {
           "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionStatus@1",
+    "type": {
+      "variant": {
+        "Archived": {
+          "unit": {}
+        },
+        "Closed": {
+          "unit": {}
+        },
+        "Expired": {
+          "unit": {}
+        },
+        "Open": {
+          "unit": {}
+        },
+        "Paused": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionStatusChanged@1",
+    "type": {
+      "record": {
+        "from": {
+          "ref": "aos.agent/SessionStatus@1"
+        },
+        "observed_at_ns": {
+          "time": {}
+        },
+        "session_id": {
+          "ref": "aos.agent/SessionId@1"
+        },
+        "to": {
+          "ref": "aos.agent/SessionStatus@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionTurnState@1",
+    "type": {
+      "record": {
+        "custom_state_refs": {
+          "list": {
+            "ref": "aos.agent/PlannerStateRef@1"
+          }
+        },
+        "durable_inputs": {
+          "list": {
+            "ref": "aos.agent/TurnInput@1"
+          }
+        },
+        "last_report": {
+          "option": {
+            "ref": "aos.agent/TurnReport@1"
+          }
+        },
+        "pinned_inputs": {
+          "list": {
+            "ref": "aos.agent/TurnInput@1"
+          }
         }
       }
     }
@@ -865,8 +2228,8 @@
     "name": "aos.agent/SessionWorkflowEvent@1",
     "type": {
       "variant": {
-        "Ingress": {
-          "ref": "aos.agent/SessionIngress@1"
+        "Input": {
+          "ref": "aos.agent/SessionInput@1"
         },
         "Noop": {
           "ref": "aos.agent/SessionNoop@1"
@@ -917,17 +2280,29 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/ToolAvailabilityRule@1",
+    "name": "aos.agent/StagedToolFollowUpTurn@1",
     "type": {
-      "variant": {
-        "Always": {
-          "unit": {}
+      "record": {
+        "base_window_items": {
+          "list": {
+            "ref": "aos.agent/ActiveWindowItem@1"
+          }
         },
-        "HostSessionNotReady": {
-          "unit": {}
+        "blob_refs_by_index": {
+          "map": {
+            "key": {
+              "nat": {}
+            },
+            "value": {
+              "hash": {}
+            }
+          }
         },
-        "HostSessionReady": {
-          "unit": {}
+        "expected_messages": {
+          "nat": {}
+        },
+        "tool_batch_id": {
+          "ref": "aos.agent/ToolBatchId@1"
         }
       }
     }
@@ -1218,11 +2593,6 @@
         "args_schema_json": {
           "text": {}
         },
-        "availability_rules": {
-          "list": {
-            "ref": "aos.agent/ToolAvailabilityRule@1"
-          }
-        },
         "description": {
           "text": {}
         },
@@ -1243,6 +2613,549 @@
         },
         "tool_ref": {
           "hash": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TranscriptLedger@1",
+    "type": {
+      "record": {
+        "entries": {
+          "list": {
+            "ref": "aos.agent/TranscriptLedgerEntry@1"
+          }
+        },
+        "next_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TranscriptLedgerEntry@1",
+    "type": {
+      "record": {
+        "appended_at_ns": {
+          "time": {}
+        },
+        "kind": {
+          "ref": "aos.agent/TranscriptLedgerEntryKind@1"
+        },
+        "ref_": {
+          "hash": {}
+        },
+        "seq": {
+          "nat": {}
+        },
+        "source": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TranscriptLedgerEntryKind@1",
+    "type": {
+      "variant": {
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "MessageRef": {
+          "unit": {}
+        },
+        "ProviderArtifactRef": {
+          "unit": {}
+        },
+        "SummaryRef": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TranscriptRange@1",
+    "type": {
+      "record": {
+        "end_seq": {
+          "nat": {}
+        },
+        "start_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnBudget@1",
+    "type": {
+      "record": {
+        "max_input_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_message_refs": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "max_tool_refs": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "reserve_output_tokens": {
+          "option": {
+            "nat": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnInput@1",
+    "type": {
+      "record": {
+        "content_ref": {
+          "hash": {}
+        },
+        "correlation_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "estimated_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "input_id": {
+          "text": {}
+        },
+        "kind": {
+          "ref": "aos.agent/TurnInputKind@1"
+        },
+        "lane": {
+          "ref": "aos.agent/TurnInputLane@1"
+        },
+        "priority": {
+          "ref": "aos.agent/TurnPriority@1"
+        },
+        "source_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "source_kind": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tags": {
+          "list": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnInputKind@1",
+    "type": {
+      "variant": {
+        "ArtifactRef": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "MessageRef": {
+          "unit": {}
+        },
+        "ProviderOptionsRef": {
+          "unit": {}
+        },
+        "ResponseFormatRef": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnInputLane@1",
+    "type": {
+      "variant": {
+        "Conversation": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "Developer": {
+          "unit": {}
+        },
+        "Domain": {
+          "unit": {}
+        },
+        "Memory": {
+          "unit": {}
+        },
+        "RuntimeHint": {
+          "unit": {}
+        },
+        "Skill": {
+          "unit": {}
+        },
+        "Steer": {
+          "unit": {}
+        },
+        "Summary": {
+          "unit": {}
+        },
+        "System": {
+          "unit": {}
+        },
+        "ToolResult": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnObservation@1",
+    "type": {
+      "variant": {
+        "CustomStateRefRemoved": {
+          "record": {
+            "key": {
+              "text": {}
+            },
+            "planner_id": {
+              "text": {}
+            }
+          }
+        },
+        "CustomStateRefUpdated": {
+          "ref": "aos.agent/PlannerStateRef@1"
+        },
+        "InputObserved": {
+          "ref": "aos.agent/TurnInput@1"
+        },
+        "InputRemoved": {
+          "record": {
+            "input_id": {
+              "text": {}
+            }
+          }
+        },
+        "Noop": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnPlan@1",
+    "type": {
+      "record": {
+        "active_window_items": {
+          "list": {
+            "ref": "aos.agent/ActiveWindowItem@1"
+          }
+        },
+        "prerequisites": {
+          "list": {
+            "ref": "aos.agent/TurnPrerequisite@1"
+          }
+        },
+        "provider_options_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "report": {
+          "ref": "aos.agent/TurnReport@1"
+        },
+        "response_format_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "selected_tool_ids": {
+          "list": {
+            "text": {}
+          }
+        },
+        "state_updates": {
+          "list": {
+            "ref": "aos.agent/TurnStateUpdate@1"
+          }
+        },
+        "tool_choice": {
+          "option": {
+            "ref": "aos.agent/TurnToolChoice@1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnPrerequisite@1",
+    "type": {
+      "record": {
+        "input_ids": {
+          "list": {
+            "text": {}
+          }
+        },
+        "kind": {
+          "ref": "aos.agent/TurnPrerequisiteKind@1"
+        },
+        "prerequisite_id": {
+          "text": {}
+        },
+        "reason": {
+          "text": {}
+        },
+        "tool_ids": {
+          "list": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnPrerequisiteKind@1",
+    "type": {
+      "variant": {
+        "CompactContext": {
+          "unit": {}
+        },
+        "CountTokens": {
+          "unit": {}
+        },
+        "Custom": {
+          "record": {
+            "kind": {
+              "text": {}
+            }
+          }
+        },
+        "MaterializeToolDefinitions": {
+          "unit": {}
+        },
+        "OpenHostSession": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnPriority@1",
+    "type": {
+      "variant": {
+        "High": {
+          "unit": {}
+        },
+        "Low": {
+          "unit": {}
+        },
+        "Normal": {
+          "unit": {}
+        },
+        "Required": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnReport@1",
+    "type": {
+      "record": {
+        "budget": {
+          "ref": "aos.agent/TurnBudget@1"
+        },
+        "decision_codes": {
+          "list": {
+            "text": {}
+          }
+        },
+        "dropped_message_count": {
+          "nat": {}
+        },
+        "dropped_tool_count": {
+          "nat": {}
+        },
+        "planner": {
+          "text": {}
+        },
+        "selected_message_count": {
+          "nat": {}
+        },
+        "selected_tool_count": {
+          "nat": {}
+        },
+        "token_estimate": {
+          "ref": "aos.agent/TurnTokenEstimate@1"
+        },
+        "unresolved": {
+          "list": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnStateUpdate@1",
+    "type": {
+      "variant": {
+        "Noop": {
+          "unit": {}
+        },
+        "RemoveCustomStateRef": {
+          "record": {
+            "key": {
+              "text": {}
+            },
+            "planner_id": {
+              "text": {}
+            }
+          }
+        },
+        "RemoveDurableInput": {
+          "record": {
+            "input_id": {
+              "text": {}
+            }
+          }
+        },
+        "RemovePinnedInput": {
+          "record": {
+            "input_id": {
+              "text": {}
+            }
+          }
+        },
+        "UpsertCustomStateRef": {
+          "ref": "aos.agent/PlannerStateRef@1"
+        },
+        "UpsertDurableInput": {
+          "ref": "aos.agent/TurnInput@1"
+        },
+        "UpsertPinnedInput": {
+          "ref": "aos.agent/TurnInput@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnTokenEstimate@1",
+    "type": {
+      "record": {
+        "message_tokens": {
+          "nat": {}
+        },
+        "tool_tokens": {
+          "nat": {}
+        },
+        "total_input_tokens": {
+          "nat": {}
+        },
+        "unknown_message_count": {
+          "nat": {}
+        },
+        "unknown_tool_count": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnToolChoice@1",
+    "type": {
+      "variant": {
+        "Auto": {
+          "unit": {}
+        },
+        "NoneChoice": {
+          "unit": {}
+        },
+        "Required": {
+          "unit": {}
+        },
+        "Tool": {
+          "record": {
+            "name": {
+              "text": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnToolInput@1",
+    "type": {
+      "record": {
+        "estimated_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "priority": {
+          "ref": "aos.agent/TurnPriority@1"
+        },
+        "source_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "source_kind": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tags": {
+          "list": {
+            "text": {}
+          }
+        },
+        "tool_id": {
+          "text": {}
         }
       }
     }

@@ -6,7 +6,7 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use aos_effects::builtins::{
-    HashRef, LlmGenerateParams, LlmGenerateReceipt, LlmRuntimeArgs, LlmToolChoice, SecretRef,
+    HashRef, LlmGenerateParams, LlmGenerateReceipt, LlmRuntimeArgs, LlmToolChoice, LlmWindowItem, SecretRef,
     TextOrSecretRef,
 };
 use aos_wasm_sdk::{
@@ -49,7 +49,7 @@ aos_variant! {
             provider: String,
             model: String,
             api_key_alias: String,
-            message_refs: Vec<String>,
+            window_refs: Vec<String>,
             tool_refs: Option<Vec<String>>,
             tool_choice: Option<LlmToolChoice>,
             max_tokens: Option<u64>,
@@ -83,7 +83,7 @@ impl Workflow for LiveAgentWorkflow {
                 provider,
                 model,
                 api_key_alias,
-                message_refs,
+                window_refs,
                 tool_refs,
                 tool_choice,
                 max_tokens,
@@ -94,7 +94,7 @@ impl Workflow for LiveAgentWorkflow {
                     provider,
                     model,
                     api_key_alias,
-                    message_refs,
+                    window_refs,
                     tool_refs,
                     tool_choice,
                     max_tokens,
@@ -116,7 +116,7 @@ fn on_run_requested(
     provider: String,
     model: String,
     api_key_alias: String,
-    message_refs: Vec<String>,
+    window_refs: Vec<String>,
     tool_refs: Option<Vec<String>>,
     tool_choice: Option<LlmToolChoice>,
     max_tokens: Option<u64>,
@@ -130,11 +130,13 @@ fn on_run_requested(
         correlation_id: Some(alloc::format!("chat-live-{request_id}")),
         provider,
         model,
-        message_refs: message_refs
+        window_items: window_refs
             .into_iter()
             .map(|value| {
-                HashRef::new(value)
-                    .unwrap_or_else(|_| panic!("invalid message ref in chat-live workflow"))
+                LlmWindowItem::message_ref(
+                    HashRef::new(value)
+                        .unwrap_or_else(|_| panic!("invalid window ref in chat-live workflow")),
+                )
             })
             .collect(),
         runtime: LlmRuntimeArgs {
@@ -259,7 +261,7 @@ mod tests {
             provider: "openai-responses".into(),
             model: "gpt-5.2".into(),
             api_key_alias: "llm/openai_api".into(),
-            message_refs: vec![
+            window_refs: vec![
                 "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
             ],
             tool_refs: Some(vec![

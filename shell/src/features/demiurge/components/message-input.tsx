@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useBlobPut, useEventsPost } from "@/sdk/mutations";
 import { buildRunHistoryPayload, encodeJsonBlob } from "../lib/message-utils";
-import type { ChatMessage, ChatSettings, SessionIngress } from "../types";
+import type { ChatMessage, ChatSettings, SessionInput } from "../types";
 import { cn } from "@/lib/utils";
 
 const MAX_TOKENS_CAP = 4096;
@@ -44,10 +44,10 @@ export function MessageInput({
         data_b64: base64Data,
       });
 
-      const ingress: SessionIngress = {
+      const input: SessionInput = {
         session_id: chatId,
         observed_at_ns: Date.now(),
-        ingress: {
+        input: {
           $tag: "RunRequested",
           $value: {
             input_ref: blobResult.hash,
@@ -61,8 +61,8 @@ export function MessageInput({
       };
 
       await eventsPostMutation.mutateAsync({
-        schema: "aos.agent/SessionIngress@1",
-        value: ingress,
+        schema: "aos.agent/SessionInput@1",
+        value: input,
       });
 
       setMessage("");

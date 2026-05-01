@@ -20,8 +20,9 @@ use crate::errors::{
 use crate::provider::{ProviderAdapter, ProviderFactory, register_provider_factory};
 use crate::stream::{StreamEvent, StreamEventStream, StreamEventType, StreamEventTypeOrString};
 use crate::types::{
-    ContentKind, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response, Role,
-    ToolCall, ToolCallData, Usage,
+    CompactionItem, CompactionItemKind, CompactionRequest, CompactionResponse, ContentKind,
+    ContentPart, FinishReason, Message, RateLimitInfo, Request, Response, Role, TokenCountQuality,
+    TokenCountRequest, TokenCountResponse, ToolCall, ToolCallData, Usage,
 };
 use crate::utils::{SseEvent, SseParser, is_local_path, load_file_data};
 
@@ -125,6 +126,20 @@ impl OpenAIAdapter {
     fn endpoint(&self) -> String {
         format!("{}/responses", self.config.base_url.trim_end_matches('/'))
     }
+
+    fn compact_endpoint(&self) -> String {
+        format!(
+            "{}/responses/compact",
+            self.config.base_url.trim_end_matches('/')
+        )
+    }
+
+    fn input_tokens_endpoint(&self) -> String {
+        format!(
+            "{}/responses/input_tokens",
+            self.config.base_url.trim_end_matches('/')
+        )
+    }
 }
 
 #[async_trait]
@@ -156,6 +171,71 @@ impl ProviderAdapter for OpenAIAdapter {
             .await
             .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
         parse_responses_api_response(raw_json, "openai", Some(&headers))
+    }
+
+    async fn compact(&self, request: CompactionRequest) -> Result<CompactionResponse, SDKError> {
+        let body = build_responses_compact_body(&request)?;
+        let response = self
+            .client
+            .post(self.compact_endpoint())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+
+        let headers = response.headers().clone();
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let retry_after = parse_retry_after(response.headers());
+            let raw = response.text().await.unwrap_or_default();
+            return Err(build_provider_error("openai", status, &raw, retry_after));
+        }
+
+        let raw_json = response
+            .json::<Value>()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+        parse_openai_compaction_response(raw_json, "openai", request.model, Some(&headers))
+    }
+
+    async fn count_tokens(
+        &self,
+        request: TokenCountRequest,
+    ) -> Result<TokenCountResponse, SDKError> {
+        let body = build_responses_input_tokens_body(&request)?;
+        let response = self
+            .client
+            .post(self.input_tokens_endpoint())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let retry_after = parse_retry_after(response.headers());
+            let raw = response.text().await.unwrap_or_default();
+            return Err(build_provider_error("openai", status, &raw, retry_after));
+        }
+
+        let raw_json = response
+            .json::<Value>()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+        let input_tokens = raw_json.get("input_tokens").and_then(Value::as_u64);
+        Ok(TokenCountResponse {
+            input_tokens,
+            original_input_tokens: input_tokens,
+            quality: if input_tokens.is_some() {
+                TokenCountQuality::Exact
+            } else {
+                TokenCountQuality::Unknown
+            },
+            model: request.model,
+            provider: "openai".into(),
+            raw: Some(raw_json),
+            warnings: Vec::new(),
+        })
     }
 
     async fn stream(&self, request: Request) -> Result<StreamEventStream, SDKError> {
@@ -1118,6 +1198,54 @@ fn build_responses_body(request: &Request, stream: bool) -> Result<Value, SDKErr
     Ok(body)
 }
 
+fn build_responses_compact_body(request: &CompactionRequest) -> Result<Value, SDKError> {
+    let mut body = json!({
+        "model": request.model,
+    });
+
+    let (instructions, input) = translate_messages_to_responses_input(&request.messages)?;
+    if let Some(instructions) = instructions {
+        body["instructions"] = Value::String(instructions);
+    }
+    body["input"] = input;
+
+    if let Some(provider_options) = &request.provider_options {
+        if let Some(openai_options) = provider_options.get("openai") {
+            if let Some(object) = openai_options.as_object() {
+                for (key, value) in object {
+                    body[key] = value.clone();
+                }
+            }
+        }
+    }
+
+    Ok(body)
+}
+
+fn build_responses_input_tokens_body(request: &TokenCountRequest) -> Result<Value, SDKError> {
+    let generation_request = Request {
+        model: request.model.clone(),
+        messages: request.messages.clone(),
+        provider: request.provider.clone(),
+        tools: request.tools.clone(),
+        tool_choice: request.tool_choice.clone(),
+        response_format: request.response_format.clone(),
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        stop_sequences: None,
+        reasoning_effort: None,
+        metadata: None,
+        provider_options: request.provider_options.clone(),
+    };
+    let mut body = build_responses_body(&generation_request, false)?;
+    if let Some(object) = body.as_object_mut() {
+        object.remove("stream");
+        object.remove("max_output_tokens");
+    }
+    Ok(body)
+}
+
 fn build_chat_completions_body(request: &Request, stream: bool) -> Result<Value, SDKError> {
     let messages = translate_messages_to_chat_messages(&request.messages)?;
     let mut body = json!({
@@ -1271,17 +1399,25 @@ fn translate_messages_to_responses_input(
                 }
             }
             Role::User | Role::Assistant => {
+                for part in &message.content {
+                    if let Some(provider_item) = &part.provider_item {
+                        input.push(provider_item.clone());
+                    }
+                }
+
                 let content =
                     translate_parts_to_responses_content(message.role.clone(), &message.content)?;
-                input.push(json!({
-                    "type": "message",
-                    "role": match message.role {
-                        Role::User => "user",
-                        Role::Assistant => "assistant",
-                        _ => "user"
-                    },
-                    "content": content
-                }));
+                if content.as_array().is_some_and(|items| !items.is_empty()) {
+                    input.push(json!({
+                        "type": "message",
+                        "role": match message.role {
+                            Role::User => "user",
+                            Role::Assistant => "assistant",
+                            _ => "user"
+                        },
+                        "content": content
+                    }));
+                }
 
                 if message.role == Role::Assistant {
                     for part in &message.content {
@@ -1516,6 +1652,9 @@ fn parse_responses_api_response(
                     r#type: "function".to_string(),
                 }));
             }
+            Some("compaction") => {
+                message_parts.push(ContentPart::provider_item("compaction", item.clone()));
+            }
             _ => {}
         }
     }
@@ -1563,6 +1702,84 @@ fn parse_responses_api_response(
         warnings: Vec::new(),
         rate_limit: headers.and_then(parse_rate_limit_info),
     })
+}
+
+fn parse_openai_compaction_response(
+    raw_json: Value,
+    provider: &str,
+    requested_model: String,
+    headers: Option<&reqwest::header::HeaderMap>,
+) -> Result<CompactionResponse, SDKError> {
+    let id = raw_json
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("resp_compaction_unknown")
+        .to_string();
+    let model = raw_json
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or(requested_model.as_str())
+        .to_string();
+    let output_items = raw_json
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(parse_compaction_output_item)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let usage = parse_responses_usage(raw_json.get("usage"));
+
+    Ok(CompactionResponse {
+        id,
+        model,
+        provider: provider.to_string(),
+        output_items,
+        usage,
+        raw: Some(raw_json),
+        warnings: Vec::new(),
+        rate_limit: headers.and_then(parse_rate_limit_info),
+    })
+}
+
+fn parse_compaction_output_item(item: &Value) -> CompactionItem {
+    let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+    let kind = match item_type {
+        "compaction" => CompactionItemKind::Compaction,
+        "message" => CompactionItemKind::Message,
+        _ => CompactionItemKind::Other,
+    };
+    let text = extract_text_from_provider_item(item);
+    CompactionItem {
+        id: item
+            .get("id")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        kind,
+        encrypted_content: item
+            .get("encrypted_content")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        text,
+        raw: item.clone(),
+    }
+}
+
+fn extract_text_from_provider_item(item: &Value) -> Option<String> {
+    let content = item.get("content").and_then(Value::as_array)?;
+    let mut parts = Vec::new();
+    for part in content {
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            parts.push(text);
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(""))
+    }
 }
 
 fn parse_chat_completions_response(raw_json: Value, provider: &str) -> Result<Response, SDKError> {

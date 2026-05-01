@@ -47,6 +47,12 @@ pub fn transition_lifecycle(
             | (SessionLifecycle::Completed, SessionLifecycle::Running)
             | (SessionLifecycle::Failed, SessionLifecycle::Running)
             | (SessionLifecycle::Cancelled, SessionLifecycle::Running)
+            | (SessionLifecycle::Running, SessionLifecycle::Interrupted)
+            | (
+                SessionLifecycle::WaitingInput,
+                SessionLifecycle::Interrupted
+            )
+            | (SessionLifecycle::Interrupted, SessionLifecycle::Running)
     );
 
     if !allowed {
@@ -77,6 +83,6 @@ pub fn can_apply_host_command(state: &SessionState, command: &HostCommandKind) -
                     | SessionLifecycle::Paused
             )
         }
-        _ => !state.lifecycle.is_terminal(),
+        HostCommandKind::Noop => !state.lifecycle.is_terminal(),
     }
 }

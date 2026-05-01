@@ -18,14 +18,16 @@ use crate::errors::{
 use crate::provider::{ProviderAdapter, ProviderFactory, register_provider_factory};
 use crate::stream::{StreamEvent, StreamEventStream, StreamEventType, StreamEventTypeOrString};
 use crate::types::{
-    ContentKind, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response, Role,
-    ThinkingData, ToolCall, ToolCallData, Usage,
+    CompactionItem, CompactionItemKind, CompactionRequest, CompactionResponse, ContentKind,
+    ContentPart, FinishReason, Message, RateLimitInfo, Request, Response, Role, ThinkingData,
+    TokenCountQuality, TokenCountRequest, TokenCountResponse, ToolCall, ToolCallData, Usage,
 };
 use crate::utils::{SseEvent, SseParser, is_local_path, load_file_data};
 
 const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: u64 = 4096;
 const PROMPT_CACHING_BETA: &str = "prompt-caching-2024-07-31";
+const COMPACTION_BETA: &str = "compact-2026-01-12";
 
 #[derive(Clone, Debug)]
 pub struct AnthropicAdapterConfig {
@@ -107,6 +109,13 @@ impl AnthropicAdapter {
     fn endpoint(&self) -> String {
         format!("{}/messages", self.config.base_url.trim_end_matches('/'))
     }
+
+    fn count_tokens_endpoint(&self) -> String {
+        format!(
+            "{}/messages/count_tokens",
+            self.config.base_url.trim_end_matches('/')
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -148,6 +157,81 @@ impl ProviderAdapter for AnthropicAdapter {
             .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
 
         parse_anthropic_response(raw_json, "anthropic", Some(&headers))
+    }
+
+    async fn compact(&self, request: CompactionRequest) -> Result<CompactionResponse, SDKError> {
+        let prepared = build_compact_messages_body(&request)?;
+
+        let mut req = self.client.post(self.endpoint()).json(&prepared.body);
+        if !prepared.beta_headers.is_empty() {
+            req = req.header("anthropic-beta", prepared.beta_headers.join(","));
+        }
+
+        let response = req
+            .send()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+
+        let headers = response.headers().clone();
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let retry_after = parse_retry_after(response.headers());
+            let raw = response.text().await.unwrap_or_default();
+            return Err(build_provider_error("anthropic", status, &raw, retry_after));
+        }
+
+        let raw_json = response
+            .json::<Value>()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+
+        parse_anthropic_compaction_response(raw_json, "anthropic", Some(&headers))
+    }
+
+    async fn count_tokens(
+        &self,
+        request: TokenCountRequest,
+    ) -> Result<TokenCountResponse, SDKError> {
+        let prepared = build_count_tokens_body(&request)?;
+
+        let mut req = self
+            .client
+            .post(self.count_tokens_endpoint())
+            .json(&prepared.body);
+        if !prepared.beta_headers.is_empty() {
+            req = req.header("anthropic-beta", prepared.beta_headers.join(","));
+        }
+
+        let response = req
+            .send()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let retry_after = parse_retry_after(response.headers());
+            let raw = response.text().await.unwrap_or_default();
+            return Err(build_provider_error("anthropic", status, &raw, retry_after));
+        }
+
+        let raw_json = response
+            .json::<Value>()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+        let input_tokens = raw_json.get("input_tokens").and_then(Value::as_u64);
+        Ok(TokenCountResponse {
+            input_tokens,
+            original_input_tokens: input_tokens,
+            quality: if input_tokens.is_some() {
+                TokenCountQuality::ProviderEstimate
+            } else {
+                TokenCountQuality::Unknown
+            },
+            model: request.model,
+            provider: "anthropic".into(),
+            raw: Some(raw_json),
+            warnings: Vec::new(),
+        })
     }
 
     async fn stream(&self, request: Request) -> Result<StreamEventStream, SDKError> {
@@ -899,6 +983,101 @@ fn build_messages_body(
     Ok(PreparedAnthropicRequest { body, beta_headers })
 }
 
+fn build_compact_messages_body(
+    request: &CompactionRequest,
+) -> Result<PreparedAnthropicRequest, SDKError> {
+    let mut request_options = request
+        .provider_options
+        .clone()
+        .unwrap_or_else(|| json!({}));
+
+    if request_options.get("anthropic").is_none() {
+        request_options["anthropic"] = json!({});
+    }
+    let anthropic_options = request_options
+        .get_mut("anthropic")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| {
+            SDKError::Configuration(ConfigurationError::new(
+                "anthropic provider_options must be an object",
+            ))
+        })?;
+
+    let mut edit = json!({
+        "type": "compact_20260112",
+        "pause_after_compaction": true,
+    });
+    if let Some(target_tokens) = request.target_tokens {
+        edit["trigger"] = json!({
+            "type": "input_tokens",
+            "value": target_tokens.max(50_000),
+        });
+    }
+    if let Some(existing) = anthropic_options.get("compaction") {
+        if let Some(object) = existing.as_object() {
+            for (key, value) in object {
+                edit[key] = value.clone();
+            }
+        }
+    }
+    anthropic_options.insert(
+        "context_management".to_string(),
+        json!({
+            "edits": [edit]
+        }),
+    );
+
+    let mut beta_headers = collect_beta_headers(Some(&Value::Object(anthropic_options.clone())));
+    beta_headers.push(COMPACTION_BETA.to_string());
+    beta_headers.sort();
+    beta_headers.dedup();
+    anthropic_options.insert("beta_headers".to_string(), json!(beta_headers.clone()));
+
+    let generation_request = Request {
+        model: request.model.clone(),
+        messages: request.messages.clone(),
+        provider: request.provider.clone(),
+        tools: None,
+        tool_choice: None,
+        response_format: None,
+        temperature: None,
+        top_p: None,
+        max_tokens: Some(DEFAULT_MAX_TOKENS),
+        stop_sequences: None,
+        reasoning_effort: None,
+        metadata: None,
+        provider_options: Some(request_options),
+    };
+
+    build_messages_body(&generation_request, false)
+}
+
+fn build_count_tokens_body(
+    request: &TokenCountRequest,
+) -> Result<PreparedAnthropicRequest, SDKError> {
+    let generation_request = Request {
+        model: request.model.clone(),
+        messages: request.messages.clone(),
+        provider: request.provider.clone(),
+        tools: request.tools.clone(),
+        tool_choice: request.tool_choice.clone(),
+        response_format: request.response_format.clone(),
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        stop_sequences: None,
+        reasoning_effort: None,
+        metadata: None,
+        provider_options: request.provider_options.clone(),
+    };
+    let mut prepared = build_messages_body(&generation_request, false)?;
+    if let Some(object) = prepared.body.as_object_mut() {
+        object.remove("max_tokens");
+        object.remove("stream");
+    }
+    Ok(prepared)
+}
+
 fn extract_system_text(messages: &[Message]) -> Vec<String> {
     messages
         .iter()
@@ -1049,6 +1228,11 @@ fn translate_parts_to_anthropic_content(
                     "data": thinking.text,
                 }));
             }
+            continue;
+        }
+
+        if let Some(provider_item) = &part.provider_item {
+            content.push(provider_item.clone());
             continue;
         }
     }
@@ -1293,6 +1477,9 @@ fn parse_anthropic_response(
                             .to_string(),
                     ));
                 }
+                "compaction" => {
+                    content.push(ContentPart::provider_item("compaction", item.clone()));
+                }
                 _ => {}
             }
         }
@@ -1319,6 +1506,68 @@ fn parse_anthropic_response(
     })
 }
 
+fn parse_anthropic_compaction_response(
+    raw_json: Value,
+    provider: &str,
+    headers: Option<&reqwest::header::HeaderMap>,
+) -> Result<CompactionResponse, SDKError> {
+    let id = raw_json
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("msg_compaction_unknown")
+        .to_string();
+    let model = raw_json
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let output_items = raw_json
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(parse_anthropic_compaction_item)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let usage = parse_anthropic_usage(raw_json.get("usage"), &[]);
+
+    Ok(CompactionResponse {
+        id,
+        model,
+        provider: provider.to_string(),
+        output_items,
+        usage,
+        raw: Some(raw_json),
+        warnings: Vec::new(),
+        rate_limit: headers.and_then(parse_rate_limit_info),
+    })
+}
+
+fn parse_anthropic_compaction_item(item: &Value) -> CompactionItem {
+    let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+    let kind = match item_type {
+        "compaction" => CompactionItemKind::Compaction,
+        "text" => CompactionItemKind::Message,
+        _ => CompactionItemKind::Other,
+    };
+    CompactionItem {
+        id: item
+            .get("id")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        kind,
+        encrypted_content: None,
+        text: item
+            .get("content")
+            .or_else(|| item.get("text"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        raw: item.clone(),
+    }
+}
+
 fn thinking_content_part(thinking: ThinkingData) -> ContentPart {
     ContentPart {
         kind: ContentKind::Thinking.into(),
@@ -1329,6 +1578,7 @@ fn thinking_content_part(thinking: ThinkingData) -> ContentPart {
         tool_call: None,
         tool_result: None,
         thinking: Some(thinking),
+        provider_item: None,
     }
 }
 
@@ -1346,6 +1596,7 @@ fn redacted_thinking_content_part(data: String) -> ContentPart {
             signature: None,
             redacted: true,
         }),
+        provider_item: None,
     }
 }
 

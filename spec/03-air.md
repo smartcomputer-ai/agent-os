@@ -299,6 +299,8 @@ Built-in effects live in `spec/defs/builtin-effects.air.json`, including:
 - `sys/blob.get@1`
 - `sys/timer.set@1`
 - `sys/llm.generate@1`
+- `sys/llm.count_tokens@1`
+- `sys/llm.compact@1`
 - `sys/vault.put@1`
 - `sys/vault.rotate@1`
 - `sys/workspace.*@1`

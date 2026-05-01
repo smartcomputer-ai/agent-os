@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use aos_effect_adapters::traits::AsyncEffectAdapter;
-use aos_effects::builtins::{LlmGenerateParams, LlmToolCallList, LlmToolChoice};
+use aos_effects::builtins::{LlmGenerateParams, LlmToolCallList, LlmToolChoice, LlmWindowItem};
 use aos_kernel::MemStore;
 use serde_json::{Value, json};
 
@@ -49,7 +49,7 @@ pub(crate) async fn run_required_tool_call(
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![message_ref],
+        window_items: vec![LlmWindowItem::message_ref(message_ref)],
         runtime,
         api_key: Some(case.api_key.clone().into()),
     };
@@ -158,7 +158,7 @@ async fn run_multi_tool_call(case: &ProviderRuntime) -> (Arc<MemStore>, LlmToolC
             correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
-            message_refs: vec![message_ref],
+            window_items: vec![LlmWindowItem::message_ref(message_ref)],
             runtime,
             api_key: Some(case.api_key.clone().into()),
         };
@@ -237,7 +237,7 @@ pub(crate) async fn run_tool_result_roundtrip(case: &ProviderRuntime) {
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![roundtrip_messages_ref.clone()],
+        window_items: vec![LlmWindowItem::message_ref(roundtrip_messages_ref.clone())],
         runtime: default_runtime(),
         api_key: Some(case.api_key.clone().into()),
     };
@@ -270,7 +270,7 @@ pub(crate) async fn run_tool_result_roundtrip(case: &ProviderRuntime) {
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![turn3_ref],
+        window_items: vec![LlmWindowItem::message_ref(turn3_ref)],
         runtime: default_runtime(),
         api_key: Some(case.api_key.clone().into()),
     };
@@ -331,7 +331,7 @@ pub(crate) async fn run_multi_tool_roundtrip(case: &ProviderRuntime) {
             correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
-            message_refs: vec![roundtrip_ref],
+            window_items: vec![LlmWindowItem::message_ref(roundtrip_ref)],
             runtime: default_runtime(),
             api_key: Some(case.api_key.clone().into()),
         };
@@ -404,7 +404,7 @@ pub(crate) async fn run_multi_tool_roundtrip(case: &ProviderRuntime) {
         correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
-        message_refs: vec![followup_ref],
+        window_items: vec![LlmWindowItem::message_ref(followup_ref)],
         runtime: default_runtime(),
         api_key: Some(case.api_key.clone().into()),
     };

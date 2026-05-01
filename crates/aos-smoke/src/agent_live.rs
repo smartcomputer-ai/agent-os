@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent::{
-    LlmToolCallList, SessionConfig, SessionId, SessionIngress, SessionIngressKind, SessionState,
-    ToolAvailabilityRule, ToolExecutor, ToolParallelismHint, ToolSpec,
+    LlmToolCallList, SessionConfig, SessionId, SessionInput, SessionInputKind, SessionState,
+    ToolExecutor, ToolParallelismHint, ToolSpec,
 };
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
@@ -17,6 +17,7 @@ use aos_effect_adapters::config::{
 use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::builtins::{
     LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmRuntimeArgs, LlmToolChoice,
+    LlmWindowItem,
 };
 use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
 use aos_kernel::Store;
@@ -28,7 +29,7 @@ use tokio::runtime::Builder;
 use crate::example_host::{ExampleHost, ExampleHostConfig, HarnessConfig};
 
 const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
+const EVENT_SCHEMA: &str = "aos.agent/SessionInput@1";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
 const SDK_AIR_ROOT: &str = "crates/aos-agent/air";
 const SDK_WASM_PACKAGE: &str = "aos-agent";
@@ -113,7 +114,7 @@ enum SearchPhase {
 #[derive(Debug, Clone, Default)]
 struct StepContext {
     correlation_id: Option<String>,
-    message_refs: Vec<String>,
+    window_items: Vec<String>,
     temperature: Option<String>,
     top_p: Option<String>,
     tool_refs: Option<Vec<String>>,
@@ -128,18 +129,16 @@ struct StepContext {
 pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()> {
     let provider = resolve_provider(provider, model_override)?;
     let fixture_root = crate::workspace_root().join(FIXTURE_ROOT);
-    let assets_root = fixture_root.join("air");
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
-    let import_roots = vec![sdk_air_root];
     let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root: &fixture_root,
-            assets_root: Some(&assets_root),
+            assets_root: Some(&sdk_air_root),
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
             module_crate: "",
         },
-        &import_roots,
+        &[],
         Some(ExampleHostConfig {
             world: WorldConfig::default(),
             adapters: EffectAdapterConfig {
@@ -169,7 +168,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     send_session_event(
         &mut host,
         &mut event_clock,
-        SessionIngressKind::RunRequested {
+        SessionInputKind::RunRequested {
             input_ref: fake_hash('a'),
             run_overrides: Some(SessionConfig {
                 provider: provider.provider_id.clone(),
@@ -181,6 +180,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 default_tool_enable: None,
                 default_tool_disable: None,
                 default_tool_force: None,
+                default_host_session_open: None,
             }),
         },
     )?;
@@ -217,13 +217,13 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
 
         let history_ref = store_history_blob(&host, &history)?;
         let turn_tool_refs = if matches!(phase, SearchPhase::Looking) {
-            state.effective_tools.tool_refs()
+            selected_tool_refs(&state)
         } else {
             None
         };
         let step_ctx = StepContext {
             correlation_id: Some(format!("live-run-turn-{llm_turn}")),
-            message_refs: vec![history_ref],
+            window_items: vec![history_ref],
             temperature: None,
             top_p: None,
             tool_refs: turn_tool_refs,
@@ -362,11 +362,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         stats.tool_calls
     );
 
-    send_session_event(
-        &mut host,
-        &mut event_clock,
-        SessionIngressKind::RunCompleted,
-    )?;
+    send_session_event(&mut host, &mut event_clock, SessionInputKind::RunCompleted)?;
 
     let final_state: SessionState = host.read_state()?;
     ensure!(
@@ -399,13 +395,13 @@ fn tool_call_args_json(host: &ExampleHost, call: &aos_agent::ToolCallObserved) -
 fn send_session_event(
     host: &mut ExampleHost,
     clock: &mut u64,
-    kind: SessionIngressKind,
+    kind: SessionInputKind,
 ) -> Result<()> {
     *clock = clock.saturating_add(1);
-    let event = SessionIngress {
+    let event = SessionInput {
         session_id: SessionId(SESSION_ID.into()),
         observed_at_ns: *clock,
-        ingress: kind,
+        input: kind,
     };
     host.send_event(&event)
 }
@@ -431,7 +427,6 @@ fn configure_search_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Re
             executor: ToolExecutor::HostLoop {
                 bridge: SEARCH_TOOL_NAME.into(),
             },
-            availability_rules: vec![ToolAvailabilityRule::Always],
             parallelism_hint: ToolParallelismHint {
                 parallel_safe: true,
                 resource_key: None,
@@ -445,11 +440,29 @@ fn configure_search_tool_registry(host: &mut ExampleHost, clock: &mut u64) -> Re
     send_session_event(
         host,
         clock,
-        SessionIngressKind::ToolRegistrySet {
+        SessionInputKind::ToolRegistrySet {
             registry,
             profiles: Some(profiles),
             default_profile: Some(SEARCH_TOOL_PROFILE.into()),
         },
+    )
+}
+
+fn selected_tool_refs(state: &SessionState) -> Option<Vec<String>> {
+    let selected = state
+        .current_run
+        .as_ref()
+        .and_then(|run| run.turn_plan.as_ref())
+        .map(|plan| plan.selected_tool_ids.as_slice())?;
+    if selected.is_empty() {
+        return None;
+    }
+    Some(
+        selected
+            .iter()
+            .filter_map(|tool_id| state.tool_registry.get(tool_id))
+            .map(|tool| tool.tool_ref.clone())
+            .collect(),
     )
 }
 
@@ -462,13 +475,17 @@ fn to_core_llm_params(
     let model = run_config.model.trim();
     ensure!(!model.is_empty(), "run model missing");
 
-    let mut message_refs = run_config.prompt_refs.clone().unwrap_or_default();
-    message_refs.extend(step_ctx.message_refs.clone());
-    ensure!(!message_refs.is_empty(), "message_refs must not be empty");
+    let mut window_refs = run_config.prompt_refs.clone().unwrap_or_default();
+    window_refs.extend(step_ctx.window_items.clone());
+    ensure!(!window_refs.is_empty(), "window_items must not be empty");
 
-    let message_refs = message_refs
+    let window_items = window_refs
         .into_iter()
-        .map(|value| HashRef::new(value).map_err(|err| anyhow!("invalid message ref: {err}")))
+        .map(|value| {
+            HashRef::new(value)
+                .map(LlmWindowItem::message_ref)
+                .map_err(|err| anyhow!("invalid window item ref: {err}"))
+        })
         .collect::<Result<Vec<_>>>()?;
 
     let tool_refs = step_ctx
@@ -500,7 +517,7 @@ fn to_core_llm_params(
         correlation_id: step_ctx.correlation_id.clone(),
         provider: provider.into(),
         model: model.into(),
-        message_refs,
+        window_items,
         runtime: LlmRuntimeArgs {
             temperature: step_ctx.temperature.clone(),
             top_p: step_ctx.top_p.clone(),

@@ -20,6 +20,60 @@ mod inspect_workflow;
 mod inspect_world;
 pub mod workspace;
 
+pub type CompositeToolAction = workspace::WorkspaceAction;
+
+pub fn is_composite_tool_mapper(mapper: ToolMapper) -> bool {
+    workspace::is_workspace_mapper(mapper)
+}
+
+pub fn start_composite_tool(
+    mapper: ToolMapper,
+    tool_name: &str,
+    arguments_json: &str,
+    emitted_at_ns: u64,
+) -> Result<CompositeToolAction, ToolMappingError> {
+    if workspace::is_workspace_mapper(mapper) {
+        workspace::start_tool(mapper, tool_name, arguments_json, emitted_at_ns)
+    } else {
+        Err(ToolMappingError::unsupported("not a composite tool"))
+    }
+}
+
+pub fn continue_composite_tool(
+    mapper: ToolMapper,
+    tool_name: &str,
+    state_json: &str,
+) -> CompositeToolAction {
+    if workspace::is_workspace_mapper(mapper) {
+        workspace::continue_tool(tool_name, state_json)
+    } else {
+        failed_composite_action(tool_name, "not a composite tool")
+    }
+}
+
+pub fn resume_composite_tool(
+    mapper: ToolMapper,
+    tool_name: &str,
+    state_json: &str,
+    status: &str,
+    payload: &[u8],
+) -> CompositeToolAction {
+    if workspace::is_workspace_mapper(mapper) {
+        workspace::resume_tool(tool_name, state_json, status, payload)
+    } else {
+        failed_composite_action(tool_name, "not a composite tool")
+    }
+}
+
+fn failed_composite_action(tool_name: &str, detail: &str) -> CompositeToolAction {
+    CompositeToolAction::Complete(failed_receipt(
+        tool_name,
+        "error",
+        "tool_unsupported",
+        detail,
+    ))
+}
+
 pub fn map_args(
     mapper: ToolMapper,
     arguments_json: &str,

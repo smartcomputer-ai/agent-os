@@ -196,10 +196,12 @@ fn receipt_from_py(receipt: &Bound<'_, PyAny>) -> PyResult<EffectReceipt> {
         .extract()?;
     let cost_cents: Option<u64> = receipt
         .get_item("cost_cents")?
+        .filter(|value| !value.is_none())
         .map(|value| value.extract())
         .transpose()?;
     let signature: Vec<u8> = receipt
         .get_item("signature")?
+        .filter(|value| !value.is_none())
         .map(|value| value.extract())
         .transpose()?
         .unwrap_or_default();
@@ -860,6 +862,7 @@ fn common_receipt_llm_generate_ok<H: CommonHarnessOps>(
         output_ref: parse_hash_ref(output_ref)?,
         raw_output_ref: raw_output_ref.map(parse_hash_ref).transpose()?,
         provider_response_id,
+        provider_context_items: Vec::new(),
         finish_reason: LlmFinishReason {
             reason: finish_reason.to_string(),
             raw: None,
