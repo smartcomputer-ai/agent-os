@@ -1,6 +1,7 @@
 use aos_llm::{
-    AnthropicAdapter, AnthropicAdapterConfig, Client, Message, ProviderErrorKind, Request,
-    Response, SDKError, StreamEventType, StreamEventTypeOrString, ToolChoice, ToolDefinition,
+    AnthropicAdapter, AnthropicAdapterConfig, Client, CompactionItemKind, CompactionRequest,
+    Message, ProviderErrorKind, Request, Response, SDKError, StreamEventType,
+    StreamEventTypeOrString, ToolChoice, ToolDefinition,
 };
 use futures::StreamExt;
 use serde_json::json;
@@ -25,6 +26,11 @@ fn live_tests_enabled() -> bool {
 
 fn live_model() -> String {
     env_or_dotenv_var("ANTHROPIC_LIVE_MODEL").unwrap_or_else(|| "claude-sonnet-4-5".to_string())
+}
+
+fn compact_live_model() -> String {
+    env_or_dotenv_var("ANTHROPIC_COMPACT_LIVE_MODEL")
+        .unwrap_or_else(|| "claude-sonnet-4-6".to_string())
 }
 
 fn dotenv_candidates() -> Vec<PathBuf> {
@@ -285,6 +291,50 @@ async fn anthropic_live_complete_returns_non_empty_text() {
     assert_eq!(response.provider, "anthropic");
     assert!(!response.text().trim().is_empty());
     assert!(response.usage.total_tokens > 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires RUN_LIVE_ANTHROPIC_TESTS=1 and ANTHROPIC_API_KEY (env or .env)"]
+async fn anthropic_live_compact_request_is_accepted() {
+    if !live_tests_enabled() {
+        return;
+    }
+
+    let Some(client) = build_live_client() else {
+        return;
+    };
+
+    let response = client
+        .compact(CompactionRequest {
+            model: compact_live_model(),
+            messages: vec![
+                Message::user("Remember that project codename is cobalt."),
+                Message::assistant("Noted: project codename is cobalt."),
+                Message::user(
+                    "Compact this short conversation. Preserve the codename fact exactly.",
+                ),
+            ],
+            provider: Some("anthropic".to_string()),
+            target_tokens: None,
+            provider_options: None,
+        })
+        .await
+        .expect("anthropic live compact");
+
+    assert_eq!(response.provider, "anthropic");
+    assert!(
+        !response.output_items.is_empty(),
+        "expected compact output items"
+    );
+    assert!(
+        response.output_items.iter().any(|item| matches!(
+            item.kind,
+            CompactionItemKind::Compaction | CompactionItemKind::Message
+        )),
+        "expected compaction or normal message item, got {:?}",
+        response.output_items
+    );
+    assert!(response.raw.is_some());
 }
 
 #[tokio::test(flavor = "current_thread")]

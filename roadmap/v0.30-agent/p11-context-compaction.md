@@ -522,15 +522,16 @@ Do not implement a full summarizer, memory engine, full provider compatibility m
 
 ### First backend
 
-Start with deterministic backends, not provider-native compaction:
+Start with deterministic backends, then plug in provider-native compaction once the workflow surface is stable:
 
 1. register `sys/llm.compact@1` and the `llm.compact` route alias in the adapter registry,
 2. add a `StubLlmCompactAdapter` that decodes `LlmCompactParams` and returns a deterministic `LlmCompactReceipt` with an `AosSummary` active-window item,
 3. extend `MockLlmHarness` so tests can collect compact requests and respond with a stored AOS-summary blob,
 4. let the workflow apply the compact receipt, append a `CompactionRecord`, update `compacted_through`, replace `active_window_items`, clear the pending operation, and unblock the pending LLM turn,
-5. keep OpenAI and Anthropic native compaction adapters deferred until the agent state machine and AIR surface are proven with deterministic tests.
+5. add `aos-llm` compact APIs for OpenAI Responses `POST /v1/responses/compact` and Anthropic Messages `context_management.edits` with `compact_20260112`,
+6. wire configured `aos-effect-adapters` LLM providers to `sys/llm.compact@1`, with stub/mock behavior only when no real LLM adapter config is present.
 
-This means the first backend is effectively stub/mock plus scripted AOS-summary behavior. It is the right starting point because compaction correctness is primarily a workflow/state transition problem: provider-native implementations should only plug in after `sys/llm.compact@1` receipts, traces, and active-window replacement are deterministic.
+This means the first implementation proves workflow correctness with stub/mock plus scripted AOS-summary behavior, while the configured adapter path can already return provider-native compaction artifacts. Compaction correctness remains primarily a workflow/state transition problem: provider-native implementations should plug into the same `sys/llm.compact@1` receipt, trace, and active-window replacement path rather than bypassing it.
 
 ## Deferred
 

@@ -4,10 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aos_air_types::HashRef;
-use aos_effect_adapters::adapters::llm::LlmAdapter;
+use aos_effect_adapters::adapters::llm::{LlmAdapter, LlmCompactAdapter};
 use aos_effect_adapters::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::builtins::{
+    LlmCompactParams, LlmCompactReceipt, LlmCompactStrategy, LlmCompactionArtifactKind,
     LlmGenerateParams, LlmProviderCompatibility, LlmRuntimeArgs, LlmWindowItem, LlmWindowItemKind,
 };
 use aos_effects::{EffectIntent, ReceiptStatus, effect_ops};
@@ -395,6 +396,121 @@ async fn llm_happy_path_ok_receipt() {
     let payload: aos_effects::builtins::LlmGenerateReceipt =
         serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
     assert!(!payload.output_ref.as_str().is_empty());
+}
+
+#[tokio::test]
+async fn llm_compact_adapter_returns_provider_native_window_items() {
+    if !loopback_available().await {
+        eprintln!(
+            "skipping llm_compact_adapter_returns_provider_native_window_items: loopback bind not permitted"
+        );
+        return;
+    }
+
+    let store = Arc::new(MemStore::new());
+    let message = serde_json::to_vec(&json!({"role":"user","content":"compact me"})).unwrap();
+    let message_ref = HashRef::new(store.put_blob(&message).unwrap().to_hex()).unwrap();
+
+    let body = br#"{
+      "id": "resp_compact_1",
+      "object": "response.compaction",
+      "created_at": 1764967971,
+      "output": [
+        {
+          "id": "msg_000",
+          "type": "message",
+          "status": "completed",
+          "role": "user",
+          "content": [{ "type": "input_text", "text": "compact me" }]
+        },
+        {
+          "id": "cmp_001",
+          "type": "compaction",
+          "encrypted_content": "encrypted-summary"
+        }
+      ],
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 4,
+        "total_tokens": 14
+      }
+    }"#;
+    let (addr, capture_rx) = start_test_server_with_capture(body, "200 OK").await;
+
+    let mut providers = HashMap::new();
+    providers.insert(
+        "openai-responses".into(),
+        ProviderConfig {
+            base_url: format!("http://{}", addr),
+            timeout: Duration::from_secs(2),
+            api_kind: LlmApiKind::Responses,
+        },
+    );
+    let cfg = LlmAdapterConfig {
+        providers,
+        default_provider: "openai-responses".into(),
+    };
+    let adapter = LlmCompactAdapter::new(store.clone(), cfg);
+
+    let params = LlmCompactParams {
+        correlation_id: None,
+        operation_id: "ctx-op-1".into(),
+        provider: "openai-responses".into(),
+        model: "gpt-5.2".into(),
+        strategy: LlmCompactStrategy::ProviderNative,
+        source_window_items: vec![LlmWindowItem::message_ref(message_ref.clone())],
+        preserve_window_items: Vec::new(),
+        recent_tail_items: Vec::new(),
+        source_range: Some(aos_effects::builtins::LlmTranscriptRange {
+            start_seq: 0,
+            end_seq: 1,
+        }),
+        target_tokens: Some(1024),
+        provider_options_ref: None,
+        api_key: Some("key".into()),
+    };
+    let intent = build_intent(
+        effect_ops::LLM_COMPACT,
+        serde_cbor::to_vec(&params).unwrap(),
+    );
+
+    let receipt = adapter.execute(&intent).await.unwrap();
+    assert_eq!(receipt.status, ReceiptStatus::Ok);
+    let raw_request = capture_rx.await.expect("captured request");
+    assert!(
+        String::from_utf8_lossy(&raw_request)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .contains("/responses/compact")
+    );
+    let request_body: serde_json::Value =
+        serde_json::from_slice(extract_http_body(&raw_request)).expect("request body JSON");
+    assert_eq!(
+        request_body.get("model").and_then(|v| v.as_str()),
+        Some("gpt-5.2")
+    );
+    assert!(request_body.get("input").is_some());
+
+    let payload: LlmCompactReceipt = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    assert_eq!(payload.operation_id, "ctx-op-1");
+    assert!(matches!(
+        payload.artifact_kind,
+        LlmCompactionArtifactKind::ProviderNative
+    ));
+    assert_eq!(payload.artifact_refs.len(), 1);
+    assert_eq!(payload.active_window_items.len(), 2);
+    assert!(payload.active_window_items.iter().any(|item| {
+        matches!(item.kind, LlmWindowItemKind::ProviderNativeArtifactRef)
+            && item
+                .provider_compatibility
+                .as_ref()
+                .is_some_and(|compat| compat.provider == "openai-responses")
+    }));
+    assert_eq!(
+        payload.token_usage.as_ref().map(|usage| usage.total),
+        Some(Some(14))
+    );
 }
 
 #[tokio::test]

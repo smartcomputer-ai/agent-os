@@ -10,8 +10,7 @@ use adapters::registry::AdapterRegistry;
 #[cfg(not(feature = "adapter-http"))]
 use adapters::stub::StubHttpAdapter;
 use adapters::stub::{
-    StubLlmAdapter, StubLlmCompactAdapter, StubTimerAdapter, StubVaultPutAdapter,
-    StubVaultRotateAdapter,
+    StubLlmAdapter, StubTimerAdapter, StubVaultPutAdapter, StubVaultRotateAdapter,
 };
 use aos_effects::effect_ops;
 use aos_kernel::Store;
@@ -79,17 +78,22 @@ pub fn default_registry<S: Store + 'static>(
     {
         if let Some(llm_cfg) = &config.llm {
             registry.register(Box::new(adapters::llm::LlmAdapter::new(
+                store.clone(),
+                llm_cfg.clone(),
+            )));
+            registry.register(Box::new(adapters::llm::LlmCompactAdapter::new(
                 store,
                 llm_cfg.clone(),
             )));
         } else {
             registry.register(Box::new(StubLlmAdapter));
+            registry.register(Box::new(adapters::stub::StubLlmCompactAdapter));
         }
     }
-    registry.register(Box::new(StubLlmCompactAdapter));
     #[cfg(not(feature = "adapter-llm"))]
     {
         registry.register(Box::new(StubLlmAdapter));
+        registry.register(Box::new(adapters::stub::StubLlmCompactAdapter));
     }
 
     register_builtin_route_aliases(&mut registry);

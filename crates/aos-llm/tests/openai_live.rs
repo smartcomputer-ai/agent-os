@@ -1,6 +1,7 @@
 use aos_llm::{
-    Client, Message, OpenAIAdapter, OpenAIAdapterConfig, ProviderErrorKind, Request, Response,
-    SDKError, StreamEventType, StreamEventTypeOrString, ToolChoice, ToolDefinition,
+    Client, CompactionItemKind, CompactionRequest, Message, OpenAIAdapter, OpenAIAdapterConfig,
+    ProviderErrorKind, Request, Response, SDKError, StreamEventType, StreamEventTypeOrString,
+    ToolChoice, ToolDefinition,
 };
 use futures::StreamExt;
 use serde_json::json;
@@ -274,6 +275,50 @@ async fn openai_live_complete_returns_non_empty_text() {
     assert_eq!(response.provider, "openai");
     assert!(!response.text().trim().is_empty());
     assert!(response.usage.total_tokens > 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires RUN_LIVE_OPENAI_TESTS=1 and OPENAI_API_KEY (env or .env)"]
+async fn openai_live_compact_returns_provider_items() {
+    if !live_tests_enabled() {
+        return;
+    }
+
+    let Some(client) = build_live_client() else {
+        return;
+    };
+
+    let response = client
+        .compact(CompactionRequest {
+            model: live_model(),
+            messages: vec![
+                Message::user("Remember that project codename is cobalt."),
+                Message::assistant("Noted: project codename is cobalt."),
+                Message::user(
+                    "Compact this short conversation. Preserve the codename fact exactly.",
+                ),
+            ],
+            provider: Some("openai".to_string()),
+            target_tokens: Some(1024),
+            provider_options: None,
+        })
+        .await
+        .expect("openai live compact");
+
+    assert_eq!(response.provider, "openai");
+    assert!(
+        !response.output_items.is_empty(),
+        "expected compact output items"
+    );
+    assert!(
+        response.output_items.iter().any(|item| matches!(
+            item.kind,
+            CompactionItemKind::Compaction | CompactionItemKind::Message
+        )),
+        "expected compaction or retained message item, got {:?}",
+        response.output_items
+    );
+    assert!(response.raw.is_some());
 }
 
 #[tokio::test(flavor = "current_thread")]

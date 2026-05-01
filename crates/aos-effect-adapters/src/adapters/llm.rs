@@ -3,16 +3,18 @@ use std::sync::Arc;
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_effects::builtins::{
-    LlmFinishReason, LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCall,
-    LlmToolCallList, LlmToolChoice, LlmUsageDetails, LlmWindowItem, TokenUsage,
+    LlmCompactParams, LlmCompactReceipt, LlmCompactionArtifactKind, LlmFinishReason,
+    LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmProviderCompatibility,
+    LlmToolCall, LlmToolCallList, LlmToolChoice, LlmUsageDetails, LlmWindowItem, LlmWindowItemKind,
+    TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use aos_kernel::Store;
 use aos_llm::{
-    AdapterTimeout, AnthropicAdapter, AnthropicAdapterConfig, ContentPart, Message, OpenAIAdapter,
-    OpenAIAdapterConfig, OpenAICompatibleAdapter, OpenAICompatibleAdapterConfig, ProviderAdapter,
-    Request, ResponseFormat, Role, SDKError, ToolCallData, ToolChoice, ToolDefinition,
-    ToolResultData,
+    AdapterTimeout, AnthropicAdapter, AnthropicAdapterConfig, CompactionItemKind,
+    CompactionRequest, ContentPart, Message, OpenAIAdapter, OpenAIAdapterConfig,
+    OpenAICompatibleAdapter, OpenAICompatibleAdapterConfig, ProviderAdapter, Request,
+    ResponseFormat, Role, SDKError, ToolCallData, ToolChoice, ToolDefinition, ToolResultData,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -26,6 +28,11 @@ pub struct LlmAdapter<S: Store> {
     config: LlmAdapterConfig,
 }
 
+pub struct LlmCompactAdapter<S: Store> {
+    store: Arc<S>,
+    config: LlmAdapterConfig,
+}
+
 impl<S: Store> LlmAdapter<S> {
     pub fn new(store: Arc<S>, config: LlmAdapterConfig) -> Self {
         Self { store, config }
@@ -35,8 +42,10 @@ impl<S: Store> LlmAdapter<S> {
         self.config.providers.get(name)
     }
 
-    fn resolve_api_key(params: &LlmGenerateParams) -> Result<String, String> {
-        let Some(api_key) = params.api_key.as_ref() else {
+    fn resolve_api_key(
+        api_key: Option<&aos_effects::builtins::TextOrSecretRef>,
+    ) -> Result<String, String> {
+        let Some(api_key) = api_key else {
             return Err(
                 "api_key missing (use secret ref in params and kernel secret injection)".into(),
             );
@@ -127,11 +136,44 @@ impl<S: Store> LlmAdapter<S> {
         }
     }
 
-    fn load_messages(&self, refs: &[HashRef]) -> Result<Vec<Message>, String> {
+    fn load_window_item_messages(
+        &self,
+        items: &[LlmWindowItem],
+        provider: &str,
+        model: &str,
+    ) -> Result<Vec<Message>, String> {
         let mut messages = Vec::new();
-        for reference in refs {
-            let mut loaded = self.load_message(reference)?;
-            messages.append(&mut loaded);
+        for item in items {
+            let Some(reference) = item.renderable_message_ref(provider, model) else {
+                return Err(format!(
+                    "window item '{}' is not renderable for provider '{}' model '{}'",
+                    item.item_id, provider, model
+                ));
+            };
+            match item.kind {
+                LlmWindowItemKind::ProviderNativeArtifactRef
+                | LlmWindowItemKind::ProviderRawWindowRef => {
+                    let raw = self.load_json_blob(reference, "provider_window_item_ref")?;
+                    let kind = raw
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("provider_item")
+                        .to_string();
+                    messages.push(Message {
+                        role: Role::Assistant,
+                        content: vec![ContentPart::provider_item(kind, raw)],
+                        name: None,
+                        tool_call_id: None,
+                    });
+                }
+                _ => {
+                    let mut loaded = self.load_message(reference)?;
+                    messages.append(&mut loaded);
+                }
+            }
+        }
+        if messages.is_empty() {
+            return Err("window_items empty".into());
         }
         Ok(messages)
     }
@@ -255,6 +297,113 @@ impl<S: Store> LlmAdapter<S> {
     }
 }
 
+impl<S: Store> LlmCompactAdapter<S> {
+    pub fn new(store: Arc<S>, config: LlmAdapterConfig) -> Self {
+        Self { store, config }
+    }
+
+    fn provider(&self, name: &str) -> Option<&ProviderConfig> {
+        self.config.providers.get(name)
+    }
+
+    fn load_window_item_messages(
+        &self,
+        items: &[LlmWindowItem],
+        provider: &str,
+        model: &str,
+    ) -> Result<Vec<Message>, String> {
+        let adapter = LlmAdapter {
+            store: self.store.clone(),
+            config: self.config.clone(),
+        };
+        adapter.load_window_item_messages(items, provider, model)
+    }
+
+    fn load_json_blob(&self, reference: &HashRef, field: &str) -> Result<Value, String> {
+        let adapter = LlmAdapter {
+            store: self.store.clone(),
+            config: self.config.clone(),
+        };
+        adapter.load_json_blob(reference, field)
+    }
+
+    fn store_json_blob(&self, value: &Value) -> Result<HashRef, String> {
+        let adapter = LlmAdapter {
+            store: self.store.clone(),
+            config: self.config.clone(),
+        };
+        adapter.store_json_blob(value)
+    }
+
+    async fn compact_with_provider(
+        &self,
+        provider: &ProviderConfig,
+        api_key: String,
+        request: CompactionRequest,
+    ) -> Result<aos_llm::CompactionResponse, SDKError> {
+        match provider.api_kind {
+            LlmApiKind::Responses => {
+                let mut cfg = OpenAIAdapterConfig::new(api_key);
+                cfg.base_url = provider.base_url.clone();
+                cfg.timeout = to_adapter_timeout(provider.timeout);
+                let adapter = OpenAIAdapter::new(cfg)?;
+                adapter.compact(request).await
+            }
+            LlmApiKind::AnthropicMessages => {
+                let mut cfg = AnthropicAdapterConfig::new(api_key);
+                cfg.base_url = provider.base_url.clone();
+                cfg.timeout = to_adapter_timeout(provider.timeout);
+                let adapter = AnthropicAdapter::new(cfg)?;
+                adapter.compact(request).await
+            }
+            LlmApiKind::ChatCompletions => {
+                Err(SDKError::Configuration(aos_llm::ConfigurationError::new(
+                    "OpenAI-compatible chat completions does not support explicit compaction",
+                )))
+            }
+        }
+    }
+
+    fn failure_receipt(
+        &self,
+        intent: &EffectIntent,
+        params: Option<&LlmCompactParams>,
+        provider_id: &str,
+        status: ReceiptStatus,
+        message: impl Into<String>,
+    ) -> EffectReceipt {
+        let warnings_ref = self
+            .store_json_blob(&serde_json::json!({ "error": message.into() }))
+            .ok();
+        let receipt = LlmCompactReceipt {
+            operation_id: params
+                .map(|params| params.operation_id.clone())
+                .unwrap_or_else(|| "unknown".into()),
+            artifact_kind: LlmCompactionArtifactKind::AosSummary,
+            artifact_refs: Vec::new(),
+            source_range: params.and_then(|params| params.source_range.clone()),
+            compacted_through: None,
+            active_window_items: Vec::new(),
+            token_usage: Some(TokenUsage {
+                prompt: 0,
+                completion: 0,
+                total: Some(0),
+            }),
+            provider_metadata_ref: None,
+            warnings_ref,
+            provider_id: provider_id.to_string(),
+        };
+        EffectReceipt {
+            intent_hash: intent.intent_hash,
+            status,
+            payload_cbor: serde_cbor::to_vec(&receipt)
+                .expect("encode llm.compact failure receipt payload"),
+            cost_cents: None,
+            signature: vec![0; 64],
+        }
+    }
+}
+
 #[async_trait]
 impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
     fn kind(&self) -> &str {
@@ -283,7 +432,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        let api_key = match Self::resolve_api_key(&params) {
+        let api_key = match Self::resolve_api_key(params.api_key.as_ref()) {
             Ok(key) => key,
             Err(message) => {
                 return Ok(self.failure_receipt(
@@ -295,18 +444,11 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        let message_refs = match Self::render_window_item_refs(
+        let messages = match self.load_window_item_messages(
             &params.window_items,
             &provider_id,
             params.model.as_str(),
         ) {
-            Ok(refs) => refs,
-            Err(err) => {
-                return Ok(self.failure_receipt(intent, &provider_id, ReceiptStatus::Error, err));
-            }
-        };
-
-        let messages = match self.load_messages(&message_refs) {
             Ok(messages) => messages,
             Err(err) => {
                 return Ok(self.failure_receipt(intent, &provider_id, ReceiptStatus::Error, err));
@@ -552,6 +694,228 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
     }
 }
 
+#[async_trait]
+impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmCompactAdapter<S> {
+    fn kind(&self) -> &str {
+        aos_effects::effect_ops::LLM_COMPACT
+    }
+
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+        let params: LlmCompactParams = match serde_cbor::from_slice(&intent.params_cbor) {
+            Ok(params) => params,
+            Err(err) => {
+                return Ok(self.failure_receipt(
+                    intent,
+                    None,
+                    "unknown",
+                    ReceiptStatus::Error,
+                    format!("decode LlmCompactParams: {err}"),
+                ));
+            }
+        };
+
+        let provider_id = if params.provider.is_empty() {
+            self.config.default_provider.clone()
+        } else {
+            params.provider.clone()
+        };
+        let provider = match self.provider(&provider_id) {
+            Some(provider) => provider,
+            None => {
+                return Ok(self.failure_receipt(
+                    intent,
+                    Some(&params),
+                    &provider_id,
+                    ReceiptStatus::Error,
+                    format!("unknown provider {provider_id}"),
+                ));
+            }
+        };
+        let api_key = match LlmAdapter::<S>::resolve_api_key(params.api_key.as_ref()) {
+            Ok(key) => key,
+            Err(message) => {
+                return Ok(self.failure_receipt(
+                    intent,
+                    Some(&params),
+                    &provider_id,
+                    ReceiptStatus::Error,
+                    message,
+                ));
+            }
+        };
+        if let Err(err) = LlmAdapter::<S>::render_window_item_refs(
+            &params.source_window_items,
+            &provider_id,
+            params.model.as_str(),
+        ) {
+            return Ok(self.failure_receipt(
+                intent,
+                Some(&params),
+                &provider_id,
+                ReceiptStatus::Error,
+                err,
+            ));
+        }
+        let messages = match self.load_window_item_messages(
+            &params.source_window_items,
+            &provider_id,
+            params.model.as_str(),
+        ) {
+            Ok(messages) => messages,
+            Err(err) => {
+                return Ok(self.failure_receipt(
+                    intent,
+                    Some(&params),
+                    &provider_id,
+                    ReceiptStatus::Error,
+                    err,
+                ));
+            }
+        };
+        let provider_options = if let Some(reference) = params.provider_options_ref.as_ref() {
+            match self.load_json_blob(reference, "provider_options_ref") {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        Some(&params),
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        err,
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        let request = CompactionRequest {
+            model: params.model.clone(),
+            messages,
+            provider: Some(provider_id.clone()),
+            target_tokens: params.target_tokens,
+            provider_options,
+        };
+        let response = match self.compact_with_provider(provider, api_key, request).await {
+            Ok(response) => response,
+            Err(err) => {
+                let status = map_error_status(&err);
+                return Ok(self.failure_receipt(
+                    intent,
+                    Some(&params),
+                    &provider_id,
+                    status,
+                    format!("provider compact request failed: {err}"),
+                ));
+            }
+        };
+
+        let source_refs = params
+            .source_window_items
+            .iter()
+            .map(|item| item.ref_.clone())
+            .collect::<Vec<_>>();
+        let api_kind = llm_api_kind_name(provider.api_kind).to_string();
+        let mut artifact_refs = Vec::new();
+        let mut active_window_items = Vec::new();
+        for (idx, item) in response.output_items.iter().enumerate() {
+            let raw_ref = match self.store_json_blob(&item.raw) {
+                Ok(reference) => reference,
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        Some(&params),
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        format!("store compaction item failed: {err}"),
+                    ));
+                }
+            };
+            let is_artifact = matches!(item.kind, CompactionItemKind::Compaction);
+            if is_artifact {
+                artifact_refs.push(raw_ref.clone());
+            }
+            active_window_items.push(LlmWindowItem {
+                item_id: item.id.clone().unwrap_or_else(|| {
+                    format!("compact:{}:provider-item:{idx}", params.operation_id)
+                }),
+                kind: if is_artifact {
+                    LlmWindowItemKind::ProviderNativeArtifactRef
+                } else {
+                    LlmWindowItemKind::ProviderRawWindowRef
+                },
+                ref_: raw_ref,
+                lane: Some("Summary".into()),
+                source_range: params.source_range.clone(),
+                source_refs: source_refs.clone(),
+                provider_compatibility: Some(LlmProviderCompatibility {
+                    provider: provider_id.clone(),
+                    api_kind: api_kind.clone(),
+                    model: Some(response.model.clone()),
+                    model_family: None,
+                    artifact_type: item
+                        .raw
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("provider_item")
+                        .to_string(),
+                    opaque: item.encrypted_content.is_some(),
+                    encrypted: item.encrypted_content.is_some(),
+                }),
+                estimated_tokens: None,
+                metadata: Default::default(),
+            });
+        }
+
+        if active_window_items.is_empty() {
+            active_window_items.extend(params.preserve_window_items.clone());
+            active_window_items.extend(params.recent_tail_items.clone());
+        }
+        if artifact_refs.is_empty() {
+            artifact_refs = active_window_items
+                .iter()
+                .map(|item| item.ref_.clone())
+                .collect();
+        }
+
+        let provider_metadata_ref = response
+            .raw
+            .as_ref()
+            .and_then(|raw| self.store_json_blob(raw).ok());
+        let warnings_ref = if response.warnings.is_empty() {
+            None
+        } else {
+            serde_json::to_value(&response.warnings)
+                .ok()
+                .and_then(|value| self.store_json_blob(&value).ok())
+        };
+        let receipt = LlmCompactReceipt {
+            operation_id: params.operation_id.clone(),
+            artifact_kind: LlmCompactionArtifactKind::ProviderNative,
+            artifact_refs,
+            source_range: params.source_range.clone(),
+            compacted_through: params.source_range.as_ref().map(|range| range.end_seq),
+            active_window_items,
+            token_usage: Some(TokenUsage {
+                prompt: response.usage.input_tokens,
+                completion: response.usage.output_tokens,
+                total: Some(response.usage.total_tokens),
+            }),
+            provider_metadata_ref,
+            warnings_ref,
+            provider_id,
+        };
+
+        Ok(EffectReceipt {
+            intent_hash: intent.intent_hash,
+            status: ReceiptStatus::Ok,
+            payload_cbor: serde_cbor::to_vec(&receipt)?,
+            cost_cents: None,
+            signature: vec![0; 64],
+        })
+    }
+}
+
 fn to_adapter_timeout(timeout: std::time::Duration) -> AdapterTimeout {
     let request = timeout.as_secs_f64();
     if request <= 0.0 {
@@ -571,6 +935,14 @@ fn map_error_status(error: &SDKError) -> ReceiptStatus {
             ReceiptStatus::Timeout
         }
         _ => ReceiptStatus::Error,
+    }
+}
+
+fn llm_api_kind_name(kind: LlmApiKind) -> &'static str {
+    match kind {
+        LlmApiKind::Responses => "responses",
+        LlmApiKind::ChatCompletions => "chat_completions",
+        LlmApiKind::AnthropicMessages => "anthropic_messages",
     }
 }
 
@@ -732,6 +1104,17 @@ fn parse_message_value(value: Value) -> Result<Vec<Message>, String> {
                             tool_call_id: None,
                         }]);
                     }
+                    "compaction" => {
+                        return Ok(vec![Message {
+                            role: Role::Assistant,
+                            content: vec![ContentPart::provider_item(
+                                "compaction",
+                                Value::Object(obj.clone()),
+                            )],
+                            name: None,
+                            tool_call_id: None,
+                        }]);
+                    }
                     _ => {}
                 }
             }
@@ -811,6 +1194,10 @@ fn parse_content_part(value: &Value) -> Result<Option<ContentPart>, String> {
                     let call = parse_tool_call_object(value)?;
                     Ok(Some(ContentPart::tool_call(call)))
                 }
+                "compaction" => Ok(Some(ContentPart::provider_item(
+                    "compaction",
+                    value.clone(),
+                ))),
                 "function_call_output" | "tool_result" => {
                     let tool_call_id = obj
                         .get("call_id")

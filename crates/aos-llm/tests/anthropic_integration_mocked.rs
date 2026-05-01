@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::thread;
 
 use aos_llm::{
-    AnthropicAdapter, AnthropicAdapterConfig, Client, Message, Request, StreamEventType,
-    StreamEventTypeOrString,
+    AnthropicAdapter, AnthropicAdapterConfig, Client, CompactionItemKind, CompactionRequest,
+    Message, ProviderAdapter, Request, StreamEventType, StreamEventTypeOrString,
 };
 use futures::StreamExt;
 use serde_json::{Value, json};
@@ -95,6 +95,47 @@ fn spawn_capture_server() -> (String, std::sync::mpsc::Receiver<String>) {
     (format!("http://{}", address), rx)
 }
 
+fn spawn_compaction_capture_server() -> (String, std::sync::mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+    let address = listener.local_addr().expect("listener addr");
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("accept");
+        let mut buffer = vec![0_u8; 65536];
+        let read = socket.read(&mut buffer).expect("read request");
+        let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+        tx.send(request).expect("send request capture");
+
+        let body = json!({
+            "id": "msg_compact_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-opus-4-7",
+            "content": [
+                {
+                    "type": "compaction",
+                    "content": "Summary of the conversation: preserve the key facts."
+                }
+            ],
+            "stop_reason": "compaction",
+            "usage": {"input_tokens": 50000, "output_tokens": 120}
+        })
+        .to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        socket
+            .write_all(response.as_bytes())
+            .expect("write response");
+        socket.flush().expect("flush");
+    });
+
+    (format!("http://{}", address), rx)
+}
+
 fn minimal_request(provider: &str) -> Request {
     Request {
         model: "claude-sonnet-4-5".to_string(),
@@ -163,6 +204,71 @@ async fn client_complete_anthropic_adapter_returns_thinking_and_tool_use() {
     assert!(response.reasoning().is_some());
     assert_eq!(response.usage.cache_write_tokens, Some(5));
     assert_eq!(response.usage.cache_read_tokens, Some(7));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn anthropic_adapter_compact_sets_context_management_and_beta_header() {
+    let (base_url, rx) = spawn_compaction_capture_server();
+    let mut config = AnthropicAdapterConfig::new("test-key");
+    config.base_url = base_url;
+    let adapter = AnthropicAdapter::new(config).expect("adapter");
+
+    let response = adapter
+        .compact(CompactionRequest {
+            model: "claude-opus-4-7".into(),
+            messages: vec![Message::user("hello")],
+            provider: Some("anthropic".into()),
+            target_tokens: Some(75_000),
+            provider_options: Some(json!({
+                "anthropic": {
+                    "compaction": {
+                        "instructions": "Preserve decisions and open tasks."
+                    }
+                }
+            })),
+        })
+        .await
+        .expect("compact");
+
+    let captured = rx.recv().expect("captured request");
+    assert!(captured.contains("anthropic-beta: compact-2026-01-12"));
+    let body = extract_json_body(&captured);
+    let edit = body
+        .get("context_management")
+        .and_then(|value| value.get("edits"))
+        .and_then(Value::as_array)
+        .and_then(|edits| edits.first())
+        .expect("context management edit");
+    assert_eq!(
+        edit.get("type").and_then(Value::as_str),
+        Some("compact_20260112")
+    );
+    assert_eq!(
+        edit.get("pause_after_compaction").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        edit.get("instructions").and_then(Value::as_str),
+        Some("Preserve decisions and open tasks.")
+    );
+    assert_eq!(
+        edit.get("trigger")
+            .and_then(|trigger| trigger.get("value"))
+            .and_then(Value::as_u64),
+        Some(75_000)
+    );
+
+    assert_eq!(response.provider, "anthropic");
+    assert_eq!(response.output_items.len(), 1);
+    assert_eq!(
+        response.output_items[0].kind,
+        CompactionItemKind::Compaction
+    );
+    assert_eq!(
+        response.output_items[0].text.as_deref(),
+        Some("Summary of the conversation: preserve the key facts.")
+    );
+    assert_eq!(response.usage.input_tokens, 50_000);
 }
 
 #[tokio::test(flavor = "current_thread")]
