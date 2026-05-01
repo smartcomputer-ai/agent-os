@@ -132,7 +132,7 @@ tests.
 
 ## Scope
 
-### [ ] 1) Document and enforce the test lane split
+### [x] 1) Document and enforce the test lane split
 
 Required outcome:
 
@@ -147,7 +147,16 @@ First cut:
 3. document that new agent workflows should be able to use `aos-harness-py` for deterministic integration tests.
 4. document that provider credentials and real host/Fabric infrastructure are not required for the deterministic lane.
 
-### [ ] 2) Add an `aos_harness.agent` helper module
+Done:
+
+1. P10 now records the lane split: current `aos-agent` stays on Rust unit tests plus
+   `aos-agent-eval`; new agent workflows can use `aos-harness-py`.
+2. P5 was updated so pending `aos-harness-py` coverage is not a blocker for current `aos-agent`
+   acceptance.
+3. `aos-agent-eval` refactoring/replacement is explicitly a non-goal for this phase.
+4. `crates/aos-harness-py/README.md` documents the additive Python agent helper lane.
+
+### [x] 2) Add an `aos_harness.agent` helper module
 
 Add Python helpers for new agent workflow fixtures:
 
@@ -174,7 +183,21 @@ Suggested helper names:
 8. `run_interrupt_requested(...)`,
 9. `follow_up_input_appended(...)`.
 
-### [ ] 3) Add scripted LLM and blob helpers
+Done:
+
+1. added `crates/aos-harness-py/python/aos_harness/agent.py`.
+2. added `agent_workflow(...)`, including a default one-bin shim for the reusable
+   `aos.agent/SessionWorkflow@1` and explicit `source_root`/`workflow_dir` support for custom
+   agent workflows.
+3. added constants for `aos.agent/SessionWorkflow@1` and `aos.agent/SessionInput@1`.
+4. added session input builders including `session_input`, `run_requested`,
+   `run_start_requested`, `host_session_updated`, `turn_observed`, `run_steer_requested`,
+   `run_interrupt_requested`, and `follow_up_input_appended`.
+5. added `direct_run_cause`, `domain_event_run_cause`, and `cause_ref`.
+6. added tool registry convenience builders including `tool_spec`, `tool_registry_set`, and
+   executor/mapper helpers.
+
+### [x] 3) Add scripted LLM and blob helpers
 
 Required outcome:
 
@@ -197,7 +220,15 @@ Suggested helper names:
 5. `apply_llm_generate_ok(...)`,
 6. `respond_blob_get_bytes(...)`.
 
-### [ ] 4) Add session state, turn plan, and trace assertions
+Done:
+
+1. added `find_effect` and `expect_llm_generate`.
+2. added `llm_output_envelope_bytes`, `llm_tool_calls_bytes`, and `llm_tool_call`.
+3. added `apply_llm_generate_ok`, `respond_blob_get_bytes`, `respond_llm_output_blob`, and
+   `respond_llm_tool_calls_blob`.
+4. these helpers reuse the existing typed receipt helpers and `WorkflowHarness` primitives.
+
+### [x] 4) Add session state, turn plan, and trace assertions
 
 Add Python helpers for:
 
@@ -213,6 +244,14 @@ Add Python helpers for:
 
 The first cut should assert `RunStarted`, `TurnPlanned`, `LlmRequested`, `LlmReceived`, and
 `RunFinished` where applicable.
+
+Done:
+
+1. added `session_state` and `session_key`.
+2. added `current_run`, `current_turn_plan`, `selected_message_refs`, and `selected_tool_ids`.
+3. added `run_trace_entries`, `run_trace_kinds`, `last_trace_kind`, `trace_contains_kind`, and
+   `require_trace_kinds`.
+4. added `run_history_summaries` and `last_llm_usage`.
 
 ### [ ] 5) Add first deterministic agent fixtures
 
@@ -232,6 +271,13 @@ Add a narrow set first:
 The goal is to prove the Python harness can express an agent session story deterministically for
 new agent workflows, not to port current `aos-agent-eval` cases.
 
+Progress:
+
+1. `crates/aos-harness-py/examples/agent_no_tool_llm.py` demonstrates the no-tool LLM completion
+   lane using `aos_harness.agent`.
+2. Remaining work is to turn examples into checked fixtures and add host-ready planning,
+   tool-call, intervention, and domain-event coverage.
+
 ### [ ] 6) Add replay/reopen checks
 
 Required outcome:
@@ -241,7 +287,13 @@ Required outcome:
 3. reopened trace summaries match the original deterministic run,
 4. replay/reopen checks do not require provider credentials or live adapters.
 
-### [ ] 7) Defer broad eval migration and Fabric modes
+Progress:
+
+1. `agent_no_tool_llm.py` includes a basic `WorkflowHarness.reopen()` assertion for the completed
+   no-tool run.
+2. Remaining work is to apply reopen checks consistently across the deterministic fixture suite.
+
+### [x] 7) Defer broad eval migration and Fabric modes
 
 Deferred:
 
@@ -253,6 +305,12 @@ Deferred:
 6. Fabric live-gated tests,
 7. direct skill resolver tests,
 8. a shared JSON case format for scripted and live runners.
+
+Done:
+
+1. P10 explicitly defers broad `aos-agent-eval` migration, changing/replacing `aos-agent-eval`,
+   Fabric modes, live providers, and shared scripted/live case formats.
+2. The implemented Python helper lane is additive and does not refactor `aos-agent-eval`.
 
 ## Non-Goals
 

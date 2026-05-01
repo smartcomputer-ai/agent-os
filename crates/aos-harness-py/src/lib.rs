@@ -196,10 +196,12 @@ fn receipt_from_py(receipt: &Bound<'_, PyAny>) -> PyResult<EffectReceipt> {
         .extract()?;
     let cost_cents: Option<u64> = receipt
         .get_item("cost_cents")?
+        .filter(|value| !value.is_none())
         .map(|value| value.extract())
         .transpose()?;
     let signature: Vec<u8> = receipt
         .get_item("signature")?
+        .filter(|value| !value.is_none())
         .map(|value| value.extract())
         .transpose()?
         .unwrap_or_default();
