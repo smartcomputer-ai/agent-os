@@ -3,7 +3,8 @@ use aos_air_types::HashRef;
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, HeaderMap, HttpRequestParams,
     HttpRequestReceipt, LlmCompactParams, LlmCompactReceipt, LlmCompactionArtifactKind,
-    LlmFinishReason, LlmGenerateParams, LlmGenerateReceipt, LlmWindowItem, LlmWindowItemKind,
+    LlmCountTokensParams, LlmCountTokensReceipt, LlmFinishReason, LlmGenerateParams,
+    LlmGenerateReceipt, LlmTokenCountByRef, LlmTokenCountQuality, LlmWindowItem, LlmWindowItemKind,
     RequestTimings, TimerSetParams, TimerSetReceipt, TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
@@ -139,6 +140,54 @@ impl AsyncEffectAdapter for StubLlmCompactAdapter {
             intent_hash: intent.intent_hash,
             status: ReceiptStatus::Ok,
             payload_cbor: encode_receipt_payload("llm.compact", &receipt_payload)?,
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        })
+    }
+}
+
+pub struct StubLlmCountTokensAdapter;
+
+#[async_trait]
+impl AsyncEffectAdapter for StubLlmCountTokensAdapter {
+    fn kind(&self) -> &str {
+        "llm.count_tokens"
+    }
+
+    async fn run_terminal(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
+        let params: LlmCountTokensParams = serde_cbor::from_slice(&intent.params_cbor)
+            .context("decode llm.count_tokens params")?;
+        let input_tokens = params
+            .window_items
+            .iter()
+            .map(|item| item.estimated_tokens.unwrap_or(0))
+            .sum::<u64>();
+        let counts_by_ref = params
+            .window_items
+            .iter()
+            .map(|item| LlmTokenCountByRef {
+                ref_: item.ref_.clone(),
+                tokens: item.estimated_tokens.unwrap_or(0),
+                quality: LlmTokenCountQuality::LocalEstimate,
+            })
+            .collect();
+        let receipt_payload = LlmCountTokensReceipt {
+            input_tokens: Some(input_tokens),
+            original_input_tokens: Some(input_tokens),
+            counts_by_ref,
+            tool_tokens: None,
+            response_format_tokens: None,
+            quality: LlmTokenCountQuality::LocalEstimate,
+            provider: params.provider,
+            model: params.model,
+            candidate_plan_id: params.candidate_plan_id,
+            provider_metadata_ref: None,
+            warnings_ref: None,
+        };
+        Ok(EffectReceipt {
+            intent_hash: intent.intent_hash,
+            status: ReceiptStatus::Ok,
+            payload_cbor: encode_receipt_payload("llm.count_tokens", &receipt_payload)?,
             cost_cents: Some(0),
             signature: vec![0; 64],
         })

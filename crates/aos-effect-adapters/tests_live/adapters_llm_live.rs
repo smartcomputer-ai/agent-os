@@ -5,7 +5,7 @@ mod llm_live_tools;
 use llm_live_common::require_live_matrix;
 use llm_live_scenarios::{
     run_invalid_api_key, run_multi_turn_conversation, run_plain_completion, run_runtime_refs_smoke,
-    run_typed_window_items,
+    run_token_count, run_typed_window_items,
 };
 use llm_live_tools::{run_multi_tool_roundtrip, run_required_tool_call, run_tool_result_roundtrip};
 
@@ -18,6 +18,18 @@ async fn llm_adapter_live_plain_completion_matrix() {
     }
     for case in &matrix {
         run_plain_completion(case).await;
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires RUN_LIVE_LLM_ADAPTER_TESTS=1 and provider keys (OPENAI_API_KEY and/or ANTHROPIC_API_KEY)"]
+async fn llm_adapter_live_token_count_matrix() {
+    let matrix = require_live_matrix();
+    if matrix.is_empty() {
+        return;
+    }
+    for case in &matrix {
+        run_token_count(case).await;
     }
 }
 

@@ -1107,6 +1107,12 @@ define_sys_effect_helpers!(
         LlmGenerateParams
     ),
     (
+        llm_count_tokens,
+        llm_count_tokens_tracked,
+        "sys/llm.count_tokens@1",
+        LlmCountTokensParams
+    ),
+    (
         vault_put,
         vault_put_tracked,
         "sys/vault.put@1",

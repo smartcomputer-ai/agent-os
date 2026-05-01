@@ -295,6 +295,68 @@ pub struct LlmGenerateParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "$tag", content = "$value")]
+pub enum LlmTokenCountQuality {
+    Exact,
+    ProviderEstimate,
+    LocalEstimate,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmTokenCountByRef {
+    pub ref_: HashRef,
+    pub tokens: u64,
+    pub quality: LlmTokenCountQuality,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmCountTokensParams {
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    pub provider: String,
+    pub model: String,
+    pub window_items: Vec<LlmWindowItem>,
+    #[serde(default)]
+    pub tool_definitions_ref: Option<HashRef>,
+    #[serde(default)]
+    pub response_format_ref: Option<HashRef>,
+    #[serde(default)]
+    pub provider_options_ref: Option<HashRef>,
+    #[serde(default)]
+    pub rendering_profile: Option<String>,
+    #[serde(default)]
+    pub candidate_plan_id: Option<String>,
+    #[serde(default)]
+    pub metadata: alloc::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub api_key: Option<TextOrSecretRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmCountTokensReceipt {
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub original_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub counts_by_ref: Vec<LlmTokenCountByRef>,
+    #[serde(default)]
+    pub tool_tokens: Option<u64>,
+    #[serde(default)]
+    pub response_format_tokens: Option<u64>,
+    pub quality: LlmTokenCountQuality,
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub candidate_plan_id: Option<String>,
+    #[serde(default)]
+    pub provider_metadata_ref: Option<HashRef>,
+    #[serde(default)]
+    pub warnings_ref: Option<HashRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
 pub enum LlmCompactStrategy {
     ProviderNative,
     AosSummary,

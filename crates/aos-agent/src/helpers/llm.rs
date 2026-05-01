@@ -9,9 +9,9 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use aos_air_types::HashRef;
 use aos_effects::builtins::{
-    LlmCompactParams, LlmCompactStrategy, LlmGenerateParams, LlmProviderCompatibility,
-    LlmRuntimeArgs, LlmToolChoice, LlmTranscriptRange, LlmWindowItem, LlmWindowItemKind,
-    TextOrSecretRef,
+    LlmCompactParams, LlmCompactStrategy, LlmCountTokensParams, LlmGenerateParams,
+    LlmProviderCompatibility, LlmRuntimeArgs, LlmToolChoice, LlmTranscriptRange, LlmWindowItem,
+    LlmWindowItemKind, TextOrSecretRef,
 };
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +41,19 @@ pub struct LlmCompactStepContext {
     pub strategy: LlmCompactStrategy,
     pub target_tokens: Option<u64>,
     pub provider_options_ref: Option<String>,
+    pub api_key: Option<TextOrSecretRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct LlmCountTokensStepContext {
+    pub correlation_id: Option<String>,
+    pub window_items: Vec<ActiveWindowItem>,
+    pub tool_definitions_ref: Option<String>,
+    pub response_format_ref: Option<String>,
+    pub provider_options_ref: Option<String>,
+    pub rendering_profile: Option<String>,
+    pub candidate_plan_id: Option<String>,
+    pub metadata: BTreeMap<String, String>,
     pub api_key: Option<TextOrSecretRef>,
 }
 
@@ -183,6 +196,55 @@ pub fn materialize_llm_compact_params(
             .as_ref()
             .map(|value| parse_hash_ref(value.clone()))
             .transpose()?,
+        api_key: step.api_key.clone(),
+    })
+}
+
+pub fn materialize_llm_count_tokens_params(
+    run_config: &RunConfig,
+    step: &LlmCountTokensStepContext,
+) -> Result<LlmCountTokensParams, LlmMappingError> {
+    let provider = run_config.provider.trim();
+    if provider.is_empty() {
+        return Err(LlmMappingError::MissingProvider);
+    }
+
+    let model = run_config.model.trim();
+    if model.is_empty() {
+        return Err(LlmMappingError::MissingModel);
+    }
+
+    if step.window_items.is_empty() {
+        return Err(LlmMappingError::EmptyWindowItems);
+    }
+
+    Ok(LlmCountTokensParams {
+        correlation_id: step.correlation_id.clone(),
+        provider: provider.into(),
+        model: model.into(),
+        window_items: step
+            .window_items
+            .iter()
+            .map(map_window_item)
+            .collect::<Result<Vec<_>, _>>()?,
+        tool_definitions_ref: step
+            .tool_definitions_ref
+            .as_ref()
+            .map(|value| parse_hash_ref(value.clone()))
+            .transpose()?,
+        response_format_ref: step
+            .response_format_ref
+            .as_ref()
+            .map(|value| parse_hash_ref(value.clone()))
+            .transpose()?,
+        provider_options_ref: step
+            .provider_options_ref
+            .as_ref()
+            .map(|value| parse_hash_ref(value.clone()))
+            .transpose()?,
+        rendering_profile: step.rendering_profile.clone(),
+        candidate_plan_id: step.candidate_plan_id.clone(),
+        metadata: step.metadata.clone(),
         api_key: step.api_key.clone(),
     })
 }

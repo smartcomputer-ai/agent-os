@@ -1,7 +1,7 @@
 use aos_llm::{
     Client, CompactionItemKind, CompactionRequest, Message, OpenAIAdapter, OpenAIAdapterConfig,
     ProviderErrorKind, Request, Response, SDKError, StreamEventType, StreamEventTypeOrString,
-    ToolChoice, ToolDefinition,
+    TokenCountQuality, TokenCountRequest, ToolChoice, ToolDefinition,
 };
 use futures::StreamExt;
 use serde_json::json;
@@ -317,6 +317,42 @@ async fn openai_live_compact_returns_provider_items() {
         )),
         "expected compaction or retained message item, got {:?}",
         response.output_items
+    );
+    assert!(response.raw.is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires RUN_LIVE_OPENAI_TESTS=1 and OPENAI_API_KEY (env or .env)"]
+async fn openai_live_count_tokens_returns_input_count() {
+    if !live_tests_enabled() {
+        return;
+    }
+
+    let Some(client) = build_live_client() else {
+        return;
+    };
+
+    let response = client
+        .count_tokens(TokenCountRequest {
+            model: live_model(),
+            messages: vec![Message::user(
+                "Count the input tokens for this short live test request.",
+            )],
+            provider: Some("openai".to_string()),
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            provider_options: None,
+        })
+        .await
+        .expect("openai live count_tokens");
+
+    assert_eq!(response.provider, "openai");
+    assert_eq!(response.quality, TokenCountQuality::Exact);
+    assert!(
+        response.input_tokens.unwrap_or_default() > 0,
+        "expected positive input token count: {:?}",
+        response
     );
     assert!(response.raw.is_some());
 }

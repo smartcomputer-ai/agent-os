@@ -291,6 +291,82 @@ fn llm_compact_params_and_receipt_literals_match_builtin_schemas() {
 }
 
 #[test]
+fn llm_count_tokens_params_and_receipt_literals_match_builtin_schemas() {
+    let schemas = SchemaIndex::new(
+        builtin_schemas()
+            .iter()
+            .map(|schema| (schema.schema.name.clone(), schema.schema.ty.clone()))
+            .collect(),
+    );
+    let message_ref =
+        hash("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let window_item = record(vec![
+        ("item_id", text("ledger:0")),
+        ("kind", variant("MessageRef", null())),
+        ("ref_", message_ref.clone()),
+        ("lane", null()),
+        ("source_range", null()),
+        ("source_refs", list(vec![message_ref.clone()])),
+        ("provider_compatibility", null()),
+        ("estimated_tokens", nat(128)),
+        ("metadata", map(vec![])),
+    ]);
+
+    let params_schema =
+        find_builtin_schema("sys/LlmCountTokensParams@1").expect("llm count params schema");
+    let params_literal = record(vec![
+        ("correlation_id", null()),
+        ("provider", text("openai")),
+        ("model", text("gpt-5.2")),
+        ("window_items", list(vec![window_item])),
+        ("tool_definitions_ref", null()),
+        ("response_format_ref", null()),
+        ("provider_options_ref", null()),
+        ("rendering_profile", null()),
+        ("candidate_plan_id", text("plan-1")),
+        ("metadata", map(vec![])),
+        ("api_key", null()),
+    ]);
+    validate_literal(
+        &params_literal,
+        &params_schema.schema.ty,
+        &params_schema.schema.name,
+        &schemas,
+    )
+    .expect("params literal matches schema");
+
+    let receipt_schema =
+        find_builtin_schema("sys/LlmCountTokensReceipt@1").expect("llm count receipt schema");
+    let receipt_literal = record(vec![
+        ("input_tokens", nat(128)),
+        ("original_input_tokens", nat(128)),
+        (
+            "counts_by_ref",
+            list(vec![record(vec![
+                ("ref_", message_ref),
+                ("tokens", nat(128)),
+                ("quality", variant("LocalEstimate", null())),
+            ])]),
+        ),
+        ("tool_tokens", null()),
+        ("response_format_tokens", null()),
+        ("quality", variant("LocalEstimate", null())),
+        ("provider", text("openai")),
+        ("model", text("gpt-5.2")),
+        ("candidate_plan_id", text("plan-1")),
+        ("provider_metadata_ref", null()),
+        ("warnings_ref", null()),
+    ]);
+    validate_literal(
+        &receipt_literal,
+        &receipt_schema.schema.ty,
+        &receipt_schema.schema.name,
+        &schemas,
+    )
+    .expect("receipt literal matches schema");
+}
+
+#[test]
 fn host_target_accepts_local_and_sandbox_variants() {
     let schema = find_builtin_schema("sys/HostTarget@1").expect("host target schema");
     let schemas = SchemaIndex::new(

@@ -11,7 +11,9 @@ use futures::future::BoxFuture;
 use crate::errors::{ConfigurationError, SDKError};
 use crate::provider::{ProviderAdapter, registered_factories};
 use crate::stream::StreamEventStream;
-use crate::types::{CompactionRequest, CompactionResponse, Request, Response};
+use crate::types::{
+    CompactionRequest, CompactionResponse, Request, Response, TokenCountRequest, TokenCountResponse,
+};
 
 pub type CompleteHandler =
     Arc<dyn Fn(Request) -> BoxFuture<'static, Result<Response, SDKError>> + Send + Sync>;
@@ -178,6 +180,22 @@ impl Client {
         adapter.compact(request).await
     }
 
+    pub async fn count_tokens(
+        &self,
+        mut request: TokenCountRequest,
+    ) -> Result<TokenCountResponse, SDKError> {
+        let provider_name = self.resolve_token_count_provider(&request)?;
+        request.provider = Some(provider_name.clone());
+        let adapter = self
+            .providers
+            .get(&provider_name)
+            .ok_or_else(|| {
+                SDKError::Configuration(ConfigurationError::new("provider not registered"))
+            })?
+            .clone();
+        adapter.count_tokens(request).await
+    }
+
     pub fn close(&self) -> Result<(), SDKError> {
         for adapter in self.providers.values() {
             adapter.close()?;
@@ -198,6 +216,21 @@ impl Client {
     }
 
     fn resolve_compaction_provider(&self, request: &CompactionRequest) -> Result<String, SDKError> {
+        if let Some(provider) = &request.provider {
+            return Ok(provider.clone());
+        }
+        if let Some(provider) = &self.default_provider {
+            return Ok(provider.clone());
+        }
+        Err(SDKError::Configuration(ConfigurationError::new(
+            "no provider configured",
+        )))
+    }
+
+    fn resolve_token_count_provider(
+        &self,
+        request: &TokenCountRequest,
+    ) -> Result<String, SDKError> {
         if let Some(provider) = &request.provider {
             return Ok(provider.clone());
         }

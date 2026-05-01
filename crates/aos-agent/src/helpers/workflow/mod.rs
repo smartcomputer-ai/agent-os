@@ -1,7 +1,8 @@
 use super::{
-    DefaultTurnPlanner, LlmCompactStepContext, LlmStepContext, RequestLlm, RequestLlmCompact,
-    SessionEffectCommand, SessionWorkflowOutput, TurnPlanError, TurnRequest, allocate_run_id,
-    can_apply_host_command, pop_follow_up_if_ready, request_llm, request_llm_compact,
+    DefaultTurnPlanner, LlmCompactStepContext, LlmCountTokensStepContext, LlmStepContext,
+    RequestLlm, RequestLlmCompact, RequestLlmCountTokens, SessionEffectCommand,
+    SessionWorkflowOutput, TurnPlanError, TurnRequest, allocate_run_id, can_apply_host_command,
+    pop_follow_up_if_ready, request_llm, request_llm_compact, request_llm_count_tokens,
     transition_lifecycle,
 };
 use crate::contracts::{
@@ -26,7 +27,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use aos_effects::builtins::{
     HostLocalTarget, HostMount, HostSandboxTarget, HostSessionOpenParams, HostTarget,
-    LlmCompactReceipt, LlmCompactStrategy, LlmCompactionArtifactKind, LlmGenerateReceipt,
+    LlmCompactReceipt, LlmCompactStrategy, LlmCompactionArtifactKind, LlmCountTokensReceipt,
+    LlmGenerateReceipt,
 };
 use aos_wasm_sdk::{EffectReceiptEnvelope, EffectReceiptRejected};
 
@@ -1001,6 +1003,69 @@ fn handle_llm_compact_receipt(
     dispatch_pending_llm_turn(state, out)
 }
 
+fn handle_llm_count_tokens_receipt(
+    state: &mut SessionState,
+    envelope: &EffectReceiptEnvelope,
+    out: &mut SessionWorkflowOutput,
+) -> Result<(), SessionWorkflowError> {
+    if envelope.status != "ok" {
+        mark_context_operation_failed(state, "llm.count_tokens receipt status not ok");
+        return Ok(());
+    }
+
+    let Some(receipt): Option<LlmCountTokensReceipt> = envelope.decode_receipt_payload().ok()
+    else {
+        mark_context_operation_failed(state, "invalid llm.count_tokens receipt payload");
+        return Ok(());
+    };
+
+    apply_llm_count_tokens_receipt(state, receipt);
+    dispatch_pending_llm_turn(state, out)
+}
+
+fn apply_llm_count_tokens_receipt(state: &mut SessionState, receipt: LlmCountTokensReceipt) {
+    state.context_state.last_token_count = Some(crate::contracts::LlmTokenCountRecord {
+        input_tokens: receipt.input_tokens,
+        original_input_tokens: receipt.original_input_tokens,
+        tool_tokens: receipt.tool_tokens,
+        response_format_tokens: receipt.response_format_tokens,
+        quality: token_count_quality(receipt.quality.clone()),
+        provider: receipt.provider.clone(),
+        model: receipt.model.clone(),
+        candidate_plan_id: receipt.candidate_plan_id.clone(),
+        provider_metadata_ref: receipt
+            .provider_metadata_ref
+            .as_ref()
+            .map(|value| value.to_string()),
+        warnings_ref: receipt.warnings_ref.as_ref().map(|value| value.to_string()),
+        counted_at_ns: state.updated_at,
+    });
+
+    if let Some(mut operation) = state.context_state.pending_context_operation.clone() {
+        if matches!(operation.phase, ContextOperationPhase::CountingTokens) {
+            operation.phase = ContextOperationPhase::Idle;
+            operation.updated_at_ns = state.updated_at;
+            state.context_state.set_pending_operation(operation);
+        }
+    }
+    sync_current_run_execution(state);
+
+    let mut metadata = BTreeMap::new();
+    metadata.insert("provider".into(), receipt.provider);
+    metadata.insert("model".into(), receipt.model);
+    metadata.insert("quality".into(), format!("{:?}", receipt.quality));
+    if let Some(input_tokens) = receipt.input_tokens {
+        metadata.insert("input_tokens".into(), input_tokens.to_string());
+    }
+    push_run_trace(
+        state,
+        RunTraceEntryKind::TokenCountReceived,
+        "llm token count received",
+        Vec::new(),
+        metadata,
+    );
+}
+
 fn apply_llm_compact_receipt(
     state: &mut SessionState,
     receipt: LlmCompactReceipt,
@@ -1136,6 +1201,25 @@ fn compaction_artifact_kind(value: LlmCompactionArtifactKind) -> CompactionArtif
     }
 }
 
+fn token_count_quality(
+    value: aos_effects::builtins::LlmTokenCountQuality,
+) -> crate::contracts::LlmTokenCountQuality {
+    match value {
+        aos_effects::builtins::LlmTokenCountQuality::Exact => {
+            crate::contracts::LlmTokenCountQuality::Exact
+        }
+        aos_effects::builtins::LlmTokenCountQuality::ProviderEstimate => {
+            crate::contracts::LlmTokenCountQuality::ProviderEstimate
+        }
+        aos_effects::builtins::LlmTokenCountQuality::LocalEstimate => {
+            crate::contracts::LlmTokenCountQuality::LocalEstimate
+        }
+        aos_effects::builtins::LlmTokenCountQuality::Unknown => {
+            crate::contracts::LlmTokenCountQuality::Unknown
+        }
+    }
+}
+
 fn llm_usage_record_from_receipt(receipt: &LlmGenerateReceipt) -> crate::contracts::LlmUsageRecord {
     crate::contracts::LlmUsageRecord {
         prompt_tokens: receipt.token_usage.prompt,
@@ -1225,6 +1309,7 @@ fn on_receipt_envelope(
                 let _ = handle_standalone_host_session_open_receipt(state, envelope, out)?;
             }
             "sys/llm.generate@1" => handle_llm_generate_receipt(state, envelope, out)?,
+            "sys/llm.count_tokens@1" => handle_llm_count_tokens_receipt(state, envelope, out)?,
             "sys/llm.compact@1" => handle_llm_compact_receipt(state, envelope, out)?,
             _ => {}
         }
@@ -1264,6 +1349,9 @@ fn on_receipt_rejected(
                 let _ = handle_standalone_host_session_open_receipt(state, &envelope, out)?;
             }
             "sys/llm.generate@1" => fail_run(state)?,
+            "sys/llm.count_tokens@1" => {
+                mark_context_operation_failed(state, "llm.count_tokens rejected")
+            }
             "sys/llm.compact@1" => mark_context_operation_failed(state, "llm.compact rejected"),
             _ => {}
         }
@@ -1559,6 +1647,13 @@ pub fn dispatch_pending_llm_turn_with_planner<P: TurnPlanner>(
         {
             request_context_compaction(state, out, &plan)?;
         }
+        if plan
+            .prerequisites
+            .iter()
+            .any(|item| matches!(item.kind, TurnPrerequisiteKind::CountTokens))
+        {
+            request_context_token_count(state, out, &plan)?;
+        }
         trace_context_operation_blocked_turn(state, &plan);
         sync_current_run_execution(state);
         return Ok(());
@@ -1698,6 +1793,60 @@ fn request_context_compaction(
     )?;
 
     operation.phase = ContextOperationPhase::Compacting;
+    operation.params_hash = Some(requested.pending.params_hash.clone());
+    operation.updated_at_ns = state.updated_at;
+    state.context_state.set_pending_operation(operation);
+    trace_context_operation_state(state);
+    Ok(())
+}
+
+fn request_context_token_count(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+    plan: &TurnPlan,
+) -> Result<(), SessionWorkflowError> {
+    if state
+        .pending_effects
+        .contains_effect("sys/llm.count_tokens@1")
+    {
+        return Ok(());
+    }
+    let Some(mut operation) = state.context_state.pending_context_operation.clone() else {
+        return Ok(());
+    };
+    if !matches!(operation.phase, ContextOperationPhase::CountingTokens) {
+        return Ok(());
+    }
+
+    let run_seq = state
+        .active_run_id
+        .as_ref()
+        .map(|id| id.run_seq)
+        .unwrap_or(0);
+    let requested = request_llm_count_tokens(
+        state,
+        out,
+        RequestLlmCountTokens {
+            step: LlmCountTokensStepContext {
+                correlation_id: Some(format!("run-{run_seq}-count-tokens")),
+                window_items: plan.active_window_items.clone(),
+                tool_definitions_ref: selected_tool_refs(state, plan).and_then(|refs| {
+                    if refs.len() == 1 {
+                        refs.into_iter().next()
+                    } else {
+                        None
+                    }
+                }),
+                response_format_ref: plan.response_format_ref.clone(),
+                provider_options_ref: plan.provider_options_ref.clone(),
+                rendering_profile: None,
+                candidate_plan_id: Some(hash_cbor(plan)),
+                metadata: BTreeMap::new(),
+                api_key: None,
+            },
+        },
+    )?;
+
     operation.params_hash = Some(requested.pending.params_hash.clone());
     operation.updated_at_ns = state.updated_at;
     state.context_state.set_pending_operation(operation);
@@ -2394,6 +2543,31 @@ fn trace_workflow_output(state: &mut SessionState, out: &SessionWorkflowOutput) 
                     metadata,
                 );
             }
+            SessionEffectCommand::LlmCountTokens { params, pending } => {
+                let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
+                if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
+                    refs.push(trace_ref("issuer_ref", issuer_ref.clone()));
+                }
+                refs.extend(
+                    params
+                        .window_items
+                        .iter()
+                        .map(|item| trace_ref("window_item_ref", item.ref_.to_string())),
+                );
+                let mut metadata = BTreeMap::new();
+                metadata.insert("provider".into(), params.provider.clone());
+                metadata.insert("model".into(), params.model.clone());
+                if let Some(candidate_plan_id) = params.candidate_plan_id.as_ref() {
+                    metadata.insert("candidate_plan_id".into(), candidate_plan_id.clone());
+                }
+                push_run_trace(
+                    state,
+                    RunTraceEntryKind::TokenCountRequested,
+                    "llm token count requested",
+                    refs,
+                    metadata,
+                );
+            }
             SessionEffectCommand::ToolEffect { kind, pending, .. } => {
                 let mut refs = vec![trace_ref("params_hash", pending.params_hash.clone())];
                 if let Some(issuer_ref) = pending.issuer_ref.as_ref() {
@@ -2546,8 +2720,9 @@ mod tests {
     };
     use aos_effects::builtins::{
         BlobGetReceipt, BlobPutReceipt, LlmCompactReceipt, LlmCompactionArtifactKind,
-        LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCall, LlmTranscriptRange,
-        LlmUsageDetails, LlmWindowItem, LlmWindowItemKind, TokenUsage,
+        LlmCountTokensReceipt, LlmFinishReason, LlmGenerateReceipt, LlmOutputEnvelope,
+        LlmTokenCountQuality, LlmToolCall, LlmTranscriptRange, LlmUsageDetails, LlmWindowItem,
+        LlmWindowItemKind, TokenUsage,
     };
 
     fn fake_hash(ch: char) -> String {
@@ -3066,6 +3241,96 @@ mod tests {
                 .entries
                 .iter()
                 .any(|entry| matches!(entry.kind, RunTraceEntryKind::LlmRequested))
+        );
+    }
+
+    #[test]
+    fn llm_count_tokens_receipt_records_count_and_unblocks_llm() {
+        let mut state = SessionState::default();
+        state.session_id = SessionId("s-1".into());
+        let mut operation = ContextOperationState::needs_compaction(
+            "ctx-op-count",
+            ContextPressureReason::Manual,
+            CompactionStrategy::Auto,
+            None,
+            0,
+        );
+        operation.phase = ContextOperationPhase::CountingTokens;
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                0,
+                SessionInputKind::ContextOperationUpdated {
+                    operation: Some(operation),
+                },
+            ),
+        )
+        .expect("context operation update");
+
+        let out = apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+        let count_pending = out
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffectCommand::LlmCountTokens { pending, params } => {
+                    assert_eq!(params.candidate_plan_id.is_some(), true);
+                    Some(pending.clone())
+                }
+                _ => None,
+            })
+            .expect("llm.count_tokens emitted");
+
+        let receipt = LlmCountTokensReceipt {
+            input_tokens: Some(123),
+            original_input_tokens: Some(123),
+            counts_by_ref: Vec::new(),
+            tool_tokens: Some(0),
+            response_format_tokens: None,
+            quality: LlmTokenCountQuality::LocalEstimate,
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            candidate_plan_id: None,
+            provider_metadata_ref: None,
+            warnings_ref: None,
+        };
+
+        let out = apply_session_workflow_event(
+            &mut state,
+            &receipt_event(
+                2,
+                "sys/llm.count_tokens@1",
+                Some(count_pending.params_hash),
+                "ok",
+                &receipt,
+            ),
+        )
+        .expect("count receipt");
+
+        assert!(state.context_state.pending_context_operation.is_none());
+        assert_eq!(
+            state
+                .context_state
+                .last_token_count
+                .as_ref()
+                .and_then(|count| count.input_tokens),
+            Some(123)
+        );
+        assert!(matches!(
+            out.effects.first(),
+            Some(SessionEffectCommand::LlmGenerate { .. })
+        ));
+        let trace = &state.current_run.as_ref().expect("current run").trace;
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::TokenCountRequested))
+        );
+        assert!(
+            trace
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, RunTraceEntryKind::TokenCountReceived))
         );
     }
 
@@ -3969,6 +4234,8 @@ mod tests {
             RunTraceEntryKind::ContextOperationStateChanged => "ContextOperationStateChanged",
             RunTraceEntryKind::CompactionRequested => "CompactionRequested",
             RunTraceEntryKind::CompactionReceived => "CompactionReceived",
+            RunTraceEntryKind::TokenCountRequested => "TokenCountRequested",
+            RunTraceEntryKind::TokenCountReceived => "TokenCountReceived",
             RunTraceEntryKind::ActiveWindowUpdated => "ActiveWindowUpdated",
             RunTraceEntryKind::RunFinished => "RunFinished",
             RunTraceEntryKind::Custom { .. } => "Custom",

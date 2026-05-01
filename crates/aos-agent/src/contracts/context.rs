@@ -1,4 +1,4 @@
-use super::{LlmUsageRecord, TurnInputLane};
+use super::{LlmTokenCountRecord, LlmUsageRecord, TurnInputLane};
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -297,7 +297,7 @@ pub struct ContextState {
     pub pending_context_operation: Option<ContextOperationState>,
     pub last_llm_usage: Option<LlmUsageRecord>,
     pub last_context_pressure: Option<ContextPressureRecord>,
-    pub last_token_count_ref: Option<String>,
+    pub last_token_count: Option<LlmTokenCountRecord>,
     pub last_compaction: Option<CompactionRecord>,
 }
 

@@ -441,9 +441,9 @@
             "ref": "aos.agent/LlmUsageRecord@1"
           }
         },
-        "last_token_count_ref": {
+        "last_token_count": {
           "option": {
-            "text": {}
+            "ref": "aos.agent/LlmTokenCountRecord@1"
           }
         },
         "pending_context_operation": {
@@ -645,6 +645,81 @@
                 "text": {}
               }
             }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmTokenCountQuality@1",
+    "type": {
+      "variant": {
+        "Exact": {
+          "unit": {}
+        },
+        "LocalEstimate": {
+          "unit": {}
+        },
+        "ProviderEstimate": {
+          "unit": {}
+        },
+        "Unknown": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmTokenCountRecord@1",
+    "type": {
+      "record": {
+        "candidate_plan_id": {
+          "option": {
+            "text": {}
+          }
+        },
+        "counted_at_ns": {
+          "time": {}
+        },
+        "input_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "model": {
+          "text": {}
+        },
+        "original_input_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "provider": {
+          "text": {}
+        },
+        "provider_metadata_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "quality": {
+          "ref": "aos.agent/LlmTokenCountQuality@1"
+        },
+        "response_format_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "tool_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "warnings_ref": {
+          "option": {
+            "hash": {}
           }
         }
       }
@@ -1453,6 +1528,12 @@
           "unit": {}
         },
         "StreamFrameObserved": {
+          "unit": {}
+        },
+        "TokenCountReceived": {
+          "unit": {}
+        },
+        "TokenCountRequested": {
           "unit": {}
         },
         "ToolBatchPlanned": {

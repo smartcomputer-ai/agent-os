@@ -26,6 +26,8 @@ pub enum RunTraceEntryKind {
     ContextOperationStateChanged,
     CompactionRequested,
     CompactionReceived,
+    TokenCountRequested,
+    TokenCountReceived,
     ActiveWindowUpdated,
     RunFinished,
     Custom {

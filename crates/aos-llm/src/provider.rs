@@ -8,7 +8,9 @@ use async_trait::async_trait;
 
 use crate::errors::SDKError;
 use crate::stream::StreamEventStream;
-use crate::types::{CompactionRequest, CompactionResponse, Request, Response};
+use crate::types::{
+    CompactionRequest, CompactionResponse, Request, Response, TokenCountRequest, TokenCountResponse,
+};
 
 /// Provider adapter contract.
 #[async_trait]
@@ -21,6 +23,18 @@ pub trait ProviderAdapter: Send + Sync {
         Err(SDKError::Configuration(
             crate::errors::ConfigurationError::new(format!(
                 "provider '{}' does not support explicit compaction",
+                self.name()
+            )),
+        ))
+    }
+
+    async fn count_tokens(
+        &self,
+        _request: TokenCountRequest,
+    ) -> Result<TokenCountResponse, SDKError> {
+        Err(SDKError::Configuration(
+            crate::errors::ConfigurationError::new(format!(
+                "provider '{}' does not support token counting",
                 self.name()
             )),
         ))

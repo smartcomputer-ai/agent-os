@@ -21,8 +21,8 @@ use crate::provider::{ProviderAdapter, ProviderFactory, register_provider_factor
 use crate::stream::{StreamEvent, StreamEventStream, StreamEventType, StreamEventTypeOrString};
 use crate::types::{
     CompactionItem, CompactionItemKind, CompactionRequest, CompactionResponse, ContentKind,
-    ContentPart, FinishReason, Message, RateLimitInfo, Request, Response, Role, ToolCall,
-    ToolCallData, Usage,
+    ContentPart, FinishReason, Message, RateLimitInfo, Request, Response, Role, TokenCountQuality,
+    TokenCountRequest, TokenCountResponse, ToolCall, ToolCallData, Usage,
 };
 use crate::utils::{SseEvent, SseParser, is_local_path, load_file_data};
 
@@ -133,6 +133,13 @@ impl OpenAIAdapter {
             self.config.base_url.trim_end_matches('/')
         )
     }
+
+    fn input_tokens_endpoint(&self) -> String {
+        format!(
+            "{}/responses/input_tokens",
+            self.config.base_url.trim_end_matches('/')
+        )
+    }
 }
 
 #[async_trait]
@@ -189,6 +196,46 @@ impl ProviderAdapter for OpenAIAdapter {
             .await
             .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
         parse_openai_compaction_response(raw_json, "openai", request.model, Some(&headers))
+    }
+
+    async fn count_tokens(
+        &self,
+        request: TokenCountRequest,
+    ) -> Result<TokenCountResponse, SDKError> {
+        let body = build_responses_input_tokens_body(&request)?;
+        let response = self
+            .client
+            .post(self.input_tokens_endpoint())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let retry_after = parse_retry_after(response.headers());
+            let raw = response.text().await.unwrap_or_default();
+            return Err(build_provider_error("openai", status, &raw, retry_after));
+        }
+
+        let raw_json = response
+            .json::<Value>()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+        let input_tokens = raw_json.get("input_tokens").and_then(Value::as_u64);
+        Ok(TokenCountResponse {
+            input_tokens,
+            original_input_tokens: input_tokens,
+            quality: if input_tokens.is_some() {
+                TokenCountQuality::Exact
+            } else {
+                TokenCountQuality::Unknown
+            },
+            model: request.model,
+            provider: "openai".into(),
+            raw: Some(raw_json),
+            warnings: Vec::new(),
+        })
     }
 
     async fn stream(&self, request: Request) -> Result<StreamEventStream, SDKError> {
@@ -1172,6 +1219,30 @@ fn build_responses_compact_body(request: &CompactionRequest) -> Result<Value, SD
         }
     }
 
+    Ok(body)
+}
+
+fn build_responses_input_tokens_body(request: &TokenCountRequest) -> Result<Value, SDKError> {
+    let generation_request = Request {
+        model: request.model.clone(),
+        messages: request.messages.clone(),
+        provider: request.provider.clone(),
+        tools: request.tools.clone(),
+        tool_choice: request.tool_choice.clone(),
+        response_format: request.response_format.clone(),
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        stop_sequences: None,
+        reasoning_effort: None,
+        metadata: None,
+        provider_options: request.provider_options.clone(),
+    };
+    let mut body = build_responses_body(&generation_request, false)?;
+    if let Some(object) = body.as_object_mut() {
+        object.remove("stream");
+        object.remove("max_output_tokens");
+    }
     Ok(body)
 }
 

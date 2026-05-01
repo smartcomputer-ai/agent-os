@@ -20,7 +20,7 @@ use crate::stream::{StreamEvent, StreamEventStream, StreamEventType, StreamEvent
 use crate::types::{
     CompactionItem, CompactionItemKind, CompactionRequest, CompactionResponse, ContentKind,
     ContentPart, FinishReason, Message, RateLimitInfo, Request, Response, Role, ThinkingData,
-    ToolCall, ToolCallData, Usage,
+    TokenCountQuality, TokenCountRequest, TokenCountResponse, ToolCall, ToolCallData, Usage,
 };
 use crate::utils::{SseEvent, SseParser, is_local_path, load_file_data};
 
@@ -109,6 +109,13 @@ impl AnthropicAdapter {
     fn endpoint(&self) -> String {
         format!("{}/messages", self.config.base_url.trim_end_matches('/'))
     }
+
+    fn count_tokens_endpoint(&self) -> String {
+        format!(
+            "{}/messages/count_tokens",
+            self.config.base_url.trim_end_matches('/')
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -179,6 +186,52 @@ impl ProviderAdapter for AnthropicAdapter {
             .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
 
         parse_anthropic_compaction_response(raw_json, "anthropic", Some(&headers))
+    }
+
+    async fn count_tokens(
+        &self,
+        request: TokenCountRequest,
+    ) -> Result<TokenCountResponse, SDKError> {
+        let prepared = build_count_tokens_body(&request)?;
+
+        let mut req = self
+            .client
+            .post(self.count_tokens_endpoint())
+            .json(&prepared.body);
+        if !prepared.beta_headers.is_empty() {
+            req = req.header("anthropic-beta", prepared.beta_headers.join(","));
+        }
+
+        let response = req
+            .send()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let retry_after = parse_retry_after(response.headers());
+            let raw = response.text().await.unwrap_or_default();
+            return Err(build_provider_error("anthropic", status, &raw, retry_after));
+        }
+
+        let raw_json = response
+            .json::<Value>()
+            .await
+            .map_err(|error| SDKError::Network(NetworkError::new(error.to_string())))?;
+        let input_tokens = raw_json.get("input_tokens").and_then(Value::as_u64);
+        Ok(TokenCountResponse {
+            input_tokens,
+            original_input_tokens: input_tokens,
+            quality: if input_tokens.is_some() {
+                TokenCountQuality::ProviderEstimate
+            } else {
+                TokenCountQuality::Unknown
+            },
+            model: request.model,
+            provider: "anthropic".into(),
+            raw: Some(raw_json),
+            warnings: Vec::new(),
+        })
     }
 
     async fn stream(&self, request: Request) -> Result<StreamEventStream, SDKError> {
@@ -997,6 +1050,32 @@ fn build_compact_messages_body(
     };
 
     build_messages_body(&generation_request, false)
+}
+
+fn build_count_tokens_body(
+    request: &TokenCountRequest,
+) -> Result<PreparedAnthropicRequest, SDKError> {
+    let generation_request = Request {
+        model: request.model.clone(),
+        messages: request.messages.clone(),
+        provider: request.provider.clone(),
+        tools: request.tools.clone(),
+        tool_choice: request.tool_choice.clone(),
+        response_format: request.response_format.clone(),
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        stop_sequences: None,
+        reasoning_effort: None,
+        metadata: None,
+        provider_options: request.provider_options.clone(),
+    };
+    let mut prepared = build_messages_body(&generation_request, false)?;
+    if let Some(object) = prepared.body.as_object_mut() {
+        object.remove("max_tokens");
+        object.remove("stream");
+    }
+    Ok(prepared)
 }
 
 fn extract_system_text(messages: &[Message]) -> Vec<String> {

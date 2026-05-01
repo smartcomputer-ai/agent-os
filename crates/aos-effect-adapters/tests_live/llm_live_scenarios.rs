@@ -2,13 +2,16 @@ use std::sync::Arc;
 
 use aos_effect_adapters::traits::AsyncEffectAdapter;
 use aos_effects::ReceiptStatus;
-use aos_effects::builtins::{LlmGenerateParams, LlmWindowItem, LlmWindowItemKind};
+use aos_effects::builtins::{
+    LlmCountTokensParams, LlmGenerateParams, LlmTokenCountQuality, LlmWindowItem, LlmWindowItemKind,
+};
 use aos_kernel::MemStore;
 use serde_json::{Value, json};
 
 use crate::llm_live_common::{
-    ProviderRuntime, assert_ok_receipt, build_intent, decode_envelope, decode_receipt_payload,
-    default_runtime, error_text_from_receipt, make_adapter, store_json,
+    ProviderRuntime, assert_ok_receipt, build_count_tokens_intent, build_intent,
+    decode_count_tokens_receipt_payload, decode_envelope, decode_receipt_payload, default_runtime,
+    error_text_from_receipt, make_adapter, make_count_tokens_adapter, store_json,
 };
 
 pub(crate) async fn run_plain_completion(case: &ProviderRuntime) {
@@ -41,6 +44,65 @@ pub(crate) async fn run_plain_completion(case: &ProviderRuntime) {
         !text.trim().is_empty(),
         "expected assistant text for {}",
         case.provider_id
+    );
+}
+
+pub(crate) async fn run_token_count(case: &ProviderRuntime) {
+    let store = Arc::new(MemStore::new());
+    let adapter = make_count_tokens_adapter(store.clone(), case);
+
+    let message_ref = store_json(
+        &store,
+        &json!({"role":"user","content":"Count these tokens for the live adapter smoke test."}),
+    );
+    let params = LlmCountTokensParams {
+        correlation_id: None,
+        provider: case.provider_id.clone(),
+        model: case.model.clone(),
+        window_items: vec![LlmWindowItem::message_ref(message_ref)],
+        tool_definitions_ref: None,
+        response_format_ref: None,
+        provider_options_ref: None,
+        rendering_profile: None,
+        candidate_plan_id: Some("live-token-count".into()),
+        metadata: Default::default(),
+        api_key: Some(case.api_key.clone().into()),
+    };
+
+    let receipt = adapter
+        .execute(&build_count_tokens_intent(&params))
+        .await
+        .expect("execute count_tokens");
+    let payload = decode_count_tokens_receipt_payload(&receipt);
+    if receipt.status != ReceiptStatus::Ok {
+        panic!(
+            "token count failed for provider={} model={}: status={:?} warnings_ref={:?}",
+            case.provider_id, case.model, receipt.status, payload.warnings_ref
+        );
+    }
+
+    assert_eq!(payload.provider, case.provider_id);
+    assert_eq!(payload.model, case.model);
+    assert_eq!(
+        payload.candidate_plan_id.as_deref(),
+        Some("live-token-count")
+    );
+    assert!(
+        payload.input_tokens.unwrap_or_default() > 0,
+        "expected positive input token count for provider={} model={}: {:?}",
+        case.provider_id,
+        case.model,
+        payload
+    );
+    assert!(
+        matches!(
+            payload.quality,
+            LlmTokenCountQuality::Exact
+                | LlmTokenCountQuality::ProviderEstimate
+                | LlmTokenCountQuality::LocalEstimate
+        ),
+        "unexpected token count quality: {:?}",
+        payload.quality
     );
 }
 

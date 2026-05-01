@@ -13,7 +13,8 @@ use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_effects::builtins::{
     HeaderMap, HttpRequestParams, HttpRequestReceipt, LlmCompactParams, LlmCompactReceipt,
-    LlmCompactionArtifactKind, LlmGenerateParams, LlmWindowItem, LlmWindowItemKind, RequestTimings,
+    LlmCompactionArtifactKind, LlmCountTokensParams, LlmCountTokensReceipt, LlmGenerateParams,
+    LlmTokenCountByRef, LlmTokenCountQuality, LlmWindowItem, LlmWindowItemKind, RequestTimings,
     TextOrSecretRef, TokenUsage,
 };
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
@@ -206,6 +207,12 @@ pub struct LlmCompactRequestContext {
     pub params: LlmCompactParams,
 }
 
+#[derive(Debug, Clone)]
+pub struct LlmCountTokensRequestContext {
+    pub intent: EffectIntent,
+    pub params: LlmCountTokensParams,
+}
+
 /// Mock LLM harness for testing LLM effect flows.
 ///
 /// This harness intercepts `llm.generate` effects, validates parameters,
@@ -269,6 +276,33 @@ impl<S: Store + 'static> MockLlmHarness<S> {
                         let params: LlmCompactParams = serde_cbor::from_slice(&intent.params_cbor)
                             .context("decode llm.compact params")?;
                         out.push(LlmCompactRequestContext { intent, params });
+                    }
+                    other => {
+                        return Err(anyhow!("unexpected effect kind {other}"));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn collect_count_tokens_requests(
+        &mut self,
+        kernel: &mut Kernel<S>,
+    ) -> Result<Vec<LlmCountTokensRequestContext>> {
+        let mut out = Vec::new();
+        loop {
+            let intents = kernel.drain_effects()?;
+            if intents.is_empty() {
+                break;
+            }
+            for intent in intents {
+                match intent.effect.as_str() {
+                    effect_ops::LLM_COUNT_TOKENS => {
+                        let params: LlmCountTokensParams =
+                            serde_cbor::from_slice(&intent.params_cbor)
+                                .context("decode llm.count_tokens params")?;
+                        out.push(LlmCountTokensRequestContext { intent, params });
                     }
                     other => {
                         return Err(anyhow!("unexpected effect kind {other}"));
@@ -417,6 +451,46 @@ impl<S: Store + 'static> MockLlmHarness<S> {
             provider_metadata_ref: None,
             warnings_ref: None,
             provider_id: MOCK_LLM_ROUTE_ID.into(),
+        };
+        let receipt = EffectReceipt {
+            intent_hash: ctx.intent.intent_hash,
+            status: ReceiptStatus::Ok,
+            payload_cbor: serde_cbor::to_vec(&receipt)?,
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        };
+        kernel.handle_receipt(receipt)?;
+        kernel.tick_until_idle()?;
+        Ok(())
+    }
+
+    pub fn respond_count_tokens_with_estimate(
+        &self,
+        kernel: &mut Kernel<S>,
+        ctx: LlmCountTokensRequestContext,
+        input_tokens: u64,
+    ) -> Result<()> {
+        let receipt = LlmCountTokensReceipt {
+            input_tokens: Some(input_tokens),
+            original_input_tokens: Some(input_tokens),
+            counts_by_ref: ctx
+                .params
+                .window_items
+                .iter()
+                .map(|item| LlmTokenCountByRef {
+                    ref_: item.ref_.clone(),
+                    tokens: item.estimated_tokens.unwrap_or(0),
+                    quality: LlmTokenCountQuality::LocalEstimate,
+                })
+                .collect(),
+            tool_tokens: None,
+            response_format_tokens: None,
+            quality: LlmTokenCountQuality::LocalEstimate,
+            provider: MOCK_LLM_ROUTE_ID.into(),
+            model: ctx.params.model,
+            candidate_plan_id: ctx.params.candidate_plan_id,
+            provider_metadata_ref: None,
+            warnings_ref: None,
         };
         let receipt = EffectReceipt {
             intent_hash: ctx.intent.intent_hash,

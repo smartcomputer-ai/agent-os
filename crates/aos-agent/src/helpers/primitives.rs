@@ -11,11 +11,12 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use aos_effects::builtins::{
     BlobGetParams, BlobPutParams, HostLocalTarget, HostSessionOpenParams, HostTarget,
-    LlmCompactParams, LlmGenerateParams, TextOrSecretRef,
+    LlmCompactParams, LlmCountTokensParams, LlmGenerateParams, TextOrSecretRef,
 };
 use aos_wasm_sdk::{PendingEffect, ReduceError, Value, WorkflowCtx};
 
 use super::llm::LlmCompactStepContext;
+use super::llm::LlmCountTokensStepContext;
 use super::llm::LlmStepContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +27,10 @@ pub enum SessionEffectCommand {
     },
     LlmCompact {
         params: LlmCompactParams,
+        pending: PendingEffect,
+    },
+    LlmCountTokens {
+        params: LlmCountTokensParams,
         pending: PendingEffect,
     },
     ToolEffect {
@@ -48,6 +53,7 @@ impl SessionEffectCommand {
         match self {
             Self::LlmGenerate { pending, .. }
             | Self::LlmCompact { pending, .. }
+            | Self::LlmCountTokens { pending, .. }
             | Self::ToolEffect { pending, .. }
             | Self::BlobPut { pending, .. }
             | Self::BlobGet { pending, .. } => pending,
@@ -66,6 +72,13 @@ impl SessionEffectCommand {
             Self::LlmCompact { params, pending } => {
                 ctx.effects().emit_raw_with_issuer_ref(
                     "sys/llm.compact@1",
+                    &params,
+                    pending.issuer_ref.as_deref(),
+                );
+            }
+            Self::LlmCountTokens { params, pending } => {
+                ctx.effects().emit_raw_with_issuer_ref(
+                    "sys/llm.count_tokens@1",
                     &params,
                     pending.issuer_ref.as_deref(),
                 );
@@ -171,6 +184,11 @@ pub struct RequestLlmCompact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestLlmCountTokens {
+    pub step: LlmCountTokensStepContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestedLlm {
     pub pending: PendingEffect,
     pub params: LlmGenerateParams,
@@ -180,6 +198,12 @@ pub struct RequestedLlm {
 pub struct RequestedLlmCompact {
     pub pending: PendingEffect,
     pub params: LlmCompactParams,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestedLlmCountTokens {
+    pub pending: PendingEffect,
+    pub params: LlmCountTokensParams,
 }
 
 pub fn request_llm(
@@ -224,6 +248,29 @@ pub fn request_llm_compact(
         pending: pending.clone(),
     });
     Ok(RequestedLlmCompact { pending, params })
+}
+
+pub fn request_llm_count_tokens(
+    state: &mut SessionState,
+    out: &mut SessionWorkflowOutput,
+    mut request: RequestLlmCountTokens,
+) -> Result<RequestedLlmCountTokens, SessionWorkflowError> {
+    let run_config = state
+        .active_run_config
+        .clone()
+        .ok_or(SessionWorkflowError::RunNotActive)?;
+    if request.step.api_key.is_none() {
+        request.step.api_key = provider_secret_ref(run_config.provider.as_str());
+    }
+    let params =
+        crate::helpers::llm::materialize_llm_count_tokens_params(&run_config, &request.step)
+            .map_err(map_llm_mapping_error)?;
+    let pending = begin_pending_effect(state, "sys/llm.count_tokens@1", &params, None);
+    out.effects.push(SessionEffectCommand::LlmCountTokens {
+        params: params.clone(),
+        pending: pending.clone(),
+    });
+    Ok(RequestedLlmCountTokens { pending, params })
 }
 
 pub fn session_lifecycle_changed_payload(

@@ -20,14 +20,14 @@ Completed so far:
 8. `aos-effect-adapters` routes live configured LLM compact effects through the real provider clients and falls back to stub behavior only without LLM config.
 9. `SessionWorkflow` declares the compact effect in its AIR workflow surface, and the WASM SDK maps `LlmCompactParams` to `sys/llm.compact@1`.
 10. Demiurge handoff now always installs the local coding tool registry/profile before starting a run, which fixed the README Demiurge regression found during compaction verification.
+11. `sys/llm.count_tokens@1` contracts, SDK refs, adapter registry wiring, provider/client hooks, workflow request/receipt handling, traces, and deterministic tests exist. OpenAI Responses and Anthropic Messages use their provider token-count endpoints when configured; otherwise the adapter returns a local estimate.
 
 Still open:
 
-1. `sys/llm.count_tokens@1` contract/effect implementation.
-2. automatic context-pressure detection from provider context-limit failures.
-3. post-turn high-water usage finalization that schedules compaction before the next turn.
-4. surfacing provider-native compaction artifacts returned from ordinary `sys/llm.generate@1` receipts.
-5. full deterministic harness coverage for context-limit failures and usage-triggered compaction.
+1. automatic context-pressure detection from provider context-limit failures.
+2. post-turn high-water usage finalization that schedules compaction before the next turn.
+3. surfacing provider-native compaction artifacts returned from ordinary `sys/llm.generate@1` receipts.
+4. full deterministic harness coverage for context-limit failures and usage-triggered compaction.
 
 ## Goal
 
@@ -535,7 +535,7 @@ Implement the narrowest useful version:
 5. [ ] make the workflow able to trigger compaction before the next turn from returned generation usage crossing a high-water mark,
 6. [x] make the workflow able to apply a scripted compaction receipt,
 7. [~] add deterministic harness tests that script context-limit failures, usage-triggered compaction, pending compaction state, and compaction receipts,
-8. [ ] add contracts for `sys/llm.count_tokens@1` for schema completeness, but adapter implementation can be minimal or stubbed in the first cut,
+8. [x] add contracts for `sys/llm.count_tokens@1` for schema completeness, but adapter implementation can be minimal or stubbed in the first cut,
 9. [x] allow the first implementation to back `sys/llm.compact@1` with a scripted or ordinary LLM summarization path,
 10. [ ] preserve provider-native artifacts from `sys/llm.generate@1` receipts as raw refs/metadata even if full provider adapter compaction support is deferred,
 11. [x] remove legacy message-ref-only session/context code paths rather than keeping them beside the new surface,
@@ -584,6 +584,6 @@ This means the first implementation proves workflow correctness with stub/mock p
 9. [x] provider-native compaction artifacts are marked provider-specific and rejected for incompatible providers/models,
 10. [ ] provider-native compaction artifacts returned from ordinary generation are surfaced in receipts/traces instead of flattened away,
 11. [x] AOS summaries are represented as normal refs with source ranges and usage metadata,
-12. [ ] token counting is represented as optional `sys/llm.count_tokens@1` and is not required on the default generation path,
+12. [x] token counting is represented as optional `sys/llm.count_tokens@1` and is not required on the default generation path,
 13. [x] legacy `transcript_message_refs` and simple message-ref-only active-window paths are removed from the agent SDK after the new surface lands,
 14. [~] deterministic tests can script context-limit failures, usage-triggered compaction, pending operation state, and compaction receipts without live provider credentials.

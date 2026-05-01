@@ -457,6 +457,48 @@ pub struct CompactionRequest {
     pub provider_options: Option<Value>,
 }
 
+/// Provider-neutral request for input token counting.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TokenCountRequest {
+    pub model: String,
+    pub messages: Vec<Message>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ToolDefinition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_options: Option<Value>,
+}
+
+/// Quality of a token count result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenCountQuality {
+    Exact,
+    ProviderEstimate,
+    LocalEstimate,
+    Unknown,
+}
+
+/// Provider-neutral token count response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TokenCountResponse {
+    pub input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_input_tokens: Option<u64>,
+    pub quality: TokenCountQuality,
+    pub model: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<Warning>,
+}
+
 /// Coarse kind for provider compaction output items.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
