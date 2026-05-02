@@ -4,7 +4,9 @@ use anyhow::{Context, Result};
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures_util::StreamExt;
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Position, Rect};
 use ratatui::text::Line;
 use tokio::sync::mpsc;
 
@@ -20,7 +22,7 @@ use crate::chat::tui::bottom_pane::list_selection::PickerSelection;
 use crate::chat::tui::bottom_pane::{BottomPaneAction, BottomPaneState};
 use crate::chat::tui::frame::FrameRequester;
 use crate::chat::tui::slash::{SlashCommand, SlashEffort, SlashMaxTokens, parse_slash_command};
-use crate::chat::tui::terminal::Tui;
+use crate::chat::tui::terminal::{Tui, TuiFrame};
 use crate::chat::tui::transcript::TranscriptState;
 
 #[derive(Clone)]
@@ -78,7 +80,8 @@ pub(crate) async fn run_shell(options: ChatTuiShellOptions) -> Result<()> {
                     }
                     let width = tui.terminal.size()?.width;
                     tui.insert_history_lines(app.drain_pending_history_lines(width));
-                    tui.draw(|frame| app.render(frame))?;
+                    let viewport_height = app.desired_viewport_height(width);
+                    tui.draw(viewport_height, |frame| app.render_tui_frame(frame))?;
                 }
             }
             event = terminal_events.next() => {
@@ -245,21 +248,38 @@ impl ChatTuiApp {
         frame_requester.schedule_frame();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn render(&self, frame: &mut Frame<'_>) {
-        let area = frame.area();
-        let bottom_height = self.bottom_pane.desired_height().min(area.height);
-        let chunks =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(bottom_height)]).split(area);
-
-        self.transcript.render(chunks[0], frame.buffer_mut());
-        self.bottom_pane.render(chunks[1], frame.buffer_mut());
-        if let Some(position) = self.bottom_pane.cursor_position(chunks[1]) {
+        if let Some(position) = self.render_area(frame.area(), frame.buffer_mut()) {
             frame.set_cursor_position(position);
         }
     }
 
+    pub(crate) fn render_tui_frame(&self, frame: &mut TuiFrame<'_>) {
+        if let Some(position) = self.render_area(frame.area(), frame.buffer_mut()) {
+            frame.set_cursor_position(position);
+        }
+    }
+
+    fn render_area(&self, area: Rect, buf: &mut Buffer) -> Option<Position> {
+        let bottom_height = self.bottom_pane.desired_height().min(area.height);
+        let chunks =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(bottom_height)]).split(area);
+
+        self.transcript.render(chunks[0], buf);
+        self.bottom_pane.render(chunks[1], buf);
+        self.bottom_pane.cursor_position(chunks[1])
+    }
+
     fn drain_pending_history_lines(&mut self, width: u16) -> Vec<Line<'static>> {
         self.transcript.drain_pending_history_lines(width)
+    }
+
+    fn desired_viewport_height(&self, width: u16) -> u16 {
+        self.transcript
+            .desired_height(width)
+            .saturating_add(self.bottom_pane.desired_height())
+            .max(1)
     }
 
     fn take_terminal_clear_requested(&mut self) -> bool {

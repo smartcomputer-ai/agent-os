@@ -16,7 +16,6 @@ pub(crate) struct TranscriptState {
     active_cell: Option<Box<dyn ChatCell>>,
     active_cell_revision: u64,
     pending_user_messages: Vec<PendingUserMessage>,
-    has_emitted_history_lines: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +54,6 @@ impl TranscriptState {
                 self.emitted_history_cells.clear();
                 self.pending_user_messages.clear();
                 self.active_cell = None;
-                self.has_emitted_history_lines = false;
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
                 self.push_committed_cell(Box::new(NoticeCell::new(
                     "history-reset",
@@ -133,11 +131,6 @@ impl TranscriptState {
             if cell_lines.is_empty() {
                 continue;
             }
-            if self.has_emitted_history_lines {
-                lines.push(Line::default());
-            } else {
-                self.has_emitted_history_lines = true;
-            }
             lines.extend(cell_lines);
             self.emitted_history_cells.push(fingerprint);
         }
@@ -166,6 +159,20 @@ impl TranscriptState {
             .render(area, buf);
     }
 
+    pub(crate) fn desired_height(&self, width: u16) -> u16 {
+        let render_state = CellRenderState;
+        let mut height = 0u16;
+        for pending in &self.pending_user_messages {
+            let cell = MessageCell::new(&pending.id, "user_pending", &pending.content);
+            height = height.saturating_add(cell.desired_height(width, &render_state));
+            height = height.saturating_add(1);
+        }
+        if let Some(active_cell) = self.active_cell.as_ref() {
+            height = height.saturating_add(active_cell.desired_height(width, &render_state));
+        }
+        height
+    }
+
     fn apply_delta(&mut self, delta: ChatDelta) {
         match delta {
             ChatDelta::ReplaceTurns { turns, .. } => {
@@ -175,16 +182,17 @@ impl TranscriptState {
                 self.active_cell = None;
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
                 for turn in turns {
+                    let turn_id = turn.turn_id.clone();
                     if let Some(user) = turn.user {
                         self.push_committed_cell_if_changed(Box::new(MessageCell::new(
-                            user.id,
+                            format!("{turn_id}:user:{}", user.id),
                             user.role,
                             user.content,
                         )));
                     }
                     if let Some(assistant) = turn.assistant {
                         self.push_committed_cell_if_changed(Box::new(MessageCell::new(
-                            assistant.id,
+                            format!("{turn_id}:assistant:{}", assistant.id),
                             assistant.role,
                             assistant.content,
                         )));
