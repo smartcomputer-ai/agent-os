@@ -2,8 +2,8 @@
 
 **Priority**: P3
 **Effort**: Large
-**Risk if deferred**: Medium (the chat engine can work in plain mode, but users will not get the rich live interaction needed for complex tools, compaction, and intervention)
-**Status**: Planned
+**Risk if deferred**: Medium (users will not get the rich live interaction needed for complex tools, compaction, and intervention)
+**Status**: In progress
 **Depends on**: `roadmap/v0.24-claw/p2-chat-cli-internals.md`
 
 ## Goal
@@ -12,7 +12,7 @@ Build a Codex-like terminal chat UI in `aos-cli` using Ratatui and Crossterm.
 
 The TUI should feel closer to Codex than to a log tailer: persistent transcript, multiline composer, live run status, collapsible tool chains, compaction cards, session switching, slash commands, scrollback, pickers, overlays, and graceful terminal lifecycle handling.
 
-This is still an AOS UI. It must render the P2 `ChatEvent` stream and send P2 `ChatCommand`s. It must not bypass the chat engine to talk directly to node control APIs.
+This is still an AOS UI. It must render the P2 `ChatEvent` stream and send P2 `ChatCommand`s. It must not bypass the chat session driver to talk directly to node control APIs.
 
 ## Inspiration From Codex-RS
 
@@ -49,7 +49,7 @@ Codex-RS details checked for this plan:
 
 - `tui.rs` is an inline viewport terminal, not a conventional full-screen alternate-screen app by default. Committed history is inserted into normal terminal scrollback, while the active Ratatui viewport stays anchored at the bottom. Alternate screen exists, but should be reserved for focused detail surfaces where it is actually useful.
 - `FrameRequester` coalesces redraw requests through a broadcast draw channel and a frame-rate limiter. Widgets request frames; they do not redraw directly.
-- `App::run` selects over app events, terminal events, active-thread/runtime events, and server events. The AOS equivalent should select over `UiEvent`s, `TuiEvent`s, `ChatEvent`s, and shutdown.
+- `App::run` selects over app events, terminal events, active-thread/runtime events, and server events. The AOS equivalent should select over `UiEvent`s, terminal events, `ChatEvent`s, and shutdown.
 - `ChatWidget` keeps committed history cells plus an in-flight `active_cell` with a revision counter. Streaming/tool cells mutate in place while active, then flush into committed history.
 - `HistoryCell` is source-backed and width-aware. Most cells expose `display_lines(width)` and measure with Ratatui wrapping; final assistant markdown stores source so resize reflow can render again.
 - `BottomPane` owns the composer and a stack of `BottomPaneView`s. Pickers and focused forms are bottom-pane views first, not global app modals.
@@ -362,7 +362,7 @@ Detail overlays:
 - Error detail.
 - Transcript/search view.
 
-Overlays should pause composer input but not pause the chat engine. Live events continue updating the transcript behind the overlay.
+Overlays should pause composer input but not pause the chat driver. Live events continue updating the transcript behind the overlay.
 
 Model/provider/effort pickers are bottom-pane selection views. They should:
 
@@ -377,28 +377,28 @@ Model/provider/effort pickers are bottom-pane selection views. They should:
 Top-level app loop inputs:
 
 - Crossterm key/mouse/paste/resize events.
-- `ChatEvent`s from P2 engine.
+- `ChatEvent`s from the P2 driver.
 - Frame draw events from a coalescing `FrameRequester`.
 - Optional tick events for animations and cursor blink, scheduled through the frame requester.
 - Shutdown signals.
 
 Outputs:
 
-- `ChatCommand`s to P2 engine.
+- `ChatCommand`s to the P2 driver.
 - redraw requests.
 - local UI state changes.
 
 Basic loop:
 
 1. Start terminal guard.
-2. Start `ChatEngine`.
+2. Start `ChatSessionDriver`.
 3. Load initial session/projection.
 4. Schedule the first frame.
 5. Select over terminal events, app events, chat events, draw events, and shutdown.
 6. Route input to overlay, composer, or transcript depending on focus.
 7. Apply chat events to transcript model.
 8. Request redraws from widgets/tasks and draw only when the frame requester emits.
-9. On exit, request engine shutdown and restore terminal.
+9. On exit, close the driver command channel and restore terminal.
 
 Do not redraw on every async event if several events arrive in one poll. Follow Codex's `FrameRequester` approach: many components can request frames, but the scheduler coalesces and rate-limits actual draw notifications.
 
@@ -422,7 +422,7 @@ enum UiEvent {
 }
 ```
 
-`UiEvent::Chat` carries the P2 engine stream into the UI reducer. UI reducers should be unit-testable without a terminal.
+`UiEvent::Chat` carries the P2 driver stream into the UI reducer. UI reducers should be unit-testable without a terminal.
 
 Also add a small sender wrapper, similar to Codex's `AppEventSender`, so widgets can emit typed intents without holding references to `ChatTuiApp` internals. This wrapper should be thin and should not know about node control APIs.
 
@@ -531,13 +531,12 @@ P3a: Shell
 - Inline viewport, committed-history insertion, active cell, bottom pane.
 - Frame requester/redraw coalescing.
 - Basic composer.
-- Bottom-pane view stack and generic list selection view.
-- Render user/assistant/run/error cells from fake `ChatEvent`s.
-- Plain terminal restore tests.
+- Render user/assistant/run/error cells from `ChatEvent`s.
+- Terminal restore tests.
+- Initial live wiring to `ChatSessionDriver`.
 
 P3b: Live AOS
 
-- Wire to real P2 `ChatEngine`.
 - Session picker.
 - Model/provider/effort/max-token pickers.
 - Submit user turns.
@@ -567,7 +566,6 @@ P3d: Polish
 - Add TUI modules under `crates/aos-cli/src/chat/tui/`.
 - Add Ratatui/Crossterm dependencies to `aos-cli`.
 - Make `aos chat` launch the Codex-style TUI by default on TTY.
-- Keep `--plain` fallback using P2.
 - Implement transcript cells for messages, runs, tools, compaction, reconnects, and errors.
 - Implement bottom composer and slash command parser.
 - Implement bottom-pane selection views for session/model/provider/effort choices and detail overlays for large views.

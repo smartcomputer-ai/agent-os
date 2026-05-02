@@ -19,14 +19,14 @@ use crate::chat::session::validate_session_id;
 use crate::chat::sse::JournalSseEvent;
 
 #[derive(Debug, Clone)]
-pub(crate) struct ChatEngineOptions {
+pub(crate) struct ChatSessionDriverOptions {
     pub session_id: String,
     pub draft_settings: ChatDraftSettings,
     pub draft_overrides: ChatDraftOverrideMask,
     pub from: Option<u64>,
 }
 
-pub(crate) struct ChatEngine {
+pub(crate) struct ChatSessionDriver {
     client: ChatControlClient,
     projection: ChatProjection,
     blob_cache: BlobCache,
@@ -36,13 +36,13 @@ pub(crate) struct ChatEngine {
     observed_clock: u64,
 }
 
-impl ChatEngine {
+impl ChatSessionDriver {
     pub(crate) async fn open(
         client: ChatControlClient,
-        options: ChatEngineOptions,
+        options: ChatSessionDriverOptions,
     ) -> Result<(Self, Vec<ChatEvent>)> {
         let session_id = validate_session_id(&options.session_id)?;
-        let mut engine = Self {
+        let mut driver = Self {
             projection: ChatProjection::new(client.world_id().to_string(), session_id.clone()),
             client,
             blob_cache: BlobCache::default(),
@@ -52,16 +52,16 @@ impl ChatEngine {
             observed_clock: 0,
         };
         let mut events = vec![ChatEvent::Connected(ChatConnectionInfo {
-            world_id: engine.client.world_id().to_string(),
+            world_id: driver.client.world_id().to_string(),
             session_id: session_id.clone(),
             journal_next_from: options.from,
-            settings: engine.settings_view(),
+            settings: driver.settings_view(),
         })];
-        events.extend(engine.refresh().await?);
+        events.extend(driver.refresh().await?);
         if let Some(from) = options.from {
-            engine.projection.journal_next_from = from;
+            driver.projection.journal_next_from = from;
         }
-        Ok((engine, events))
+        Ok((driver, events))
     }
 
     pub(crate) fn session_id(&self) -> &str {

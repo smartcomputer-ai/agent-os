@@ -144,11 +144,10 @@ mod tests {
     }
 
     #[test]
-    fn chat_plain_new_parse_accepts_draft_settings() {
+    fn chat_new_parse_accepts_draft_settings() {
         let cli = Cli::try_parse_from([
             "aos",
             "chat",
-            "--plain",
             "--new",
             "--provider",
             "openai-responses",
@@ -157,23 +156,7 @@ mod tests {
             "--effort",
             "medium",
         ])
-        .expect("parse chat plain new");
-        assert!(matches!(cli.command, Command::Chat(_)));
-    }
-
-    #[test]
-    fn chat_send_parse_accepts_follow() {
-        let cli = Cli::try_parse_from([
-            "aos",
-            "chat",
-            "send",
-            "--session",
-            "018f2a66-31cc-7b25-a4f7-37e3310fdc6a",
-            "--message",
-            "hello",
-            "--follow",
-        ])
-        .expect("parse chat send follow");
+        .expect("parse chat new");
         assert!(matches!(cli.command, Command::Chat(_)));
     }
 }

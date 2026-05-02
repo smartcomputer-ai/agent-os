@@ -8,7 +8,7 @@
 
 ## Goal
 
-Build a UI-independent agent chat engine inside `aos-cli`.
+Build a UI-independent agent chat session driver inside `aos-cli`.
 
 The P2 slice owns the transport, session selection, submission, world observation, history reconstruction, blob loading, and projection logic needed by the terminal TUI. P3 should be able to focus on terminal rendering and input handling instead of AOS protocol details.
 
@@ -21,8 +21,7 @@ The chat internals must support a full Codex-like TUI from the beginning:
 - tool chain progress,
 - compaction and context-pressure progress,
 - intervention signals such as steer, interrupt, pause, and resume,
-- reconnect-safe live observation over world journal SSE,
-- a plain/non-TTY fallback for scripts and debugging.
+- reconnect-safe live observation over world journal SSE.
 
 Most code should live in `aos-cli`. Do not add a new product crate for this slice.
 
@@ -30,17 +29,14 @@ Most code should live in `aos-cli`. Do not add a new product crate for this slic
 
 Implemented in `aos-cli`:
 
-- `aos chat`, `aos chat sessions`, `aos chat history`, and `aos chat send`.
-- Chat modules under `crates/aos-cli/src/chat/` for config, typed protocol/view models, control client, SSE parsing, session key handling, blob cache, projection, engine orchestration, and plain rendering.
+- `aos chat`, `aos chat sessions`, and `aos chat history`.
+- Chat modules under `crates/aos-cli/src/chat/` for config, typed protocol/view models, control client, SSE parsing, session key handling, blob cache, projection, and session-driver orchestration.
 - Typed `aos.agent/SessionInput@1` submission using `aos-agent` contracts.
 - CAS upload/download for chat-authored user messages and assistant output blobs.
 - Journal SSE parsing and follow/reconnect cursor handling over `/journal/stream`.
 - Session listing/selection with per-world selected-session persistence in CLI config.
 - Projection of runs, transcript turns, active parallel tool batches, and compaction trace entries.
-- Plain diagnostic renderer shared by `history`, `send --plain/--follow`, and `chat --plain`.
-
-The Codex-style Ratatui/Crossterm TUI remains P3. In this implementation, `aos chat` without
-`--plain` returns an explicit P3-not-implemented error rather than silently using a temporary UI.
+- A single interactive product path: `aos chat` opens the Ratatui/Crossterm TUI from P3. There is no long-lived plain chat mode or parallel REPL to maintain.
 
 P3 compatibility check:
 
@@ -77,7 +73,7 @@ The missing piece is a client-side projection layer that turns generic AOS world
 
 3. Preserve AOS generic boundaries.
 
-   Do not add an agent-specific backend stream in this slice. The chat engine observes `/journal/stream`, reads `/state`, reads `/trace` where useful, and fetches `/v1/cas/blobs/{hash}`.
+   Do not add an agent-specific backend stream in this slice. The chat driver observes `/journal/stream`, reads `/state`, reads `/trace` where useful, and fetches `/v1/cas/blobs/{hash}`.
 
 4. Make projections deterministic and replayable.
 
@@ -87,30 +83,28 @@ The missing piece is a client-side projection layer that turns generic AOS world
 
    `aos-cli` should depend on `aos-agent` for `SessionInput`, `SessionState`, `SessionId`, lifecycle types, trace types, and config types unless that creates an actual build problem. Local duplicate wire structs should be a fallback, not the first design.
 
-6. Keep a scriptable mode.
+6. Do not maintain a second chat UI.
 
-   The full-screen TUI is the default for an interactive terminal, but the same engine should expose a plain event stream for `--plain`, tests, and CI diagnostics.
+   The Ratatui TUI is the only interactive chat surface. Scriptable/debug commands may expose structured data, but they should not grow their own renderer, slash parser, or session loop.
 
 ## CLI Surface
 
 Add a top-level command:
 
 ```text
-aos chat [--session <uuid>] [--new] [--plain] [--world <uuid>] [--from <seq>]
+aos chat [--session <uuid>] [--new] [--world <uuid>] [--from <seq>]
 aos chat sessions [--world <uuid>]
 aos chat history --session <uuid> [--world <uuid>] [--json]
-aos chat send --session <uuid> --message <text> [--follow] [--plain]
 ```
 
 Initial behavior:
 
-- `aos chat` opens the TUI against the selected profile/world once P3 lands; P2 returns an explicit not-yet-implemented error unless `--plain` is used.
+- `aos chat` opens the TUI against the selected profile/world.
 - `--session` resumes one session.
 - `--new` creates a new UUID and opens it on first submitted turn.
 - If neither is provided, use the last CLI-selected session for that world when present; otherwise open the session picker.
 - `sessions` lists `aos.agent/SessionWorkflow@1` state cells and basic lifecycle metadata.
-- `history` renders reconstructed history without entering raw terminal mode.
-- `send --follow` is a non-TTY-friendly path that submits one message and streams progress until the run reaches a terminal lifecycle.
+- `history` renders reconstructed history as structured data without entering raw terminal mode.
 
 Future channel integrations should be able to reuse the session id, message blob conventions, and projection model without reusing the terminal UI.
 
@@ -128,8 +122,7 @@ chat/sse.rs                   # SSE parser and reconnect cursor handling
 chat/session.rs               # session ids, listing, selection, state key encoding
 chat/blob_cache.rs            # CAS blob fetch/cache/decode helpers
 chat/projection.rs            # SessionState + journal + blobs -> ChatEvent
-chat/engine.rs                # async orchestration and command/event channels
-chat/plain.rs                 # line-oriented renderer using the same engine
+chat/driver.rs                # async orchestration and command/event channels
 chat/tui/...                  # P3-owned terminal UI modules
 ```
 
@@ -137,10 +130,10 @@ chat/tui/...                  # P3-owned terminal UI modules
 
 ## Core Types
 
-The engine exposes a narrow API:
+The driver exposes a narrow API:
 
 ```rust
-pub(crate) struct ChatEngine;
+pub(crate) struct ChatSessionDriver;
 
 pub(crate) enum ChatCommand {
     SubmitUserMessage { text: String },
@@ -254,7 +247,7 @@ Follow-up turn:
 }
 ```
 
-Use `RunRequested` when there is no active or queued run for the session. Use `FollowUpInputAppended` when a session exists or the engine is uncertain. The workflow already starts the queued follow-up immediately when idle and queues it when a run is active.
+Use `RunRequested` when there is no active or queued run for the session. Use `FollowUpInputAppended` when a session exists or the driver is uncertain. The workflow already starts the queued follow-up immediately when idle and queues it when a run is active.
 
 `observed_at_ns` should be deterministic from the client perspective only as a monotonic client stamp. It does not need wall-clock precision for correctness. If the node later exposes a server observed-time helper, use that instead.
 
@@ -290,11 +283,11 @@ Display state:
 
 - `ChatConnectionInfo` or `ChatStatus` should include current provider, model, effort, and whether each setting is currently editable.
 - The projection should show the active run config from `SessionState.active_run_config` when present, not only the local draft.
-- Plain mode should print model/effort changes and disabled-setting warnings.
+- The TUI should render model/effort changes and disabled-setting warnings in the status line or transcript.
 
 ## Observation Loop
 
-The engine runs these async tasks:
+The session driver runs these async tasks:
 
 1. **Session loader**
 
@@ -322,7 +315,7 @@ The engine runs these async tasks:
 
 ## Journal Handling
 
-The chat engine should subscribe with a limited kind set when possible:
+The chat driver should subscribe with a limited kind set when possible:
 
 ```text
 kind=domain_event
@@ -438,22 +431,9 @@ Compaction should be first-class in the projection because the TUI needs to expl
 
 If token counts are present through `TokenCountRequested` and `TokenCountReceived`, include before/after counts in the view model.
 
-## Plain Mode
+## Structured Debug Commands
 
-`chat/plain.rs` should subscribe to the same `ChatEvent` stream as the TUI and print stable lines:
-
-```text
-session <uuid> running
-user: ...
-run 3 running
-tool search_step running
-tool search_step ok
-compaction requested
-assistant: ...
-run 3 completed
-```
-
-Plain mode is not a lesser implementation. It is the diagnostic view for projection correctness.
+`aos chat sessions` and `aos chat history` remain useful as low-level inspection commands, but they should stay data-oriented. They must not grow a second renderer, REPL, slash-command parser, or live follow loop. Projection correctness belongs in unit tests and TUI snapshot/reducer tests.
 
 ## Dependencies
 
@@ -469,7 +449,7 @@ Ratatui/Crossterm dependencies belong to P3.
 
 ## Failure Handling
 
-The engine should handle:
+The driver should handle:
 
 - selected world missing,
 - session workflow not installed in the current manifest,
@@ -488,7 +468,7 @@ Every failure should produce a `ChatEvent::Error` with actionability. The TUI de
 ## Scope
 
 - Add `aos chat` command family.
-- Add chat engine modules under `crates/aos-cli/src/chat/`.
+- Add chat driver modules under `crates/aos-cli/src/chat/`.
 - Add typed session input submission.
 - Add CAS upload/download helpers for chat blobs.
 - Add journal SSE client with reconnect cursor semantics.
@@ -496,8 +476,7 @@ Every failure should produce a `ChatEvent::Error` with actionability. The TUI de
 - Add `SessionState` to chat projection.
 - Add assistant output extraction from `LlmOutputEnvelope`.
 - Add tool chain and compaction view models.
-- Add plain mode over the same event stream.
-- Add unit and integration tests for the engine/projection.
+- Add unit and integration tests for the driver/projection.
 
 ## Non-Goals
 
@@ -528,14 +507,14 @@ Integration tests:
 
 - Start an embedded node/control app.
 - Create or load an agent world with `aos.agent/SessionWorkflow@1`.
-- Submit a first user turn through the chat engine.
+- Submit a first user turn through the chat driver.
 - Observe journal progress through P1 SSE.
-- Fetch session state and render a plain transcript.
+- Fetch session state and render structured session history.
 - Submit a follow-up turn and verify it becomes a second run or queued follow-up.
 
 Manual smoke:
 
-- `aos chat --plain --new`
+- `aos chat --new`
 - `aos chat sessions`
 - `aos chat history --session <uuid>`
 - Disconnect/restart the node during an active follow and verify reconnect/gap behavior.
