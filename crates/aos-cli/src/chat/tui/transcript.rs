@@ -137,6 +137,23 @@ impl TranscriptState {
         lines
     }
 
+    pub(crate) fn reflow_history_lines(&mut self, width: u16) -> Vec<Line<'static>> {
+        let render_state = CellRenderState;
+        let mut lines = Vec::new();
+        self.pending_history_cell_indices.clear();
+        self.emitted_history_cells.clear();
+        for cell in &self.cells {
+            let cell_lines = cell.display_lines(width, &render_state);
+            if cell_lines.is_empty() {
+                continue;
+            }
+            self.emitted_history_cells
+                .push((cell.id().to_string(), cell_fingerprint(cell.as_ref())));
+            lines.extend(cell_lines);
+        }
+        lines
+    }
+
     pub(crate) fn render(&self, area: Rect, buf: &mut Buffer) {
         let mut lines = Vec::new();
         let render_state = CellRenderState;

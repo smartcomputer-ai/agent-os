@@ -1,6 +1,7 @@
 pub(crate) mod composer;
 pub(crate) mod list_selection;
 
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
@@ -248,6 +249,14 @@ impl BottomPaneState {
         .split(area);
         self.composer
             .cursor_position(self.composer_text_area(chunks[0]))
+    }
+
+    pub(crate) fn cursor_style(&self) -> SetCursorStyle {
+        if self.active_view.is_some() {
+            SetCursorStyle::DefaultUserShape
+        } else {
+            SetCursorStyle::SteadyBar
+        }
     }
 
     fn content_height(&self) -> u16 {

@@ -20,9 +20,10 @@ use crate::chat::tui::app_event::UiEvent;
 use crate::chat::tui::app_event_sender::AppEventSender;
 use crate::chat::tui::bottom_pane::list_selection::PickerSelection;
 use crate::chat::tui::bottom_pane::{BottomPaneAction, BottomPaneState};
+use crate::chat::tui::custom_terminal::TuiFrame;
 use crate::chat::tui::frame::FrameRequester;
 use crate::chat::tui::slash::{SlashCommand, SlashEffort, SlashMaxTokens, parse_slash_command};
-use crate::chat::tui::terminal::{Tui, TuiFrame};
+use crate::chat::tui::terminal::Tui;
 use crate::chat::tui::transcript::TranscriptState;
 
 #[derive(Clone)]
@@ -79,9 +80,16 @@ pub(crate) async fn run_shell(options: ChatTuiShellOptions) -> Result<()> {
                         tui.clear_viewport()?;
                     }
                     let width = tui.terminal.size()?.width;
-                    tui.insert_history_lines(app.drain_pending_history_lines(width));
                     let viewport_height = app.desired_viewport_height(width);
-                    tui.draw(viewport_height, |frame| app.render_tui_frame(frame))?;
+                    if app.take_resize_reflow_requested(width) {
+                        let history_lines = app.reflow_history_lines(width);
+                        tui.draw_with_resize_reflow(viewport_height, history_lines, |frame| {
+                            app.render_tui_frame(frame)
+                        })?;
+                    } else {
+                        tui.insert_history_lines(app.drain_pending_history_lines(width));
+                        tui.draw(viewport_height, |frame| app.render_tui_frame(frame))?;
+                    }
                 }
             }
             event = terminal_events.next() => {
@@ -164,6 +172,8 @@ pub(crate) struct ChatTuiApp {
     command_tx: mpsc::UnboundedSender<ChatCommand>,
     next_local_message: u64,
     terminal_clear_requested: bool,
+    resize_reflow_requested: bool,
+    last_render_width: Option<u16>,
 }
 
 impl ChatTuiApp {
@@ -180,6 +190,8 @@ impl ChatTuiApp {
             command_tx,
             next_local_message: 0,
             terminal_clear_requested: false,
+            resize_reflow_requested: false,
+            last_render_width: None,
         }
     }
 
@@ -209,6 +221,7 @@ impl ChatTuiApp {
             }
             UiEvent::Resize { cols, rows } => {
                 let _ = (cols, rows);
+                self.resize_reflow_requested = true;
                 frame_requester.schedule_frame();
             }
         }
@@ -257,6 +270,7 @@ impl ChatTuiApp {
 
     pub(crate) fn render_tui_frame(&self, frame: &mut TuiFrame<'_>) {
         if let Some(position) = self.render_area(frame.area(), frame.buffer_mut()) {
+            frame.set_cursor_style(self.bottom_pane.cursor_style());
             frame.set_cursor_position(position);
         }
     }
@@ -275,6 +289,10 @@ impl ChatTuiApp {
         self.transcript.drain_pending_history_lines(width)
     }
 
+    fn reflow_history_lines(&mut self, width: u16) -> Vec<Line<'static>> {
+        self.transcript.reflow_history_lines(width)
+    }
+
     fn desired_viewport_height(&self, width: u16) -> u16 {
         self.transcript
             .desired_height(width)
@@ -285,6 +303,14 @@ impl ChatTuiApp {
     fn take_terminal_clear_requested(&mut self) -> bool {
         let requested = self.terminal_clear_requested;
         self.terminal_clear_requested = false;
+        requested
+    }
+
+    fn take_resize_reflow_requested(&mut self, width: u16) -> bool {
+        let width_changed = self.last_render_width.is_some_and(|last| last != width);
+        self.last_render_width = Some(width);
+        let requested = self.resize_reflow_requested || width_changed;
+        self.resize_reflow_requested = false;
         requested
     }
 
