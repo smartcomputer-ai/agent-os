@@ -3,6 +3,8 @@ use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
+
+use crate::chat::tui::theme::composer_band_style;
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -196,10 +198,6 @@ pub(crate) fn composer_paragraph(composer: &ComposerState) -> Paragraph<'static>
 
 pub(crate) fn composer_band_paragraph(composer: &ComposerState) -> Paragraph<'static> {
     composer_paragraph(composer).style(composer_band_style())
-}
-
-pub(crate) fn composer_band_style() -> Style {
-    Style::default().bg(Color::Rgb(58, 63, 72))
 }
 
 fn composer_lines(text: &str) -> Vec<String> {

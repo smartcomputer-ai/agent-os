@@ -5,7 +5,8 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use crate::chat::protocol::{ChatDelta, ChatEvent, ChatProgressStatus};
 use crate::chat::tui::cell::{
-    CellRenderState, ChatCell, ErrorCell, MessageCell, NoticeCell, RunCell,
+    CellRenderState, ChatCell, ChatCellKind, ErrorCell, MessageCell, NoticeCell, RunCell,
+    ToolChainCell,
 };
 
 #[derive(Debug, Default)]
@@ -74,11 +75,21 @@ impl TranscriptState {
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
             }
             ChatEvent::ToolChainsChanged { chains, .. } => {
-                if let Some(chain) = chains.first() {
-                    self.active_cell = Some(Box::new(RunCell::new(
-                        format!("active-tools:{}", chain.id),
-                        format!("{} {:?}", chain.title, chain.status),
-                    )));
+                if chains.is_empty() {
+                    if self
+                        .active_cell
+                        .as_ref()
+                        .is_some_and(|cell| cell.kind() == ChatCellKind::ToolChain)
+                    {
+                        self.active_cell = None;
+                        self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
+                    }
+                } else {
+                    let id = chains
+                        .first()
+                        .map(|chain| format!("active-tools:{}", chain.id))
+                        .unwrap_or_else(|| "active-tools".to_string());
+                    self.active_cell = Some(Box::new(ToolChainCell::new(id, chains)));
                     self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
                 }
             }
@@ -207,6 +218,12 @@ impl TranscriptState {
                             user.content,
                         )));
                     }
+                    if !turn.tool_chains.is_empty() {
+                        self.push_committed_cell_if_changed(Box::new(ToolChainCell::new(
+                            format!("{turn_id}:tools"),
+                            turn.tool_chains,
+                        )));
+                    }
                     if let Some(assistant) = turn.assistant {
                         self.push_committed_cell_if_changed(Box::new(MessageCell::new(
                             format!("{turn_id}:assistant:{}", assistant.id),
@@ -300,7 +317,7 @@ fn short(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::protocol::ChatMessageView;
+    use crate::chat::protocol::{ChatMessageView, ChatToolCallView, ChatToolChainView};
 
     #[test]
     fn confirmed_user_message_replaces_matching_pending_echo() {
@@ -327,5 +344,43 @@ mod tests {
         assert!(state.pending_user_messages.is_empty());
         assert_eq!(state.cells.len(), 1);
         assert_eq!(state.cells[0].id(), "sha256:abc");
+    }
+
+    #[test]
+    fn tool_chain_updates_render_as_active_tool_cell() {
+        let mut state = TranscriptState::default();
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![ChatToolChainView {
+                id: "run-1:1".into(),
+                title: "tools 1 calls".into(),
+                status: ChatProgressStatus::Running,
+                calls: vec![ChatToolCallView {
+                    id: "call-1".into(),
+                    tool_id: None,
+                    tool_name: "read".into(),
+                    status: ChatProgressStatus::Running,
+                    group_index: Some(1),
+                    parallel_safe: Some(true),
+                    resource_key: Some("src/main.rs".into()),
+                    arguments_preview: None,
+                    result_preview: None,
+                    error: None,
+                }],
+                summary: Some("1 execution groups".into()),
+            }],
+        });
+
+        let active = state.active_cell.as_ref().expect("active cell");
+        assert_eq!(active.kind(), ChatCellKind::ToolChain);
+        assert!(
+            active
+                .display_lines(80, &CellRenderState)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                .contains("read src/main.rs")
+        );
     }
 }

@@ -8,6 +8,7 @@ pub(crate) mod frame;
 pub(crate) mod insert_history;
 pub(crate) mod slash;
 pub(crate) mod terminal;
+pub(crate) mod theme;
 pub(crate) mod transcript;
 pub(crate) mod wrapping;
 

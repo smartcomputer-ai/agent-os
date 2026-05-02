@@ -13,13 +13,12 @@ use crate::chat::protocol::{
     ChatEvent, ChatSettingsView, ChatStatus, DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER,
     reasoning_effort_label,
 };
-use crate::chat::tui::bottom_pane::composer::{
-    ComposerState, composer_band_paragraph, composer_band_style,
-};
+use crate::chat::tui::bottom_pane::composer::{ComposerState, composer_band_paragraph};
 use crate::chat::tui::bottom_pane::list_selection::{
     ListSelectionAction, ListSelectionView, PickerSelection,
 };
 use crate::chat::tui::slash::{SlashCommandKind, slash_query};
+use crate::chat::tui::theme::composer_band_style;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BottomPaneState {
