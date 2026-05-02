@@ -93,11 +93,12 @@ crates/aos-cli/src/chat/tui/mod.rs
 crates/aos-cli/src/chat/tui/app.rs              # top-level UI state and event loop
 crates/aos-cli/src/chat/tui/app_event.rs        # UI-local event bus and typed intents
 crates/aos-cli/src/chat/tui/app_event_sender.rs # lightweight sender helpers
-crates/aos-cli/src/chat/tui/tui.rs              # terminal wrapper, event stream, frame requester
+crates/aos-cli/src/chat/tui/terminal.rs         # TUI lifecycle, raw mode, synchronized draw orchestration
 crates/aos-cli/src/chat/tui/event_stream.rs     # Crossterm EventStream -> TuiEvent
 crates/aos-cli/src/chat/tui/frame.rs            # coalesced redraw scheduling
-crates/aos-cli/src/chat/tui/terminal.rs         # raw mode, alternate screen, panic restore
-crates/aos-cli/src/chat/tui/viewport.rs         # inline viewport + scrollback insertion helpers
+crates/aos-cli/src/chat/tui/custom_terminal.rs  # inline viewport, buffers, cursor, resize/reflow primitives
+crates/aos-cli/src/chat/tui/insert_history.rs   # committed-history insertion into terminal scrollback
+crates/aos-cli/src/chat/tui/wrapping.rs         # scrollback wrapping helpers
 crates/aos-cli/src/chat/tui/layout.rs           # viewport/bottom-pane split calculations
 crates/aos-cli/src/chat/tui/style.rs            # palette, status styles, symbols
 crates/aos-cli/src/chat/tui/transcript.rs       # committed cells, active cell, reflow state
@@ -295,7 +296,7 @@ Initial slash commands:
 /help
 /new
 /sessions
-/resume <session-id>
+/session [session-id]
 /status
 /model [model]
 /provider [provider]
@@ -307,7 +308,6 @@ Initial slash commands:
 /interrupt [reason]
 /steer <instruction>
 /pause
-/resume-session
 /copy
 /clear
 /quit
@@ -319,6 +319,7 @@ Command behavior:
 - UI-only commands stay as `UiEvent`s.
 - Slash commands should be a typed enum in presentation order, with metadata for description, inline-argument support, feature availability, and availability during an active run.
 - Slash commands without arguments should open option pickers, in the style of Claude Code/Codex. The common flow is type `/model`, press Enter, then select from a list.
+- `/sessions` and `/session` open the session picker. `/session <session-id>` switches directly to a known session. There is intentionally no separate `/resume` command in the TUI.
 - `/model` opens a model picker; `/model <model>` may remain as a power-user shortcut.
 - `/provider` opens a provider picker; `/provider <provider>` may remain as a power-user shortcut.
 - `/effort` opens a reasoning-effort picker; `/effort <value>` may remain as a power-user shortcut.
@@ -535,6 +536,17 @@ P3a: Shell
 - Terminal restore tests.
 - Initial live wiring to `ChatSessionDriver`.
 
+Current P3a progress:
+
+- Implemented Ratatui/Crossterm app loop in `aos-cli`.
+- Implemented Codex-style inline viewport terminal wrapper.
+- Implemented committed-history insertion into shell-native terminal scrollback.
+- Implemented synchronized terminal updates, panic/exit restore, raw mode, bracketed paste, and cursor style restore.
+- Implemented source-backed resize reflow for committed transcript history.
+- Implemented frame-request coalescing.
+- Implemented bottom pane, composer, status/footer, and optimistic pending user echo.
+- Implemented tmux-based manual smoke workflow in `debug-tui.md`.
+
 P3b: Live AOS
 
 - Session picker.
@@ -547,12 +559,15 @@ P3b: Live AOS
 Current P3b progress:
 
 - Implemented bottom-pane `ListSelectionView` pickers for `/model`, `/provider`, `/effort`, and `/max-tokens`.
-- Implemented the bottom-pane session picker for `/sessions` and `/resume`, plus `/new` for a fresh session.
+- Implemented the bottom-pane session picker for `/sessions` and `/session`, plus `/new` for a fresh session.
+- Implemented `/session <session-id>` as the direct session-switch shortcut.
+- Removed `/resume` to keep session navigation under one command family.
 - Implemented Codex-style slash command filtering: typing `/` or a command prefix opens a bottom-pane command picker and progressively filters by prefix.
 - Implemented direct slash shortcuts for those settings, e.g. `/effort high` and `/max-tokens none`.
 - Picker selections route through P2 `ChatCommand`s and respect the driver-level editability rules.
 - Disabled picker rows now report a visible error instead of silently ignoring Enter.
-- Still remaining in this phase: committed scrollback insertion, retained transcript/detail overlay, richer assistant rendering, selected-session config persistence from in-TUI switches, and reconnect/gap polish.
+- Implemented committed terminal scrollback, terminal resize reflow, and stable composer/footer layout.
+- Still remaining in this phase: retained transcript/detail overlay, richer assistant rendering, selected-session config persistence from in-TUI switches, and reconnect/gap polish.
 
 P3c: Complex Runs
 
@@ -617,7 +632,7 @@ Render tests:
 Integration/manual tests:
 
 - `aos chat --new` against a local node.
-- Resume existing session.
+- Switch to an existing session through `/sessions`.
 - Submit follow-up while previous run is active.
 - Interrupt a running session.
 - Disconnect/reconnect node.
