@@ -239,8 +239,7 @@ impl BottomPaneState {
             .split(area);
             return self
                 .composer
-                .cursor_position(self.composer_text_area(chunks[0]))
-                .map(|position| Position::new(position.x, position.y.saturating_add(1)));
+                .cursor_position(self.composer_text_area(chunks[0]));
         }
         let chunks = Layout::vertical([
             Constraint::Length(self.composer_band_height()),
@@ -423,7 +422,18 @@ mod tests {
             .cursor_position(Rect::new(0, 0, 80, 8))
             .expect("composer cursor");
 
-        assert_eq!(cursor.y, 2);
+        assert_eq!(cursor.y, 1);
+    }
+
+    #[test]
+    fn empty_composer_cursor_is_on_prompt_row() {
+        let pane = BottomPaneState::default();
+        let cursor = pane
+            .cursor_position(Rect::new(0, 0, 80, pane.desired_height()))
+            .expect("composer cursor");
+
+        assert_eq!(pane.desired_height(), 4);
+        assert_eq!(cursor, Position::new(2, 1));
     }
 
     #[test]

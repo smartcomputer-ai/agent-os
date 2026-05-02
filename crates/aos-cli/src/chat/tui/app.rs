@@ -5,7 +5,6 @@ use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Layout};
 use ratatui::layout::{Position, Rect};
 use ratatui::text::Line;
 use tokio::sync::mpsc;
@@ -277,12 +276,26 @@ impl ChatTuiApp {
 
     fn render_area(&self, area: Rect, buf: &mut Buffer) -> Option<Position> {
         let bottom_height = self.bottom_pane.desired_height().min(area.height);
-        let chunks =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(bottom_height)]).split(area);
+        let spacer_height = u16::from(area.height > bottom_height);
+        let transcript_height = area.height.saturating_sub(bottom_height + spacer_height);
+        let transcript_area = Rect {
+            height: transcript_height,
+            ..area
+        };
+        let bottom_area = Rect {
+            y: area
+                .y
+                .saturating_add(transcript_height)
+                .saturating_add(spacer_height),
+            height: bottom_height,
+            ..area
+        };
 
-        self.transcript.render(chunks[0], buf);
-        self.bottom_pane.render(chunks[1], buf);
-        self.bottom_pane.cursor_position(chunks[1])
+        if transcript_area.height > 0 {
+            self.transcript.render(transcript_area, buf);
+        }
+        self.bottom_pane.render(bottom_area, buf);
+        self.bottom_pane.cursor_position(bottom_area)
     }
 
     fn drain_pending_history_lines(&mut self, width: u16) -> Vec<Line<'static>> {
@@ -297,6 +310,7 @@ impl ChatTuiApp {
         self.transcript
             .desired_height(width)
             .saturating_add(self.bottom_pane.desired_height())
+            .saturating_add(1)
             .max(1)
     }
 
