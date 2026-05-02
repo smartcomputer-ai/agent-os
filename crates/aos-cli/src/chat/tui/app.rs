@@ -349,11 +349,10 @@ impl ChatTuiApp {
         match command {
             SlashCommand::Help => self.local_notice(command_help()),
             SlashCommand::NewSession => self.send_chat_command(ChatCommand::NewSession),
-            SlashCommand::Sessions => self.send_chat_command(ChatCommand::ListSessions),
-            SlashCommand::Resume(Some(session_id)) => {
+            SlashCommand::Sessions(Some(session_id)) => {
                 self.send_chat_command(ChatCommand::SwitchSession { session_id });
             }
-            SlashCommand::Resume(None) => self.send_chat_command(ChatCommand::ListSessions),
+            SlashCommand::Sessions(None) => self.send_chat_command(ChatCommand::ListSessions),
             SlashCommand::Quit => self.app_event_tx.exit(),
             SlashCommand::Model(Some(model)) => {
                 self.send_chat_command(ChatCommand::SetDraftModel { model });
@@ -460,7 +459,7 @@ impl ChatTuiApp {
 }
 
 fn command_help() -> &'static str {
-    "commands: /new, /sessions, /resume, /model, /provider, /effort, /max-tokens, /help, /quit"
+    "commands: /new, /sessions, /model, /provider, /effort, /max-tokens, /help, /quit"
 }
 
 #[cfg(test)]

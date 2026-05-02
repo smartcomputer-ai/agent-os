@@ -7,8 +7,7 @@ use crate::chat::protocol::parse_reasoning_effort;
 pub(crate) enum SlashCommand {
     Help,
     NewSession,
-    Sessions,
-    Resume(Option<String>),
+    Sessions(Option<String>),
     Quit,
     Model(Option<String>),
     Provider(Option<String>),
@@ -21,7 +20,6 @@ pub(crate) enum SlashCommandKind {
     Help,
     NewSession,
     Sessions,
-    Resume,
     Model,
     Provider,
     Effort,
@@ -85,7 +83,6 @@ impl SlashCommandKind {
             SlashCommandKind::Model,
             SlashCommandKind::Sessions,
             SlashCommandKind::NewSession,
-            SlashCommandKind::Resume,
             SlashCommandKind::Provider,
             SlashCommandKind::Effort,
             SlashCommandKind::MaxTokens,
@@ -99,7 +96,6 @@ impl SlashCommandKind {
             SlashCommandKind::Help => "help",
             SlashCommandKind::NewSession => "new",
             SlashCommandKind::Sessions => "sessions",
-            SlashCommandKind::Resume => "resume",
             SlashCommandKind::Model => "model",
             SlashCommandKind::Provider => "provider",
             SlashCommandKind::Effort => "effort",
@@ -113,7 +109,6 @@ impl SlashCommandKind {
             SlashCommandKind::Help => "show available chat commands",
             SlashCommandKind::NewSession => "start a fresh session",
             SlashCommandKind::Sessions => "choose a known session",
-            SlashCommandKind::Resume => "resume a known session",
             SlashCommandKind::Model => "choose the model for future runs",
             SlashCommandKind::Provider => "choose the LLM provider",
             SlashCommandKind::Effort => "choose thinking effort for future runs",
@@ -126,8 +121,7 @@ impl SlashCommandKind {
         match self {
             SlashCommandKind::Help => SlashCommand::Help,
             SlashCommandKind::NewSession => SlashCommand::NewSession,
-            SlashCommandKind::Sessions => SlashCommand::Sessions,
-            SlashCommandKind::Resume => SlashCommand::Resume(None),
+            SlashCommandKind::Sessions => SlashCommand::Sessions(None),
             SlashCommandKind::Model => SlashCommand::Model(None),
             SlashCommandKind::Provider => SlashCommand::Provider(None),
             SlashCommandKind::Effort => SlashCommand::Effort(SlashEffort::Pick),
@@ -140,8 +134,7 @@ impl SlashCommandKind {
         Ok(match self {
             SlashCommandKind::Help => SlashCommand::Help,
             SlashCommandKind::NewSession => SlashCommand::NewSession,
-            SlashCommandKind::Sessions => SlashCommand::Sessions,
-            SlashCommandKind::Resume => SlashCommand::Resume(optional_value(args)),
+            SlashCommandKind::Sessions => SlashCommand::Sessions(optional_value(args)),
             SlashCommandKind::Quit => SlashCommand::Quit,
             SlashCommandKind::Model => SlashCommand::Model(optional_value(args)),
             SlashCommandKind::Provider => SlashCommand::Provider(optional_value(args)),
@@ -167,7 +160,6 @@ impl SlashCommandKind {
             "help" | "?" => SlashCommandKind::Help,
             "new" => SlashCommandKind::NewSession,
             "sessions" | "session" => SlashCommandKind::Sessions,
-            "resume" => SlashCommandKind::Resume,
             "quit" | "exit" => SlashCommandKind::Quit,
             "model" => SlashCommandKind::Model,
             "provider" => SlashCommandKind::Provider,
@@ -215,11 +207,7 @@ mod tests {
         );
         assert_eq!(
             parse_slash_command("/sessions").unwrap(),
-            Some(SlashCommand::Sessions)
-        );
-        assert_eq!(
-            parse_slash_command("/resume").unwrap(),
-            Some(SlashCommand::Resume(None))
+            Some(SlashCommand::Sessions(None))
         );
     }
 
@@ -240,11 +228,17 @@ mod tests {
             Some(SlashCommand::MaxTokens(SlashMaxTokens::Set(None)))
         );
         assert_eq!(
-            parse_slash_command("/resume 018f2a66-31cc-7b25-a4f7-37e3310fdc6c").unwrap(),
-            Some(SlashCommand::Resume(Some(
+            parse_slash_command("/session 018f2a66-31cc-7b25-a4f7-37e3310fdc6c").unwrap(),
+            Some(SlashCommand::Sessions(Some(
                 "018f2a66-31cc-7b25-a4f7-37e3310fdc6c".into()
             )))
         );
+    }
+
+    #[test]
+    fn resume_is_not_a_slash_command() {
+        let error = parse_slash_command("/resume").expect_err("resume should be removed");
+        assert!(error.to_string().contains("unknown slash command /resume"));
     }
 
     #[test]
