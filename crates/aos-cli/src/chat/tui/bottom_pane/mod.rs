@@ -24,6 +24,7 @@ use crate::chat::tui::slash::{SlashCommandKind, slash_query};
 pub(crate) struct BottomPaneState {
     composer: ComposerState,
     status: String,
+    current_session_id: Option<String>,
     settings: Option<ChatSettingsView>,
     active_view: Option<BottomPaneView>,
     slash_popup: Option<ListSelectionView>,
@@ -50,6 +51,7 @@ impl Default for BottomPaneState {
         Self {
             composer: ComposerState::default(),
             status: "ready".into(),
+            current_session_id: None,
             settings: None,
             active_view: None,
             slash_popup: None,
@@ -151,6 +153,17 @@ impl BottomPaneState {
         self.slash_popup = None;
     }
 
+    pub(crate) fn open_session_picker(
+        &mut self,
+        sessions: &[crate::chat::protocol::ChatSessionSummary],
+    ) {
+        self.active_view = Some(BottomPaneView::Picker(ListSelectionView::sessions(
+            sessions,
+            self.current_session_id.as_deref(),
+        )));
+        self.slash_popup = None;
+    }
+
     pub(crate) fn desired_height(&self) -> u16 {
         self.content_height() + self.footer_height()
     }
@@ -159,12 +172,23 @@ impl BottomPaneState {
         match event {
             ChatEvent::Connected(info) => {
                 self.status = "connected".into();
+                self.current_session_id = Some(info.session_id.clone());
                 self.settings = Some(info.settings.clone());
             }
+            ChatEvent::SessionSelected(summary) => {
+                self.current_session_id = Some(summary.session_id.clone());
+            }
+            ChatEvent::HistoryReset { session_id } => {
+                self.current_session_id = Some(session_id.clone());
+            }
             ChatEvent::StatusChanged(ChatStatus {
-                status, settings, ..
+                session_id,
+                status,
+                settings,
+                ..
             }) => {
                 self.status = status.clone();
+                self.current_session_id = Some(session_id.clone());
                 self.settings = Some(settings.clone());
             }
             ChatEvent::Error(error) => {

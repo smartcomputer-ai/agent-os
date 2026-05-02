@@ -15,7 +15,7 @@ use crate::chat::protocol::{
     ChatCommand, ChatConnectionInfo, ChatDelta, ChatDraftOverrideMask, ChatDraftSettings,
     ChatErrorView, ChatEvent, ChatMessageView, ChatSettingsView, ChatStatus, session_active,
 };
-use crate::chat::session::validate_session_id;
+use crate::chat::session::{new_session_id, validate_session_id};
 use crate::chat::sse::JournalSseEvent;
 
 #[derive(Debug, Clone)]
@@ -79,6 +79,8 @@ impl ChatSessionDriver {
             ChatCommand::SetDraftModel { model } => self.set_model(model),
             ChatCommand::SetDraftReasoningEffort { effort } => self.set_effort(effort),
             ChatCommand::SetDraftMaxTokens { max_tokens } => self.set_max_tokens(max_tokens),
+            ChatCommand::ListSessions => self.list_sessions().await,
+            ChatCommand::NewSession => self.switch_session(new_session_id()).await,
             ChatCommand::SteerRun { text } => self.steer_run(text).await,
             ChatCommand::InterruptRun { reason } => self.interrupt_run(reason).await,
             ChatCommand::PauseSession => {
@@ -349,6 +351,13 @@ impl ChatSessionDriver {
         let input = self.session_input(input_kind);
         self.client.submit_session_input(&input).await?;
         self.refresh().await
+    }
+
+    async fn list_sessions(&mut self) -> Result<Vec<ChatEvent>> {
+        Ok(vec![ChatEvent::SessionsListed {
+            world_id: self.client.world_id().to_string(),
+            sessions: self.client.list_sessions().await?,
+        }])
     }
 
     async fn switch_session(&mut self, session_id: String) -> Result<Vec<ChatEvent>> {

@@ -6,6 +6,9 @@ use crate::chat::protocol::parse_reasoning_effort;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SlashCommand {
     Help,
+    NewSession,
+    Sessions,
+    Resume(Option<String>),
     Quit,
     Model(Option<String>),
     Provider(Option<String>),
@@ -16,6 +19,9 @@ pub(crate) enum SlashCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlashCommandKind {
     Help,
+    NewSession,
+    Sessions,
+    Resume,
     Model,
     Provider,
     Effort,
@@ -77,6 +83,9 @@ impl SlashCommandKind {
     pub(crate) fn all() -> &'static [SlashCommandKind] {
         &[
             SlashCommandKind::Model,
+            SlashCommandKind::Sessions,
+            SlashCommandKind::NewSession,
+            SlashCommandKind::Resume,
             SlashCommandKind::Provider,
             SlashCommandKind::Effort,
             SlashCommandKind::MaxTokens,
@@ -88,6 +97,9 @@ impl SlashCommandKind {
     pub(crate) fn name(self) -> &'static str {
         match self {
             SlashCommandKind::Help => "help",
+            SlashCommandKind::NewSession => "new",
+            SlashCommandKind::Sessions => "sessions",
+            SlashCommandKind::Resume => "resume",
             SlashCommandKind::Model => "model",
             SlashCommandKind::Provider => "provider",
             SlashCommandKind::Effort => "effort",
@@ -99,6 +111,9 @@ impl SlashCommandKind {
     pub(crate) fn description(self) -> &'static str {
         match self {
             SlashCommandKind::Help => "show available chat commands",
+            SlashCommandKind::NewSession => "start a fresh session",
+            SlashCommandKind::Sessions => "choose a known session",
+            SlashCommandKind::Resume => "resume a known session",
             SlashCommandKind::Model => "choose the model for future runs",
             SlashCommandKind::Provider => "choose the LLM provider",
             SlashCommandKind::Effort => "choose thinking effort for future runs",
@@ -110,6 +125,9 @@ impl SlashCommandKind {
     pub(crate) fn command_without_args(self) -> SlashCommand {
         match self {
             SlashCommandKind::Help => SlashCommand::Help,
+            SlashCommandKind::NewSession => SlashCommand::NewSession,
+            SlashCommandKind::Sessions => SlashCommand::Sessions,
+            SlashCommandKind::Resume => SlashCommand::Resume(None),
             SlashCommandKind::Model => SlashCommand::Model(None),
             SlashCommandKind::Provider => SlashCommand::Provider(None),
             SlashCommandKind::Effort => SlashCommand::Effort(SlashEffort::Pick),
@@ -121,6 +139,9 @@ impl SlashCommandKind {
     fn command_with_args(self, args: &str) -> Result<SlashCommand> {
         Ok(match self {
             SlashCommandKind::Help => SlashCommand::Help,
+            SlashCommandKind::NewSession => SlashCommand::NewSession,
+            SlashCommandKind::Sessions => SlashCommand::Sessions,
+            SlashCommandKind::Resume => SlashCommand::Resume(optional_value(args)),
             SlashCommandKind::Quit => SlashCommand::Quit,
             SlashCommandKind::Model => SlashCommand::Model(optional_value(args)),
             SlashCommandKind::Provider => SlashCommand::Provider(optional_value(args)),
@@ -144,6 +165,9 @@ impl SlashCommandKind {
     fn from_name(name: &str) -> Option<Self> {
         Some(match name {
             "help" | "?" => SlashCommandKind::Help,
+            "new" => SlashCommandKind::NewSession,
+            "sessions" | "session" => SlashCommandKind::Sessions,
+            "resume" => SlashCommandKind::Resume,
             "quit" | "exit" => SlashCommandKind::Quit,
             "model" => SlashCommandKind::Model,
             "provider" => SlashCommandKind::Provider,
@@ -189,6 +213,14 @@ mod tests {
             parse_slash_command("/effort").unwrap(),
             Some(SlashCommand::Effort(SlashEffort::Pick))
         );
+        assert_eq!(
+            parse_slash_command("/sessions").unwrap(),
+            Some(SlashCommand::Sessions)
+        );
+        assert_eq!(
+            parse_slash_command("/resume").unwrap(),
+            Some(SlashCommand::Resume(None))
+        );
     }
 
     #[test]
@@ -207,6 +239,12 @@ mod tests {
             parse_slash_command("/max-tokens none").unwrap(),
             Some(SlashCommand::MaxTokens(SlashMaxTokens::Set(None)))
         );
+        assert_eq!(
+            parse_slash_command("/resume 018f2a66-31cc-7b25-a4f7-37e3310fdc6c").unwrap(),
+            Some(SlashCommand::Resume(Some(
+                "018f2a66-31cc-7b25-a4f7-37e3310fdc6c".into()
+            )))
+        );
     }
 
     #[test]
@@ -224,6 +262,10 @@ mod tests {
     #[test]
     fn command_matches_filter_by_prefix() {
         assert_eq!(matching_slash_commands("mo"), vec![SlashCommandKind::Model]);
+        assert_eq!(
+            matching_slash_commands("se"),
+            vec![SlashCommandKind::Sessions]
+        );
         assert!(matching_slash_commands("").contains(&SlashCommandKind::Provider));
     }
 }

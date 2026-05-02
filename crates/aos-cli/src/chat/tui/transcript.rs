@@ -36,6 +36,7 @@ impl TranscriptState {
                     ),
                 )));
             }
+            ChatEvent::SessionsListed { .. } => {}
             ChatEvent::SessionSelected(summary) => {
                 self.replace_or_push(Box::new(NoticeCell::new(
                     "session",

@@ -178,6 +178,18 @@ impl ChatTuiApp {
         match event {
             UiEvent::ExitRequested => return true,
             UiEvent::Chat(event) => {
+                match &event {
+                    ChatEvent::SessionsListed { sessions, .. } => {
+                        self.bottom_pane.open_session_picker(sessions);
+                    }
+                    ChatEvent::HistoryReset { session_id } => {
+                        self.options.session_id = session_id.clone();
+                    }
+                    ChatEvent::SessionSelected(summary) => {
+                        self.options.session_id = summary.session_id.clone();
+                    }
+                    _ => {}
+                }
                 self.bottom_pane.apply_chat_event(&event);
                 self.transcript.apply_chat_event(event);
                 frame_requester.schedule_frame();
@@ -264,6 +276,12 @@ impl ChatTuiApp {
     fn apply_slash_command(&mut self, command: SlashCommand) {
         match command {
             SlashCommand::Help => self.local_notice(command_help()),
+            SlashCommand::NewSession => self.send_chat_command(ChatCommand::NewSession),
+            SlashCommand::Sessions => self.send_chat_command(ChatCommand::ListSessions),
+            SlashCommand::Resume(Some(session_id)) => {
+                self.send_chat_command(ChatCommand::SwitchSession { session_id });
+            }
+            SlashCommand::Resume(None) => self.send_chat_command(ChatCommand::ListSessions),
             SlashCommand::Quit => self.app_event_tx.exit(),
             SlashCommand::Model(Some(model)) => {
                 self.send_chat_command(ChatCommand::SetDraftModel { model });
@@ -312,6 +330,9 @@ impl ChatTuiApp {
             }
             PickerSelection::SlashCommand(command) => {
                 self.apply_slash_command(command.command_without_args());
+            }
+            PickerSelection::Session(session_id) => {
+                self.send_chat_command(ChatCommand::SwitchSession { session_id });
             }
         }
     }
@@ -388,7 +409,7 @@ impl ChatTuiApp {
 }
 
 fn command_help() -> &'static str {
-    "commands: /model, /provider, /effort, /max-tokens, /help, /quit"
+    "commands: /new, /sessions, /resume, /model, /provider, /effort, /max-tokens, /help, /quit"
 }
 
 fn short(value: &str) -> String {
@@ -405,7 +426,8 @@ mod tests {
     use tokio::sync::mpsc;
 
     use crate::chat::protocol::{
-        ChatConnectionInfo, ChatRunView, ChatSettingsView, ChatStatus, ChatTurn, run_status,
+        ChatConnectionInfo, ChatRunView, ChatSessionSummary, ChatSettingsView, ChatStatus,
+        ChatTurn, run_status,
     };
 
     #[test]
@@ -582,6 +604,67 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| app.render(frame)).unwrap();
         assert!(format!("{}", terminal.backend()).contains("Select model"));
+    }
+
+    #[test]
+    fn sessions_event_opens_picker_and_selection_switches_session() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let mut app = ChatTuiApp::new(
+            ChatTuiViewOptions {
+                world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
+                session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+            },
+            app_event_tx,
+            command_tx,
+        );
+        let target_session = "018f2a66-31cc-7b25-a4f7-37e3310fdc6c".to_string();
+
+        app.handle_ui_event(
+            UiEvent::Chat(ChatEvent::SessionsListed {
+                world_id: app.options.world_id.clone(),
+                sessions: vec![
+                    ChatSessionSummary {
+                        session_id: app.options.session_id.clone(),
+                        status: None,
+                        lifecycle: None,
+                        updated_at_ns: Some(2),
+                        run_count: 1,
+                        provider: Some("openai-responses".into()),
+                        model: Some("gpt-5.3-codex".into()),
+                        active_run: None,
+                    },
+                    ChatSessionSummary {
+                        session_id: target_session.clone(),
+                        status: None,
+                        lifecycle: None,
+                        updated_at_ns: Some(1),
+                        run_count: 0,
+                        provider: None,
+                        model: None,
+                        active_run: None,
+                    },
+                ],
+            }),
+            &FrameRequester::test_dummy(),
+        );
+
+        app.handle_terminal_event(
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            &FrameRequester::test_dummy(),
+        );
+        app.handle_terminal_event(
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            &FrameRequester::test_dummy(),
+        );
+
+        assert_eq!(
+            command_rx.try_recv().expect("switch command"),
+            ChatCommand::SwitchSession {
+                session_id: target_session
+            }
+        );
     }
 
     fn pad(line: &str) -> String {

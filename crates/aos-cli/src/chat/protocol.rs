@@ -45,6 +45,8 @@ pub(crate) enum ChatCommand {
     SetDraftModel { model: String },
     SetDraftReasoningEffort { effort: Option<ReasoningEffort> },
     SetDraftMaxTokens { max_tokens: Option<u64> },
+    ListSessions,
+    NewSession,
     SteerRun { text: String },
     InterruptRun { reason: Option<String> },
     PauseSession,
@@ -58,6 +60,10 @@ pub(crate) enum ChatCommand {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum ChatEvent {
     Connected(ChatConnectionInfo),
+    SessionsListed {
+        world_id: String,
+        sessions: Vec<ChatSessionSummary>,
+    },
     SessionSelected(ChatSessionSummary),
     HistoryReset {
         session_id: String,

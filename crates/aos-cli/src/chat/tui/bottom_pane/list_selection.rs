@@ -6,7 +6,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
-use crate::chat::protocol::{DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER, reasoning_effort_label};
+use crate::chat::protocol::{
+    ChatSessionSummary, DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER, reasoning_effort_label,
+};
 use crate::chat::tui::slash::{SlashCommandKind, matching_slash_commands};
 
 const MODEL_CHOICES: &[&str] = &[
@@ -48,6 +50,7 @@ pub(crate) enum PickerSelection {
     Effort(Option<ReasoningEffort>),
     MaxTokens(Option<u64>),
     SlashCommand(SlashCommandKind),
+    Session(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +85,38 @@ impl ListSelectionView {
             ]);
         }
         Self::new_untitled(rows)
+    }
+
+    pub(crate) fn sessions(
+        sessions: &[ChatSessionSummary],
+        current_session_id: Option<&str>,
+    ) -> Self {
+        let rows = sessions
+            .iter()
+            .map(|summary| {
+                let current = current_session_id == Some(summary.session_id.as_str());
+                ListSelectionRow::new(
+                    short(&summary.session_id),
+                    session_description(summary, current),
+                    PickerSelection::Session(summary.session_id.clone()),
+                )
+                .with_current(current)
+            })
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            return Self::new(
+                "Select session",
+                vec![
+                    ListSelectionRow::new(
+                        "no sessions",
+                        "start one with /new",
+                        PickerSelection::Session(String::new()),
+                    )
+                    .with_disabled_reason(Some("no known sessions in this world".into())),
+                ],
+            );
+        }
+        Self::new("Select session", rows)
     }
 
     pub(crate) fn model(current: &str, editable: bool) -> Self {
@@ -350,6 +385,27 @@ fn ensure_choice(choices: &mut Vec<String>, current: &str) {
     if !current.is_empty() && !choices.iter().any(|choice| choice == current) {
         choices.push(current.to_string());
     }
+}
+
+fn session_description(summary: &ChatSessionSummary, current: bool) -> String {
+    let mut parts = Vec::new();
+    if current {
+        parts.push("current".to_string());
+    }
+    if let Some(lifecycle) = summary.lifecycle {
+        parts.push(format!("{lifecycle:?}").to_ascii_lowercase());
+    } else if let Some(status) = summary.status {
+        parts.push(format!("{status:?}").to_ascii_lowercase());
+    }
+    parts.push(format!("{} runs", summary.run_count));
+    if let Some(model) = summary.model.as_ref() {
+        parts.push(model.clone());
+    }
+    parts.join("  ")
+}
+
+fn short(value: &str) -> String {
+    value.get(..8).unwrap_or(value).to_string()
 }
 
 #[cfg(test)]
