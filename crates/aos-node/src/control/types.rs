@@ -214,6 +214,69 @@ pub struct JournalEntriesResponse {
     pub entries: Vec<JournalEntryResponse>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct JournalWaitQuery {
+    #[serde(default)]
+    pub from: Option<u64>,
+    #[serde(default = "default_journal_wait_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    #[serde(default)]
+    pub kind: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct JournalStreamQuery {
+    #[serde(default)]
+    pub from: Option<u64>,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    #[serde(default)]
+    pub kind: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JournalWaitResponse {
+    pub world_id: WorldId,
+    pub from: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_from: Option<u64>,
+    pub retained_from: u64,
+    pub head: u64,
+    pub next_from: u64,
+    pub timed_out: bool,
+    pub gap: bool,
+    pub entries: Vec<JournalEntryResponse>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JournalRecordSseData {
+    pub world_id: WorldId,
+    pub seq: u64,
+    pub kind: String,
+    pub next_from: u64,
+    pub record: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JournalHeadSseData {
+    pub world_id: WorldId,
+    pub head: u64,
+    pub next_from: u64,
+    pub retained_from: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JournalGapSseData {
+    pub world_id: WorldId,
+    pub requested_from: u64,
+    pub retained_from: u64,
+    pub next_from: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RawJournalEntryResponse {
     pub seq: u64,
@@ -520,6 +583,10 @@ pub struct WorkspaceDiffResponse {
 
 pub fn default_limit() -> u32 {
     100
+}
+
+pub fn default_journal_wait_timeout_ms() -> u64 {
+    30_000
 }
 
 pub fn default_workspace_limit() -> u64 {

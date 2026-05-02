@@ -9,17 +9,17 @@ use aos_kernel::TraceQuery;
 use aos_node::control::{
     AcceptWaitQuery, BlobPutResponse, CasBlobMetadata, CommandSubmitBody, CommandSubmitResponse,
     ControlError, CreateWorldBody, DefGetResponse, DefsListResponse, DefsQuery, ForkWorldBody,
-    HeadInfoResponse, HttpBackend, JournalEntriesResponse, JournalQuery, LimitQuery,
-    ManifestResponse, PutSecretVersionBody, RawJournalEntriesResponse, ServiceInfoResponse,
-    StateGetQuery, StateGetResponse, StateListResponse, SubmitEventBody, UpsertSecretBindingBody,
-    WorkspaceAnnotationsQuery, WorkspaceApplyRequest, WorkspaceApplyResponse, WorkspaceBytesQuery,
-    WorkspaceDiffBody, WorkspaceEntriesQuery, WorkspaceEntryQuery, WorkspaceResolveQuery,
-    WorkspaceResolveResponse,
+    HeadInfoResponse, HttpBackend, JournalEntriesResponse, JournalQuery, JournalStreamQuery,
+    JournalWaitResponse, LimitQuery, ManifestResponse, PutSecretVersionBody,
+    RawJournalEntriesResponse, ServiceInfoResponse, StateGetQuery, StateGetResponse,
+    StateListResponse, SubmitEventBody, UpsertSecretBindingBody, WorkspaceAnnotationsQuery,
+    WorkspaceApplyRequest, WorkspaceApplyResponse, WorkspaceBytesQuery, WorkspaceDiffBody,
+    WorkspaceEntriesQuery, WorkspaceEntryQuery, WorkspaceResolveQuery, WorkspaceResolveResponse,
 };
 use aos_node::{
     CommandRecord, CreateWorldRequest, DomainEventIngress, ForkWorldRequest, ReceiptIngress,
     SecretBindingRecord, SecretVersionRecord, SnapshotRecord, UniverseId, WorldId,
-    WorldRuntimeInfo,
+    WorldJournalAdvance, WorldRuntimeInfo,
 };
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -585,6 +585,25 @@ impl ControlFacade {
             .map_err(control_error_from_worker)
     }
 
+    pub fn subscribe_world_journal(
+        &self,
+    ) -> Result<tokio::sync::broadcast::Receiver<WorldJournalAdvance>, ControlError> {
+        self.runtime_for_reads()?
+            .subscribe_world_journal()
+            .map_err(control_error_from_worker)
+    }
+
+    pub fn journal_tail(
+        &self,
+        world_id: WorldId,
+        query: JournalStreamQuery,
+    ) -> Result<JournalWaitResponse, ControlError> {
+        let universe_id = self.default_universe_id()?;
+        self.runtime_for_reads()?
+            .durable_journal_tail(universe_id, world_id, query)
+            .map_err(control_error_from_worker)
+    }
+
     pub fn runtime(&self, world_id: WorldId) -> Result<HostedWorldRuntimeResponse, ControlError> {
         let universe_id = self.default_universe_id()?;
         let world = self
@@ -952,6 +971,20 @@ impl HttpBackend for ControlFacade {
         query: JournalQuery,
     ) -> Result<RawJournalEntriesResponse, ControlError> {
         ControlFacade::journal_entries_raw(self, world_id, query)
+    }
+
+    fn subscribe_world_journal(
+        &self,
+    ) -> Result<tokio::sync::broadcast::Receiver<WorldJournalAdvance>, ControlError> {
+        ControlFacade::subscribe_world_journal(self)
+    }
+
+    fn journal_tail(
+        &self,
+        world_id: WorldId,
+        query: JournalStreamQuery,
+    ) -> Result<JournalWaitResponse, ControlError> {
+        ControlFacade::journal_tail(self, world_id, query)
     }
 
     fn get_command(

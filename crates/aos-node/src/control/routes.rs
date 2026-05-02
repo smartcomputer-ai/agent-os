@@ -1,34 +1,38 @@
+use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use aos_cbor::Hash;
 use aos_effect_types::{
     GovApplyParams, GovApproveParams, GovProposeParams, GovShadowParams, HashRef,
     WorkspaceAnnotationsGetReceipt, WorkspaceDiffReceipt, WorkspaceListReceipt,
 };
-use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::body::{Body, Bytes};
+use axum::extract::{DefaultBodyLimit, Path, Query, RawQuery, State};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Serialize;
+use tokio::sync::broadcast;
 
 use crate::control::openapi;
 use crate::control::{
     AcceptWaitQuery, BlobPutResponse, CasBlobMetadata, CommandSubmitBody, CommandSubmitResponse,
     ControlError, CreateWorldBody, DefGetResponse, DefsListResponse, DefsQuery, ForkWorldBody,
-    HeadInfoResponse, JournalEntriesResponse, JournalQuery, LimitQuery, ManifestResponse,
-    PutSecretVersionBody, RawJournalEntriesResponse, ServiceInfoResponse, StateGetQuery,
-    StateGetResponse, StateListResponse, SubmitEventBody, TraceQuery, TraceSummaryQuery,
-    UniverseQuery, UpsertSecretBindingBody, WorkspaceAnnotationsQuery, WorkspaceApplyRequest,
-    WorkspaceApplyResponse, WorkspaceBytesQuery, WorkspaceDiffBody, WorkspaceEntriesQuery,
-    WorkspaceEntryQuery, WorkspaceResolveQuery, WorkspaceResolveResponse, WorldPageQuery,
-    WorldSummaryResponse,
+    HeadInfoResponse, JournalEntriesResponse, JournalGapSseData, JournalHeadSseData, JournalQuery,
+    JournalRecordSseData, JournalStreamQuery, JournalWaitQuery, JournalWaitResponse, LimitQuery,
+    ManifestResponse, PutSecretVersionBody, RawJournalEntriesResponse, ServiceInfoResponse,
+    StateGetQuery, StateGetResponse, StateListResponse, SubmitEventBody, TraceQuery,
+    TraceSummaryQuery, UniverseQuery, UpsertSecretBindingBody, WorkspaceAnnotationsQuery,
+    WorkspaceApplyRequest, WorkspaceApplyResponse, WorkspaceBytesQuery, WorkspaceDiffBody,
+    WorkspaceEntriesQuery, WorkspaceEntryQuery, WorkspaceResolveQuery, WorkspaceResolveResponse,
+    WorldPageQuery, WorldSummaryResponse, default_journal_wait_timeout_ms, default_limit,
 };
 use crate::{
     CommandRecord, ReceiptIngress, SecretBindingRecord, SecretVersionRecord, UniverseId, WorldId,
-    WorldRuntimeInfo,
+    WorldJournalAdvance, WorldRuntimeInfo,
 };
 
 const CAS_BLOB_UPLOAD_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
@@ -96,6 +100,14 @@ pub trait HttpBackend: Send + Sync + 'static {
         world_id: WorldId,
         query: JournalQuery,
     ) -> Result<RawJournalEntriesResponse, ControlError>;
+    fn subscribe_world_journal(
+        &self,
+    ) -> Result<broadcast::Receiver<WorldJournalAdvance>, ControlError>;
+    fn journal_tail(
+        &self,
+        world_id: WorldId,
+        query: JournalStreamQuery,
+    ) -> Result<JournalWaitResponse, ControlError>;
     fn get_command(
         &self,
         world_id: WorldId,
@@ -287,6 +299,11 @@ pub fn router<B: HttpBackend>(backend: Arc<B>) -> Router {
             get(trace_summary::<B>),
         )
         .route("/v1/worlds/{world_id}/journal/head", get(journal_head::<B>))
+        .route("/v1/worlds/{world_id}/journal/wait", get(journal_wait::<B>))
+        .route(
+            "/v1/worlds/{world_id}/journal/stream",
+            get(journal_stream::<B>),
+        )
         .route("/v1/worlds/{world_id}/journal", get(journal_entries::<B>))
         .route(
             "/v1/worlds/{world_id}/commands/{command_id}",
@@ -548,6 +565,84 @@ async fn journal_head<B: HttpBackend>(
     Ok(Json(backend.journal_head(parse_world_id(&world_id)?)?))
 }
 
+async fn journal_wait<B: HttpBackend>(
+    State(backend): State<Arc<B>>,
+    Path(world_id): Path<String>,
+    RawQuery(raw_query): RawQuery,
+) -> Result<impl IntoResponse, ControlError> {
+    let world_id = parse_world_id(&world_id)?;
+    let query = parse_journal_wait_query(raw_query.as_deref())?;
+    let mut receiver = backend.subscribe_world_journal()?;
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(query.timeout_ms);
+    let mut cursor = query.from;
+    loop {
+        let mut response = backend.journal_tail(
+            world_id,
+            JournalStreamQuery {
+                from: cursor,
+                limit: query.limit,
+                kind: query.kind.clone(),
+            },
+        )?;
+        if !response.entries.is_empty() || response.gap {
+            return Ok(Json(response));
+        }
+        cursor = Some(response.next_from);
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            response.timed_out = true;
+            return Ok(Json(response));
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let advanced = tokio::time::timeout(
+            remaining,
+            wait_for_world_advance(&mut receiver, world_id, response.next_from),
+        )
+        .await
+        .unwrap_or(false);
+        if !advanced {
+            let mut response = backend.journal_tail(
+                world_id,
+                JournalStreamQuery {
+                    from: cursor,
+                    limit: query.limit,
+                    kind: query.kind.clone(),
+                },
+            )?;
+            response.timed_out = true;
+            return Ok(Json(response));
+        }
+    }
+}
+
+async fn journal_stream<B: HttpBackend>(
+    State(backend): State<Arc<B>>,
+    headers: HeaderMap,
+    Path(world_id): Path<String>,
+    RawQuery(raw_query): RawQuery,
+) -> Result<Response, ControlError> {
+    let world_id = parse_world_id(&world_id)?;
+    let mut query = parse_journal_stream_query(raw_query.as_deref())?;
+    if query.from.is_none() {
+        query.from = last_event_id_next_from(&headers)?;
+    }
+    let receiver = backend.subscribe_world_journal()?;
+    let state = JournalSseState {
+        backend,
+        world_id,
+        query,
+        receiver,
+        closed: false,
+    };
+    let stream = futures::stream::unfold(state, next_journal_sse_chunk::<B>);
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(Body::from_stream(stream))
+        .expect("build SSE response"))
+}
+
 async fn journal_entries<B: HttpBackend>(
     State(backend): State<Arc<B>>,
     headers: HeaderMap,
@@ -559,6 +654,264 @@ async fn journal_entries<B: HttpBackend>(
         return cbor_response(&backend.journal_entries_raw(world_id, query)?);
     }
     Ok(Json(backend.journal_entries(world_id, query)?).into_response())
+}
+
+struct JournalSseState<B: HttpBackend> {
+    backend: Arc<B>,
+    world_id: WorldId,
+    query: JournalStreamQuery,
+    receiver: broadcast::Receiver<WorldJournalAdvance>,
+    closed: bool,
+}
+
+async fn next_journal_sse_chunk<B: HttpBackend>(
+    mut state: JournalSseState<B>,
+) -> Option<(Result<Bytes, Infallible>, JournalSseState<B>)> {
+    const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+    if state.closed {
+        return None;
+    }
+
+    loop {
+        let response = match state
+            .backend
+            .journal_tail(state.world_id, state.query.clone())
+        {
+            Ok(response) => response,
+            Err(err) => {
+                state.closed = true;
+                return Some((Ok(Bytes::from(sse_error_event(&err))), state));
+            }
+        };
+        state.query.from = Some(response.next_from);
+
+        let chunk = journal_sse_payload(&response);
+        if !chunk.is_empty() {
+            return Some((Ok(Bytes::from(chunk)), state));
+        }
+
+        let advanced = tokio::time::timeout(
+            KEEPALIVE_INTERVAL,
+            wait_for_world_advance(&mut state.receiver, state.world_id, response.next_from),
+        )
+        .await
+        .unwrap_or(false);
+        if !advanced {
+            return Some((Ok(Bytes::from(": keepalive\n\n")), state));
+        }
+    }
+}
+
+async fn wait_for_world_advance(
+    receiver: &mut broadcast::Receiver<WorldJournalAdvance>,
+    world_id: WorldId,
+    from: u64,
+) -> bool {
+    loop {
+        match receiver.recv().await {
+            Ok(advance) if advance.world_id == world_id && advance.next_world_seq > from => {
+                return true;
+            }
+            Ok(_) => {}
+            Err(broadcast::error::RecvError::Lagged(_)) => return true,
+            Err(broadcast::error::RecvError::Closed) => return false,
+        }
+    }
+}
+
+fn journal_sse_payload(response: &JournalWaitResponse) -> String {
+    let mut chunk = String::new();
+    if response.gap
+        && let Some(requested_from) = response.requested_from
+    {
+        push_sse_event(
+            &mut chunk,
+            "gap",
+            None,
+            &JournalGapSseData {
+                world_id: response.world_id,
+                requested_from,
+                retained_from: response.retained_from,
+                next_from: response.next_from,
+            },
+        );
+    }
+
+    for entry in &response.entries {
+        push_sse_event(
+            &mut chunk,
+            "journal_record",
+            Some(entry.seq),
+            &JournalRecordSseData {
+                world_id: response.world_id,
+                seq: entry.seq,
+                kind: entry.kind.clone(),
+                next_from: entry.seq.saturating_add(1),
+                record: entry.record.clone(),
+            },
+        );
+    }
+
+    if response.next_from > response.from {
+        push_sse_event(
+            &mut chunk,
+            "world_head",
+            response.next_from.checked_sub(1),
+            &JournalHeadSseData {
+                world_id: response.world_id,
+                head: response.head,
+                next_from: response.next_from,
+                retained_from: response.retained_from,
+            },
+        );
+    }
+
+    chunk
+}
+
+fn push_sse_event<T: Serialize>(chunk: &mut String, event: &str, id: Option<u64>, data: &T) {
+    chunk.push_str("event: ");
+    chunk.push_str(event);
+    chunk.push('\n');
+    if let Some(id) = id {
+        chunk.push_str("id: ");
+        chunk.push_str(&id.to_string());
+        chunk.push('\n');
+    }
+    let data = serde_json::to_string(data).expect("serialize SSE event data");
+    for line in data.lines() {
+        chunk.push_str("data: ");
+        chunk.push_str(line);
+        chunk.push('\n');
+    }
+    chunk.push('\n');
+}
+
+fn sse_error_event(err: &ControlError) -> String {
+    let mut chunk = String::new();
+    push_sse_event(
+        &mut chunk,
+        "error",
+        None,
+        &serde_json::json!({
+            "message": err.to_string(),
+        }),
+    );
+    chunk
+}
+
+fn last_event_id_next_from(headers: &HeaderMap) -> Result<Option<u64>, ControlError> {
+    let Some(value) = headers.get("last-event-id") else {
+        return Ok(None);
+    };
+    let value = value
+        .to_str()
+        .map_err(|_| ControlError::invalid("invalid Last-Event-ID header"))?
+        .trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let id = value
+        .parse::<u64>()
+        .map_err(|_| ControlError::invalid("invalid Last-Event-ID header"))?;
+    Ok(Some(id.saturating_add(1)))
+}
+
+fn parse_journal_wait_query(raw: Option<&str>) -> Result<JournalWaitQuery, ControlError> {
+    let mut query = JournalWaitQuery {
+        from: None,
+        timeout_ms: default_journal_wait_timeout_ms(),
+        limit: default_limit(),
+        kind: Vec::new(),
+    };
+    for (key, value) in query_pairs(raw)? {
+        match key.as_str() {
+            "from" => query.from = Some(parse_query_u64("from", &value)?),
+            "timeout_ms" => query.timeout_ms = parse_query_u64("timeout_ms", &value)?,
+            "limit" => query.limit = parse_query_u32("limit", &value)?,
+            "kind" => query.kind.push(value),
+            _ => {}
+        }
+    }
+    Ok(query)
+}
+
+fn parse_journal_stream_query(raw: Option<&str>) -> Result<JournalStreamQuery, ControlError> {
+    let mut query = JournalStreamQuery {
+        from: None,
+        limit: default_limit(),
+        kind: Vec::new(),
+    };
+    for (key, value) in query_pairs(raw)? {
+        match key.as_str() {
+            "from" => query.from = Some(parse_query_u64("from", &value)?),
+            "limit" => query.limit = parse_query_u32("limit", &value)?,
+            "kind" => query.kind.push(value),
+            _ => {}
+        }
+    }
+    Ok(query)
+}
+
+fn query_pairs(raw: Option<&str>) -> Result<Vec<(String, String)>, ControlError> {
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+    raw.split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            Ok((decode_query_component(key)?, decode_query_component(value)?))
+        })
+        .collect()
+}
+
+fn decode_query_component(value: &str) -> Result<String, ControlError> {
+    let mut decoded = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                let hi = from_hex(bytes[index + 1])?;
+                let lo = from_hex(bytes[index + 2])?;
+                decoded.push((hi << 4) | lo);
+                index += 3;
+            }
+            b'%' => return Err(ControlError::invalid("invalid percent-encoded query")),
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| ControlError::invalid("query is not UTF-8"))
+}
+
+fn from_hex(byte: u8) -> Result<u8, ControlError> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err(ControlError::invalid("invalid percent-encoded query")),
+    }
+}
+
+fn parse_query_u64(name: &str, value: &str) -> Result<u64, ControlError> {
+    value
+        .parse::<u64>()
+        .map_err(|_| ControlError::invalid(format!("invalid {name} query parameter")))
+}
+
+fn parse_query_u32(name: &str, value: &str) -> Result<u32, ControlError> {
+    value
+        .parse::<u32>()
+        .map_err(|_| ControlError::invalid(format!("invalid {name} query parameter")))
 }
 
 async fn events_post<B: HttpBackend>(

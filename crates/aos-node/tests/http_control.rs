@@ -7,8 +7,9 @@ use aos_kernel::SecretResolver;
 use aos_node::control::{CommandSubmitBody, CreateWorldBody, SubmitEventBody};
 use aos_node::{UniverseId, WorldId};
 use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use base64::Engine;
+use futures::StreamExt;
 use serde_json::{Value, json};
 use serial_test::serial;
 use tower::util::ServiceExt;
@@ -38,6 +39,17 @@ async fn response_json_with_status<T: serde::de::DeserializeOwned>(
         String::from_utf8_lossy(&body)
     );
     serde_json::from_slice(&body).expect("decode json body")
+}
+
+async fn first_body_chunk(response: axum::response::Response) -> String {
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut stream = response.into_body().into_data_stream();
+    let chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        .await
+        .expect("SSE chunk")
+        .expect("SSE stream item")
+        .expect("SSE bytes");
+    String::from_utf8(chunk.to_vec()).expect("SSE utf8")
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -74,6 +86,136 @@ async fn http_control_serves_hot_reads_without_materialization() {
     .await;
     assert!(manifest["journal_head"].as_u64().unwrap() >= 1);
     assert!(manifest["manifest_hash"].as_str().is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn http_control_journal_wait_returns_existing_durable_entries() {
+    let runtime = embedded_runtime(1);
+    let app = control_app(&runtime);
+    let universe_id = hosted_universe_id(&runtime);
+    let world = create_counter_world(&runtime, universe_id);
+
+    let response: Value = response_json(
+        app.oneshot(
+            Request::get(format!(
+                "/v1/worlds/{}/journal/wait?from=0&timeout_ms=1&limit=10",
+                world.world_id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        response["world_id"].as_str().unwrap(),
+        world.world_id.to_string()
+    );
+    assert!(!response["timed_out"].as_bool().unwrap());
+    assert!(!response["gap"].as_bool().unwrap());
+    assert!(response["next_from"].as_u64().unwrap() > 0);
+    assert!(
+        response["entries"]
+            .as_array()
+            .is_some_and(|entries| !entries.is_empty())
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn http_control_journal_wait_wakes_after_durable_flush() {
+    let runtime = embedded_runtime(1);
+    let app = control_app(&runtime);
+    let worker = hosted_worker();
+    let mut supervisor = worker.with_worker_runtime(runtime.clone()).spawn().unwrap();
+    let universe_id = hosted_universe_id(&runtime);
+    let world = create_counter_world(&runtime, universe_id);
+    let head = runtime
+        .journal_head(universe_id, world.world_id)
+        .unwrap()
+        .journal_head;
+
+    let wait_request = Request::get(format!(
+        "/v1/worlds/{}/journal/wait?from={head}&timeout_ms=5000&limit=20",
+        world.world_id
+    ))
+    .body(Body::empty())
+    .unwrap();
+    let wait_future = app.clone().oneshot(wait_request);
+    let submit_future = async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        runtime
+            .submit_event(aos_node::SubmitEventRequest {
+                universe_id,
+                world_id: world.world_id,
+                schema: "demo/CounterEvent@1".into(),
+                value: json!({ "Start": { "target": 1 } }),
+                submission_id: Some("wait-wakeup-start".into()),
+                expected_world_epoch: Some(world.world_epoch),
+            })
+            .unwrap();
+        wait_for_worker(&mut supervisor).await;
+    };
+    let (wait_response, ()) = tokio::join!(wait_future, submit_future);
+    let response: Value = response_json(wait_response.unwrap()).await;
+
+    assert!(!response["timed_out"].as_bool().unwrap());
+    assert!(response["next_from"].as_u64().unwrap() > head);
+    assert!(
+        response["entries"]
+            .as_array()
+            .is_some_and(|entries| !entries.is_empty())
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn http_control_journal_stream_emits_sse_records_and_head_id() {
+    let runtime = embedded_runtime(1);
+    let app = control_app(&runtime);
+    let universe_id = hosted_universe_id(&runtime);
+    let world = create_counter_world(&runtime, universe_id);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!(
+                "/v1/worlds/{}/journal/stream?from=0&limit=1",
+                world.world_id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "text/event-stream"
+    );
+    let chunk = first_body_chunk(response).await;
+
+    assert!(chunk.contains("event: journal_record"));
+    assert!(chunk.contains("id: 0"));
+    assert!(chunk.contains("event: world_head"));
+    assert!(chunk.contains("\"next_from\":1"));
+
+    let filtered_response = app
+        .oneshot(
+            Request::get(format!(
+                "/v1/worlds/{}/journal/stream?from=0&limit=1&kind=no_such_kind&kind=also_missing",
+                world.world_id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let filtered_chunk = first_body_chunk(filtered_response).await;
+    assert!(!filtered_chunk.contains("event: journal_record"));
+    assert!(filtered_chunk.contains("event: world_head"));
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -524,6 +524,7 @@ pub(super) struct HostedWorkerState {
 pub(super) struct HostedWorkerCore {
     pub infra: HostedWorkerInfra,
     pub state: HostedWorkerState,
+    pub observer: super::observe::WorldObserverHub,
     pub effect_event_tx: mpsc::Sender<EffectRuntimeEvent<WorldId>>,
     pub effect_event_rx: Option<mpsc::Receiver<EffectRuntimeEvent<WorldId>>>,
     pub shared_effect_runtimes: BTreeMap<UniverseId, SharedEffectRuntime<WorldId>>,

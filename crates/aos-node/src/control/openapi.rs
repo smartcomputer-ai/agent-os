@@ -6,9 +6,9 @@ use utoipa::{IntoParams, OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
 use super::{
-    DefsQuery, JournalQuery, LimitQuery, StateGetQuery, TraceQuery, TraceSummaryQuery,
-    WorkspaceAnnotationsQuery, WorkspaceBytesQuery, WorkspaceEntriesQuery, WorkspaceEntryQuery,
-    WorkspaceResolveQuery, WorldPageQuery,
+    DefsQuery, JournalQuery, JournalStreamQuery, JournalWaitQuery, LimitQuery, StateGetQuery,
+    TraceQuery, TraceSummaryQuery, WorkspaceAnnotationsQuery, WorkspaceBytesQuery,
+    WorkspaceEntriesQuery, WorkspaceEntryQuery, WorkspaceResolveQuery, WorldPageQuery,
 };
 
 #[derive(OpenApi)]
@@ -38,6 +38,8 @@ use super::{
         doc_trace,
         doc_trace_summary,
         doc_journal_head,
+        doc_journal_wait,
+        doc_journal_stream,
         doc_journal_entries,
         doc_command_get,
         doc_state_get,
@@ -294,6 +296,27 @@ fn doc_trace_summary() {}
     responses((status = 200, body = serde_json::Value), (status = 404, body = ApiErrorResponse))
 )]
 fn doc_journal_head() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/worlds/{world_id}/journal/wait",
+    tag = "journal",
+    params(("world_id" = String, Path, description = "World identifier"), JournalWaitQuery),
+    responses((status = 200, body = serde_json::Value), (status = 404, body = ApiErrorResponse))
+)]
+fn doc_journal_wait() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/worlds/{world_id}/journal/stream",
+    tag = "journal",
+    params(("world_id" = String, Path, description = "World identifier"), JournalStreamQuery),
+    responses(
+        (status = 200, description = "Server-Sent Events stream"),
+        (status = 404, body = ApiErrorResponse)
+    )
+)]
+fn doc_journal_stream() {}
 
 #[utoipa::path(
     get,

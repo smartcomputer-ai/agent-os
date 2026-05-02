@@ -3,7 +3,7 @@
 **Priority**: P1
 **Effort**: Medium
 **Risk if deferred**: High (the chat TUI and other live observers will keep polling hot read APIs, which adds latency, load, and inconsistent cursor semantics)
-**Status**: Planned
+**Status**: Complete
 **Depends on**: `roadmap/v0.24-claw/vision.md`
 
 ## Goal
