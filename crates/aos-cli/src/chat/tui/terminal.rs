@@ -36,16 +36,7 @@ impl Tui {
 
         let (draw_tx, _) = broadcast::channel(1);
         let frame_requester = FrameRequester::new(draw_tx.clone());
-        let backend = CrosstermBackend::new(stdout());
-        let viewport_height = crossterm::terminal::size()
-            .map(|(_, rows)| rows.clamp(8, 18))
-            .unwrap_or(12);
-        let terminal = Terminal::with_options(
-            backend,
-            TerminalOptions {
-                viewport: Viewport::Inline(viewport_height),
-            },
-        )?;
+        let terminal = init_terminal()?;
 
         Ok(Self {
             terminal,
@@ -60,6 +51,22 @@ impl Tui {
 
     pub(crate) fn draw_receiver(&self) -> broadcast::Receiver<()> {
         self.draw_tx.subscribe()
+    }
+}
+
+fn init_terminal() -> Result<ChatTerminal> {
+    let viewport_height = crossterm::terminal::size()
+        .map(|(_, rows)| rows.clamp(8, 18))
+        .unwrap_or(12);
+    let backend = CrosstermBackend::new(stdout());
+    match Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Inline(viewport_height),
+        },
+    ) {
+        Ok(terminal) => Ok(terminal),
+        Err(_) => Terminal::new(CrosstermBackend::new(stdout())),
     }
 }
 

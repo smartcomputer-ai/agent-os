@@ -246,6 +246,7 @@ impl ChatTuiApp {
             );
             return;
         }
+        self.local_user_message(text.clone());
         if let Err(error) = self
             .command_tx
             .send(ChatCommand::SubmitUserMessage { text })
@@ -270,6 +271,20 @@ impl ChatTuiApp {
                 message: ChatMessageView {
                     id,
                     role: "system".into(),
+                    content: content.into(),
+                    ref_: None,
+                },
+            }));
+    }
+
+    fn local_user_message(&mut self, content: impl Into<String>) {
+        let id = self.next_id("local-user");
+        self.app_event_tx
+            .chat(ChatEvent::TranscriptDelta(ChatDelta::AppendMessage {
+                session_id: self.options.session_id.clone(),
+                message: ChatMessageView {
+                    id,
+                    role: "user_pending".into(),
                     content: content.into(),
                     ref_: None,
                 },
@@ -356,6 +371,38 @@ mod tests {
         ]);
 
         assert_eq!(rendered, expected);
+    }
+
+    #[test]
+    fn submit_local_text_echoes_user_message_immediately() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let mut app = ChatTuiApp::new(
+            ChatTuiViewOptions {
+                world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
+                session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+            },
+            app_event_tx,
+            command_tx,
+        );
+
+        app.submit_local_text("hello now".into());
+
+        let event = rx.try_recv().expect("local echo event");
+        app.handle_ui_event(event, &FrameRequester::test_dummy());
+        let command = command_rx.try_recv().expect("submit command");
+        assert_eq!(
+            command,
+            ChatCommand::SubmitUserMessage {
+                text: "hello now".into()
+            }
+        );
+
+        let backend = TestBackend::new(80, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        assert!(format!("{}", terminal.backend()).contains("hello now"));
     }
 
     fn pad(line: &str) -> String {

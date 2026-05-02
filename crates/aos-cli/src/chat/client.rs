@@ -70,10 +70,7 @@ impl ChatControlClient {
     pub(crate) async fn submit_session_input(&self, input: &SessionInput) -> Result<Value> {
         self.api
             .post_json(
-                &format!(
-                    "/v1/worlds/{}/events?wait_for_flush=true&wait_timeout_ms=30000",
-                    self.world_id
-                ),
+                &format!("/v1/worlds/{}/events", self.world_id),
                 &json!({
                     "schema": SESSION_INPUT_SCHEMA,
                     "value_json": input,

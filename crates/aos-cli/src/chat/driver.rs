@@ -245,6 +245,9 @@ impl ChatSessionDriver {
         let Some(state) = self.projection.session_state.as_ref() else {
             return false;
         };
+        if matches!(state.lifecycle, SessionLifecycle::WaitingInput) {
+            return true;
+        }
         state.current_run.is_none()
             && state.queued_follow_up_runs.is_empty()
             && !session_active(state.lifecycle)
@@ -264,6 +267,13 @@ impl ChatSessionDriver {
         let input_ref = self.client.upload_blob(bytes.clone()).await?;
         self.blob_cache.insert_bytes(input_ref.clone(), bytes);
 
+        let mut events = Vec::new();
+        if self.waiting_for_user_input() {
+            let input = self.session_input(SessionInputKind::RunCompleted);
+            self.client.submit_session_input(&input).await?;
+            events.extend(self.refresh().await?);
+        }
+
         let input_kind = if self.should_start_first_run() {
             SessionInputKind::RunRequested {
                 input_ref: input_ref.clone(),
@@ -278,7 +288,7 @@ impl ChatSessionDriver {
         let input = self.session_input(input_kind);
         self.client.submit_session_input(&input).await?;
 
-        let mut events = vec![ChatEvent::TranscriptDelta(ChatDelta::AppendMessage {
+        events.push(ChatEvent::TranscriptDelta(ChatDelta::AppendMessage {
             session_id: self.session_id().to_string(),
             message: ChatMessageView {
                 id: input_ref.clone(),
@@ -286,7 +296,7 @@ impl ChatSessionDriver {
                 content: text,
                 ref_: Some(input_ref),
             },
-        })];
+        }));
         events.extend(self.refresh().await?);
         Ok(events)
     }
@@ -430,6 +440,13 @@ impl ChatSessionDriver {
             && state.current_run.is_none()
             && state.run_history.is_empty()
             && state.queued_follow_up_runs.is_empty()
+    }
+
+    fn waiting_for_user_input(&self) -> bool {
+        self.projection
+            .session_state
+            .as_ref()
+            .is_some_and(|state| matches!(state.lifecycle, SessionLifecycle::WaitingInput))
     }
 
     fn current_session_config(&self) -> SessionConfig {

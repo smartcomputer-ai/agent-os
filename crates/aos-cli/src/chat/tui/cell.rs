@@ -60,6 +60,7 @@ impl ChatCell for MessageCell {
     }
 
     fn display_lines(&self, _width: u16, _state: &CellRenderState) -> Vec<Line<'static>> {
+        let pending = self.role == "user_pending";
         let style = match self.role.as_str() {
             "user" => Style::default()
                 .fg(Color::Cyan)
@@ -67,17 +68,31 @@ impl ChatCell for MessageCell {
             "assistant" => Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
+            "user_pending" => Style::default().fg(Color::DarkGray),
             _ => Style::default()
                 .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         };
+        let content_style = if pending {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default()
+        };
+        let role = if pending {
+            "user".to_string()
+        } else {
+            self.role.clone()
+        };
         let mut lines = Vec::new();
-        lines.push(Line::from(vec![Span::styled(self.role.clone(), style)]));
+        lines.push(Line::from(vec![Span::styled(role, style)]));
         for line in self.content.lines() {
-            lines.push(Line::from(format!("  {line}")));
+            lines.push(Line::from(vec![Span::styled(
+                format!("  {line}"),
+                content_style,
+            )]));
         }
         if self.content.is_empty() {
-            lines.push(Line::from("  "));
+            lines.push(Line::from(vec![Span::styled("  ", content_style)]));
         }
         lines
     }
@@ -176,5 +191,21 @@ impl ChatCell for ErrorCell {
             format!("error: {}", self.message),
             Style::default().fg(Color::Red),
         )]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_user_message_renders_muted_user_label_and_content() {
+        let cell = MessageCell::new("local-user:1", "user_pending", "hello");
+        let lines = cell.display_lines(80, &CellRenderState);
+
+        assert_eq!(lines[0].spans[0].content.as_ref(), "user");
+        assert_eq!(lines[0].spans[0].style.fg, Some(Color::DarkGray));
+        assert_eq!(lines[1].spans[0].content.as_ref(), "  hello");
+        assert_eq!(lines[1].spans[0].style.fg, Some(Color::DarkGray));
     }
 }

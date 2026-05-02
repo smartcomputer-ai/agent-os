@@ -4,7 +4,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 
-use crate::chat::protocol::{ChatDelta, ChatEvent};
+use crate::chat::protocol::{ChatDelta, ChatEvent, ChatProgressStatus};
 use crate::chat::tui::cell::{
     CellRenderState, ChatCell, ErrorCell, MessageCell, NoticeCell, RunCell,
 };
@@ -14,6 +14,13 @@ pub(crate) struct TranscriptState {
     cells: Vec<Box<dyn ChatCell>>,
     active_cell: Option<Box<dyn ChatCell>>,
     active_cell_revision: u64,
+    pending_user_messages: Vec<PendingUserMessage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingUserMessage {
+    id: String,
+    content: String,
 }
 
 impl TranscriptState {
@@ -41,6 +48,7 @@ impl TranscriptState {
             }
             ChatEvent::HistoryReset { session_id } => {
                 self.cells.clear();
+                self.pending_user_messages.clear();
                 self.active_cell = None;
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
                 self.cells.push(Box::new(NoticeCell::new(
@@ -50,10 +58,15 @@ impl TranscriptState {
             }
             ChatEvent::TranscriptDelta(delta) => self.apply_delta(delta),
             ChatEvent::RunChanged(run) => {
-                self.active_cell = Some(Box::new(RunCell::new(
-                    format!("active-run:{}", run.id),
-                    format!("run {} {:?} {}", run.run_seq, run.lifecycle, run.model),
-                )));
+                self.active_cell = match run.status {
+                    ChatProgressStatus::Queued | ChatProgressStatus::Running => {
+                        Some(Box::new(RunCell::new(
+                            format!("active-run:{}", run.id),
+                            format!("run {} {:?} {}", run.run_seq, run.lifecycle, run.model),
+                        )))
+                    }
+                    _ => None,
+                };
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
             }
             ChatEvent::ToolChainsChanged { chains, .. } => {
@@ -136,6 +149,7 @@ impl TranscriptState {
         match delta {
             ChatDelta::ReplaceTurns { turns, .. } => {
                 self.cells.clear();
+                self.pending_user_messages.clear();
                 for turn in turns {
                     if let Some(user) = turn.user {
                         self.cells.push(Box::new(MessageCell::new(
@@ -160,6 +174,21 @@ impl TranscriptState {
                 }
             }
             ChatDelta::AppendMessage { message, .. } => {
+                if message.role == "user_pending" {
+                    self.pending_user_messages.push(PendingUserMessage {
+                        id: message.id.clone(),
+                        content: message.content.clone(),
+                    });
+                } else if message.role == "user"
+                    && let Some(index) = self
+                        .pending_user_messages
+                        .iter()
+                        .position(|pending| pending.content == message.content)
+                {
+                    let pending = self.pending_user_messages.remove(index);
+                    self.cells
+                        .retain(|existing| existing.id() != pending.id.as_str());
+                }
                 self.cells.push(Box::new(MessageCell::new(
                     message.id,
                     message.role,
@@ -192,4 +221,37 @@ fn visible_tail(mut lines: Vec<Line<'static>>, height: u16) -> Vec<Line<'static>
 
 fn short(value: &str) -> String {
     value.get(..8).unwrap_or(value).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::protocol::ChatMessageView;
+
+    #[test]
+    fn confirmed_user_message_replaces_matching_pending_echo() {
+        let mut state = TranscriptState::default();
+        state.apply_chat_event(ChatEvent::TranscriptDelta(ChatDelta::AppendMessage {
+            session_id: "s-1".into(),
+            message: ChatMessageView {
+                id: "local-user:1".into(),
+                role: "user_pending".into(),
+                content: "hello".into(),
+                ref_: None,
+            },
+        }));
+        state.apply_chat_event(ChatEvent::TranscriptDelta(ChatDelta::AppendMessage {
+            session_id: "s-1".into(),
+            message: ChatMessageView {
+                id: "sha256:abc".into(),
+                role: "user".into(),
+                content: "hello".into(),
+                ref_: Some("sha256:abc".into()),
+            },
+        }));
+
+        assert!(state.pending_user_messages.is_empty());
+        assert_eq!(state.cells.len(), 1);
+        assert_eq!(state.cells[0].id(), "sha256:abc");
+    }
 }
