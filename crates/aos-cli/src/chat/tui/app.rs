@@ -18,9 +18,10 @@ use crate::chat::protocol::{
 };
 use crate::chat::tui::app_event::UiEvent;
 use crate::chat::tui::app_event_sender::AppEventSender;
-use crate::chat::tui::bottom_pane::BottomPaneState;
-use crate::chat::tui::bottom_pane::composer::ComposerAction;
+use crate::chat::tui::bottom_pane::list_selection::PickerSelection;
+use crate::chat::tui::bottom_pane::{BottomPaneAction, BottomPaneState};
 use crate::chat::tui::frame::FrameRequester;
+use crate::chat::tui::slash::{SlashCommand, SlashEffort, SlashMaxTokens, parse_slash_command};
 use crate::chat::tui::terminal::Tui;
 use crate::chat::tui::transcript::TranscriptState;
 
@@ -195,17 +196,26 @@ impl ChatTuiApp {
     fn handle_terminal_event(&mut self, event: Event, frame_requester: &FrameRequester) {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                match self.bottom_pane.composer_mut().handle_key(key) {
-                    ComposerAction::None => {}
-                    ComposerAction::Changed => {
+                match self.bottom_pane.handle_key(key) {
+                    BottomPaneAction::None => {}
+                    BottomPaneAction::Changed => {
                         self.app_event_tx.send(UiEvent::ComposerChanged);
                     }
-                    ComposerAction::Submit(text) => self.submit_local_text(text),
-                    ComposerAction::ExitRequested => self.app_event_tx.exit(),
+                    BottomPaneAction::Submit(text) => self.submit_local_text(text),
+                    BottomPaneAction::ExitRequested => self.app_event_tx.exit(),
+                    BottomPaneAction::PickerSelected(selection) => {
+                        self.apply_picker_selection(selection);
+                    }
+                    BottomPaneAction::PickerRejected(reason) => {
+                        self.local_error(reason);
+                    }
+                    BottomPaneAction::SlashCommandSelected(command) => {
+                        self.apply_slash_command(command.command_without_args());
+                    }
                 }
             }
             Event::Paste(text) => {
-                self.bottom_pane.composer_mut().insert_str(&text);
+                self.bottom_pane.insert_paste(&text);
                 self.app_event_tx.send(UiEvent::ComposerChanged);
             }
             Event::Resize(cols, rows) => {
@@ -236,26 +246,90 @@ impl ChatTuiApp {
 
     fn submit_local_text(&mut self, text: String) {
         let trimmed = text.trim();
-        if matches!(trimmed, "/quit" | "/exit") {
-            self.app_event_tx.exit();
-            return;
-        }
-        if trimmed == "/help" {
-            self.local_notice(
-                "P3 shell commands: /help, /quit. Model and effort pickers are the next TUI slice.",
-            );
-            return;
+        match parse_slash_command(trimmed) {
+            Ok(Some(command)) => {
+                self.apply_slash_command(command);
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.local_error(format!("{error}"));
+                return;
+            }
         }
         self.local_user_message(text.clone());
-        if let Err(error) = self
-            .command_tx
-            .send(ChatCommand::SubmitUserMessage { text })
-        {
+        self.send_chat_command(ChatCommand::SubmitUserMessage { text });
+    }
+
+    fn apply_slash_command(&mut self, command: SlashCommand) {
+        match command {
+            SlashCommand::Help => self.local_notice(command_help()),
+            SlashCommand::Quit => self.app_event_tx.exit(),
+            SlashCommand::Model(Some(model)) => {
+                self.send_chat_command(ChatCommand::SetDraftModel { model });
+            }
+            SlashCommand::Model(None) => {
+                self.bottom_pane.open_model_picker();
+                self.app_event_tx.send(UiEvent::ComposerChanged);
+            }
+            SlashCommand::Provider(Some(provider)) => {
+                self.send_chat_command(ChatCommand::SetDraftProvider { provider });
+            }
+            SlashCommand::Provider(None) => {
+                self.bottom_pane.open_provider_picker();
+                self.app_event_tx.send(UiEvent::ComposerChanged);
+            }
+            SlashCommand::Effort(SlashEffort::Pick) => {
+                self.bottom_pane.open_effort_picker();
+                self.app_event_tx.send(UiEvent::ComposerChanged);
+            }
+            SlashCommand::Effort(SlashEffort::Set(effort)) => {
+                self.send_chat_command(ChatCommand::SetDraftReasoningEffort { effort });
+            }
+            SlashCommand::MaxTokens(SlashMaxTokens::Pick) => {
+                self.bottom_pane.open_max_tokens_picker();
+                self.app_event_tx.send(UiEvent::ComposerChanged);
+            }
+            SlashCommand::MaxTokens(SlashMaxTokens::Set(max_tokens)) => {
+                self.send_chat_command(ChatCommand::SetDraftMaxTokens { max_tokens });
+            }
+        }
+    }
+
+    fn apply_picker_selection(&mut self, selection: PickerSelection) {
+        match selection {
+            PickerSelection::Model(model) => {
+                self.send_chat_command(ChatCommand::SetDraftModel { model });
+            }
+            PickerSelection::Provider(provider) => {
+                self.send_chat_command(ChatCommand::SetDraftProvider { provider });
+            }
+            PickerSelection::Effort(effort) => {
+                self.send_chat_command(ChatCommand::SetDraftReasoningEffort { effort });
+            }
+            PickerSelection::MaxTokens(max_tokens) => {
+                self.send_chat_command(ChatCommand::SetDraftMaxTokens { max_tokens });
+            }
+            PickerSelection::SlashCommand(command) => {
+                self.apply_slash_command(command.command_without_args());
+            }
+        }
+    }
+
+    fn send_chat_command(&mut self, command: ChatCommand) {
+        if let Err(error) = self.command_tx.send(command) {
             self.app_event_tx.chat(ChatEvent::Error(ChatErrorView {
                 message: format!("chat driver is not available: {error}"),
                 action: None,
             }));
         }
+    }
+
+    fn local_error(&mut self, content: impl Into<String>) {
+        self.app_event_tx.chat(ChatEvent::Error(ChatErrorView {
+            message: content.into(),
+            action: None,
+        }));
     }
 
     fn next_id(&mut self, prefix: &str) -> String {
@@ -313,6 +387,10 @@ impl ChatTuiApp {
     }
 }
 
+fn command_help() -> &'static str {
+    "commands: /model, /provider, /effort, /max-tokens, /help, /quit"
+}
+
 fn short(value: &str) -> String {
     value.get(..8).unwrap_or(value).to_string()
 }
@@ -320,7 +398,8 @@ fn short(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_agent::RunLifecycle;
+    use aos_agent::{ReasoningEffort, RunLifecycle};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use tokio::sync::mpsc;
@@ -403,6 +482,108 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| app.render(frame)).unwrap();
         assert!(format!("{}", terminal.backend()).contains("hello now"));
+    }
+
+    #[test]
+    fn slash_effort_with_argument_sends_setting_command() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let mut app = ChatTuiApp::new(
+            ChatTuiViewOptions {
+                world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
+                session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+            },
+            app_event_tx,
+            command_tx,
+        );
+
+        app.submit_local_text("/effort high".into());
+
+        assert_eq!(
+            command_rx.try_recv().expect("setting command"),
+            ChatCommand::SetDraftReasoningEffort {
+                effort: Some(ReasoningEffort::High)
+            }
+        );
+    }
+
+    #[test]
+    fn slash_effort_opens_picker_and_enter_confirms_selection() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let mut app = ChatTuiApp::new(
+            ChatTuiViewOptions {
+                world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
+                session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+            },
+            app_event_tx,
+            command_tx,
+        );
+        for event in fixture_events(&app.options) {
+            app.handle_ui_event(UiEvent::Chat(event), &FrameRequester::test_dummy());
+        }
+
+        app.submit_local_text("/effort".into());
+        app.handle_terminal_event(
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            &FrameRequester::test_dummy(),
+        );
+        app.handle_terminal_event(
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            &FrameRequester::test_dummy(),
+        );
+
+        assert_eq!(
+            command_rx.try_recv().expect("picker command"),
+            ChatCommand::SetDraftReasoningEffort {
+                effort: Some(ReasoningEffort::Low)
+            }
+        );
+    }
+
+    #[test]
+    fn slash_prefix_filters_commands_and_enter_opens_selected_picker() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        let (command_tx, _command_rx) = mpsc::unbounded_channel();
+        let mut app = ChatTuiApp::new(
+            ChatTuiViewOptions {
+                world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
+                session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+            },
+            app_event_tx,
+            command_tx,
+        );
+        for event in fixture_events(&app.options) {
+            app.handle_ui_event(UiEvent::Chat(event), &FrameRequester::test_dummy());
+        }
+
+        for ch in ['/', 'm', 'o'] {
+            app.handle_terminal_event(
+                Event::Key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)),
+                &FrameRequester::test_dummy(),
+            );
+        }
+
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let rendered = format!("{}", terminal.backend());
+        assert!(rendered.contains("Slash commands"));
+        assert!(rendered.contains("/model"));
+        assert!(!rendered.contains("/provider"));
+
+        app.handle_terminal_event(
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            &FrameRequester::test_dummy(),
+        );
+
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        assert!(format!("{}", terminal.backend()).contains("Select model"));
     }
 
     fn pad(line: &str) -> String {

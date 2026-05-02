@@ -4,6 +4,7 @@ pub(crate) mod app_event_sender;
 pub(crate) mod bottom_pane;
 pub(crate) mod cell;
 pub(crate) mod frame;
+pub(crate) mod slash;
 pub(crate) mod terminal;
 pub(crate) mod transcript;
 

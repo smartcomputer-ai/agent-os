@@ -20,9 +20,13 @@ pub(crate) enum ComposerAction {
 }
 
 impl ComposerState {
-    #[cfg(test)]
     pub(crate) fn text(&self) -> &str {
         &self.text
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
     }
 
     #[cfg(test)]

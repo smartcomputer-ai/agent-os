@@ -544,6 +544,15 @@ P3b: Live AOS
 - Assistant output rendering.
 - Reconnect/gap notices.
 
+Current P3b progress:
+
+- Implemented bottom-pane `ListSelectionView` pickers for `/model`, `/provider`, `/effort`, and `/max-tokens`.
+- Implemented Codex-style slash command filtering: typing `/` or a command prefix opens a bottom-pane command picker and progressively filters by prefix.
+- Implemented direct slash shortcuts for those settings, e.g. `/effort high` and `/max-tokens none`.
+- Picker selections route through P2 `ChatCommand`s and respect the driver-level editability rules.
+- Disabled picker rows now report a visible error instead of silently ignoring Enter.
+- Still remaining in this phase: session picker, committed scrollback insertion, retained transcript/detail overlay, richer assistant rendering, and reconnect/gap polish.
+
 P3c: Complex Runs
 
 - Tool chain cells.
