@@ -1,6 +1,5 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
@@ -12,9 +11,12 @@ use crate::chat::tui::cell::{
 #[derive(Debug, Default)]
 pub(crate) struct TranscriptState {
     cells: Vec<Box<dyn ChatCell>>,
+    pending_history_cell_indices: Vec<usize>,
+    emitted_history_cells: Vec<(String, String)>,
     active_cell: Option<Box<dyn ChatCell>>,
     active_cell_revision: u64,
     pending_user_messages: Vec<PendingUserMessage>,
+    has_emitted_history_lines: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +29,7 @@ impl TranscriptState {
     pub(crate) fn apply_chat_event(&mut self, event: ChatEvent) {
         match event {
             ChatEvent::Connected(info) => {
-                self.replace_or_push(Box::new(NoticeCell::new(
+                self.replace_or_push_committed(Box::new(NoticeCell::new(
                     "connected",
                     format!(
                         "connected world {} session {}",
@@ -38,7 +40,7 @@ impl TranscriptState {
             }
             ChatEvent::SessionsListed { .. } => {}
             ChatEvent::SessionSelected(summary) => {
-                self.replace_or_push(Box::new(NoticeCell::new(
+                self.replace_or_push_committed(Box::new(NoticeCell::new(
                     "session",
                     format!(
                         "session {}  runs {}",
@@ -49,10 +51,13 @@ impl TranscriptState {
             }
             ChatEvent::HistoryReset { session_id } => {
                 self.cells.clear();
+                self.pending_history_cell_indices.clear();
+                self.emitted_history_cells.clear();
                 self.pending_user_messages.clear();
                 self.active_cell = None;
+                self.has_emitted_history_lines = false;
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
-                self.cells.push(Box::new(NoticeCell::new(
+                self.push_committed_cell(Box::new(NoticeCell::new(
                     "history-reset",
                     format!("switched to session {}", short(&session_id)),
                 )));
@@ -81,7 +86,7 @@ impl TranscriptState {
             }
             ChatEvent::CompactionsChanged { compactions, .. } => {
                 if let Some(compaction) = compactions.last() {
-                    self.replace_or_push(Box::new(NoticeCell::new(
+                    self.replace_or_push_committed(Box::new(NoticeCell::new(
                         format!("compaction:{}", compaction.id),
                         format!("context compaction {:?}", compaction.status),
                     )));
@@ -92,19 +97,19 @@ impl TranscriptState {
                 requested_from,
                 retained_from,
             } => {
-                self.replace_or_push(Box::new(NoticeCell::new(
+                self.replace_or_push_committed(Box::new(NoticeCell::new(
                     format!("gap:{requested_from}"),
                     format!("journal gap requested {requested_from}, retained {retained_from}"),
                 )));
             }
             ChatEvent::Reconnecting { from, reason } => {
-                self.replace_or_push(Box::new(NoticeCell::new(
+                self.replace_or_push_committed(Box::new(NoticeCell::new(
                     "reconnecting",
                     format!("reconnecting from {from}: {reason}"),
                 )));
             }
             ChatEvent::Error(error) => {
-                self.replace_or_push(Box::new(ErrorCell::new(
+                self.replace_or_push_committed(Box::new(ErrorCell::new(
                     format!("error:{}", self.cells.len()),
                     error.message,
                 )));
@@ -112,28 +117,49 @@ impl TranscriptState {
         }
     }
 
+    pub(crate) fn drain_pending_history_lines(&mut self, width: u16) -> Vec<Line<'static>> {
+        let render_state = CellRenderState;
+        let mut lines = Vec::new();
+        let pending_indices = std::mem::take(&mut self.pending_history_cell_indices);
+        for index in pending_indices {
+            let Some(cell) = self.cells.get(index) else {
+                continue;
+            };
+            let fingerprint = (cell.id().to_string(), cell_fingerprint(cell.as_ref()));
+            if self.is_emitted_history_cell(&fingerprint) {
+                continue;
+            }
+            let cell_lines = cell.display_lines(width, &render_state);
+            if cell_lines.is_empty() {
+                continue;
+            }
+            if self.has_emitted_history_lines {
+                lines.push(Line::default());
+            } else {
+                self.has_emitted_history_lines = true;
+            }
+            lines.extend(cell_lines);
+            self.emitted_history_cells.push(fingerprint);
+        }
+        lines
+    }
+
     pub(crate) fn render(&self, area: Rect, buf: &mut Buffer) {
         let mut lines = Vec::new();
         let render_state = CellRenderState;
-        for cell in &self.cells {
-            let _ = (
-                cell.kind(),
-                cell.desired_height(area.width, &render_state),
-                cell.is_stream_continuation(),
-            );
+        for pending in &self.pending_user_messages {
+            let cell = MessageCell::new(&pending.id, "user_pending", &pending.content);
             lines.extend(cell.display_lines(area.width, &render_state));
             lines.push(Line::default());
         }
         if let Some(active_cell) = self.active_cell.as_ref() {
+            let _ = (
+                active_cell.kind(),
+                active_cell.desired_height(area.width, &render_state),
+                active_cell.is_stream_continuation(),
+            );
             lines.extend(active_cell.display_lines(area.width, &render_state));
         }
-        if lines.is_empty() {
-            lines.push(Line::styled(
-                "AOS Chat shell",
-                Style::default().fg(Color::DarkGray),
-            ));
-        }
-
         let visible = visible_tail(lines, area.height);
         Paragraph::new(visible)
             .wrap(Wrap { trim: false })
@@ -144,28 +170,26 @@ impl TranscriptState {
         match delta {
             ChatDelta::ReplaceTurns { turns, .. } => {
                 self.cells.clear();
+                self.pending_history_cell_indices.clear();
                 self.pending_user_messages.clear();
+                self.active_cell = None;
+                self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
                 for turn in turns {
                     if let Some(user) = turn.user {
-                        self.cells.push(Box::new(MessageCell::new(
+                        self.push_committed_cell_if_changed(Box::new(MessageCell::new(
                             user.id,
                             user.role,
                             user.content,
                         )));
                     }
                     if let Some(assistant) = turn.assistant {
-                        self.cells.push(Box::new(MessageCell::new(
+                        self.push_committed_cell_if_changed(Box::new(MessageCell::new(
                             assistant.id,
                             assistant.role,
                             assistant.content,
                         )));
                     }
-                    if let Some(run) = turn.run {
-                        self.cells.push(Box::new(RunCell::new(
-                            format!("run:{}", run.id),
-                            format!("run {} {:?} {}", run.run_seq, run.lifecycle, run.model),
-                        )));
-                    }
+                    let _ = turn.run;
                 }
             }
             ChatDelta::AppendMessage { message, .. } => {
@@ -174,17 +198,16 @@ impl TranscriptState {
                         id: message.id.clone(),
                         content: message.content.clone(),
                     });
+                    return;
                 } else if message.role == "user"
                     && let Some(index) = self
                         .pending_user_messages
                         .iter()
                         .position(|pending| pending.content == message.content)
                 {
-                    let pending = self.pending_user_messages.remove(index);
-                    self.cells
-                        .retain(|existing| existing.id() != pending.id.as_str());
+                    self.pending_user_messages.remove(index);
                 }
-                self.cells.push(Box::new(MessageCell::new(
+                self.push_committed_cell(Box::new(MessageCell::new(
                     message.id,
                     message.role,
                     message.content,
@@ -193,7 +216,24 @@ impl TranscriptState {
         }
     }
 
-    fn replace_or_push(&mut self, cell: Box<dyn ChatCell>) {
+    fn push_committed_cell(&mut self, cell: Box<dyn ChatCell>) {
+        self.cells.push(cell);
+        self.pending_history_cell_indices
+            .push(self.cells.len().saturating_sub(1));
+    }
+
+    fn push_committed_cell_if_changed(&mut self, cell: Box<dyn ChatCell>) {
+        let id = cell.id().to_string();
+        let fingerprint = cell_fingerprint(cell.as_ref());
+        let already_committed = self.is_emitted_history_cell(&(id, fingerprint));
+        self.cells.push(cell);
+        if !already_committed {
+            self.pending_history_cell_indices
+                .push(self.cells.len().saturating_sub(1));
+        }
+    }
+
+    fn replace_or_push_committed(&mut self, cell: Box<dyn ChatCell>) {
         if let Some(existing) = self
             .cells
             .iter_mut()
@@ -201,9 +241,23 @@ impl TranscriptState {
         {
             *existing = cell;
         } else {
-            self.cells.push(cell);
+            self.push_committed_cell(cell);
         }
     }
+
+    fn is_emitted_history_cell(&self, fingerprint: &(String, String)) -> bool {
+        self.emitted_history_cells
+            .iter()
+            .any(|emitted| emitted == fingerprint)
+    }
+}
+
+fn cell_fingerprint(cell: &dyn ChatCell) -> String {
+    cell.display_lines(u16::MAX, &CellRenderState)
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn visible_tail(mut lines: Vec<Line<'static>>, height: u16) -> Vec<Line<'static>> {

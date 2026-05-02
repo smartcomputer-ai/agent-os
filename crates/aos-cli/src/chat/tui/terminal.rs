@@ -7,7 +7,9 @@ use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ratatui::backend::CrosstermBackend;
-use ratatui::{Terminal, TerminalOptions, Viewport};
+use ratatui::text::{Line, Text};
+use ratatui::widgets::{Paragraph, Widget, Wrap};
+use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use tokio::sync::broadcast;
 
 use crate::chat::tui::frame::FrameRequester;
@@ -20,6 +22,7 @@ pub(crate) struct Tui {
     pub(crate) terminal: ChatTerminal,
     frame_requester: FrameRequester,
     draw_tx: broadcast::Sender<()>,
+    pending_history_lines: Vec<Line<'static>>,
 }
 
 impl Tui {
@@ -42,6 +45,7 @@ impl Tui {
             terminal,
             frame_requester,
             draw_tx,
+            pending_history_lines: Vec::new(),
         })
     }
 
@@ -52,12 +56,61 @@ impl Tui {
     pub(crate) fn draw_receiver(&self) -> broadcast::Receiver<()> {
         self.draw_tx.subscribe()
     }
+
+    pub(crate) fn insert_history_lines(&mut self, lines: Vec<Line<'static>>) {
+        if lines.is_empty() {
+            return;
+        }
+        self.pending_history_lines.extend(lines);
+        self.frame_requester.schedule_frame();
+    }
+
+    pub(crate) fn clear_viewport(&mut self) -> Result<()> {
+        self.pending_history_lines.clear();
+        self.terminal.clear()
+    }
+
+    pub(crate) fn draw(&mut self, render: impl FnOnce(&mut Frame<'_>)) -> Result<()> {
+        self.flush_pending_history_lines()?;
+        self.terminal.draw(render).map(|_| ())
+    }
+
+    fn flush_pending_history_lines(&mut self) -> Result<()> {
+        if self.pending_history_lines.is_empty() {
+            return Ok(());
+        }
+
+        let width = self.terminal.size()?.width.max(1);
+        let lines = std::mem::take(&mut self.pending_history_lines);
+        let height = history_lines_height(&lines, width);
+        if height == 0 {
+            return Ok(());
+        }
+
+        self.terminal.insert_before(height, |buf| {
+            Paragraph::new(Text::from(lines))
+                .wrap(Wrap { trim: false })
+                .render(buf.area, buf);
+        })
+    }
+}
+
+fn history_lines_height(lines: &[Line<'static>], width: u16) -> u16 {
+    let width = usize::from(width.max(1));
+    lines
+        .iter()
+        .map(|line| line.width().max(1).div_ceil(width))
+        .sum::<usize>()
+        .try_into()
+        .unwrap_or(u16::MAX)
+}
+
+fn default_viewport_height() -> u16 {
+    7
 }
 
 fn init_terminal() -> Result<ChatTerminal> {
-    let viewport_height = crossterm::terminal::size()
-        .map(|(_, rows)| rows.clamp(8, 18))
-        .unwrap_or(12);
+    let viewport_height = default_viewport_height();
     let backend = CrosstermBackend::new(stdout());
     match Terminal::with_options(
         backend,

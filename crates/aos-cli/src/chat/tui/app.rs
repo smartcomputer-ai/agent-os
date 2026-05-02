@@ -5,9 +5,7 @@ use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
+use ratatui::text::Line;
 use tokio::sync::mpsc;
 
 use crate::chat::client::ChatControlClient;
@@ -75,7 +73,12 @@ pub(crate) async fn run_shell(options: ChatTuiShellOptions) -> Result<()> {
             }
             draw = draw_rx.recv() => {
                 if draw.is_ok() {
-                    tui.terminal.draw(|frame| app.render(frame))?;
+                    if app.take_terminal_clear_requested() {
+                        tui.clear_viewport()?;
+                    }
+                    let width = tui.terminal.size()?.width;
+                    tui.insert_history_lines(app.drain_pending_history_lines(width));
+                    tui.draw(|frame| app.render(frame))?;
                 }
             }
             event = terminal_events.next() => {
@@ -145,6 +148,7 @@ fn driver_error(error: anyhow::Error) -> ChatEvent {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChatTuiViewOptions {
+    #[allow(dead_code)]
     pub(crate) world_id: String,
     pub(crate) session_id: String,
 }
@@ -156,6 +160,7 @@ pub(crate) struct ChatTuiApp {
     app_event_tx: AppEventSender,
     command_tx: mpsc::UnboundedSender<ChatCommand>,
     next_local_message: u64,
+    terminal_clear_requested: bool,
 }
 
 impl ChatTuiApp {
@@ -171,6 +176,7 @@ impl ChatTuiApp {
             app_event_tx,
             command_tx,
             next_local_message: 0,
+            terminal_clear_requested: false,
         }
     }
 
@@ -184,6 +190,7 @@ impl ChatTuiApp {
                     }
                     ChatEvent::HistoryReset { session_id } => {
                         self.options.session_id = session_id.clone();
+                        self.terminal_clear_requested = true;
                     }
                     ChatEvent::SessionSelected(summary) => {
                         self.options.session_id = summary.session_id.clone();
@@ -241,19 +248,24 @@ impl ChatTuiApp {
     pub(crate) fn render(&self, frame: &mut Frame<'_>) {
         let area = frame.area();
         let bottom_height = self.bottom_pane.desired_height().min(area.height);
-        let chunks = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(bottom_height),
-        ])
-        .split(area);
+        let chunks =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(bottom_height)]).split(area);
 
-        Paragraph::new(self.title_line()).render(chunks[0], frame.buffer_mut());
-        self.transcript.render(chunks[1], frame.buffer_mut());
-        self.bottom_pane.render(chunks[2], frame.buffer_mut());
-        if let Some(position) = self.bottom_pane.cursor_position(chunks[2]) {
+        self.transcript.render(chunks[0], frame.buffer_mut());
+        self.bottom_pane.render(chunks[1], frame.buffer_mut());
+        if let Some(position) = self.bottom_pane.cursor_position(chunks[1]) {
             frame.set_cursor_position(position);
         }
+    }
+
+    fn drain_pending_history_lines(&mut self, width: u16) -> Vec<Line<'static>> {
+        self.transcript.drain_pending_history_lines(width)
+    }
+
+    fn take_terminal_clear_requested(&mut self) -> bool {
+        let requested = self.terminal_clear_requested;
+        self.terminal_clear_requested = false;
+        requested
     }
 
     fn submit_local_text(&mut self, text: String) {
@@ -385,35 +397,10 @@ impl ChatTuiApp {
                 },
             }));
     }
-
-    fn title_line(&self) -> Line<'static> {
-        Line::from(vec![
-            Span::styled(
-                "AOS Chat",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  world "),
-            Span::styled(
-                short(&self.options.world_id),
-                Style::default().fg(Color::Cyan),
-            ),
-            Span::raw("  session "),
-            Span::styled(
-                short(&self.options.session_id),
-                Style::default().fg(Color::Cyan),
-            ),
-        ])
-    }
 }
 
 fn command_help() -> &'static str {
     "commands: /new, /sessions, /resume, /model, /provider, /effort, /max-tokens, /help, /quit"
-}
-
-fn short(value: &str) -> String {
-    value.get(..8).unwrap_or(value).to_string()
 }
 
 #[cfg(test)]
@@ -446,20 +433,28 @@ mod tests {
         for event in fixture_events(&app.options) {
             app.handle_ui_event(UiEvent::Chat(event), &FrameRequester::test_dummy());
         }
+        let history = app.drain_pending_history_lines(80);
+        let history_text = history
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(history_text.contains("Hello from AOS Chat."));
+        assert!(history_text.contains("Simulated assistant response."));
 
         let backend = TestBackend::new(80, 16);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| app.render(frame)).unwrap();
         let rendered = format!("{}", terminal.backend());
         let expected = snapshot_lines([
-            pad("AOS Chat  world 018f2a66  session 018f2a66"),
-            pad("user"),
-            pad("  Hello from AOS Chat."),
             pad(""),
-            pad("assistant"),
-            pad("  Simulated assistant response. Live engine wiring comes next."),
             pad(""),
-            pad("run 0 Running gpt-5.3-codex"),
+            pad(""),
+            pad(""),
+            pad(""),
+            pad(""),
+            pad(""),
+            pad(""),
             pad(""),
             pad(""),
             pad(""),
