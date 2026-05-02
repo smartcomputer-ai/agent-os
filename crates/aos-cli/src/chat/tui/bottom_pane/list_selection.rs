@@ -27,7 +27,7 @@ const TOKEN_CHOICES: &[Option<u64>] = &[
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ListSelectionView {
-    title: String,
+    title: Option<String>,
     rows: Vec<ListSelectionRow>,
     selected: usize,
 }
@@ -72,19 +72,16 @@ impl ListSelectionView {
             })
             .collect::<Vec<_>>();
         if rows.is_empty() {
-            return Self::new(
-                "Slash commands",
-                vec![
-                    ListSelectionRow::new(
-                        "no matches",
-                        "keep typing or press Esc",
-                        PickerSelection::SlashCommand(SlashCommandKind::Help),
-                    )
-                    .with_disabled_reason(Some("no matching command".into())),
-                ],
-            );
+            return Self::new_untitled(vec![
+                ListSelectionRow::new(
+                    "no matches",
+                    "keep typing or press Esc",
+                    PickerSelection::SlashCommand(SlashCommandKind::Help),
+                )
+                .with_disabled_reason(Some("no matching command".into())),
+            ]);
         }
-        Self::new("Slash commands", rows)
+        Self::new_untitled(rows)
     }
 
     pub(crate) fn model(current: &str, editable: bool) -> Self {
@@ -239,7 +236,7 @@ impl ListSelectionView {
     }
 
     pub(crate) fn desired_height(&self) -> u16 {
-        1 + self.rows.len().min(8) as u16
+        self.title_height() + self.rows.len().min(8) as u16
     }
 
     pub(crate) fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -247,9 +244,17 @@ impl ListSelectionView {
     }
 
     fn new(title: impl Into<String>, rows: Vec<ListSelectionRow>) -> Self {
+        Self::with_title(Some(title.into()), rows)
+    }
+
+    fn new_untitled(rows: Vec<ListSelectionRow>) -> Self {
+        Self::with_title(None, rows)
+    }
+
+    fn with_title(title: Option<String>, rows: Vec<ListSelectionRow>) -> Self {
         let selected = rows.iter().position(|row| row.current).unwrap_or(0);
         Self {
-            title: title.into(),
+            title,
             rows,
             selected,
         }
@@ -270,16 +275,18 @@ impl ListSelectionView {
     }
 
     fn render_lines(&self, _width: u16) -> Vec<Line<'static>> {
-        let mut lines = Vec::with_capacity(self.rows.len() + 1);
-        lines.push(Line::from(vec![
-            Span::styled(
-                self.title.clone(),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  Esc close", Style::default().fg(Color::DarkGray)),
-        ]));
+        let mut lines = Vec::with_capacity(self.rows.len() + usize::from(self.title.is_some()));
+        if let Some(title) = &self.title {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    title.clone(),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  Esc close", Style::default().fg(Color::DarkGray)),
+            ]));
+        }
         for (idx, row) in self.rows.iter().enumerate() {
             let selected = idx == self.selected;
             let base = if row.disabled_reason.is_some() {
@@ -306,6 +313,10 @@ impl ListSelectionView {
             ]));
         }
         lines
+    }
+
+    fn title_height(&self) -> u16 {
+        u16::from(self.title.is_some())
     }
 }
 

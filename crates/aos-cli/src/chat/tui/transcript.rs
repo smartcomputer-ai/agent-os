@@ -2,7 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use crate::chat::protocol::{ChatDelta, ChatEvent, ChatProgressStatus};
 use crate::chat::tui::cell::{
@@ -112,25 +112,19 @@ impl TranscriptState {
     }
 
     pub(crate) fn render(&self, area: Rect, buf: &mut Buffer) {
-        let block = Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(Color::DarkGray));
-        let inner = block.inner(area);
-        block.render(area, buf);
-
         let mut lines = Vec::new();
         let render_state = CellRenderState;
         for cell in &self.cells {
             let _ = (
                 cell.kind(),
-                cell.desired_height(inner.width, &render_state),
+                cell.desired_height(area.width, &render_state),
                 cell.is_stream_continuation(),
             );
-            lines.extend(cell.display_lines(inner.width, &render_state));
+            lines.extend(cell.display_lines(area.width, &render_state));
             lines.push(Line::default());
         }
         if let Some(active_cell) = self.active_cell.as_ref() {
-            lines.extend(active_cell.display_lines(inner.width, &render_state));
+            lines.extend(active_cell.display_lines(area.width, &render_state));
         }
         if lines.is_empty() {
             lines.push(Line::styled(
@@ -139,10 +133,10 @@ impl TranscriptState {
             ));
         }
 
-        let visible = visible_tail(lines, inner.height);
+        let visible = visible_tail(lines, area.height);
         Paragraph::new(visible)
             .wrap(Wrap { trim: false })
-            .render(inner, buf);
+            .render(area, buf);
     }
 
     fn apply_delta(&mut self, delta: ChatDelta) {

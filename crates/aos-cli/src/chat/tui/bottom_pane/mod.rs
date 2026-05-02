@@ -6,13 +6,15 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget};
 
 use crate::chat::protocol::{
     ChatEvent, ChatSettingsView, ChatStatus, DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER,
     reasoning_effort_label,
 };
-use crate::chat::tui::bottom_pane::composer::{ComposerState, composer_paragraph};
+use crate::chat::tui::bottom_pane::composer::{
+    ComposerState, composer_band_paragraph, composer_band_style,
+};
 use crate::chat::tui::bottom_pane::list_selection::{
     ListSelectionAction, ListSelectionView, PickerSelection,
 };
@@ -150,7 +152,7 @@ impl BottomPaneState {
     }
 
     pub(crate) fn desired_height(&self) -> u16 {
-        2 + self.content_height()
+        self.content_height() + self.footer_height()
     }
 
     pub(crate) fn apply_chat_event(&mut self, event: &ChatEvent) {
@@ -173,41 +175,30 @@ impl BottomPaneState {
     }
 
     pub(crate) fn render(&self, area: Rect, buf: &mut Buffer) {
-        let block = Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::DarkGray));
-        let inner = block.inner(area);
-        block.render(area, buf);
-
         let chunks = if let Some(view) = self.active_view.as_ref() {
-            Layout::vertical([
-                Constraint::Length(1),
-                Constraint::Length(view.desired_height()),
-            ])
-            .split(inner)
+            Layout::vertical([Constraint::Length(view.desired_height())]).split(area)
         } else if let Some(slash_popup) = self.slash_popup.as_ref() {
             Layout::vertical([
-                Constraint::Length(1),
+                Constraint::Length(self.composer_band_height()),
                 Constraint::Length(slash_popup.desired_height()),
-                Constraint::Length(self.composer.desired_height()),
             ])
-            .split(inner)
+            .split(area)
         } else {
             Layout::vertical([
+                Constraint::Length(self.composer_band_height()),
                 Constraint::Length(1),
-                Constraint::Length(self.composer.desired_height()),
             ])
-            .split(inner)
+            .split(area)
         };
 
-        Paragraph::new(self.status_line()).render(chunks[0], buf);
         if let Some(view) = self.active_view.as_ref() {
-            view.render(chunks[1], buf);
+            view.render(chunks[0], buf);
         } else if let Some(slash_popup) = self.slash_popup.as_ref() {
+            self.render_composer_band(chunks[0], buf);
             slash_popup.render(chunks[1], buf);
-            composer_paragraph(&self.composer).render(chunks[2], buf);
         } else {
-            composer_paragraph(&self.composer).render(chunks[1], buf);
+            self.render_composer_band(chunks[0], buf);
+            Paragraph::new(self.status_line()).render(chunks[1], buf);
         }
     }
 
@@ -215,25 +206,24 @@ impl BottomPaneState {
         if self.active_view.is_some() {
             return None;
         }
-        let inner = area.inner(ratatui::layout::Margin {
-            vertical: 1,
-            horizontal: 0,
-        });
         if let Some(slash_popup) = self.slash_popup.as_ref() {
             let chunks = Layout::vertical([
-                Constraint::Length(1),
+                Constraint::Length(self.composer_band_height()),
                 Constraint::Length(slash_popup.desired_height()),
-                Constraint::Length(self.composer.desired_height()),
             ])
-            .split(inner);
-            return self.composer.cursor_position(chunks[2]);
+            .split(area);
+            return self
+                .composer
+                .cursor_position(self.composer_text_area(chunks[0]))
+                .map(|position| Position::new(position.x, position.y.saturating_add(1)));
         }
         let chunks = Layout::vertical([
+            Constraint::Length(self.composer_band_height()),
             Constraint::Length(1),
-            Constraint::Length(self.composer.desired_height()),
         ])
-        .split(inner);
-        self.composer.cursor_position(chunks[1])
+        .split(area);
+        self.composer
+            .cursor_position(self.composer_text_area(chunks[0]))
     }
 
     fn content_height(&self) -> u16 {
@@ -245,7 +235,34 @@ impl BottomPaneState {
             .as_ref()
             .map(ListSelectionView::desired_height)
             .unwrap_or(0);
-        popup_height + self.composer.desired_height()
+        popup_height + self.composer_band_height()
+    }
+
+    fn footer_height(&self) -> u16 {
+        u16::from(self.active_view.is_none() && self.slash_popup.is_none())
+    }
+
+    fn composer_band_height(&self) -> u16 {
+        self.composer.desired_height().saturating_add(2).min(7)
+    }
+
+    fn render_composer_band(&self, area: Rect, buf: &mut Buffer) {
+        Paragraph::new("")
+            .style(composer_band_style())
+            .render(area, buf);
+        composer_band_paragraph(&self.composer).render(self.composer_text_area(area), buf);
+    }
+
+    fn composer_text_area(&self, area: Rect) -> Rect {
+        if area.height >= 3 {
+            Rect {
+                y: area.y.saturating_add(1),
+                height: area.height.saturating_sub(2),
+                ..area
+            }
+        } else {
+            area
+        }
     }
 
     fn handle_slash_popup_key(&mut self, key: KeyEvent) -> BottomPaneAction {
@@ -350,4 +367,58 @@ fn slash_popup_owns_key(key: &KeyEvent) -> bool {
             | crossterm::event::KeyCode::End
             | crossterm::event::KeyCode::Enter
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn slash_popup_keeps_cursor_in_composer_band_above_results() {
+        let mut pane = BottomPaneState::default();
+        for ch in ['/', 'p'] {
+            assert_eq!(
+                pane.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)),
+                BottomPaneAction::Changed
+            );
+        }
+
+        let cursor = pane
+            .cursor_position(Rect::new(0, 0, 80, 8))
+            .expect("composer cursor");
+
+        assert_eq!(cursor.y, 2);
+    }
+
+    #[test]
+    fn multiline_composer_renders_text_after_newline() {
+        let mut pane = BottomPaneState::default();
+        for ch in ['s', 'u', 'p', 'e', 'r'] {
+            assert_eq!(
+                pane.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)),
+                BottomPaneAction::Changed
+            );
+        }
+        assert_eq!(
+            pane.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)),
+            BottomPaneAction::Changed
+        );
+        for ch in ['v', 'i', 's', 'i', 'b', 'l', 'e'] {
+            assert_eq!(
+                pane.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)),
+                BottomPaneAction::Changed
+            );
+        }
+
+        let backend = TestBackend::new(40, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| pane.render(frame.area(), frame.buffer_mut()))
+            .unwrap();
+
+        assert!(format!("{}", terminal.backend()).contains("visible"));
+    }
 }

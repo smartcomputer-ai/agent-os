@@ -429,7 +429,6 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| app.render(frame)).unwrap();
         let rendered = format!("{}", terminal.backend());
-        let rule = "\u{2500}".repeat(80);
         let expected = snapshot_lines([
             pad("AOS Chat  world 018f2a66  session 018f2a66"),
             pad("user"),
@@ -443,10 +442,10 @@ mod tests {
             pad(""),
             pad(""),
             pad(""),
-            rule.clone(),
-            rule,
-            pad("P3a shell  gpt-5.3-codex  effort none"),
+            pad(""),
             pad("> "),
+            pad(""),
+            pad("P3a shell  gpt-5.3-codex  effort none"),
         ]);
 
         assert_eq!(rendered, expected);
@@ -571,7 +570,6 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| app.render(frame)).unwrap();
         let rendered = format!("{}", terminal.backend());
-        assert!(rendered.contains("Slash commands"));
         assert!(rendered.contains("/model"));
         assert!(!rendered.contains("/provider"));
 

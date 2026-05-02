@@ -48,6 +48,17 @@ impl ComposerState {
                 self.insert_char('\n');
                 ComposerAction::Changed
             }
+            KeyCode::Char('\n') | KeyCode::Char('\r') => {
+                self.insert_char('\n');
+                ComposerAction::Changed
+            }
+            KeyCode::Enter
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    || key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.insert_char('\n');
+                ComposerAction::Changed
+            }
             KeyCode::Enter => {
                 if self.text.trim().is_empty() {
                     return ComposerAction::None;
@@ -99,27 +110,28 @@ impl ComposerState {
     }
 
     pub(crate) fn insert_str(&mut self, text: &str) {
-        self.text.insert_str(self.cursor, text);
-        self.cursor += text.len();
+        let normalized = normalize_newlines(text);
+        self.text.insert_str(self.cursor, &normalized);
+        self.cursor += normalized.len();
     }
 
     pub(crate) fn desired_height(&self) -> u16 {
-        let line_count = self.text.lines().count().max(1) as u16;
+        let line_count = composer_lines(&self.text).len().max(1) as u16;
         line_count.clamp(1, 5)
     }
 
     pub(crate) fn render_lines(&self) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
-        let mut source_lines = self.text.lines();
+        let mut source_lines = composer_lines(&self.text).into_iter();
         let first = source_lines.next().unwrap_or_default();
         lines.push(Line::from(vec![
             Span::styled("> ", Style::default().fg(Color::Cyan)),
-            Span::raw(first.to_string()),
+            Span::raw(first),
         ]));
         for line in source_lines {
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default().fg(Color::Cyan)),
-                Span::raw(line.to_string()),
+                Span::raw(line),
             ]));
         }
         lines
@@ -182,6 +194,28 @@ pub(crate) fn composer_paragraph(composer: &ComposerState) -> Paragraph<'static>
     Paragraph::new(composer.render_lines()).wrap(Wrap { trim: false })
 }
 
+pub(crate) fn composer_band_paragraph(composer: &ComposerState) -> Paragraph<'static> {
+    composer_paragraph(composer).style(composer_band_style())
+}
+
+pub(crate) fn composer_band_style() -> Style {
+    Style::default().bg(Color::Rgb(58, 63, 72))
+}
+
+fn composer_lines(text: &str) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    normalize_newlines(text)
+        .split('\n')
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +236,34 @@ mod tests {
         let action = composer.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
         assert_eq!(action, ComposerAction::Changed);
         assert_eq!(composer.text(), "hello\n");
+    }
+
+    #[test]
+    fn shift_enter_inserts_newline_and_preserves_trailing_blank_row() {
+        let mut composer = ComposerState::default();
+        composer.insert_str("hello");
+        let action = composer.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+        assert_eq!(action, ComposerAction::Changed);
+        assert_eq!(composer.text(), "hello\n");
+        assert_eq!(composer.desired_height(), 2);
+
+        let rendered = composer.render_lines();
+        assert_eq!(rendered.len(), 2);
+
+        let action = composer.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert_eq!(action, ComposerAction::Changed);
+        assert_eq!(composer.text(), "hello\nx");
+        assert_eq!(composer.desired_height(), 2);
+        assert_eq!(composer.render_lines().len(), 2);
+    }
+
+    #[test]
+    fn carriage_return_input_is_normalized_to_visible_newline() {
+        let mut composer = ComposerState::default();
+        composer.insert_str("hello\rworld");
+
+        assert_eq!(composer.text(), "hello\nworld");
+        assert_eq!(composer.desired_height(), 2);
+        assert_eq!(composer.render_lines().len(), 2);
     }
 }
