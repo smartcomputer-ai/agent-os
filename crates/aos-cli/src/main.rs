@@ -1,4 +1,5 @@
 mod authoring;
+mod chat;
 mod client;
 mod commands;
 mod config;
@@ -140,5 +141,39 @@ mod tests {
         ])
         .expect("parse air check");
         assert!(matches!(cli.command, Command::Air(_)));
+    }
+
+    #[test]
+    fn chat_plain_new_parse_accepts_draft_settings() {
+        let cli = Cli::try_parse_from([
+            "aos",
+            "chat",
+            "--plain",
+            "--new",
+            "--provider",
+            "openai-responses",
+            "--model",
+            "gpt-5.3-codex",
+            "--effort",
+            "medium",
+        ])
+        .expect("parse chat plain new");
+        assert!(matches!(cli.command, Command::Chat(_)));
+    }
+
+    #[test]
+    fn chat_send_parse_accepts_follow() {
+        let cli = Cli::try_parse_from([
+            "aos",
+            "chat",
+            "send",
+            "--session",
+            "018f2a66-31cc-7b25-a4f7-37e3310fdc6a",
+            "--message",
+            "hello",
+            "--follow",
+        ])
+        .expect("parse chat send follow");
+        assert!(matches!(cli.command, Command::Chat(_)));
     }
 }

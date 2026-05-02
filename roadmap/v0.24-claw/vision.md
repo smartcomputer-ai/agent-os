@@ -20,6 +20,6 @@ I want to be able to define an OpenClaw-like agent with similar top-level prompt
 - how to integrate with things like calendar and external email
 
 ## Steps
-1) expand aos-cli to chat with an agent (select session, view session history, turn based events, keep it rudimentary)
+1) expand aos-cli to chat with an agent through a Codex-like TUI (select/resume sessions, view history, render turn progress, tool chains, compaction, and intervention state)
 2) talk to the agent via WA
 3) don't plan any further for now

@@ -63,6 +63,31 @@ impl ApiClient {
         self.send_json("GET", path, request, None).await
     }
 
+    pub async fn get_stream(
+        &self,
+        path: &str,
+        query: &[(&str, Option<String>)],
+    ) -> Result<reqwest::Response> {
+        let mut request = self.client.get(self.url(path));
+        for (key, value) in query {
+            if let Some(value) = value {
+                request = request.query(&[(key, value)]);
+            }
+        }
+        self.log_request("GET", path, None);
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("send GET {}", self.url(path)))?;
+        self.log_response("GET", path, response.status());
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!("{}", format_http_error("GET", path, status, &body)));
+        }
+        Ok(response)
+    }
+
     pub async fn delete_json(&self, path: &str, query: &[(&str, Option<String>)]) -> Result<Value> {
         let mut request = self.client.delete(self.url(path));
         for (key, value) in query {
