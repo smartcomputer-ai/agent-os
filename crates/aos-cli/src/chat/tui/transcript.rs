@@ -59,17 +59,7 @@ impl TranscriptState {
                     ),
                 )));
             }
-            ChatEvent::SessionsListed { .. } => {}
-            ChatEvent::SessionSelected(summary) => {
-                self.replace_or_push_committed(Box::new(NoticeCell::new(
-                    "session",
-                    format!(
-                        "session {}  runs {}",
-                        short(&summary.session_id),
-                        summary.run_count
-                    ),
-                )));
-            }
+            ChatEvent::SessionsListed { .. } | ChatEvent::SessionSelected(_) => {}
             ChatEvent::HistoryReset { session_id } => {
                 self.cells.clear();
                 self.pending_history_cell_indices.clear();
@@ -403,7 +393,9 @@ fn short(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::protocol::{ChatMessageView, ChatToolCallView, ChatToolChainView, ChatTurn};
+    use crate::chat::protocol::{
+        ChatMessageView, ChatSessionSummary, ChatToolCallView, ChatToolChainView, ChatTurn,
+    };
 
     #[test]
     fn confirmed_user_message_replaces_matching_pending_echo() {
@@ -430,6 +422,24 @@ mod tests {
         assert!(state.pending_user_messages.is_empty());
         assert_eq!(state.cells.len(), 1);
         assert_eq!(state.cells[0].id(), "sha256:abc");
+    }
+
+    #[test]
+    fn session_selected_does_not_emit_transcript_notice() {
+        let mut state = TranscriptState::default();
+        state.apply_chat_event(ChatEvent::SessionSelected(ChatSessionSummary {
+            session_id: "c4c49a6a-9426-4153-b817-856f7248aaa2".into(),
+            status: None,
+            lifecycle: None,
+            updated_at_ns: None,
+            run_count: 11,
+            provider: None,
+            model: None,
+            active_run: None,
+        }));
+
+        assert!(state.drain_pending_history_lines(80).is_empty());
+        assert!(state.cells.is_empty());
     }
 
     #[test]
