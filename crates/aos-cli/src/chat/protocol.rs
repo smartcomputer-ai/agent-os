@@ -3,7 +3,7 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 pub(crate) const DEFAULT_CHAT_PROVIDER: &str = "openai-responses";
-pub(crate) const DEFAULT_CHAT_MODEL: &str = "gpt-5.3-codex";
+pub(crate) const DEFAULT_CHAT_MODEL: &str = "gpt-5.5";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ChatDraftSettings {

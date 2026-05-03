@@ -152,7 +152,7 @@ mod tests {
             "--provider",
             "openai-responses",
             "--model",
-            "gpt-5.3-codex",
+            "gpt-5.5",
             "--effort",
             "medium",
         ])

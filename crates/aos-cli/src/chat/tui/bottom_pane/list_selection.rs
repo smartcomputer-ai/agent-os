@@ -13,6 +13,7 @@ use crate::chat::tui::slash::{SlashCommandKind, matching_slash_commands};
 
 const MODEL_CHOICES: &[&str] = &[
     DEFAULT_CHAT_MODEL,
+    "gpt-5.4",
     "gpt-5.3-codex-spark",
     "gpt-5.2-codex",
     "gpt-5.2",

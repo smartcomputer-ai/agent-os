@@ -235,8 +235,8 @@ mod tests {
     #[test]
     fn parses_direct_setting_commands() {
         assert_eq!(
-            parse_slash_command("/model gpt-5.3-codex").unwrap(),
-            Some(SlashCommand::Model(Some("gpt-5.3-codex".into())))
+            parse_slash_command("/model gpt-5.4").unwrap(),
+            Some(SlashCommand::Model(Some("gpt-5.4".into())))
         );
         assert_eq!(
             parse_slash_command("/effort high").unwrap(),

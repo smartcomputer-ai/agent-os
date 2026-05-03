@@ -534,7 +534,7 @@ mod tests {
             lifecycle: RunLifecycle::Running,
             status: run_status(RunLifecycle::Running),
             provider: "openai-responses".into(),
-            model: "gpt-5.3-codex".into(),
+            model: "gpt-5.5".into(),
             reasoning_effort: None,
             input_refs: Vec::new(),
             output_ref: None,

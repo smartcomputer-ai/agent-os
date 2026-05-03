@@ -597,7 +597,7 @@ mod tests {
             pad(""),
             pad("> "),
             pad(""),
-            pad("P3a shell  gpt-5.3-codex  effort none"),
+            pad("P3a shell  gpt-5.5  effort none"),
         ]);
 
         assert_eq!(rendered, expected);
@@ -866,7 +866,7 @@ mod tests {
                         updated_at_ns: Some(2),
                         run_count: 1,
                         provider: Some("openai-responses".into()),
-                        model: Some("gpt-5.3-codex".into()),
+                        model: Some("gpt-5.5".into()),
                         active_run: None,
                     },
                     ChatSessionSummary {
@@ -969,7 +969,7 @@ mod tests {
     fn fixture_events(options: &ChatTuiViewOptions) -> Vec<ChatEvent> {
         let settings = ChatSettingsView {
             provider: "openai-responses".into(),
-            model: "gpt-5.3-codex".into(),
+            model: "gpt-5.5".into(),
             reasoning_effort: None,
             max_tokens: None,
             provider_editable: true,
@@ -1008,7 +1008,7 @@ mod tests {
                         lifecycle: RunLifecycle::Running,
                         status: run_status(RunLifecycle::Running),
                         provider: "openai-responses".into(),
-                        model: "gpt-5.3-codex".into(),
+                        model: "gpt-5.5".into(),
                         reasoning_effort: None,
                         input_refs: Vec::new(),
                         output_ref: None,
