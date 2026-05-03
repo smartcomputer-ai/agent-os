@@ -33,7 +33,7 @@ impl BlobCache {
     ) {
         let mut refs = BTreeSet::new();
         collect_state_refs(state, &mut refs);
-        for ref_ in refs {
+        while let Some(ref_) = refs.pop_first() {
             if self.entries.contains_key(&ref_) {
                 continue;
             }
@@ -41,6 +41,9 @@ impl BlobCache {
                 Ok(bytes) => BlobEntry::Bytes(bytes),
                 Err(err) => BlobEntry::Error(err.to_string()),
             };
+            if let BlobEntry::Bytes(bytes) = &entry {
+                collect_nested_blob_refs(bytes, &mut refs);
+            }
             self.entries.insert(ref_, entry);
         }
     }
@@ -59,6 +62,19 @@ impl BlobCache {
         decode_llm_output(bytes)
             .ok()
             .and_then(|output| output.assistant_text)
+    }
+
+    pub(crate) fn reasoning_text(&self, ref_: &str) -> Option<String> {
+        let bytes = self.bytes(ref_)?;
+        let output = decode_llm_output(bytes).ok()?;
+        let reasoning_ref = output.reasoning_ref?;
+        let bytes = self.bytes(reasoning_ref.as_str())?;
+        std::str::from_utf8(bytes).ok().map(str::to_owned)
+    }
+
+    pub(crate) fn tool_lead_in_text(&self, ref_: &str) -> Option<String> {
+        self.reasoning_text(ref_)
+            .or_else(|| self.assistant_text(ref_))
     }
 
     pub(crate) fn preview_json_or_text(&self, ref_: &str) -> Option<String> {
@@ -151,6 +167,21 @@ fn collect_tool_batch_refs(batch: &ActiveToolBatch, refs: &mut BTreeSet<String>)
     if let Some(ref_) = &batch.results_ref {
         refs.insert(ref_.clone());
     }
+    if let Some(ref_) = &batch.source_output_ref {
+        refs.insert(ref_.clone());
+    }
+}
+
+fn collect_nested_blob_refs(bytes: &[u8], refs: &mut BTreeSet<String>) {
+    let Ok(output) = decode_llm_output(bytes) else {
+        return;
+    };
+    if let Some(ref_) = output.reasoning_ref {
+        refs.insert(ref_.to_string());
+    }
+    if let Some(ref_) = output.tool_calls_ref {
+        refs.insert(ref_.to_string());
+    }
 }
 
 fn decode_user_message(bytes: &[u8]) -> Result<UserMessageBlob> {
@@ -207,5 +238,46 @@ mod tests {
     fn decodes_llm_output_assistant_text() {
         let output = decode_llm_output(br#"{"assistant_text":"done"}"#).unwrap();
         assert_eq!(output.assistant_text.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn follows_llm_output_reasoning_ref() {
+        let mut cache = BlobCache::default();
+        let output_ref = hash_ref('a');
+        let reasoning_ref = hash_ref('b');
+        cache.insert_bytes(
+            output_ref.clone(),
+            format!(r#"{{"assistant_text":"done","reasoning_ref":"{reasoning_ref}"}}"#)
+                .into_bytes(),
+        );
+        cache.insert_bytes(reasoning_ref, b"I should inspect files.".to_vec());
+
+        assert_eq!(
+            cache.reasoning_text(&output_ref).as_deref(),
+            Some("I should inspect files.")
+        );
+    }
+
+    #[test]
+    fn tool_lead_in_falls_back_to_assistant_text() {
+        let mut cache = BlobCache::default();
+        let output_ref = hash_ref('a');
+        cache.insert_bytes(
+            output_ref.clone(),
+            format!(
+                r#"{{"assistant_text":"I'll inspect the files.","tool_calls_ref":"{}"}}"#,
+                hash_ref('b')
+            )
+            .into_bytes(),
+        );
+
+        assert_eq!(
+            cache.tool_lead_in_text(&output_ref).as_deref(),
+            Some("I'll inspect the files.")
+        );
+    }
+
+    fn hash_ref(ch: char) -> String {
+        format!("sha256:{}", ch.to_string().repeat(64))
     }
 }

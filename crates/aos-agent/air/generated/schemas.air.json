@@ -46,6 +46,11 @@
             "hash": {}
           }
         },
+        "source_output_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
         "tool_batch_id": {
           "ref": "aos.agent/ToolBatchId@1"
         }

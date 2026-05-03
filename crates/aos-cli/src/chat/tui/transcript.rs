@@ -6,8 +6,8 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 use crate::chat::protocol::ChatToolChainView;
 use crate::chat::protocol::{ChatDelta, ChatEvent, ChatProgressStatus};
 use crate::chat::tui::cell::{
-    CellRenderState, ChatCell, ChatCellKind, ErrorCell, MessageCell, NoticeCell, RunCell,
-    ToolChainCell,
+    CellRenderState, ChatCell, ChatCellKind, ErrorCell, MessageCell, NoticeCell, ReasoningCell,
+    RunCell, ToolChainCell,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -249,6 +249,12 @@ impl TranscriptState {
                             "{turn_id}:tools-spacer"
                         ))));
                     }
+                    if let Some(reasoning) = turn.assistant_reasoning {
+                        self.push_committed_cell_if_changed(Box::new(ReasoningCell::new(
+                            format!("{turn_id}:reasoning:{}", reasoning.id),
+                            reasoning.content,
+                        )));
+                    }
                     if let Some(assistant) = turn.assistant {
                         self.push_committed_cell_if_changed(Box::new(MessageCell::new(
                             format!("{turn_id}:assistant:{}", assistant.id),
@@ -396,7 +402,8 @@ fn short(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::chat::protocol::{
-        ChatMessageView, ChatSessionSummary, ChatToolCallView, ChatToolChainView, ChatTurn,
+        ChatMessageView, ChatReasoningView, ChatSessionSummary, ChatToolCallView,
+        ChatToolChainView, ChatTurn,
     };
 
     #[test]
@@ -483,6 +490,7 @@ mod tests {
                 id: "run-1:1".into(),
                 title: "tools 1 calls".into(),
                 status: ChatProgressStatus::Running,
+                reasoning: None,
                 calls: vec![ChatToolCallView {
                     id: "call-1".into(),
                     tool_id: None,
@@ -521,6 +529,7 @@ mod tests {
                 id: "run-1:1".into(),
                 title: "tools 1 calls".into(),
                 status: ChatProgressStatus::Running,
+                reasoning: None,
                 calls: vec![ChatToolCallView {
                     id: "call-1".into(),
                     tool_id: None,
@@ -544,6 +553,7 @@ mod tests {
                 id: "run-1:1".into(),
                 title: "tools 1 calls".into(),
                 status: ChatProgressStatus::Succeeded,
+                reasoning: None,
                 calls: vec![ChatToolCallView {
                     id: "call-1".into(),
                     tool_id: None,
@@ -588,6 +598,7 @@ mod tests {
                 id: "run-1:1".into(),
                 title: "tools 1 calls".into(),
                 status: ChatProgressStatus::Running,
+                reasoning: None,
                 calls: vec![ChatToolCallView {
                     id: "call-1".into(),
                     tool_id: None,
@@ -609,6 +620,7 @@ mod tests {
                 id: "run-1:1".into(),
                 title: "tools 1 calls".into(),
                 status: ChatProgressStatus::Succeeded,
+                reasoning: None,
                 calls: vec![ChatToolCallView {
                     id: "call-1".into(),
                     tool_id: None,
@@ -650,6 +662,7 @@ mod tests {
             turns: vec![ChatTurn {
                 turn_id: "turn-1".into(),
                 user: None,
+                assistant_reasoning: None,
                 assistant: Some(ChatMessageView {
                     id: "assistant-1".into(),
                     role: "assistant".into(),
@@ -661,6 +674,7 @@ mod tests {
                     id: "run-1:1".into(),
                     title: "tools 1 calls".into(),
                     status: ChatProgressStatus::Succeeded,
+                    reasoning: None,
                     calls: vec![ChatToolCallView {
                         id: "call-1".into(),
                         tool_id: None,
@@ -691,12 +705,97 @@ mod tests {
     }
 
     #[test]
+    fn active_tool_chain_renders_reasoning_before_tools() {
+        let mut state = TranscriptState::default();
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![ChatToolChainView {
+                id: "run-1:1".into(),
+                title: "tools 1 calls".into(),
+                status: ChatProgressStatus::Running,
+                reasoning: Some(ChatReasoningView {
+                    id: "reasoning-1".into(),
+                    content: "I need to inspect the file tree first.".into(),
+                    ref_: None,
+                    output_ref: Some("sha256:output".into()),
+                }),
+                calls: vec![ChatToolCallView {
+                    id: "call-1".into(),
+                    tool_id: None,
+                    tool_name: "list_dir".into(),
+                    status: ChatProgressStatus::Running,
+                    group_index: Some(1),
+                    parallel_safe: Some(true),
+                    resource_key: None,
+                    arguments_preview: None,
+                    result_preview: None,
+                    error: None,
+                }],
+                summary: Some("1 execution groups".into()),
+            }],
+        });
+
+        let active = state.active_cell.as_ref().expect("active cell");
+        let lines = active
+            .display_lines(80, &CellRenderState)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(lines[0].contains("I need to inspect the file tree first."));
+        assert!(lines[1].contains("tools 1 calls"));
+    }
+
+    #[test]
+    fn reconstructed_history_renders_final_reasoning_before_assistant() {
+        let mut state = TranscriptState::default();
+        state.apply_chat_event(ChatEvent::TranscriptDelta(ChatDelta::ReplaceTurns {
+            session_id: "s-1".into(),
+            turns: vec![ChatTurn {
+                turn_id: "turn-1".into(),
+                user: None,
+                assistant_reasoning: Some(ChatReasoningView {
+                    id: "reasoning-1".into(),
+                    content: "I have enough context to answer.".into(),
+                    ref_: None,
+                    output_ref: Some("sha256:output".into()),
+                }),
+                assistant: Some(ChatMessageView {
+                    id: "assistant-1".into(),
+                    role: "assistant".into(),
+                    content: "done".into(),
+                    ref_: None,
+                }),
+                run: None,
+                tool_chains: Vec::new(),
+            }],
+        }));
+
+        let lines = state
+            .drain_pending_history_lines(80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        let reasoning = lines
+            .iter()
+            .position(|line| line.contains("I have enough context to answer."))
+            .expect("reasoning line");
+        let assistant = lines
+            .iter()
+            .position(|line| line.contains("done"))
+            .expect("assistant line");
+        assert!(reasoning < assistant);
+    }
+
+    #[test]
     fn consecutive_terminal_tool_batches_are_spaced_after_the_block() {
         fn chain(id: &str, title: &str, status: ChatProgressStatus) -> ChatToolChainView {
             ChatToolChainView {
                 id: id.into(),
                 title: title.into(),
                 status,
+                reasoning: None,
                 calls: vec![ChatToolCallView {
                     id: format!("{id}:call"),
                     tool_id: None,

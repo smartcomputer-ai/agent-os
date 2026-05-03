@@ -8,6 +8,7 @@ use crate::chat::tui::theme::COMPOSER_BG;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChatCellKind {
     Message,
+    Reasoning,
     Run,
     ToolChain,
     Error,
@@ -149,6 +150,35 @@ fn assistant_message_lines(content: &str, width: u16) -> Vec<Line<'static>> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReasoningCell {
+    id: String,
+    content: String,
+}
+
+impl ReasoningCell {
+    pub(crate) fn new(id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            content: content.into(),
+        }
+    }
+}
+
+impl ChatCell for ReasoningCell {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn kind(&self) -> ChatCellKind {
+        ChatCellKind::Reasoning
+    }
+
+    fn display_lines(&self, width: u16, _state: &CellRenderState) -> Vec<Line<'static>> {
+        reasoning_lines(&self.content, width, true)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NoticeCell {
     id: String,
     text: String,
@@ -269,6 +299,9 @@ impl ChatCell for ToolChainCell {
             if chain_index > 0 && matches!(self.display, ToolChainDisplay::Expanded) {
                 lines.push(Line::default());
             }
+            if let Some(reasoning) = chain.reasoning.as_ref() {
+                lines.extend(reasoning_lines(&reasoning.content, width, false));
+            }
             lines.push(tool_chain_header(chain));
             if matches!(self.display, ToolChainDisplay::Collapsed) {
                 continue;
@@ -334,6 +367,26 @@ fn wrap_message_lines(content: &str, width: u16) -> Vec<String> {
         out.push(current);
     }
     out
+}
+
+fn reasoning_lines(content: &str, width: u16, trailing_blank: bool) -> Vec<Line<'static>> {
+    let marker_style = Style::default().fg(Color::DarkGray);
+    let content_style = Style::default()
+        .fg(Color::Gray)
+        .add_modifier(Modifier::ITALIC);
+    let mut lines = Vec::new();
+    let wrapped = wrap_message_lines(content, width.saturating_sub(2).max(1));
+    for (index, line) in wrapped.iter().enumerate() {
+        let prefix = if index == 0 { "• " } else { "  " };
+        lines.push(Line::from(vec![
+            Span::styled(prefix, marker_style),
+            Span::styled(line.clone(), content_style),
+        ]));
+    }
+    if trailing_blank {
+        lines.push(Line::default());
+    }
+    lines
 }
 
 fn text_width(value: &str) -> usize {
@@ -624,6 +677,7 @@ mod tests {
                 id: "chain".into(),
                 title: "tools 2 calls".into(),
                 status: ChatProgressStatus::Running,
+                reasoning: None,
                 summary: Some("2 execution groups".into()),
                 calls: vec![
                     ChatToolCallView {
@@ -674,6 +728,7 @@ mod tests {
                 id: "chain".into(),
                 title: "tools 1 calls".into(),
                 status: ChatProgressStatus::Succeeded,
+                reasoning: None,
                 summary: Some("1 execution groups".into()),
                 calls: vec![ChatToolCallView {
                     id: "a".into(),
@@ -709,6 +764,7 @@ mod tests {
             id: id.into(),
             title: title.into(),
             status: ChatProgressStatus::Succeeded,
+            reasoning: None,
             summary: Some("1 execution groups".into()),
             calls: vec![ChatToolCallView {
                 id: format!("{id}:call"),

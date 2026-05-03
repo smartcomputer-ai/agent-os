@@ -178,6 +178,8 @@ pub(crate) enum ChatDelta {
 pub(crate) struct ChatTurn {
     pub turn_id: String,
     pub user: Option<ChatMessageView>,
+    #[serde(default)]
+    pub assistant_reasoning: Option<ChatReasoningView>,
     pub assistant: Option<ChatMessageView>,
     pub run: Option<ChatRunView>,
     pub tool_chains: Vec<ChatToolChainView>,
@@ -189,6 +191,14 @@ pub(crate) struct ChatMessageView {
     pub role: String,
     pub content: String,
     pub ref_: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ChatReasoningView {
+    pub id: String,
+    pub content: String,
+    pub ref_: Option<String>,
+    pub output_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -211,6 +221,8 @@ pub(crate) struct ChatToolChainView {
     pub id: String,
     pub title: String,
     pub status: ChatProgressStatus,
+    #[serde(default)]
+    pub reasoning: Option<ChatReasoningView>,
     pub calls: Vec<ChatToolCallView>,
     pub summary: Option<String>,
 }

@@ -102,6 +102,7 @@ pub(super) fn run_tool_batch(
         pending_effects: PendingEffectSet::new(),
         execution,
         llm_results: BTreeMap::new(),
+        source_output_ref: state.last_output_ref.clone(),
         results_ref: None,
     });
     let mut refs = vec![trace_ref(

@@ -994,6 +994,7 @@ mod tests {
                         content: "Hello from AOS Chat.".into(),
                         ref_: None,
                     }),
+                    assistant_reasoning: None,
                     assistant: Some(ChatMessageView {
                         id: "p3a-assistant".into(),
                         role: "assistant".into(),

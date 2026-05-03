@@ -7,8 +7,8 @@ use aos_agent::{
 use crate::chat::blob_cache::BlobCache;
 use crate::chat::client::run_id_label;
 use crate::chat::protocol::{
-    ChatCompactionView, ChatDelta, ChatEvent, ChatMessageView, ChatProgressStatus, ChatRunView,
-    ChatToolCallView, ChatToolChainView, ChatTurn, run_status,
+    ChatCompactionView, ChatDelta, ChatEvent, ChatMessageView, ChatProgressStatus,
+    ChatReasoningView, ChatRunView, ChatToolCallView, ChatToolChainView, ChatTurn, run_status,
 };
 
 #[derive(Debug, Clone)]
@@ -111,6 +111,11 @@ fn project_turns(state: &SessionState, blob_cache: &BlobCache) -> Vec<ChatTurn> 
         turns.push(ChatTurn {
             turn_id: run.id.clone(),
             user: first_user_message(&record.input_refs, blob_cache),
+            assistant_reasoning: record
+                .outcome
+                .as_ref()
+                .and_then(|outcome| outcome.output_ref.as_deref())
+                .and_then(|ref_| reasoning_message(ref_, blob_cache)),
             assistant: record
                 .outcome
                 .as_ref()
@@ -135,6 +140,7 @@ fn project_turns(state: &SessionState, blob_cache: &BlobCache) -> Vec<ChatTurn> 
         turns.push(ChatTurn {
             turn_id: run.id.clone(),
             user: first_user_message(&current.input_refs, blob_cache),
+            assistant_reasoning: assistant_ref.and_then(|ref_| reasoning_message(ref_, blob_cache)),
             assistant: assistant_ref.and_then(|ref_| assistant_message(ref_, blob_cache)),
             run: Some(run),
             tool_chains,
@@ -161,6 +167,19 @@ fn assistant_message(ref_: &str, blob_cache: &BlobCache) -> Option<ChatMessageVi
         role: "assistant".into(),
         content: text,
         ref_: Some(ref_.to_string()),
+    })
+}
+
+fn reasoning_message(ref_: &str, blob_cache: &BlobCache) -> Option<ChatReasoningView> {
+    let text = blob_cache.reasoning_text(ref_)?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(ChatReasoningView {
+        id: format!("{ref_}:reasoning"),
+        content: text,
+        ref_: None,
+        output_ref: Some(ref_.to_string()),
     })
 }
 
@@ -357,6 +376,10 @@ fn project_tool_batch(batch: &ActiveToolBatch, blob_cache: &BlobCache) -> ChatTo
         ),
         title: format!("tools {} calls", calls.len()),
         status,
+        reasoning: batch
+            .source_output_ref
+            .as_deref()
+            .and_then(|ref_| tool_lead_in_message(ref_, blob_cache)),
         calls,
         summary: Some(format!(
             "{} execution groups",
@@ -456,6 +479,19 @@ fn metadata_u64(metadata: &BTreeMap<String, String>, key: &str) -> Option<u64> {
     metadata
         .get(key)
         .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn tool_lead_in_message(ref_: &str, blob_cache: &BlobCache) -> Option<ChatReasoningView> {
+    let text = blob_cache.tool_lead_in_text(ref_)?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(ChatReasoningView {
+        id: format!("{ref_}:tool-lead-in"),
+        content: text,
+        ref_: None,
+        output_ref: Some(ref_.to_string()),
+    })
 }
 
 fn preview(value: &str) -> String {
@@ -660,6 +696,67 @@ mod tests {
         );
     }
 
+    #[test]
+    fn tool_batch_projects_reasoning_from_source_output_ref() {
+        let run_id = RunId {
+            session_id: SessionId("s-1".into()),
+            run_seq: 1,
+        };
+        let mut batch = settled_tool_batch(run_id, 1);
+        let output_ref = hash_ref('a');
+        let reasoning_ref = hash_ref('b');
+        batch.source_output_ref = Some(output_ref.clone());
+        let mut cache = BlobCache::default();
+        cache.insert_bytes(
+            output_ref,
+            format!(
+                r#"{{"tool_calls_ref":"{}","reasoning_ref":"{}"}}"#,
+                hash_ref('c'),
+                reasoning_ref
+            )
+            .into_bytes(),
+        );
+        cache.insert_bytes(reasoning_ref, b"I need to list the directory.".to_vec());
+
+        let view = project_tool_batch(&batch, &cache);
+
+        assert_eq!(
+            view.reasoning
+                .as_ref()
+                .map(|reasoning| reasoning.content.as_str()),
+            Some("I need to list the directory.")
+        );
+    }
+
+    #[test]
+    fn tool_batch_projects_assistant_text_from_source_output_ref_without_reasoning() {
+        let run_id = RunId {
+            session_id: SessionId("s-1".into()),
+            run_seq: 1,
+        };
+        let mut batch = settled_tool_batch(run_id, 1);
+        let output_ref = hash_ref('a');
+        batch.source_output_ref = Some(output_ref.clone());
+        let mut cache = BlobCache::default();
+        cache.insert_bytes(
+            output_ref,
+            format!(
+                r#"{{"assistant_text":"I'll inspect the repo first.","tool_calls_ref":"{}"}}"#,
+                hash_ref('b')
+            )
+            .into_bytes(),
+        );
+
+        let view = project_tool_batch(&batch, &cache);
+
+        assert_eq!(
+            view.reasoning
+                .as_ref()
+                .map(|reasoning| reasoning.content.as_str()),
+            Some("I'll inspect the repo first.")
+        );
+    }
+
     fn settled_tool_batch(run_id: RunId, batch_seq: u64) -> ActiveToolBatch {
         let mut batch = tool_batch(run_id, batch_seq);
         batch
@@ -722,7 +819,12 @@ mod tests {
             pending_effects: Default::default(),
             execution: Default::default(),
             llm_results: BTreeMap::new(),
+            source_output_ref: None,
             results_ref: None,
         }
+    }
+
+    fn hash_ref(ch: char) -> String {
+        format!("sha256:{}", ch.to_string().repeat(64))
     }
 }
