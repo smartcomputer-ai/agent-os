@@ -23,7 +23,7 @@ use crate::chat::tui::custom_terminal::TuiFrame;
 use crate::chat::tui::frame::FrameRequester;
 use crate::chat::tui::slash::{SlashCommand, SlashEffort, SlashMaxTokens, parse_slash_command};
 use crate::chat::tui::terminal::Tui;
-use crate::chat::tui::transcript::TranscriptState;
+use crate::chat::tui::transcript::{TranscriptOptions, TranscriptState};
 
 #[derive(Clone)]
 pub(crate) struct ChatTuiShellOptions {
@@ -35,12 +35,14 @@ pub(crate) struct ChatTuiShellOptions {
     pub(crate) prompt_config: ChatPromptConfig,
     pub(crate) workdir: String,
     pub(crate) from: Option<u64>,
+    pub(crate) show_tool_details: bool,
 }
 
 pub(crate) async fn run_shell(options: ChatTuiShellOptions) -> Result<()> {
     let view_options = ChatTuiViewOptions {
         world_id: options.client.world_id().to_string(),
         session_id: options.session_id.clone(),
+        show_tool_details: options.show_tool_details,
     };
     let (driver, initial_events) = ChatSessionDriver::open(
         options.client,
@@ -167,6 +169,7 @@ pub(crate) struct ChatTuiViewOptions {
     #[allow(dead_code)]
     pub(crate) world_id: String,
     pub(crate) session_id: String,
+    pub(crate) show_tool_details: bool,
 }
 
 pub(crate) struct ChatTuiApp {
@@ -187,9 +190,12 @@ impl ChatTuiApp {
         app_event_tx: AppEventSender,
         command_tx: mpsc::UnboundedSender<ChatCommand>,
     ) -> Self {
+        let transcript = TranscriptState::new(TranscriptOptions {
+            show_tool_details: options.show_tool_details,
+        });
         Self {
             options,
-            transcript: TranscriptState::default(),
+            transcript,
             bottom_pane: BottomPaneState::default(),
             app_event_tx,
             command_tx,
@@ -491,6 +497,7 @@ mod tests {
             ChatTuiViewOptions {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+                show_tool_details: false,
             },
             app_event_tx,
             command_tx,
@@ -542,6 +549,7 @@ mod tests {
             ChatTuiViewOptions {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+                show_tool_details: false,
             },
             app_event_tx,
             command_tx,
@@ -574,6 +582,7 @@ mod tests {
             ChatTuiViewOptions {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+                show_tool_details: false,
             },
             app_event_tx,
             command_tx,
@@ -598,6 +607,7 @@ mod tests {
             ChatTuiViewOptions {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+                show_tool_details: false,
             },
             app_event_tx,
             command_tx,
@@ -633,6 +643,7 @@ mod tests {
             ChatTuiViewOptions {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+                show_tool_details: false,
             },
             app_event_tx,
             command_tx,
@@ -675,6 +686,7 @@ mod tests {
             ChatTuiViewOptions {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+                show_tool_details: false,
             },
             app_event_tx,
             command_tx,

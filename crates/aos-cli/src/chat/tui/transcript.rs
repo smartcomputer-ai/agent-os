@@ -10,8 +10,14 @@ use crate::chat::tui::cell::{
     ToolChainCell,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TranscriptOptions {
+    pub(crate) show_tool_details: bool,
+}
+
+#[derive(Debug)]
 pub(crate) struct TranscriptState {
+    options: TranscriptOptions,
     cells: Vec<Box<dyn ChatCell>>,
     pending_history_cell_indices: Vec<usize>,
     emitted_history_cells: Vec<(String, String)>,
@@ -28,6 +34,19 @@ struct PendingUserMessage {
 }
 
 impl TranscriptState {
+    pub(crate) fn new(options: TranscriptOptions) -> Self {
+        Self {
+            options,
+            cells: Vec::new(),
+            pending_history_cell_indices: Vec::new(),
+            emitted_history_cells: Vec::new(),
+            active_cell: None,
+            active_cell_revision: 0,
+            active_tool_chains: None,
+            pending_user_messages: Vec::new(),
+        }
+    }
+
     pub(crate) fn apply_chat_event(&mut self, event: ChatEvent) {
         match event {
             ChatEvent::Connected(info) => {
@@ -231,10 +250,9 @@ impl TranscriptState {
                         )));
                     }
                     if !turn.tool_chains.is_empty() {
-                        self.push_committed_cell_if_changed(Box::new(ToolChainCell::collapsed(
-                            format!("{turn_id}:tools"),
-                            turn.tool_chains,
-                        )));
+                        self.push_committed_cell_if_changed(Box::new(
+                            self.completed_tool_cell(format!("{turn_id}:tools"), turn.tool_chains),
+                        ));
                         self.push_committed_cell_if_changed(Box::new(NoticeCell::blank(format!(
                             "{turn_id}:tools-spacer"
                         ))));
@@ -320,10 +338,28 @@ impl TranscriptState {
             .map(|chain| format!("tools:{}", chain.id))
             .unwrap_or_else(|| "tools".to_string());
         let spacer_id = format!("{id}:spacer");
-        self.push_committed_cell_if_changed(Box::new(ToolChainCell::collapsed(id, chains)));
+        self.push_committed_cell_if_changed(Box::new(self.completed_tool_cell(id, chains)));
         if add_spacer {
             self.push_committed_cell_if_changed(Box::new(NoticeCell::blank(spacer_id)));
         }
+    }
+
+    fn completed_tool_cell(
+        &self,
+        id: impl Into<String>,
+        chains: Vec<ChatToolChainView>,
+    ) -> ToolChainCell {
+        if self.options.show_tool_details {
+            ToolChainCell::expanded(id, chains)
+        } else {
+            ToolChainCell::collapsed(id, chains)
+        }
+    }
+}
+
+impl Default for TranscriptState {
+    fn default() -> Self {
+        Self::new(TranscriptOptions::default())
     }
 }
 
@@ -367,7 +403,7 @@ fn short(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::protocol::{ChatMessageView, ChatToolCallView, ChatToolChainView};
+    use crate::chat::protocol::{ChatMessageView, ChatToolCallView, ChatToolChainView, ChatTurn};
 
     #[test]
     fn confirmed_user_message_replaces_matching_pending_echo() {
@@ -497,6 +533,119 @@ mod tests {
         assert!(!history.contains("result"));
         assert!(!history.contains("args"));
         assert!(!history.contains("running"));
+    }
+
+    #[test]
+    fn show_tool_details_keeps_completed_tool_args_and_results() {
+        let mut state = TranscriptState::new(TranscriptOptions {
+            show_tool_details: true,
+        });
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![ChatToolChainView {
+                id: "run-1:1".into(),
+                title: "tools 1 calls".into(),
+                status: ChatProgressStatus::Running,
+                calls: vec![ChatToolCallView {
+                    id: "call-1".into(),
+                    tool_id: None,
+                    tool_name: "list_dir".into(),
+                    status: ChatProgressStatus::Running,
+                    group_index: Some(1),
+                    parallel_safe: Some(true),
+                    resource_key: None,
+                    arguments_preview: Some(r#"{"path":"spec"}"#.into()),
+                    result_preview: None,
+                    error: None,
+                }],
+                summary: Some("1 execution groups".into()),
+            }],
+        });
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![ChatToolChainView {
+                id: "run-1:1".into(),
+                title: "tools 1 calls".into(),
+                status: ChatProgressStatus::Succeeded,
+                calls: vec![ChatToolCallView {
+                    id: "call-1".into(),
+                    tool_id: None,
+                    tool_name: "list_dir".into(),
+                    status: ChatProgressStatus::Succeeded,
+                    group_index: Some(1),
+                    parallel_safe: Some(true),
+                    resource_key: None,
+                    arguments_preview: Some(r#"{"path":"spec"}"#.into()),
+                    result_preview: Some(r#"{"ok":true}"#.into()),
+                    error: None,
+                }],
+                summary: Some("1 execution groups".into()),
+            }],
+        });
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: Vec::new(),
+        });
+
+        let history = state
+            .drain_pending_history_lines(80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(history.contains("tools 1 calls  ok"));
+        assert!(history.contains(r#"args {"path":"spec"}"#));
+        assert!(history.contains(r#"result {"ok":true}"#));
+    }
+
+    #[test]
+    fn show_tool_details_expands_reconstructed_history_tool_cells() {
+        let mut state = TranscriptState::new(TranscriptOptions {
+            show_tool_details: true,
+        });
+        state.apply_chat_event(ChatEvent::TranscriptDelta(ChatDelta::ReplaceTurns {
+            session_id: "s-1".into(),
+            turns: vec![ChatTurn {
+                turn_id: "turn-1".into(),
+                user: None,
+                assistant: Some(ChatMessageView {
+                    id: "assistant-1".into(),
+                    role: "assistant".into(),
+                    content: "done".into(),
+                    ref_: None,
+                }),
+                run: None,
+                tool_chains: vec![ChatToolChainView {
+                    id: "run-1:1".into(),
+                    title: "tools 1 calls".into(),
+                    status: ChatProgressStatus::Succeeded,
+                    calls: vec![ChatToolCallView {
+                        id: "call-1".into(),
+                        tool_id: None,
+                        tool_name: "read_file".into(),
+                        status: ChatProgressStatus::Succeeded,
+                        group_index: Some(1),
+                        parallel_safe: Some(false),
+                        resource_key: Some("README.md".into()),
+                        arguments_preview: Some(r#"{"path":"README.md"}"#.into()),
+                        result_preview: Some(r#"{"ok":true}"#.into()),
+                        error: None,
+                    }],
+                    summary: Some("1 execution groups".into()),
+                }],
+            }],
+        }));
+
+        let history = state
+            .drain_pending_history_lines(80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(history.contains("read_file README.md  ok"));
+        assert!(history.contains(r#"args {"path":"README.md"}"#));
+        assert!(history.contains(r#"result {"ok":true}"#));
+        assert!(history.contains("done"));
     }
 
     #[test]

@@ -81,6 +81,9 @@ struct ChatOpenArgs {
     /// Inline prompt text to install.
     #[arg(long = "prompt", conflicts_with_all = ["prompt_profile", "prompt_file"])]
     prompt: Option<String>,
+    /// Always show tool call args/results instead of collapsing completed tool cells.
+    #[arg(long)]
+    show_tool_details: bool,
 }
 
 #[derive(Args, Debug)]
@@ -194,6 +197,7 @@ async fn handle_open(global: &GlobalOpts, output: OutputOpts, args: ChatOpenArgs
         prompt_config,
         workdir,
         from: args.from,
+        show_tool_details: args.show_tool_details,
     })
     .await
 }
