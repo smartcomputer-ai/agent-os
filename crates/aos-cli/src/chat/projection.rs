@@ -117,24 +117,27 @@ fn project_turns(state: &SessionState, blob_cache: &BlobCache) -> Vec<ChatTurn> 
                 .and_then(|outcome| outcome.output_ref.as_deref())
                 .and_then(|ref_| assistant_message(ref_, blob_cache)),
             run: Some(run),
-            tool_chains: Vec::new(),
+            tool_chains: project_completed_tool_batches(&record.completed_tool_batches, blob_cache),
         });
     }
     if let Some(current) = &state.current_run {
         let run = project_run_state(current);
+        let assistant_ref = current
+            .outcome
+            .as_ref()
+            .and_then(|outcome| outcome.output_ref.as_deref())
+            .or(current.last_output_ref.as_deref());
+        let tool_chains = if assistant_ref.is_some() {
+            current_turn_tool_chains(current, state, blob_cache)
+        } else {
+            Vec::new()
+        };
         turns.push(ChatTurn {
             turn_id: run.id.clone(),
             user: first_user_message(&current.input_refs, blob_cache),
-            assistant: current
-                .outcome
-                .as_ref()
-                .and_then(|outcome| outcome.output_ref.as_deref())
-                .or(current.last_output_ref.as_deref())
-                .and_then(|ref_| assistant_message(ref_, blob_cache)),
+            assistant: assistant_ref.and_then(|ref_| assistant_message(ref_, blob_cache)),
             run: Some(run),
-            // Active tool chains are live viewport UI, not committed transcript history.
-            // They are projected separately via ToolChainsChanged and finalized by the TUI.
-            tool_chains: Vec::new(),
+            tool_chains,
         });
     }
     turns
@@ -205,13 +208,81 @@ fn project_run_state(run: &RunState) -> ChatRunView {
 }
 
 fn project_tool_chains(state: &SessionState, blob_cache: &BlobCache) -> Vec<ChatToolChainView> {
-    state
+    let Some(batch) = state
         .current_run
         .as_ref()
         .and_then(|run| run.active_tool_batch.as_ref())
         .or(state.active_tool_batch.as_ref())
-        .map(|batch| vec![project_tool_batch(batch, blob_cache)])
-        .unwrap_or_default()
+    else {
+        return Vec::new();
+    };
+
+    if state.current_run.as_ref().is_some_and(|run| {
+        active_tool_batch_for_run(run, state).is_some_and(|current_batch| {
+            current_batch.tool_batch_id == batch.tool_batch_id
+                && run_has_assistant_output(run)
+                && tool_batch_terminal(current_batch)
+        })
+    }) {
+        return Vec::new();
+    }
+
+    vec![project_tool_batch(batch, blob_cache)]
+}
+
+fn current_turn_tool_chains(
+    current: &RunState,
+    state: &SessionState,
+    blob_cache: &BlobCache,
+) -> Vec<ChatToolChainView> {
+    let mut chains = project_completed_tool_batches(&current.completed_tool_batches, blob_cache);
+    let Some(batch) = active_tool_batch_for_run(current, state) else {
+        return chains;
+    };
+    if tool_batch_terminal(batch)
+        && !current
+            .completed_tool_batches
+            .iter()
+            .any(|completed| completed.tool_batch_id == batch.tool_batch_id)
+    {
+        chains.push(project_tool_batch(batch, blob_cache));
+    }
+    chains
+}
+
+fn project_completed_tool_batches(
+    batches: &[ActiveToolBatch],
+    blob_cache: &BlobCache,
+) -> Vec<ChatToolChainView> {
+    batches
+        .iter()
+        .filter(|batch| tool_batch_terminal(batch))
+        .map(|batch| project_tool_batch(batch, blob_cache))
+        .collect()
+}
+
+fn active_tool_batch_for_run<'a>(
+    run: &'a RunState,
+    state: &'a SessionState,
+) -> Option<&'a ActiveToolBatch> {
+    run.active_tool_batch.as_ref().or_else(|| {
+        state
+            .active_tool_batch
+            .as_ref()
+            .filter(|batch| batch.tool_batch_id.run_id == run.run_id)
+    })
+}
+
+fn run_has_assistant_output(run: &RunState) -> bool {
+    run.outcome
+        .as_ref()
+        .and_then(|outcome| outcome.output_ref.as_ref())
+        .or(run.last_output_ref.as_ref())
+        .is_some()
+}
+
+fn tool_batch_terminal(batch: &ActiveToolBatch) -> bool {
+    !batch.plan.observed_calls.is_empty() && batch.is_settled()
 }
 
 fn project_tool_batch(batch: &ActiveToolBatch, blob_cache: &BlobCache) -> ChatToolChainView {
@@ -400,8 +471,9 @@ fn preview(value: &str) -> String {
 mod tests {
     use super::*;
     use aos_agent::{
-        ActiveToolBatch, RunId, ToolBatchId, ToolBatchPlan, ToolCallObserved, ToolCallStatus,
-        ToolExecutionPlan,
+        ActiveToolBatch, PlannedToolCall, RunId, RunLifecycle, RunOutcome, RunRecord, RunState,
+        SessionId, SessionState, ToolBatchId, ToolBatchPlan, ToolCallLlmResult, ToolCallObserved,
+        ToolCallStatus, ToolExecutionPlan, ToolExecutor, ToolMapper,
     };
 
     #[test]
@@ -451,5 +523,206 @@ mod tests {
         assert_eq!(view.calls[1].group_index, Some(1));
         assert_eq!(view.calls[2].group_index, Some(2));
         assert_eq!(view.calls[1].status, ChatProgressStatus::Running);
+    }
+
+    #[test]
+    fn attach_snapshot_embeds_terminal_current_tools_before_assistant() {
+        let mut state = SessionState {
+            session_id: SessionId("s-1".into()),
+            ..SessionState::default()
+        };
+        let run_id = RunId {
+            session_id: state.session_id.clone(),
+            run_seq: 1,
+        };
+        state.current_run = Some(RunState {
+            run_id: run_id.clone(),
+            lifecycle: RunLifecycle::WaitingInput,
+            input_refs: vec!["sha256:user".into()],
+            outcome: Some(RunOutcome {
+                output_ref: Some("sha256:assistant".into()),
+                ..RunOutcome::default()
+            }),
+            active_tool_batch: Some(settled_tool_batch(run_id, 1)),
+            ..RunState::default()
+        });
+
+        let turns = project_turns(&state, &BlobCache::default());
+        let chains = project_tool_chains(&state, &BlobCache::default());
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].tool_chains.len(), 1);
+        assert_eq!(
+            turns[0].tool_chains[0].status,
+            ChatProgressStatus::Succeeded
+        );
+        assert!(
+            chains.is_empty(),
+            "terminal attached tools should not also render as the active cell"
+        );
+    }
+
+    #[test]
+    fn running_current_tools_stay_active_during_normal_operation() {
+        let mut state = SessionState {
+            session_id: SessionId("s-1".into()),
+            ..SessionState::default()
+        };
+        let run_id = RunId {
+            session_id: state.session_id.clone(),
+            run_seq: 1,
+        };
+        state.current_run = Some(RunState {
+            run_id: run_id.clone(),
+            lifecycle: RunLifecycle::Running,
+            input_refs: vec!["sha256:user".into()],
+            active_tool_batch: Some(running_tool_batch(run_id, 1)),
+            ..RunState::default()
+        });
+
+        let turns = project_turns(&state, &BlobCache::default());
+        let chains = project_tool_chains(&state, &BlobCache::default());
+
+        assert_eq!(turns.len(), 1);
+        assert!(turns[0].tool_chains.is_empty());
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].status, ChatProgressStatus::Running);
+    }
+
+    #[test]
+    fn historical_run_records_project_completed_tool_batches() {
+        let mut state = SessionState {
+            session_id: SessionId("s-1".into()),
+            ..SessionState::default()
+        };
+        let run_id = RunId {
+            session_id: state.session_id.clone(),
+            run_seq: 1,
+        };
+        state.run_history.push(RunRecord {
+            run_id: run_id.clone(),
+            lifecycle: RunLifecycle::Completed,
+            input_refs: vec!["sha256:user".into()],
+            completed_tool_batches: vec![settled_tool_batch(run_id, 1)],
+            outcome: Some(RunOutcome {
+                output_ref: Some("sha256:assistant".into()),
+                ..RunOutcome::default()
+            }),
+            ..RunRecord::default()
+        });
+
+        let turns = project_turns(&state, &BlobCache::default());
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].tool_chains.len(), 1);
+        assert_eq!(
+            turns[0].tool_chains[0].status,
+            ChatProgressStatus::Succeeded
+        );
+    }
+
+    #[test]
+    fn current_turn_projects_multiple_completed_tool_batches_before_assistant() {
+        let mut state = SessionState {
+            session_id: SessionId("s-1".into()),
+            ..SessionState::default()
+        };
+        let run_id = RunId {
+            session_id: state.session_id.clone(),
+            run_seq: 1,
+        };
+        state.current_run = Some(RunState {
+            run_id: run_id.clone(),
+            lifecycle: RunLifecycle::WaitingInput,
+            input_refs: vec!["sha256:user".into()],
+            outcome: Some(RunOutcome {
+                output_ref: Some("sha256:assistant".into()),
+                ..RunOutcome::default()
+            }),
+            completed_tool_batches: vec![
+                settled_tool_batch(run_id.clone(), 1),
+                settled_tool_batch(run_id, 2),
+            ],
+            ..RunState::default()
+        });
+
+        let turns = project_turns(&state, &BlobCache::default());
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].tool_chains.len(), 2);
+        assert_eq!(
+            turns[0].tool_chains[0].status,
+            ChatProgressStatus::Succeeded
+        );
+        assert_eq!(
+            turns[0].tool_chains[1].status,
+            ChatProgressStatus::Succeeded
+        );
+    }
+
+    fn settled_tool_batch(run_id: RunId, batch_seq: u64) -> ActiveToolBatch {
+        let mut batch = tool_batch(run_id, batch_seq);
+        batch
+            .call_status
+            .insert("call-1".into(), ToolCallStatus::Succeeded);
+        batch.llm_results.insert(
+            "call-1".into(),
+            ToolCallLlmResult {
+                call_id: "call-1".into(),
+                tool_id: "host.fs.list_dir".into(),
+                tool_name: "list_dir".into(),
+                is_error: false,
+                output_json: r#"{"ok":true}"#.into(),
+            },
+        );
+        batch
+    }
+
+    fn running_tool_batch(run_id: RunId, batch_seq: u64) -> ActiveToolBatch {
+        let mut batch = tool_batch(run_id, batch_seq);
+        batch
+            .call_status
+            .insert("call-1".into(), ToolCallStatus::Pending);
+        batch
+    }
+
+    fn tool_batch(run_id: RunId, batch_seq: u64) -> ActiveToolBatch {
+        ActiveToolBatch {
+            tool_batch_id: ToolBatchId { run_id, batch_seq },
+            intent_id: "sha256:intent".into(),
+            params_hash: None,
+            plan: ToolBatchPlan {
+                observed_calls: vec![ToolCallObserved {
+                    call_id: "call-1".into(),
+                    tool_name: "list_dir".into(),
+                    arguments_json: r#"{"path":"crates/aos-cli/src/chat"}"#.into(),
+                    arguments_ref: None,
+                    provider_call_id: None,
+                }],
+                planned_calls: vec![PlannedToolCall {
+                    call_id: "call-1".into(),
+                    tool_id: "host.fs.list_dir".into(),
+                    tool_name: "list_dir".into(),
+                    arguments_json: r#"{"path":"crates/aos-cli/src/chat"}"#.into(),
+                    arguments_ref: None,
+                    provider_call_id: None,
+                    mapper: ToolMapper::HostFsListDir,
+                    executor: ToolExecutor::Effect {
+                        effect: "host.fs.list_dir".into(),
+                    },
+                    parallel_safe: true,
+                    resource_key: None,
+                    accepted: true,
+                }],
+                execution_plan: ToolExecutionPlan {
+                    groups: vec![vec!["call-1".into()]],
+                },
+            },
+            call_status: BTreeMap::new(),
+            pending_effects: Default::default(),
+            execution: Default::default(),
+            llm_results: BTreeMap::new(),
+            results_ref: None,
+        }
     }
 }

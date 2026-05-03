@@ -203,6 +203,8 @@ pub struct RunState {
     #[aos(air_type = "hash")]
     pub queued_steer_refs: Vec<String>,
     pub interrupt: Option<RunInterrupt>,
+    #[serde(default)]
+    pub completed_tool_batches: Vec<ActiveToolBatch>,
     pub active_tool_batch: Option<ActiveToolBatch>,
     #[aos(map_key_air_type = "hash", schema_ref = PendingEffect)]
     pub pending_effects: PendingEffects,
@@ -233,6 +235,8 @@ pub struct RunRecord {
     pub cause: RunCause,
     #[aos(air_type = "hash")]
     pub input_refs: Vec<String>,
+    #[serde(default)]
+    pub completed_tool_batches: Vec<ActiveToolBatch>,
     pub outcome: Option<RunOutcome>,
     pub last_llm_usage: Option<LlmUsageRecord>,
     pub trace_summary: RunTraceSummary,

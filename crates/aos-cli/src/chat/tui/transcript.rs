@@ -79,7 +79,7 @@ impl TranscriptState {
             }
             ChatEvent::ToolChainsChanged { chains, .. } => {
                 if chains.is_empty() {
-                    self.flush_terminal_active_tool_chains();
+                    self.flush_terminal_active_tool_chains(true);
                     self.active_tool_chains = None;
                     if self
                         .active_cell
@@ -97,7 +97,7 @@ impl TranscriptState {
                     if self.active_tool_chains.as_ref().is_some_and(|previous| {
                         tool_chain_identity(previous) != tool_chain_identity(&chains)
                     }) {
-                        self.flush_terminal_active_tool_chains();
+                        self.flush_terminal_active_tool_chains(false);
                     }
                     self.active_tool_chains = Some(chains.clone());
                     self.active_cell = Some(Box::new(ToolChainCell::new(id, chains)));
@@ -231,10 +231,13 @@ impl TranscriptState {
                         )));
                     }
                     if !turn.tool_chains.is_empty() {
-                        self.push_committed_cell_if_changed(Box::new(ToolChainCell::new(
+                        self.push_committed_cell_if_changed(Box::new(ToolChainCell::collapsed(
                             format!("{turn_id}:tools"),
                             turn.tool_chains,
                         )));
+                        self.push_committed_cell_if_changed(Box::new(NoticeCell::blank(format!(
+                            "{turn_id}:tools-spacer"
+                        ))));
                     }
                     if let Some(assistant) = turn.assistant {
                         self.push_committed_cell_if_changed(Box::new(MessageCell::new(
@@ -305,7 +308,7 @@ impl TranscriptState {
             .any(|emitted| emitted == fingerprint)
     }
 
-    fn flush_terminal_active_tool_chains(&mut self) {
+    fn flush_terminal_active_tool_chains(&mut self, add_spacer: bool) {
         let Some(chains) = self.active_tool_chains.take() else {
             return;
         };
@@ -316,7 +319,11 @@ impl TranscriptState {
             .first()
             .map(|chain| format!("tools:{}", chain.id))
             .unwrap_or_else(|| "tools".to_string());
-        self.push_committed_cell_if_changed(Box::new(ToolChainCell::new(id, chains)));
+        let spacer_id = format!("{id}:spacer");
+        self.push_committed_cell_if_changed(Box::new(ToolChainCell::collapsed(id, chains)));
+        if add_spacer {
+            self.push_committed_cell_if_changed(Box::new(NoticeCell::blank(spacer_id)));
+        }
     }
 }
 
@@ -487,7 +494,86 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(history.contains("tools 1 calls  ok"));
-        assert!(history.contains("result"));
+        assert!(!history.contains("result"));
+        assert!(!history.contains("args"));
         assert!(!history.contains("running"));
+    }
+
+    #[test]
+    fn consecutive_terminal_tool_batches_are_spaced_after_the_block() {
+        fn chain(id: &str, title: &str, status: ChatProgressStatus) -> ChatToolChainView {
+            ChatToolChainView {
+                id: id.into(),
+                title: title.into(),
+                status,
+                calls: vec![ChatToolCallView {
+                    id: format!("{id}:call"),
+                    tool_id: None,
+                    tool_name: "glob".into(),
+                    status,
+                    group_index: Some(1),
+                    parallel_safe: Some(true),
+                    resource_key: None,
+                    arguments_preview: None,
+                    result_preview: None,
+                    error: None,
+                }],
+                summary: Some("1 execution groups".into()),
+            }
+        }
+
+        let mut state = TranscriptState::default();
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![chain(
+                "run-1:1",
+                "tools 1 calls",
+                ChatProgressStatus::Running,
+            )],
+        });
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![chain(
+                "run-1:1",
+                "tools 1 calls",
+                ChatProgressStatus::Succeeded,
+            )],
+        });
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![chain(
+                "run-1:2",
+                "tools 4 calls",
+                ChatProgressStatus::Running,
+            )],
+        });
+        let first_batch = state
+            .drain_pending_history_lines(80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(first_batch.len(), 1);
+        assert!(first_batch[0].contains("tools 1 calls"));
+
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![chain(
+                "run-1:2",
+                "tools 4 calls",
+                ChatProgressStatus::Succeeded,
+            )],
+        });
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: Vec::new(),
+        });
+        let second_batch = state
+            .drain_pending_history_lines(80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(second_batch.len(), 2);
+        assert!(second_batch[0].contains("tools 4 calls"));
+        assert_eq!(second_batch[1], "");
     }
 }

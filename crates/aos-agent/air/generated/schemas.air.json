@@ -1264,6 +1264,11 @@
         "cause": {
           "ref": "aos.agent/RunCause@1"
         },
+        "completed_tool_batches": {
+          "list": {
+            "ref": "aos.agent/ActiveToolBatch@1"
+          }
+        },
         "ended_at": {
           "time": {}
         },
@@ -1314,6 +1319,11 @@
         },
         "cause": {
           "ref": "aos.agent/RunCause@1"
+        },
+        "completed_tool_batches": {
+          "list": {
+            "ref": "aos.agent/ActiveToolBatch@1"
+          }
         },
         "config": {
           "ref": "aos.agent/RunConfig@1"

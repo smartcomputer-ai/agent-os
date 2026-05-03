@@ -543,6 +543,7 @@ fn on_run_start_requested(
         turn_plan: None,
         queued_steer_refs: Vec::new(),
         interrupt: None,
+        completed_tool_batches: Vec::new(),
         active_tool_batch: None,
         pending_effects: aos_wasm_sdk::PendingEffects::new(),
         pending_blob_gets: aos_wasm_sdk::SharedBlobGets::new(),
@@ -2598,6 +2599,16 @@ fn finish_current_run(
     run.lifecycle = lifecycle;
     run.updated_at = state.updated_at;
     run.outcome = outcome.clone();
+    let mut completed_tool_batches = run.completed_tool_batches;
+    if let Some(batch) = run.active_tool_batch
+        && !batch.plan.observed_calls.is_empty()
+        && batch.is_settled()
+        && !completed_tool_batches
+            .iter()
+            .any(|completed| completed.tool_batch_id == batch.tool_batch_id)
+    {
+        completed_tool_batches.push(batch);
+    }
     let mut refs = Vec::new();
     if let Some(output_ref) = outcome.as_ref().and_then(|value| value.output_ref.as_ref()) {
         refs.push(trace_ref("output_ref", output_ref.clone()));
@@ -2633,6 +2644,7 @@ fn finish_current_run(
         lifecycle,
         cause: run.cause,
         input_refs: run.input_refs,
+        completed_tool_batches,
         outcome,
         last_llm_usage: run.last_llm_usage,
         trace_summary,
@@ -2919,13 +2931,13 @@ fn trace_stream_frame(state: &mut SessionState, frame: &aos_wasm_sdk::EffectStre
 mod tests {
     use super::*;
     use crate::contracts::{
-        CauseRef, CompactionStrategy, ContextOperationState, ContextPressureReason,
-        HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, RunCauseOrigin, RunId,
-        SessionId, SessionInput, ToolCallObserved, ToolProfileBuilder, ToolRegistryBuilder,
-        TranscriptRange, TurnInput, TurnInputKind, TurnInputLane, TurnPrerequisiteKind,
-        TurnPriority, TurnReport, TurnToolChoice, local_coding_agent_tool_profile_for_provider,
-        local_coding_agent_tool_profiles, local_coding_agent_tool_registry,
-        tool_bundle_host_sandbox,
+        ActiveToolBatch, CauseRef, CompactionStrategy, ContextOperationState,
+        ContextPressureReason, HostSessionOpenConfig, HostSessionStatus, HostTargetConfig,
+        RunCauseOrigin, RunId, SessionId, SessionInput, ToolBatchId, ToolCallObserved,
+        ToolProfileBuilder, ToolRegistryBuilder, TranscriptRange, TurnInput, TurnInputKind,
+        TurnInputLane, TurnPrerequisiteKind, TurnPriority, TurnReport, TurnToolChoice,
+        local_coding_agent_tool_profile_for_provider, local_coding_agent_tool_profiles,
+        local_coding_agent_tool_registry, tool_bundle_host_sandbox,
     };
     use alloc::string::ToString;
     use alloc::vec;
@@ -4249,6 +4261,54 @@ mod tests {
             batch.call_status.get("c3"),
             Some(ToolCallStatus::Ignored)
         ));
+    }
+
+    #[test]
+    fn completed_tool_batch_is_retained_on_current_run() {
+        let mut state = local_coding_state();
+        state.session_id = SessionId("s-1".into());
+        apply_session_workflow_event(
+            &mut state,
+            &session_input(
+                0,
+                SessionInputKind::HostSessionUpdated {
+                    host_session_id: Some("hs_1".into()),
+                    host_session_status: Some(HostSessionStatus::Ready),
+                },
+            ),
+        )
+        .expect("host session ready");
+        apply_session_workflow_event(&mut state, &run_request_event(1)).expect("run");
+
+        let run_id = state.active_run_id.clone().expect("active run");
+        state.active_tool_batch = Some(ActiveToolBatch {
+            tool_batch_id: ToolBatchId {
+                run_id,
+                batch_seq: 1,
+            },
+            plan: ToolBatchPlan {
+                observed_calls: vec![ToolCallObserved {
+                    call_id: "call-1".into(),
+                    tool_name: "list_dir".into(),
+                    arguments_json: "{}".into(),
+                    arguments_ref: None,
+                    provider_call_id: None,
+                }],
+                ..ToolBatchPlan::default()
+            },
+            call_status: BTreeMap::from([("call-1".into(), ToolCallStatus::Succeeded)]),
+            ..ActiveToolBatch::default()
+        });
+
+        let completion =
+            tool_batch::take_completed_tool_batch(&mut state).expect("completed tool batch");
+
+        let run = state.current_run.as_ref().expect("current run");
+        assert_eq!(run.completed_tool_batches.len(), 1);
+        assert_eq!(
+            run.completed_tool_batches[0].tool_batch_id.batch_seq,
+            completion.tool_batch_id.batch_seq
+        );
     }
 
     #[test]

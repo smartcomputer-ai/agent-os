@@ -133,6 +133,13 @@ impl NoticeCell {
             text: text.into(),
         }
     }
+
+    pub(crate) fn blank(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            text: String::new(),
+        }
+    }
 }
 
 impl ChatCell for NoticeCell {
@@ -188,13 +195,33 @@ impl ChatCell for RunCell {
 pub(crate) struct ToolChainCell {
     id: String,
     chains: Vec<ChatToolChainView>,
+    display: ToolChainDisplay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolChainDisplay {
+    Collapsed,
+    Expanded,
 }
 
 impl ToolChainCell {
     pub(crate) fn new(id: impl Into<String>, chains: Vec<ChatToolChainView>) -> Self {
+        Self::expanded(id, chains)
+    }
+
+    pub(crate) fn collapsed(id: impl Into<String>, chains: Vec<ChatToolChainView>) -> Self {
         Self {
             id: id.into(),
             chains,
+            display: ToolChainDisplay::Collapsed,
+        }
+    }
+
+    pub(crate) fn expanded(id: impl Into<String>, chains: Vec<ChatToolChainView>) -> Self {
+        Self {
+            id: id.into(),
+            chains,
+            display: ToolChainDisplay::Expanded,
         }
     }
 }
@@ -211,10 +238,13 @@ impl ChatCell for ToolChainCell {
     fn display_lines(&self, width: u16, _state: &CellRenderState) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         for (chain_index, chain) in self.chains.iter().enumerate() {
-            if chain_index > 0 {
+            if chain_index > 0 && matches!(self.display, ToolChainDisplay::Expanded) {
                 lines.push(Line::default());
             }
             lines.push(tool_chain_header(chain));
+            if matches!(self.display, ToolChainDisplay::Collapsed) {
+                continue;
+            }
 
             let grouped = group_tool_calls(&chain.calls);
             for group in grouped {
@@ -568,5 +598,80 @@ mod tests {
         assert!(rendered.contains("group 1 parallel"));
         assert!(rendered.contains("rg SessionInput"));
         assert!(rendered.contains("read cell.rs"));
+    }
+
+    #[test]
+    fn collapsed_tool_chain_shows_summary_only() {
+        let cell = ToolChainCell::collapsed(
+            "tools:1",
+            vec![ChatToolChainView {
+                id: "chain".into(),
+                title: "tools 1 calls".into(),
+                status: ChatProgressStatus::Succeeded,
+                summary: Some("1 execution groups".into()),
+                calls: vec![ChatToolCallView {
+                    id: "a".into(),
+                    tool_id: None,
+                    tool_name: "read_file".into(),
+                    status: ChatProgressStatus::Succeeded,
+                    group_index: Some(1),
+                    parallel_safe: Some(true),
+                    resource_key: None,
+                    arguments_preview: Some(r#"{"path":"README.md"}"#.into()),
+                    result_preview: Some(r#"{"ok":true}"#.into()),
+                    error: None,
+                }],
+            }],
+        );
+        let rendered = cell
+            .display_lines(80, &CellRenderState)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("tools 1 calls"));
+        assert!(rendered.contains("ok"));
+        assert!(!rendered.contains("read_file"));
+        assert!(!rendered.contains("args"));
+        assert!(!rendered.contains("result"));
+    }
+
+    #[test]
+    fn collapsed_tool_chain_does_not_space_between_chains() {
+        let chain = |id: &str, title: &str| ChatToolChainView {
+            id: id.into(),
+            title: title.into(),
+            status: ChatProgressStatus::Succeeded,
+            summary: Some("1 execution groups".into()),
+            calls: vec![ChatToolCallView {
+                id: format!("{id}:call"),
+                tool_id: None,
+                tool_name: "read_file".into(),
+                status: ChatProgressStatus::Succeeded,
+                group_index: Some(1),
+                parallel_safe: Some(false),
+                resource_key: None,
+                arguments_preview: None,
+                result_preview: None,
+                error: None,
+            }],
+        };
+        let cell = ToolChainCell::collapsed(
+            "tools:1",
+            vec![
+                chain("chain-1", "tools 1 calls"),
+                chain("chain-2", "tools 4 calls"),
+            ],
+        );
+        let rendered = cell
+            .display_lines(80, &CellRenderState)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered.len(), 2);
+        assert!(rendered[0].contains("tools 1 calls"));
+        assert!(rendered[1].contains("tools 4 calls"));
     }
 }

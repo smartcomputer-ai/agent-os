@@ -109,6 +109,9 @@ fn collect_state_refs(state: &SessionState, refs: &mut BTreeSet<String>) {
 
 fn collect_run_record_refs(run: &RunRecord, refs: &mut BTreeSet<String>) {
     refs.extend(run.input_refs.iter().cloned());
+    for batch in &run.completed_tool_batches {
+        collect_tool_batch_refs(batch, refs);
+    }
     if let Some(outcome) = &run.outcome
         && let Some(ref_) = &outcome.output_ref
     {
@@ -118,6 +121,9 @@ fn collect_run_record_refs(run: &RunRecord, refs: &mut BTreeSet<String>) {
 
 fn collect_run_state_refs(run: &RunState, refs: &mut BTreeSet<String>) {
     refs.extend(run.input_refs.iter().cloned());
+    for batch in &run.completed_tool_batches {
+        collect_tool_batch_refs(batch, refs);
+    }
     if let Some(ref_) = &run.last_output_ref {
         refs.insert(ref_.clone());
     }
