@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
+use crate::chat::protocol::ChatToolChainView;
 use crate::chat::protocol::{ChatDelta, ChatEvent, ChatProgressStatus};
 use crate::chat::tui::cell::{
     CellRenderState, ChatCell, ChatCellKind, ErrorCell, MessageCell, NoticeCell, RunCell,
@@ -16,6 +17,7 @@ pub(crate) struct TranscriptState {
     emitted_history_cells: Vec<(String, String)>,
     active_cell: Option<Box<dyn ChatCell>>,
     active_cell_revision: u64,
+    active_tool_chains: Option<Vec<ChatToolChainView>>,
     pending_user_messages: Vec<PendingUserMessage>,
 }
 
@@ -55,6 +57,7 @@ impl TranscriptState {
                 self.emitted_history_cells.clear();
                 self.pending_user_messages.clear();
                 self.active_cell = None;
+                self.active_tool_chains = None;
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
                 self.push_committed_cell(Box::new(NoticeCell::new(
                     "history-reset",
@@ -76,6 +79,8 @@ impl TranscriptState {
             }
             ChatEvent::ToolChainsChanged { chains, .. } => {
                 if chains.is_empty() {
+                    self.flush_terminal_active_tool_chains();
+                    self.active_tool_chains = None;
                     if self
                         .active_cell
                         .as_ref()
@@ -89,6 +94,12 @@ impl TranscriptState {
                         .first()
                         .map(|chain| format!("active-tools:{}", chain.id))
                         .unwrap_or_else(|| "active-tools".to_string());
+                    if self.active_tool_chains.as_ref().is_some_and(|previous| {
+                        tool_chain_identity(previous) != tool_chain_identity(&chains)
+                    }) {
+                        self.flush_terminal_active_tool_chains();
+                    }
+                    self.active_tool_chains = Some(chains.clone());
                     self.active_cell = Some(Box::new(ToolChainCell::new(id, chains)));
                     self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
                 }
@@ -208,6 +219,7 @@ impl TranscriptState {
                 self.pending_history_cell_indices.clear();
                 self.pending_user_messages.clear();
                 self.active_cell = None;
+                self.active_tool_chains = None;
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
                 for turn in turns {
                     let turn_id = turn.turn_id.clone();
@@ -292,6 +304,37 @@ impl TranscriptState {
             .iter()
             .any(|emitted| emitted == fingerprint)
     }
+
+    fn flush_terminal_active_tool_chains(&mut self) {
+        let Some(chains) = self.active_tool_chains.take() else {
+            return;
+        };
+        if !tool_chains_terminal(&chains) {
+            return;
+        }
+        let id = chains
+            .first()
+            .map(|chain| format!("tools:{}", chain.id))
+            .unwrap_or_else(|| "tools".to_string());
+        self.push_committed_cell_if_changed(Box::new(ToolChainCell::new(id, chains)));
+    }
+}
+
+fn tool_chain_identity(chains: &[ChatToolChainView]) -> Option<&str> {
+    chains.first().map(|chain| chain.id.as_str())
+}
+
+fn tool_chains_terminal(chains: &[ChatToolChainView]) -> bool {
+    !chains.is_empty()
+        && chains.iter().all(|chain| {
+            matches!(
+                chain.status,
+                ChatProgressStatus::Succeeded
+                    | ChatProgressStatus::Failed
+                    | ChatProgressStatus::Cancelled
+                    | ChatProgressStatus::Stale
+            )
+        })
 }
 
 fn cell_fingerprint(cell: &dyn ChatCell) -> String {
@@ -382,5 +425,69 @@ mod tests {
                 .join("\n")
                 .contains("read src/main.rs")
         );
+    }
+
+    #[test]
+    fn tool_chain_running_updates_do_not_enter_history_until_terminal() {
+        let mut state = TranscriptState::default();
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![ChatToolChainView {
+                id: "run-1:1".into(),
+                title: "tools 1 calls".into(),
+                status: ChatProgressStatus::Running,
+                calls: vec![ChatToolCallView {
+                    id: "call-1".into(),
+                    tool_id: None,
+                    tool_name: "list_dir".into(),
+                    status: ChatProgressStatus::Running,
+                    group_index: Some(1),
+                    parallel_safe: Some(true),
+                    resource_key: None,
+                    arguments_preview: Some(r#"{"path":"spec"}"#.into()),
+                    result_preview: None,
+                    error: None,
+                }],
+                summary: Some("1 execution groups".into()),
+            }],
+        });
+        assert!(state.drain_pending_history_lines(80).is_empty());
+
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: vec![ChatToolChainView {
+                id: "run-1:1".into(),
+                title: "tools 1 calls".into(),
+                status: ChatProgressStatus::Succeeded,
+                calls: vec![ChatToolCallView {
+                    id: "call-1".into(),
+                    tool_id: None,
+                    tool_name: "list_dir".into(),
+                    status: ChatProgressStatus::Succeeded,
+                    group_index: Some(1),
+                    parallel_safe: Some(true),
+                    resource_key: None,
+                    arguments_preview: Some(r#"{"path":"spec"}"#.into()),
+                    result_preview: Some(r#"{"ok":true}"#.into()),
+                    error: None,
+                }],
+                summary: Some("1 execution groups".into()),
+            }],
+        });
+        assert!(state.drain_pending_history_lines(80).is_empty());
+
+        state.apply_chat_event(ChatEvent::ToolChainsChanged {
+            session_id: "s-1".into(),
+            chains: Vec::new(),
+        });
+        let history = state
+            .drain_pending_history_lines(80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(history.contains("tools 1 calls  ok"));
+        assert!(history.contains("result"));
+        assert!(!history.contains("running"));
     }
 }

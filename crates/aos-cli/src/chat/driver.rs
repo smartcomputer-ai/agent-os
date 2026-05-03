@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use aos_agent::{
-    HostSessionOpenConfig, HostTargetConfig, ReasoningEffort, SessionConfig, SessionId,
-    SessionInput, SessionInputKind, SessionLifecycle, SessionState, ToolProfileBuilder,
+    HostSessionOpenConfig, HostSessionStatus, HostTargetConfig, ReasoningEffort, SessionConfig,
+    SessionId, SessionInput, SessionInputKind, SessionLifecycle, SessionState, ToolProfileBuilder,
     ToolRegistryBuilder, ToolSpec, local_coding_agent_tool_profile_for_provider,
     local_coding_agent_tool_profiles, local_coding_agent_tool_registry, tool_bundle_inspect,
     tool_bundle_workspace,
@@ -76,6 +76,19 @@ mod tests {
             HostTargetConfig::Sandbox { .. } => panic!("expected local target"),
         }
     }
+
+    #[test]
+    fn ephemeral_host_session_reset_detects_remembered_runtime_session() {
+        let mut state = SessionState::default();
+        assert!(!needs_ephemeral_host_session_reset(Some(&state)));
+
+        state.tool_runtime_context.host_session_id = Some("hs_old".into());
+        assert!(needs_ephemeral_host_session_reset(Some(&state)));
+
+        state.tool_runtime_context.host_session_id = None;
+        state.tool_runtime_context.host_session_status = Some(HostSessionStatus::Ready);
+        assert!(needs_ephemeral_host_session_reset(Some(&state)));
+    }
 }
 
 pub(crate) struct ChatSessionDriver {
@@ -90,6 +103,7 @@ pub(crate) struct ChatSessionDriver {
     workdir: String,
     base_session_config: SessionConfig,
     observed_clock: u64,
+    host_session_reset_for_process: bool,
 }
 
 struct ToolBootstrap {
@@ -169,6 +183,13 @@ fn local_host_session_open_config(workdir: &str) -> HostSessionOpenConfig {
     }
 }
 
+fn needs_ephemeral_host_session_reset(state: Option<&SessionState>) -> bool {
+    state.is_some_and(|state| {
+        state.tool_runtime_context.host_session_id.is_some()
+            || state.tool_runtime_context.host_session_status == Some(HostSessionStatus::Ready)
+    })
+}
+
 impl ChatSessionDriver {
     pub(crate) async fn open(
         client: ChatControlClient,
@@ -187,6 +208,7 @@ impl ChatSessionDriver {
             workdir: options.workdir,
             base_session_config: SessionConfig::default(),
             observed_clock: 0,
+            host_session_reset_for_process: false,
         };
         let mut events = vec![ChatEvent::Connected(ChatConnectionInfo {
             world_id: driver.client.world_id().to_string(),
@@ -413,6 +435,7 @@ impl ChatSessionDriver {
             events.extend(self.refresh().await?);
         }
         if !self.run_active() {
+            self.reset_ephemeral_host_session_for_process().await?;
             self.bootstrap_next_run_tools().await?;
             self.bootstrap_next_run_prompt().await?;
         }
@@ -504,6 +527,7 @@ impl ChatSessionDriver {
     async fn switch_session(&mut self, session_id: String) -> Result<Vec<ChatEvent>> {
         let session_id = validate_session_id(&session_id)?;
         let mut events = vec![self.projection.reset(session_id)];
+        self.host_session_reset_for_process = false;
         events.extend(self.refresh().await?);
         Ok(events)
     }
@@ -603,6 +627,23 @@ impl ChatSessionDriver {
             default_profile: Some(bootstrap.default_profile),
         });
         self.client.submit_session_input(&input).await.map(|_| ())
+    }
+
+    async fn reset_ephemeral_host_session_for_process(&mut self) -> Result<()> {
+        if self.host_session_reset_for_process || self.tool_mode != ChatToolMode::LocalCoding {
+            return Ok(());
+        }
+        self.host_session_reset_for_process = true;
+        if !needs_ephemeral_host_session_reset(self.projection.session_state.as_ref()) {
+            return Ok(());
+        }
+
+        let input = self.session_input(SessionInputKind::HostSessionUpdated {
+            host_session_id: None,
+            host_session_status: None,
+        });
+        self.client.submit_session_input(&input).await?;
+        self.refresh().await.map(|_| ())
     }
 
     async fn bootstrap_next_run_prompt(&mut self) -> Result<()> {

@@ -132,11 +132,9 @@ fn project_turns(state: &SessionState, blob_cache: &BlobCache) -> Vec<ChatTurn> 
                 .or(current.last_output_ref.as_deref())
                 .and_then(|ref_| assistant_message(ref_, blob_cache)),
             run: Some(run),
-            tool_chains: current
-                .active_tool_batch
-                .as_ref()
-                .map(|batch| vec![project_tool_batch(batch, blob_cache)])
-                .unwrap_or_default(),
+            // Active tool chains are live viewport UI, not committed transcript history.
+            // They are projected separately via ToolChainsChanged and finalized by the TUI.
+            tool_chains: Vec::new(),
         });
     }
     turns
