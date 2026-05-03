@@ -1,6 +1,6 @@
 use aos_cbor::to_canonical_cbor;
+use aos_effect_types::{HashRef, ReadMeta as EffectReadMeta};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus, effect_ops};
-use serde::{Deserialize, Serialize};
 
 use crate::query::{Consistency, ReadMeta};
 use crate::{Kernel, KernelError};
@@ -32,19 +32,6 @@ pub(crate) static INTERNAL_EFFECT_ENTRYPOINTS: &[&str] = &[
     "sys/governance.apply@1",
 ];
 
-#[derive(Debug, Serialize, Deserialize)]
-struct MetaSer {
-    journal_height: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_bytes")]
-    snapshot_hash: Option<Vec<u8>>,
-    #[serde(with = "serde_bytes")]
-    manifest_hash: Vec<u8>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    active_baseline_height: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    active_baseline_receipt_horizon_height: Option<u64>,
-}
-
 /// Map textual consistency param to enum.
 fn parse_consistency(value: &str) -> Result<Consistency, KernelError> {
     let v = value.trim().to_lowercase();
@@ -66,14 +53,16 @@ fn parse_consistency(value: &str) -> Result<Consistency, KernelError> {
     Err(KernelError::Query(format!("unknown consistency '{value}'")))
 }
 
-fn to_meta(meta: &ReadMeta) -> MetaSer {
-    MetaSer {
+fn hash_ref(value: aos_cbor::Hash) -> Result<HashRef, KernelError> {
+    HashRef::new(value.to_hex()).map_err(|err| KernelError::Manifest(err.to_string()))
+}
+
+fn to_meta(meta: &ReadMeta) -> Result<EffectReadMeta, KernelError> {
+    Ok(EffectReadMeta {
         journal_height: meta.journal_height,
-        snapshot_hash: meta.snapshot_hash.as_ref().map(|h| h.as_bytes().to_vec()),
-        manifest_hash: meta.manifest_hash.as_bytes().to_vec(),
-        active_baseline_height: meta.active_baseline_height,
-        active_baseline_receipt_horizon_height: meta.active_baseline_receipt_horizon_height,
-    }
+        snapshot_hash: meta.snapshot_hash.map(hash_ref).transpose()?,
+        manifest_hash: hash_ref(meta.manifest_hash)?,
+    })
 }
 
 impl<S> Kernel<S>

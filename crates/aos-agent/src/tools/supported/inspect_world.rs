@@ -67,16 +67,7 @@ pub fn map_receipt(tool_name: &str, status: &str, payload: &[u8]) -> ToolMappedR
             "effect_count": manifest.effects.len(),
             "has_routing": manifest.routing.is_some(),
         },
-        "modules": section(&manifest_json, "modules", json!([])),
-        "workflows": section(&manifest_json, "workflows", json!([])),
-        "effects": section(&manifest_json, "effects", json!([])),
-        "routing": section(
-            &manifest_json,
-            "routing",
-            json!({
-                "subscriptions": [],
-            }),
-        ),
+        "manifest": manifest_json,
     });
 
     build_receipt(
@@ -87,10 +78,6 @@ pub fn map_receipt(tool_name: &str, status: &str, payload: &[u8]) -> ToolMappedR
         ToolCallStatus::Succeeded,
         ToolRuntimeDelta::default(),
     )
-}
-
-fn section(root: &Value, key: &str, default: Value) -> Value {
-    root.get(key).cloned().unwrap_or(default)
 }
 
 fn decode_error_receipt(tool_name: &str, status: &str, payload: &[u8]) -> ToolMappedReceipt {
@@ -157,5 +144,7 @@ mod tests {
             serde_json::from_str(&mapped.llm_output_json).expect("decode llm output json");
         assert_eq!(output["result"]["summary"]["journal_height"], 7);
         assert_eq!(output["result"]["summary"]["module_count"], 0);
+        assert_eq!(output["result"]["manifest"]["air_version"], "2");
+        assert!(output["result"].get("modules").is_none());
     }
 }
