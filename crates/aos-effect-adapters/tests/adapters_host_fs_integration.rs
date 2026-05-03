@@ -104,6 +104,34 @@ async fn host_fs_read_file_modes_and_statuses_expected() {
         other => panic!("expected blob read payload, got {other:?}"),
     }
 
+    let utf8_alias_params = HostFsReadFileParams {
+        session_id: session_id.clone(),
+        path: "large.txt".into(),
+        offset_bytes: Some(0),
+        max_bytes: Some(4),
+        encoding: Some("utf-8".into()),
+        output_mode: Some("require_inline".into()),
+    };
+    let utf8_alias_receipt = set
+        .fs_read_file
+        .execute(&build_intent(
+            effect_ops::HOST_FS_READ_FILE,
+            serde_cbor::to_vec(&utf8_alias_params).unwrap(),
+            7,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(utf8_alias_receipt.status, ReceiptStatus::Ok);
+    let utf8_alias_payload: HostFsReadFileReceipt =
+        serde_cbor::from_slice(&utf8_alias_receipt.payload_cbor).unwrap();
+    assert_eq!(utf8_alias_payload.status, "ok");
+    match utf8_alias_payload.content {
+        Some(HostOutput::InlineText { inline_text }) => {
+            assert_eq!(inline_text.text, "xxxx");
+        }
+        other => panic!("expected inline text payload, got {other:?}"),
+    }
+
     let inline_params = HostFsReadFileParams {
         session_id: session_id.clone(),
         path: "large.txt".into(),

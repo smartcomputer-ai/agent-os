@@ -40,7 +40,7 @@ use super::paths::{
 };
 use super::shared::{
     build_receipt, decode_host_fs_apply_patch_params, decode_host_fs_write_file_params,
-    now_wallclock_ns, resolve_file_content, resolve_patch_text,
+    normalize_host_fs_read_encoding, now_wallclock_ns, resolve_file_content, resolve_patch_text,
 };
 use super::state::{HostState, SessionRecord};
 
@@ -721,7 +721,10 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
         let end = offset.saturating_add(max_len).min(bytes.len());
         let slice = &bytes[offset..end];
         let truncated = end < bytes.len();
-        let encoding = params.encoding.as_deref().unwrap_or("utf8");
+        let encoding = match normalize_host_fs_read_encoding(params.encoding.as_deref()) {
+            Ok(encoding) => encoding,
+            Err(message) => return fs_read_error(intent, "invalid_encoding", message),
+        };
 
         let content = if encoding == "bytes" {
             match materialize_binary_output(self.store.as_ref(), mode, slice, self.output_cfg) {
@@ -785,11 +788,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                 }
             }
         } else {
-            return fs_read_error(
-                intent,
-                "invalid_encoding",
-                format!("unsupported encoding '{encoding}'"),
-            );
+            unreachable!("normalize_host_fs_read_encoding returned unknown encoding");
         };
 
         let payload = HostFsReadFileReceipt {
