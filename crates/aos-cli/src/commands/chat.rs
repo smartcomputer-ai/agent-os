@@ -1,6 +1,7 @@
 use std::io::IsTerminal;
+use std::path::PathBuf;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use clap::{Args, Subcommand};
 use serde_json::json;
 
@@ -8,7 +9,7 @@ use crate::GlobalOpts;
 use crate::chat::config::{
     cached_selected_session, load_default_draft_settings, save_selected_session,
 };
-use crate::chat::protocol::ChatDraftOverrideMask;
+use crate::chat::protocol::{ChatDraftOverrideMask, ChatToolMode};
 use crate::chat::tui::{ChatTuiShellOptions, run_shell};
 use crate::chat::{
     ChatControlClient, ChatDraftSettings, ChatSessionDriver, ChatSessionDriverOptions,
@@ -62,6 +63,12 @@ struct ChatOpenArgs {
     /// Draft max output token limit.
     #[arg(long)]
     max_tokens: Option<u64>,
+    /// Tool surface to install when a chat session has no tools.
+    #[arg(long, value_enum, default_value = "local-coding")]
+    tools: ChatToolMode,
+    /// Working directory for local coding tools. Defaults to the current directory.
+    #[arg(long)]
+    workdir: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -115,6 +122,11 @@ async fn handle_history(
             session_id: args.session,
             draft_settings: draft,
             draft_overrides: ChatDraftOverrideMask::default(),
+            tool_mode: ChatToolMode::None,
+            workdir: std::env::current_dir()
+                .context("resolve current directory")?
+                .to_string_lossy()
+                .into_owned(),
             from: None,
         },
     )
@@ -137,6 +149,7 @@ async fn handle_open(global: &GlobalOpts, output: OutputOpts, args: ChatOpenArgs
         args.effort.as_deref(),
         args.max_tokens,
     )?;
+    let workdir = resolve_chat_workdir(args.workdir)?;
     let session_id = resolve_session_id(global, &client, &world_id, args.session, args.new).await?;
 
     if output.json || output.pretty {
@@ -163,6 +176,8 @@ async fn handle_open(global: &GlobalOpts, output: OutputOpts, args: ChatOpenArgs
         session_id,
         draft_settings: draft,
         draft_overrides,
+        tool_mode: args.tools,
+        workdir,
         from: args.from,
     })
     .await
@@ -225,4 +240,18 @@ fn apply_draft_overrides(
         mask.max_tokens = true;
     }
     Ok(mask)
+}
+
+fn resolve_chat_workdir(workdir: Option<PathBuf>) -> Result<String> {
+    let path = match workdir {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => std::env::current_dir()
+            .context("resolve current directory")?
+            .join(path),
+        None => std::env::current_dir().context("resolve current directory")?,
+    };
+    let path = path
+        .canonicalize()
+        .with_context(|| format!("resolve chat workdir '{}'", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
 }

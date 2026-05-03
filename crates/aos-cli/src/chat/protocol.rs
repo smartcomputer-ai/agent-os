@@ -1,4 +1,5 @@
 use aos_agent::{ReasoningEffort, RunLifecycle, SessionLifecycle, SessionStatus};
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 pub(crate) const DEFAULT_CHAT_PROVIDER: &str = "openai-responses";
@@ -10,6 +11,15 @@ pub(crate) struct ChatDraftSettings {
     pub model: String,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub max_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub(crate) enum ChatToolMode {
+    None,
+    Inspect,
+    Workspace,
+    #[default]
+    LocalCoding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

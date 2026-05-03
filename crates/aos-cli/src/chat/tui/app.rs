@@ -13,7 +13,7 @@ use crate::chat::client::ChatControlClient;
 use crate::chat::driver::{ChatSessionDriver, ChatSessionDriverOptions};
 use crate::chat::protocol::{
     ChatCommand, ChatDelta, ChatDraftOverrideMask, ChatDraftSettings, ChatErrorView, ChatEvent,
-    ChatMessageView,
+    ChatMessageView, ChatToolMode,
 };
 use crate::chat::tui::app_event::UiEvent;
 use crate::chat::tui::app_event_sender::AppEventSender;
@@ -31,6 +31,8 @@ pub(crate) struct ChatTuiShellOptions {
     pub(crate) session_id: String,
     pub(crate) draft_settings: ChatDraftSettings,
     pub(crate) draft_overrides: ChatDraftOverrideMask,
+    pub(crate) tool_mode: ChatToolMode,
+    pub(crate) workdir: String,
     pub(crate) from: Option<u64>,
 }
 
@@ -45,6 +47,8 @@ pub(crate) async fn run_shell(options: ChatTuiShellOptions) -> Result<()> {
             session_id: options.session_id,
             draft_settings: options.draft_settings,
             draft_overrides: options.draft_overrides,
+            tool_mode: options.tool_mode,
+            workdir: options.workdir,
             from: options.from,
         },
     )

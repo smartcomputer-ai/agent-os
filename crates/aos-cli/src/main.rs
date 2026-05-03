@@ -159,4 +159,19 @@ mod tests {
         .expect("parse chat new");
         assert!(matches!(cli.command, Command::Chat(_)));
     }
+
+    #[test]
+    fn chat_new_parse_accepts_tool_options() {
+        let cli = Cli::try_parse_from([
+            "aos",
+            "chat",
+            "--new",
+            "--tools",
+            "workspace",
+            "--workdir",
+            ".",
+        ])
+        .expect("parse chat tool options");
+        assert!(matches!(cli.command, Command::Chat(_)));
+    }
 }

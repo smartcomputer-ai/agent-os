@@ -1,9 +1,13 @@
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use aos_agent::{
-    ReasoningEffort, SessionConfig, SessionId, SessionInput, SessionInputKind, SessionLifecycle,
-    SessionState,
+    HostSessionOpenConfig, HostTargetConfig, ReasoningEffort, SessionConfig, SessionId,
+    SessionInput, SessionInputKind, SessionLifecycle, SessionState, ToolProfileBuilder,
+    ToolRegistryBuilder, ToolSpec, local_coding_agent_tool_profile_for_provider,
+    local_coding_agent_tool_profiles, local_coding_agent_tool_registry, tool_bundle_inspect,
+    tool_bundle_workspace,
 };
 use serde_json::json;
 use tokio::time::sleep;
@@ -13,7 +17,8 @@ use crate::chat::client::{ChatControlClient, bare_summary, summary_from_state};
 use crate::chat::projection::ChatProjection;
 use crate::chat::protocol::{
     ChatCommand, ChatConnectionInfo, ChatDelta, ChatDraftOverrideMask, ChatDraftSettings,
-    ChatErrorView, ChatEvent, ChatMessageView, ChatSettingsView, ChatStatus, session_active,
+    ChatErrorView, ChatEvent, ChatMessageView, ChatSettingsView, ChatStatus, ChatToolMode,
+    session_active,
 };
 use crate::chat::session::{new_session_id, validate_session_id};
 use crate::chat::sse::JournalSseEvent;
@@ -23,7 +28,52 @@ pub(crate) struct ChatSessionDriverOptions {
     pub session_id: String,
     pub draft_settings: ChatDraftSettings,
     pub draft_overrides: ChatDraftOverrideMask,
+    pub tool_mode: ChatToolMode,
+    pub workdir: String,
     pub from: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_coding_bootstrap_selects_provider_profile() {
+        let bootstrap =
+            build_tool_bootstrap(ChatToolMode::LocalCoding, "openai-responses").expect("bootstrap");
+
+        assert_eq!(bootstrap.default_profile, "openai");
+        assert!(bootstrap.registry.contains_key("host.exec"));
+        assert!(bootstrap.registry.contains_key("host.fs.apply_patch"));
+        assert!(
+            bootstrap
+                .profiles
+                .get("openai")
+                .is_some_and(|tools| tools.iter().any(|tool| tool == "host.exec"))
+        );
+    }
+
+    #[test]
+    fn workspace_bootstrap_uses_workspace_only_profile() {
+        let bootstrap =
+            build_tool_bootstrap(ChatToolMode::Workspace, "openai-responses").expect("bootstrap");
+
+        assert_eq!(bootstrap.default_profile, "workspace");
+        assert!(bootstrap.registry.contains_key("workspace.read"));
+        assert!(!bootstrap.registry.contains_key("host.exec"));
+    }
+
+    #[test]
+    fn local_host_config_uses_requested_workdir() {
+        let config = local_host_session_open_config("/tmp/aos-chat");
+
+        match config.target {
+            HostTargetConfig::Local { workdir, .. } => {
+                assert_eq!(workdir.as_deref(), Some("/tmp/aos-chat"));
+            }
+            HostTargetConfig::Sandbox { .. } => panic!("expected local target"),
+        }
+    }
 }
 
 pub(crate) struct ChatSessionDriver {
@@ -32,8 +82,87 @@ pub(crate) struct ChatSessionDriver {
     blob_cache: BlobCache,
     draft_settings: ChatDraftSettings,
     draft_overrides: ChatDraftOverrideMask,
+    tool_mode: ChatToolMode,
+    workdir: String,
     base_session_config: SessionConfig,
     observed_clock: u64,
+}
+
+struct ToolBootstrap {
+    registry: BTreeMap<String, ToolSpec>,
+    profiles: BTreeMap<String, Vec<String>>,
+    default_profile: String,
+}
+
+fn build_tool_bootstrap(mode: ChatToolMode, provider: &str) -> Result<ToolBootstrap> {
+    match mode {
+        ChatToolMode::None => Ok(ToolBootstrap {
+            registry: BTreeMap::new(),
+            profiles: BTreeMap::new(),
+            default_profile: String::new(),
+        }),
+        ChatToolMode::Inspect => {
+            let bundle = tool_bundle_inspect();
+            let registry = ToolRegistryBuilder::new()
+                .with_bundle(bundle.clone())
+                .build()
+                .map_err(|err| anyhow!(err))?;
+            let profile = ToolProfileBuilder::new()
+                .with_bundle(bundle)
+                .build_for_registry(&registry)
+                .map_err(|err| anyhow!(err))?;
+            Ok(tool_bootstrap_with_profile(registry, "inspect", profile))
+        }
+        ChatToolMode::Workspace => {
+            let bundle = tool_bundle_workspace();
+            let registry = ToolRegistryBuilder::new()
+                .with_bundle(bundle.clone())
+                .build()
+                .map_err(|err| anyhow!(err))?;
+            let profile = ToolProfileBuilder::new()
+                .with_bundle(bundle)
+                .build_for_registry(&registry)
+                .map_err(|err| anyhow!(err))?;
+            Ok(tool_bootstrap_with_profile(registry, "workspace", profile))
+        }
+        ChatToolMode::LocalCoding => {
+            let registry = local_coding_agent_tool_registry();
+            let profiles = local_coding_agent_tool_profiles();
+            let default_profile = local_coding_agent_tool_profile_for_provider(provider);
+            Ok(ToolBootstrap {
+                registry,
+                profiles,
+                default_profile,
+            })
+        }
+    }
+}
+
+fn tool_bootstrap_with_profile(
+    registry: BTreeMap<String, ToolSpec>,
+    profile_id: &str,
+    profile: Vec<String>,
+) -> ToolBootstrap {
+    let mut profiles = BTreeMap::new();
+    profiles.insert(profile_id.into(), profile);
+    ToolBootstrap {
+        registry,
+        profiles,
+        default_profile: profile_id.into(),
+    }
+}
+
+fn local_host_session_open_config(workdir: &str) -> HostSessionOpenConfig {
+    HostSessionOpenConfig {
+        target: HostTargetConfig::Local {
+            mounts: None,
+            workdir: Some(workdir.into()),
+            env: None,
+            network_mode: Some("none".into()),
+        },
+        session_ttl_ns: None,
+        labels: None,
+    }
 }
 
 impl ChatSessionDriver {
@@ -48,6 +177,8 @@ impl ChatSessionDriver {
             blob_cache: BlobCache::default(),
             draft_settings: options.draft_settings,
             draft_overrides: options.draft_overrides,
+            tool_mode: options.tool_mode,
+            workdir: options.workdir,
             base_session_config: SessionConfig::default(),
             observed_clock: 0,
         };
@@ -275,6 +406,9 @@ impl ChatSessionDriver {
             self.client.submit_session_input(&input).await?;
             events.extend(self.refresh().await?);
         }
+        if !self.run_active() {
+            self.bootstrap_next_run_tools().await?;
+        }
 
         let input_kind = if self.should_start_first_run() {
             SessionInputKind::RunRequested {
@@ -441,6 +575,29 @@ impl ChatSessionDriver {
         }
     }
 
+    async fn bootstrap_next_run_tools(&mut self) -> Result<()> {
+        if self.tool_mode == ChatToolMode::None {
+            return Ok(());
+        }
+        if self
+            .projection
+            .session_state
+            .as_ref()
+            .is_some_and(|state| !state.tool_registry.is_empty())
+        {
+            return Ok(());
+        }
+
+        let bootstrap = build_tool_bootstrap(self.tool_mode, self.draft_settings.provider.as_str())
+            .context("build chat tool registry")?;
+        let input = self.session_input(SessionInputKind::ToolRegistrySet {
+            registry: bootstrap.registry,
+            profiles: Some(bootstrap.profiles),
+            default_profile: Some(bootstrap.default_profile),
+        });
+        self.client.submit_session_input(&input).await.map(|_| ())
+    }
+
     fn should_start_first_run(&self) -> bool {
         let Some(state) = self.projection.session_state.as_ref() else {
             return true;
@@ -464,6 +621,9 @@ impl ChatSessionDriver {
         config.model = self.draft_settings.model.clone();
         config.reasoning_effort = self.draft_settings.reasoning_effort;
         config.max_tokens = self.draft_settings.max_tokens;
+        if matches!(self.tool_mode, ChatToolMode::LocalCoding) {
+            config.default_host_session_open = Some(local_host_session_open_config(&self.workdir));
+        }
         config
     }
 
