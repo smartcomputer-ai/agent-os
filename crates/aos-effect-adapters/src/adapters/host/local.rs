@@ -2452,7 +2452,7 @@ mod tests {
         assert_schema_normalizes("sys/HostFsWriteFileReceipt@1", &write_receipt.payload_cbor);
 
         let read_params = HostFsReadFileParams {
-            session_id: open_payload.session_id,
+            session_id: open_payload.session_id.clone(),
             path: "src/lib.rs".into(),
             offset_bytes: None,
             max_bytes: None,
@@ -2466,6 +2466,32 @@ mod tests {
             .expect("read receipt");
         assert_eq!(read_receipt.status, ReceiptStatus::Ok);
         assert_schema_normalizes("sys/HostFsReadFileReceipt@1", &read_receipt.payload_cbor);
+
+        tokio::fs::write(tmp.path().join("large.txt"), "x".repeat(20_000))
+            .await
+            .expect("write large file");
+        let large_read_params = HostFsReadFileParams {
+            session_id: open_payload.session_id,
+            path: "large.txt".into(),
+            offset_bytes: None,
+            max_bytes: None,
+            encoding: Some("utf8".into()),
+            output_mode: Some("auto".into()),
+        };
+        let large_read_receipt = set
+            .fs_read_file
+            .run_terminal(&intent_for(
+                effect_ops::HOST_FS_READ_FILE,
+                &large_read_params,
+                12,
+            ))
+            .await
+            .expect("large read receipt");
+        assert_eq!(large_read_receipt.status, ReceiptStatus::Ok);
+        assert_schema_normalizes(
+            "sys/HostFsReadFileReceipt@1",
+            &large_read_receipt.payload_cbor,
+        );
     }
 
     #[test]

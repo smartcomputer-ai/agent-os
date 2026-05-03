@@ -110,7 +110,7 @@ pub struct HostInlineBytes {
 pub struct HostBlobOutput {
     pub blob_ref: HashRef,
     pub size_bytes: u64,
-    #[serde(default)]
+    #[serde(default, with = "crate::serde_helpers::bytes_opt")]
     pub preview_bytes: Option<Vec<u8>>,
 }
 
