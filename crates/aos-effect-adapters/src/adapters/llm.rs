@@ -1524,6 +1524,15 @@ fn parse_message_value(value: Value) -> Result<Vec<Message>, String> {
                 return parse_message_value(output);
             }
 
+            if let Some(text) = obj.get("assistant_text").and_then(Value::as_str) {
+                return Ok(vec![Message {
+                    role: Role::Assistant,
+                    content: vec![ContentPart::text(text.to_string())],
+                    name: None,
+                    tool_call_id: None,
+                }]);
+            }
+
             let role = obj
                 .get("role")
                 .and_then(Value::as_str)
@@ -1711,4 +1720,27 @@ fn empty_object() -> Value {
 
 fn zero_hashref() -> HashRef {
     HashRef::new(format!("sha256:{}", "0".repeat(64))).expect("zero hash is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_llm_output_envelope_as_assistant_message() {
+        let messages = parse_message_value(json!({
+            "assistant_text": "hello from prior turn",
+            "tool_calls_ref": null,
+            "reasoning_ref": null
+        }))
+        .expect("parse envelope");
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, Role::Assistant);
+        assert_eq!(
+            messages[0].content[0].text.as_deref(),
+            Some("hello from prior turn")
+        );
+    }
 }

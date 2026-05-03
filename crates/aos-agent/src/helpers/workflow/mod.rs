@@ -5253,6 +5253,10 @@ mod tests {
             state.last_output_ref.as_deref(),
             Some(hash_ref('e').as_str())
         );
+        assert_eq!(
+            state.context_state.ledger_message_refs(),
+            vec![hash_ref('a').to_string(), hash_ref('e').to_string()]
+        );
 
         let changed = crate::helpers::primitives::session_lifecycle_changed_payload(
             &state,
