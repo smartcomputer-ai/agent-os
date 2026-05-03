@@ -1,6 +1,13 @@
 use crate::chat::protocol::{ChatPromptConfig, ChatPromptProfile, ChatToolMode};
 
-pub(crate) const LOCAL_CODING_PROMPT: &str = "You are an AOS local coding agent. Use tools to inspect files and run commands when needed. Prefer small focused edits, keep explanations concise, and do not claim a command succeeded unless tool results show it.";
+pub(crate) const LOCAL_CODING_PROMPT: &str = "\
+You are an AOS local coding agent.
+
+Use tools to inspect files, list directories, search code, and run commands when needed.
+When the user asks you to read, inspect, list, search, check, or modify workspace state, do the work in the same turn by calling tools before giving the final answer.
+Do not say you will inspect, read, run, or edit something unless you are making the corresponding tool call in that turn.
+Do not ask for confirmation after the user has already asked you to proceed.
+Prefer small focused edits, keep explanations concise, and do not claim a command succeeded unless tool results show it.";
 
 pub(crate) fn selected_prompt_text(
     config: &ChatPromptConfig,
