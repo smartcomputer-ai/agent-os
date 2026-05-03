@@ -3,7 +3,7 @@
 **Priority**: P3
 **Effort**: Large
 **Risk if deferred**: Medium (users will not get the rich live interaction needed for complex tools, compaction, and intervention)
-**Status**: In progress
+**Status**: In progress — P3a complete, P3b mostly complete, P3c partially implemented
 **Depends on**: `roadmap/v0.24-claw/p2-chat-cli-internals.md`
 
 ## Goal
@@ -527,14 +527,14 @@ Codex-specific safety pattern to copy:
 
 P3a: Shell
 
-- Ratatui/Crossterm setup.
-- App loop.
-- Inline viewport, committed-history insertion, active cell, bottom pane.
-- Frame requester/redraw coalescing.
-- Basic composer.
-- Render user/assistant/run/error cells from `ChatEvent`s.
-- Terminal restore tests.
-- Initial live wiring to `ChatSessionDriver`.
+- [x] Ratatui/Crossterm setup.
+- [x] App loop.
+- [x] Inline viewport, committed-history insertion, active cell, bottom pane.
+- [x] Frame requester/redraw coalescing.
+- [x] Basic composer.
+- [x] Render user/assistant/run/error cells from `ChatEvent`s.
+- [x] Terminal restore coverage and manual smoke workflow.
+- [x] Initial live wiring to `ChatSessionDriver`.
 
 Current P3a progress:
 
@@ -546,15 +546,17 @@ Current P3a progress:
 - Implemented frame-request coalescing.
 - Implemented bottom pane, composer, status/footer, and optimistic pending user echo.
 - Implemented tmux-based manual smoke workflow in `debug-tui.md`.
+- P3a is complete for the v0.24 TUI baseline.
 
 P3b: Live AOS
 
-- Session picker.
-- Model/provider/effort/max-token pickers.
-- Submit user turns.
-- Committed terminal scrollback and retained transcript overlay.
-- Assistant output rendering.
-- Reconnect/gap notices.
+- [x] Session picker.
+- [x] Model/provider/effort/max-token pickers.
+- [x] Submit user turns.
+- [x] Committed terminal scrollback.
+- [ ] Retained transcript/detail overlay.
+- [x] Assistant output rendering, including markdown/code wrapping.
+- [x] Reconnect/gap notices.
 
 Current P3b progress:
 
@@ -567,34 +569,58 @@ Current P3b progress:
 - Picker selections route through P2 `ChatCommand`s and respect the driver-level editability rules.
 - Disabled picker rows now report a visible error instead of silently ignoring Enter.
 - Implemented committed terminal scrollback, terminal resize reflow, and stable composer/footer layout.
-- Still remaining in this phase: retained transcript/detail overlay, richer assistant rendering, selected-session config persistence from in-TUI switches, and reconnect/gap polish.
+- Implemented selected-session persistence when the TUI switches sessions and receives `HistoryReset`.
+- Implemented markdown-aware assistant rendering with headings, emphasis, lists, links, block quotes, and fenced code blocks.
+- Implemented stable reconnect/gap cells and status-line updates.
+- Still remaining in this phase: retained transcript/detail overlay.
 
 P3c: Complex Runs
 
-- Tool chain cells.
-- Tool detail overlay.
-- Compaction cells.
-- Trace overlay.
-- Interrupt/steer flows.
-- Slash command completion.
+- [x] Tool chain cells.
+- [ ] Tool detail overlay.
+- [ ] Compaction cells.
+- [ ] Trace overlay.
+- [x] Interrupt/steer flows.
+- [x] Slash command completion.
+
+Current P3c progress:
+
+- Implemented active tool-chain cells from `ToolChainsChanged`.
+- Implemented grouped parallel tool-call rendering using `group_index`.
+- Implemented collapsed completed tool chains in committed terminal scrollback.
+- Implemented expanded tool details through the `--show-tool-details` TUI option, including arguments and result previews for completed and reconstructed history cells.
+- Implemented reasoning-before-tools rendering when the projection provides tool-associated reasoning.
+- Implemented `/interrupt`, Ctrl-C interruption for active runs, and `/steer <instruction>`.
+- Implemented slash command prefix filtering through the bottom-pane command picker.
+- Implemented compaction projection and a basic `context compaction <status>` notice.
+- Still remaining in this phase: interactive tool detail overlay, rich compaction card/detail rendering, and trace overlay.
 
 P3d: Polish
 
-- Markdown/code wrapping.
-- Copy/export.
-- Search in transcript.
-- Better narrow-terminal behavior.
-- Snapshot tests for representative full frames.
+- [x] Markdown/code wrapping.
+- [ ] Copy/export.
+- [ ] Search in transcript.
+- [ ] Better narrow-terminal behavior.
+- [ ] Snapshot tests for representative full frames.
+
+Current P3d progress:
+
+- Implemented markdown rendering through `pulldown-cmark`.
+- Implemented width-aware wrapping/truncation for messages, markdown, and tool rows.
+- Added Ratatui `TestBackend` render coverage for the shell, slash picker flows, and bottom-pane state.
+- Still remaining in this phase: copy/export, transcript search, broader narrow-terminal polish, and a representative full-frame snapshot suite.
 
 ## Scope
 
-- Add TUI modules under `crates/aos-cli/src/chat/tui/`.
-- Add Ratatui/Crossterm dependencies to `aos-cli`.
-- Make `aos chat` launch the Codex-style TUI by default on TTY.
-- Implement transcript cells for messages, runs, tools, compaction, reconnects, and errors.
-- Implement bottom composer and slash command parser.
-- Implement bottom-pane selection views for session/model/provider/effort choices and detail overlays for large views.
-- Add UI reducer tests and render snapshots.
+- [x] Add TUI modules under `crates/aos-cli/src/chat/tui/`.
+- [x] Add Ratatui/Crossterm dependencies to `aos-cli`.
+- [x] Make `aos chat` launch the Codex-style TUI by default on TTY.
+- [x] Implement transcript cells for messages, runs, tools, reconnects, and errors.
+- [ ] Implement rich compaction cells. Current implementation projects compactions and renders a basic notice.
+- [x] Implement bottom composer and slash command parser.
+- [x] Implement bottom-pane selection views for session/model/provider/effort choices.
+- [ ] Implement detail overlays for large views.
+- [ ] Add the full UI reducer and render snapshot suite. Current implementation has focused unit/render tests for the landed shell, picker, slash, tool-chain, reconnect/gap, and persistence behavior.
 
 ## Non-Goals
 
@@ -610,34 +636,34 @@ P3d: Polish
 
 Unit tests:
 
-- Key binding reducer.
-- Composer editing and paste handling.
-- Slash command parse/completion.
-- Transcript append/update/reflow behavior.
-- Retained transcript overlay scroll, sticky-bottom, and unread indicator behavior.
-- Cell height calculations at narrow, normal, and wide widths.
-- Tool chain collapsed/expanded rendering model.
-- Compaction card rendering model.
+- [x] Key binding coverage for active-run Ctrl-C interruption.
+- [x] Composer editing and paste handling.
+- [x] Slash command parse/completion.
+- [x] Transcript append/update/reflow behavior.
+- [ ] Retained transcript overlay scroll, sticky-bottom, and unread indicator behavior.
+- [x] Cell height/wrapping coverage for message, markdown, and tool-chain cells.
+- [x] Tool chain collapsed/expanded rendering model.
+- [ ] Compaction card rendering model.
 
 Render tests:
 
-- Initial empty session.
-- Active run with pending LLM.
-- Tool-heavy run with nested calls.
-- Failed tool call.
-- Compaction requested/received.
-- SSE reconnect and retained-history gap.
-- Narrow terminal layout.
+- [x] Initial shell/session frame.
+- [x] Active run status/bottom-pane rendering.
+- [x] Tool-chain rendering at the cell/transcript level.
+- [x] Failed/error rendering at the cell/transcript level.
+- [ ] Compaction requested/received.
+- [x] SSE reconnect and retained-history gap cell/status behavior.
+- [ ] Narrow terminal layout snapshot.
 
 Integration/manual tests:
 
-- `aos chat --new` against a local node.
-- Switch to an existing session through `/sessions`.
-- Submit follow-up while previous run is active.
-- Interrupt a running session.
-- Disconnect/reconnect node.
-- Resize terminal during streaming output.
-- Panic/fatal error restores terminal state.
+- [x] `aos chat --new` against a local node through the tmux smoke workflow.
+- [x] Switch to an existing session through `/sessions`.
+- [ ] Submit follow-up while previous run is active.
+- [x] Interrupt a running session through `/interrupt` and Ctrl-C command paths.
+- [ ] Disconnect/reconnect node.
+- [x] Resize terminal during streaming output/reflow path.
+- [x] Panic/fatal error restores terminal state.
 
 ## Open Questions
 
