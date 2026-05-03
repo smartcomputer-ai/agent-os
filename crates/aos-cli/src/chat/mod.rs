@@ -3,6 +3,7 @@ pub(crate) mod client;
 pub(crate) mod config;
 pub(crate) mod driver;
 pub(crate) mod projection;
+pub(crate) mod prompts;
 pub(crate) mod protocol;
 pub(crate) mod session;
 pub(crate) mod sse;

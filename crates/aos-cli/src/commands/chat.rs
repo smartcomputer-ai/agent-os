@@ -1,3 +1,4 @@
+use std::fs;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
@@ -9,7 +10,9 @@ use crate::GlobalOpts;
 use crate::chat::config::{
     cached_selected_session, load_default_draft_settings, save_selected_session,
 };
-use crate::chat::protocol::{ChatDraftOverrideMask, ChatToolMode};
+use crate::chat::protocol::{
+    ChatDraftOverrideMask, ChatPromptConfig, ChatPromptProfile, ChatToolMode,
+};
 use crate::chat::tui::{ChatTuiShellOptions, run_shell};
 use crate::chat::{
     ChatControlClient, ChatDraftSettings, ChatSessionDriver, ChatSessionDriverOptions,
@@ -69,6 +72,15 @@ struct ChatOpenArgs {
     /// Working directory for local coding tools. Defaults to the current directory.
     #[arg(long)]
     workdir: Option<PathBuf>,
+    /// Prompt profile to install when a chat session has no prompt.
+    #[arg(long, value_enum, conflicts_with_all = ["prompt_file", "prompt"])]
+    prompt_profile: Option<ChatPromptProfile>,
+    /// Read the prompt to install from a file.
+    #[arg(long, conflicts_with_all = ["prompt_profile", "prompt"])]
+    prompt_file: Option<PathBuf>,
+    /// Inline prompt text to install.
+    #[arg(long = "prompt", conflicts_with_all = ["prompt_profile", "prompt_file"])]
+    prompt: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -123,6 +135,7 @@ async fn handle_history(
             draft_settings: draft,
             draft_overrides: ChatDraftOverrideMask::default(),
             tool_mode: ChatToolMode::None,
+            prompt_config: ChatPromptConfig::None,
             workdir: std::env::current_dir()
                 .context("resolve current directory")?
                 .to_string_lossy()
@@ -150,6 +163,7 @@ async fn handle_open(global: &GlobalOpts, output: OutputOpts, args: ChatOpenArgs
         args.max_tokens,
     )?;
     let workdir = resolve_chat_workdir(args.workdir)?;
+    let prompt_config = resolve_prompt_config(args.prompt_profile, args.prompt_file, args.prompt)?;
     let session_id = resolve_session_id(global, &client, &world_id, args.session, args.new).await?;
 
     if output.json || output.pretty {
@@ -177,6 +191,7 @@ async fn handle_open(global: &GlobalOpts, output: OutputOpts, args: ChatOpenArgs
         draft_settings: draft,
         draft_overrides,
         tool_mode: args.tools,
+        prompt_config,
         workdir,
         from: args.from,
     })
@@ -254,4 +269,26 @@ fn resolve_chat_workdir(workdir: Option<PathBuf>) -> Result<String> {
         .canonicalize()
         .with_context(|| format!("resolve chat workdir '{}'", path.display()))?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+fn resolve_prompt_config(
+    profile: Option<ChatPromptProfile>,
+    file: Option<PathBuf>,
+    prompt: Option<String>,
+) -> Result<ChatPromptConfig> {
+    if let Some(profile) = profile {
+        return Ok(match profile {
+            ChatPromptProfile::None => ChatPromptConfig::None,
+            ChatPromptProfile::LocalCoding => ChatPromptConfig::Profile(profile),
+        });
+    }
+    if let Some(path) = file {
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("read prompt file '{}'", path.display()))?;
+        return Ok(ChatPromptConfig::Inline(content));
+    }
+    if let Some(prompt) = prompt {
+        return Ok(ChatPromptConfig::Inline(prompt));
+    }
+    Ok(ChatPromptConfig::Auto)
 }

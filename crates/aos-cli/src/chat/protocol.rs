@@ -22,6 +22,21 @@ pub(crate) enum ChatToolMode {
     LocalCoding,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ChatPromptProfile {
+    None,
+    LocalCoding,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum ChatPromptConfig {
+    #[default]
+    Auto,
+    None,
+    Profile(ChatPromptProfile),
+    Inline(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct ChatDraftOverrideMask {
     pub provider: bool,

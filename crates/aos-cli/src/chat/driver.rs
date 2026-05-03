@@ -15,10 +15,11 @@ use tokio::time::sleep;
 use crate::chat::blob_cache::BlobCache;
 use crate::chat::client::{ChatControlClient, bare_summary, summary_from_state};
 use crate::chat::projection::ChatProjection;
+use crate::chat::prompts::selected_prompt_text;
 use crate::chat::protocol::{
     ChatCommand, ChatConnectionInfo, ChatDelta, ChatDraftOverrideMask, ChatDraftSettings,
-    ChatErrorView, ChatEvent, ChatMessageView, ChatSettingsView, ChatStatus, ChatToolMode,
-    session_active,
+    ChatErrorView, ChatEvent, ChatMessageView, ChatPromptConfig, ChatSettingsView, ChatStatus,
+    ChatToolMode, session_active,
 };
 use crate::chat::session::{new_session_id, validate_session_id};
 use crate::chat::sse::JournalSseEvent;
@@ -29,6 +30,7 @@ pub(crate) struct ChatSessionDriverOptions {
     pub draft_settings: ChatDraftSettings,
     pub draft_overrides: ChatDraftOverrideMask,
     pub tool_mode: ChatToolMode,
+    pub prompt_config: ChatPromptConfig,
     pub workdir: String,
     pub from: Option<u64>,
 }
@@ -83,6 +85,8 @@ pub(crate) struct ChatSessionDriver {
     draft_settings: ChatDraftSettings,
     draft_overrides: ChatDraftOverrideMask,
     tool_mode: ChatToolMode,
+    prompt_config: ChatPromptConfig,
+    prompt_ref: Option<String>,
     workdir: String,
     base_session_config: SessionConfig,
     observed_clock: u64,
@@ -178,6 +182,8 @@ impl ChatSessionDriver {
             draft_settings: options.draft_settings,
             draft_overrides: options.draft_overrides,
             tool_mode: options.tool_mode,
+            prompt_config: options.prompt_config,
+            prompt_ref: None,
             workdir: options.workdir,
             base_session_config: SessionConfig::default(),
             observed_clock: 0,
@@ -408,6 +414,7 @@ impl ChatSessionDriver {
         }
         if !self.run_active() {
             self.bootstrap_next_run_tools().await?;
+            self.bootstrap_next_run_prompt().await?;
         }
 
         let input_kind = if self.should_start_first_run() {
@@ -598,6 +605,38 @@ impl ChatSessionDriver {
         self.client.submit_session_input(&input).await.map(|_| ())
     }
 
+    async fn bootstrap_next_run_prompt(&mut self) -> Result<()> {
+        if self.prompt_ref.is_some() || self.session_has_prompt_refs() {
+            return Ok(());
+        }
+        let Some(prompt_text) = selected_prompt_text(&self.prompt_config, self.tool_mode) else {
+            return Ok(());
+        };
+        let message = json!({
+            "role": "developer",
+            "content": prompt_text,
+            "source": {
+                "kind": "aos-cli",
+                "channel": "terminal",
+                "session_id": self.session_id(),
+                "prompt": "bootstrap"
+            }
+        });
+        let bytes = serde_json::to_vec(&message).context("encode chat prompt blob")?;
+        let prompt_ref = self.client.upload_blob(bytes.clone()).await?;
+        self.blob_cache.insert_bytes(prompt_ref.clone(), bytes);
+        self.prompt_ref = Some(prompt_ref);
+        Ok(())
+    }
+
+    fn session_has_prompt_refs(&self) -> bool {
+        self.projection
+            .session_state
+            .as_ref()
+            .and_then(|state| state.session_config.default_prompt_refs.as_ref())
+            .is_some_and(|refs| !refs.is_empty())
+    }
+
     fn should_start_first_run(&self) -> bool {
         let Some(state) = self.projection.session_state.as_ref() else {
             return true;
@@ -621,6 +660,9 @@ impl ChatSessionDriver {
         config.model = self.draft_settings.model.clone();
         config.reasoning_effort = self.draft_settings.reasoning_effort;
         config.max_tokens = self.draft_settings.max_tokens;
+        if let Some(prompt_ref) = self.prompt_ref.clone() {
+            config.default_prompt_refs = Some(vec![prompt_ref]);
+        }
         if matches!(self.tool_mode, ChatToolMode::LocalCoding) {
             config.default_host_session_open = Some(local_host_session_open_config(&self.workdir));
         }

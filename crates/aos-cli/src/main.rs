@@ -174,4 +174,15 @@ mod tests {
         .expect("parse chat tool options");
         assert!(matches!(cli.command, Command::Chat(_)));
     }
+
+    #[test]
+    fn chat_new_parse_accepts_prompt_options() {
+        let cli = Cli::try_parse_from(["aos", "chat", "--new", "--prompt-profile", "local-coding"])
+            .expect("parse prompt profile");
+        assert!(matches!(cli.command, Command::Chat(_)));
+
+        let cli = Cli::try_parse_from(["aos", "chat", "--new", "--prompt", "be concise"])
+            .expect("parse inline prompt");
+        assert!(matches!(cli.command, Command::Chat(_)));
+    }
 }
