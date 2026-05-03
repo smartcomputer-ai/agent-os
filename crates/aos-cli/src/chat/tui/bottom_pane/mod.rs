@@ -10,8 +10,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
 use crate::chat::protocol::{
-    ChatEvent, ChatSettingsView, ChatStatus, DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER,
-    reasoning_effort_label,
+    ChatEvent, ChatProgressStatus, ChatSettingsView, ChatStatus, DEFAULT_CHAT_MODEL,
+    DEFAULT_CHAT_PROVIDER, reasoning_effort_label,
 };
 use crate::chat::tui::bottom_pane::composer::{ComposerState, composer_band_paragraph};
 use crate::chat::tui::bottom_pane::list_selection::{
@@ -24,6 +24,7 @@ use crate::chat::tui::theme::composer_band_style;
 pub(crate) struct BottomPaneState {
     composer: ComposerState,
     status: String,
+    run_control_active: bool,
     current_session_id: Option<String>,
     settings: Option<ChatSettingsView>,
     active_view: Option<BottomPaneView>,
@@ -51,6 +52,7 @@ impl Default for BottomPaneState {
         Self {
             composer: ComposerState::default(),
             status: "ready".into(),
+            run_control_active: false,
             current_session_id: None,
             settings: None,
             active_view: None,
@@ -180,6 +182,16 @@ impl BottomPaneState {
             }
             ChatEvent::HistoryReset { session_id } => {
                 self.current_session_id = Some(session_id.clone());
+                self.run_control_active = false;
+            }
+            ChatEvent::RunChanged(run) => {
+                self.run_control_active = matches!(
+                    run.status,
+                    ChatProgressStatus::Queued | ChatProgressStatus::Running
+                );
+                if self.run_control_active {
+                    self.status = format!("run {} running", run.run_seq);
+                }
             }
             ChatEvent::StatusChanged(ChatStatus {
                 session_id,
@@ -188,6 +200,7 @@ impl BottomPaneState {
                 ..
             }) => {
                 self.status = status.clone();
+                self.run_control_active = status_allows_run_control(status);
                 self.current_session_id = Some(session_id.clone());
                 self.settings = Some(settings.clone());
             }
@@ -334,12 +347,16 @@ impl BottomPaneState {
     }
 
     fn status_line(&self) -> Line<'static> {
-        let mut spans = vec![Span::styled(
-            self.status.clone(),
+        let status_style = if self.run_control_active {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
             Style::default()
                 .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )];
+                .add_modifier(Modifier::BOLD)
+        };
+        let mut spans = vec![Span::styled(self.status.clone(), status_style)];
         if let Some(settings) = &self.settings {
             spans.push(Span::raw("  "));
             spans.push(Span::styled(
@@ -352,8 +369,19 @@ impl BottomPaneState {
                 Style::default().fg(Color::DarkGray),
             ));
         }
+        if self.run_control_active {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                "Ctrl-C interrupt",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
         Line::from(spans)
     }
+}
+
+fn status_allows_run_control(status: &str) -> bool {
+    matches!(status, "running" | "cancelling" | "paused")
 }
 
 enum BottomPaneViewAction {
@@ -409,6 +437,8 @@ fn slash_popup_owns_key(key: &KeyEvent) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::protocol::{ChatRunView, run_status};
+    use aos_agent::RunLifecycle;
     use crossterm::event::{KeyCode, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -493,5 +523,27 @@ mod tests {
                 .to_string()
                 .contains("journal gap; refreshed")
         );
+    }
+
+    #[test]
+    fn active_run_status_shows_interrupt_hint() {
+        let mut pane = BottomPaneState::default();
+        pane.apply_chat_event(&ChatEvent::RunChanged(ChatRunView {
+            id: "run-1".into(),
+            run_seq: 7,
+            lifecycle: RunLifecycle::Running,
+            status: run_status(RunLifecycle::Running),
+            provider: "openai-responses".into(),
+            model: "gpt-5.3-codex".into(),
+            reasoning_effort: None,
+            input_refs: Vec::new(),
+            output_ref: None,
+            started_at_ns: 0,
+            updated_at_ns: 0,
+        }));
+
+        let rendered = pane.status_line().to_string();
+        assert!(rendered.contains("run 7 running"));
+        assert!(rendered.contains("Ctrl-C interrupt"));
     }
 }

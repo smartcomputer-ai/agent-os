@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use crossterm::event::{Event, EventStream, KeyEventKind};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -15,7 +15,7 @@ use crate::chat::config::save_selected_session;
 use crate::chat::driver::{ChatSessionDriver, ChatSessionDriverOptions};
 use crate::chat::protocol::{
     ChatCommand, ChatDelta, ChatDraftOverrideMask, ChatDraftSettings, ChatErrorView, ChatEvent,
-    ChatMessageView, ChatPromptConfig, ChatToolMode,
+    ChatMessageView, ChatProgressStatus, ChatPromptConfig, ChatToolMode,
 };
 use crate::chat::tui::app_event::UiEvent;
 use crate::chat::tui::app_event_sender::AppEventSender;
@@ -190,6 +190,7 @@ pub(crate) struct ChatTuiApp {
     app_event_tx: AppEventSender,
     command_tx: mpsc::UnboundedSender<ChatCommand>,
     next_local_message: u64,
+    run_control_active: bool,
     terminal_clear_requested: bool,
     resize_reflow_requested: bool,
     last_render_width: Option<u16>,
@@ -211,6 +212,7 @@ impl ChatTuiApp {
             app_event_tx,
             command_tx,
             next_local_message: 0,
+            run_control_active: false,
             terminal_clear_requested: false,
             resize_reflow_requested: false,
             last_render_width: None,
@@ -238,6 +240,15 @@ impl ChatTuiApp {
                     ChatEvent::SessionSelected(summary) => {
                         self.options.session_id = summary.session_id.clone();
                     }
+                    ChatEvent::RunChanged(run) => {
+                        self.run_control_active = matches!(
+                            run.status,
+                            ChatProgressStatus::Queued | ChatProgressStatus::Running
+                        );
+                    }
+                    ChatEvent::StatusChanged(status) => {
+                        self.run_control_active = status_allows_run_control(&status.status);
+                    }
                     _ => {}
                 }
                 self.bottom_pane.apply_chat_event(&event);
@@ -259,6 +270,11 @@ impl ChatTuiApp {
     fn handle_terminal_event(&mut self, event: Event, frame_requester: &FrameRequester) {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
+                if is_ctrl_c(key) && self.run_control_active {
+                    self.interrupt_active_run(None);
+                    frame_requester.schedule_frame();
+                    return;
+                }
                 match self.bottom_pane.handle_key(key) {
                     BottomPaneAction::None => {}
                     BottomPaneAction::Changed => {
@@ -411,6 +427,18 @@ impl ChatTuiApp {
             SlashCommand::MaxTokens(SlashMaxTokens::Set(max_tokens)) => {
                 self.send_chat_command(ChatCommand::SetDraftMaxTokens { max_tokens });
             }
+            SlashCommand::Interrupt(reason) => {
+                self.interrupt_active_run(reason);
+            }
+            SlashCommand::Steer(text) => {
+                if text.trim().is_empty() {
+                    self.local_error("/steer requires an instruction");
+                } else if self.run_control_active {
+                    self.send_chat_command(ChatCommand::SteerRun { text });
+                } else {
+                    self.local_error("/steer is only available while a run is active");
+                }
+            }
         }
     }
 
@@ -443,6 +471,14 @@ impl ChatTuiApp {
                 message: format!("chat driver is not available: {error}"),
                 action: None,
             }));
+        }
+    }
+
+    fn interrupt_active_run(&mut self, reason: Option<String>) {
+        if self.run_control_active {
+            self.send_chat_command(ChatCommand::InterruptRun { reason });
+        } else {
+            self.local_error("/interrupt is only available while a run is active");
         }
     }
 
@@ -488,7 +524,15 @@ impl ChatTuiApp {
 }
 
 fn command_help() -> &'static str {
-    "commands: /new, /sessions, /model, /provider, /effort, /max-tokens, /help, /quit"
+    "commands: /new, /sessions, /model, /provider, /effort, /max-tokens, /interrupt, /steer, /help, /quit"
+}
+
+fn is_ctrl_c(key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+fn status_allows_run_control(status: &str) -> bool {
+    matches!(status, "running" | "cancelling" | "paused")
 }
 
 #[cfg(test)]
@@ -616,6 +660,100 @@ mod tests {
             ChatCommand::SetDraftReasoningEffort {
                 effort: Some(ReasoningEffort::High)
             }
+        );
+    }
+
+    #[test]
+    fn slash_interrupt_requires_active_run() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let mut app = ChatTuiApp::new(
+            ChatTuiViewOptions {
+                world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
+                session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+                show_tool_details: false,
+                selected_session_store: None,
+            },
+            app_event_tx,
+            command_tx,
+        );
+
+        app.submit_local_text("/interrupt wait".into());
+        assert!(command_rx.try_recv().is_err());
+        let event = rx.try_recv().expect("local error");
+        assert!(
+            matches!(event, UiEvent::Chat(ChatEvent::Error(error)) if error.message.contains("/interrupt is only available"))
+        );
+
+        app.run_control_active = true;
+        app.submit_local_text("/interrupt wait".into());
+        assert_eq!(
+            command_rx.try_recv().expect("interrupt command"),
+            ChatCommand::InterruptRun {
+                reason: Some("wait".into())
+            }
+        );
+    }
+
+    #[test]
+    fn slash_steer_requires_active_run() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let mut app = ChatTuiApp::new(
+            ChatTuiViewOptions {
+                world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
+                session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+                show_tool_details: false,
+                selected_session_store: None,
+            },
+            app_event_tx,
+            command_tx,
+        );
+
+        app.submit_local_text("/steer focus on tests".into());
+        assert!(command_rx.try_recv().is_err());
+        let event = rx.try_recv().expect("local error");
+        assert!(
+            matches!(event, UiEvent::Chat(ChatEvent::Error(error)) if error.message.contains("/steer is only available"))
+        );
+
+        app.run_control_active = true;
+        app.submit_local_text("/steer focus on tests".into());
+        assert_eq!(
+            command_rx.try_recv().expect("steer command"),
+            ChatCommand::SteerRun {
+                text: "focus on tests".into()
+            }
+        );
+    }
+
+    #[test]
+    fn ctrl_c_interrupts_active_run() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let mut app = ChatTuiApp::new(
+            ChatTuiViewOptions {
+                world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
+                session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
+                show_tool_details: false,
+                selected_session_store: None,
+            },
+            app_event_tx,
+            command_tx,
+        );
+        app.run_control_active = true;
+
+        app.handle_terminal_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            &FrameRequester::test_dummy(),
+        );
+
+        assert_eq!(
+            command_rx.try_recv().expect("interrupt command"),
+            ChatCommand::InterruptRun { reason: None }
         );
     }
 

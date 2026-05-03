@@ -13,6 +13,8 @@ pub(crate) enum SlashCommand {
     Provider(Option<String>),
     Effort(SlashEffort),
     MaxTokens(SlashMaxTokens),
+    Interrupt(Option<String>),
+    Steer(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +26,8 @@ pub(crate) enum SlashCommandKind {
     Provider,
     Effort,
     MaxTokens,
+    Interrupt,
+    Steer,
     Quit,
 }
 
@@ -86,6 +90,8 @@ impl SlashCommandKind {
             SlashCommandKind::Provider,
             SlashCommandKind::Effort,
             SlashCommandKind::MaxTokens,
+            SlashCommandKind::Interrupt,
+            SlashCommandKind::Steer,
             SlashCommandKind::Help,
             SlashCommandKind::Quit,
         ]
@@ -100,6 +106,8 @@ impl SlashCommandKind {
             SlashCommandKind::Provider => "provider",
             SlashCommandKind::Effort => "effort",
             SlashCommandKind::MaxTokens => "max-tokens",
+            SlashCommandKind::Interrupt => "interrupt",
+            SlashCommandKind::Steer => "steer",
             SlashCommandKind::Quit => "quit",
         }
     }
@@ -113,6 +121,8 @@ impl SlashCommandKind {
             SlashCommandKind::Provider => "choose the LLM provider",
             SlashCommandKind::Effort => "choose thinking effort for future runs",
             SlashCommandKind::MaxTokens => "choose max output tokens",
+            SlashCommandKind::Interrupt => "interrupt the active run",
+            SlashCommandKind::Steer => "send guidance to the active run",
             SlashCommandKind::Quit => "exit chat",
         }
     }
@@ -126,6 +136,8 @@ impl SlashCommandKind {
             SlashCommandKind::Provider => SlashCommand::Provider(None),
             SlashCommandKind::Effort => SlashCommand::Effort(SlashEffort::Pick),
             SlashCommandKind::MaxTokens => SlashCommand::MaxTokens(SlashMaxTokens::Pick),
+            SlashCommandKind::Interrupt => SlashCommand::Interrupt(None),
+            SlashCommandKind::Steer => SlashCommand::Steer(String::new()),
             SlashCommandKind::Quit => SlashCommand::Quit,
         }
     }
@@ -152,6 +164,13 @@ impl SlashCommandKind {
                     SlashCommand::MaxTokens(SlashMaxTokens::Set(parse_max_tokens(args)?))
                 }
             }
+            SlashCommandKind::Interrupt => SlashCommand::Interrupt(optional_value(args)),
+            SlashCommandKind::Steer => {
+                if args.is_empty() {
+                    anyhow::bail!("slash command /steer requires an instruction");
+                }
+                SlashCommand::Steer(args.to_string())
+            }
         })
     }
 
@@ -165,6 +184,8 @@ impl SlashCommandKind {
             "provider" => SlashCommandKind::Provider,
             "effort" | "thinking" => SlashCommandKind::Effort,
             "max-tokens" | "tokens" => SlashCommandKind::MaxTokens,
+            "interrupt" | "stop" | "cancel" => SlashCommandKind::Interrupt,
+            "steer" => SlashCommandKind::Steer,
             _ => return None,
         })
     }
@@ -232,6 +253,24 @@ mod tests {
             Some(SlashCommand::Sessions(Some(
                 "018f2a66-31cc-7b25-a4f7-37e3310fdc6c".into()
             )))
+        );
+        assert_eq!(
+            parse_slash_command("/interrupt wrong direction").unwrap(),
+            Some(SlashCommand::Interrupt(Some("wrong direction".into())))
+        );
+        assert_eq!(
+            parse_slash_command("/steer focus on tests").unwrap(),
+            Some(SlashCommand::Steer("focus on tests".into()))
+        );
+    }
+
+    #[test]
+    fn steer_requires_instruction() {
+        let error = parse_slash_command("/steer").expect_err("steer needs text");
+        assert!(
+            error
+                .to_string()
+                .contains("slash command /steer requires an instruction")
         );
     }
 
