@@ -9,7 +9,9 @@ use ratatui::layout::{Position, Rect};
 use ratatui::text::Line;
 use tokio::sync::mpsc;
 
+use crate::GlobalOpts;
 use crate::chat::client::ChatControlClient;
+use crate::chat::config::save_selected_session;
 use crate::chat::driver::{ChatSessionDriver, ChatSessionDriverOptions};
 use crate::chat::protocol::{
     ChatCommand, ChatDelta, ChatDraftOverrideMask, ChatDraftSettings, ChatErrorView, ChatEvent,
@@ -36,6 +38,13 @@ pub(crate) struct ChatTuiShellOptions {
     pub(crate) workdir: String,
     pub(crate) from: Option<u64>,
     pub(crate) show_tool_details: bool,
+    pub(crate) selected_session_store: Option<SelectedSessionStore>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SelectedSessionStore {
+    pub(crate) global: GlobalOpts,
+    pub(crate) world_id: String,
 }
 
 pub(crate) async fn run_shell(options: ChatTuiShellOptions) -> Result<()> {
@@ -43,6 +52,7 @@ pub(crate) async fn run_shell(options: ChatTuiShellOptions) -> Result<()> {
         world_id: options.client.world_id().to_string(),
         session_id: options.session_id.clone(),
         show_tool_details: options.show_tool_details,
+        selected_session_store: options.selected_session_store,
     };
     let (driver, initial_events) = ChatSessionDriver::open(
         options.client,
@@ -170,6 +180,7 @@ pub(crate) struct ChatTuiViewOptions {
     pub(crate) world_id: String,
     pub(crate) session_id: String,
     pub(crate) show_tool_details: bool,
+    pub(crate) selected_session_store: Option<SelectedSessionStore>,
 }
 
 pub(crate) struct ChatTuiApp {
@@ -217,6 +228,12 @@ impl ChatTuiApp {
                     ChatEvent::HistoryReset { session_id } => {
                         self.options.session_id = session_id.clone();
                         self.terminal_clear_requested = true;
+                        if let Some(store) = self.options.selected_session_store.as_ref()
+                            && let Err(error) =
+                                save_selected_session(&store.global, &store.world_id, session_id)
+                        {
+                            self.local_error(format!("failed to save selected session: {error}"));
+                        }
                     }
                     ChatEvent::SessionSelected(summary) => {
                         self.options.session_id = summary.session_id.clone();
@@ -483,6 +500,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use tokio::sync::mpsc;
 
+    use crate::chat::config::cached_selected_session;
     use crate::chat::protocol::{
         ChatConnectionInfo, ChatRunView, ChatSessionSummary, ChatSettingsView, ChatStatus,
         ChatTurn, run_status,
@@ -498,6 +516,7 @@ mod tests {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
                 show_tool_details: false,
+                selected_session_store: None,
             },
             app_event_tx,
             command_tx,
@@ -550,6 +569,7 @@ mod tests {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
                 show_tool_details: false,
+                selected_session_store: None,
             },
             app_event_tx,
             command_tx,
@@ -583,6 +603,7 @@ mod tests {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
                 show_tool_details: false,
+                selected_session_store: None,
             },
             app_event_tx,
             command_tx,
@@ -608,6 +629,7 @@ mod tests {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
                 show_tool_details: false,
+                selected_session_store: None,
             },
             app_event_tx,
             command_tx,
@@ -644,6 +666,7 @@ mod tests {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
                 show_tool_details: false,
+                selected_session_store: None,
             },
             app_event_tx,
             command_tx,
@@ -687,6 +710,7 @@ mod tests {
                 world_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".into(),
                 session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".into(),
                 show_tool_details: false,
+                selected_session_store: None,
             },
             app_event_tx,
             command_tx,
@@ -739,6 +763,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn history_reset_persists_selected_session() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let config_path = temp.path().join("cli.json");
+        let global = test_global_with_config(config_path);
+        let world_id = "018f2a66-31cc-7b25-a4f7-37e3310fdc6a".to_string();
+        let session_id = "018f2a66-31cc-7b25-a4f7-37e3310fdc6b".to_string();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        let (command_tx, _command_rx) = mpsc::unbounded_channel();
+        let mut app = ChatTuiApp::new(
+            ChatTuiViewOptions {
+                world_id: world_id.clone(),
+                session_id: "018f2a66-31cc-7b25-a4f7-37e3310fdc6c".into(),
+                show_tool_details: false,
+                selected_session_store: Some(SelectedSessionStore {
+                    global: global.clone(),
+                    world_id: world_id.clone(),
+                }),
+            },
+            app_event_tx,
+            command_tx,
+        );
+
+        app.handle_ui_event(
+            UiEvent::Chat(ChatEvent::HistoryReset {
+                session_id: session_id.clone(),
+            }),
+            &FrameRequester::test_dummy(),
+        );
+
+        assert_eq!(
+            cached_selected_session(&global, &world_id).expect("selected session"),
+            Some(session_id)
+        );
+    }
+
     fn pad(line: &str) -> String {
         format!("{line:<80}")
     }
@@ -748,6 +809,23 @@ mod tests {
             .into_iter()
             .map(|line| format!("\"{line}\"\n"))
             .collect()
+    }
+
+    fn test_global_with_config(config: std::path::PathBuf) -> crate::GlobalOpts {
+        crate::GlobalOpts {
+            profile: None,
+            api: None,
+            token: None,
+            header: Vec::new(),
+            universe: None,
+            world: None,
+            config: Some(config),
+            json: false,
+            pretty: false,
+            quiet: false,
+            no_meta: false,
+            verbose: false,
+        }
     }
 
     fn fixture_events(options: &ChatTuiViewOptions) -> Vec<ChatEvent> {

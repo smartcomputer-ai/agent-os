@@ -2,6 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::chat::protocol::{ChatProgressStatus, ChatToolCallView, ChatToolChainView};
+use crate::chat::tui::markdown::append_markdown;
 use crate::chat::tui::theme::COMPOSER_BG;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +65,10 @@ impl ChatCell for MessageCell {
     }
 
     fn display_lines(&self, width: u16, _state: &CellRenderState) -> Vec<Line<'static>> {
+        if self.role == "assistant" {
+            return assistant_message_lines(&self.content, width);
+        }
+
         let pending = self.role == "user_pending";
         let user_like = matches!(self.role.as_str(), "user" | "user_pending");
         let row_bg = user_like.then_some(COMPOSER_BG);
@@ -118,6 +123,29 @@ impl ChatCell for MessageCell {
         }
         lines
     }
+}
+
+fn assistant_message_lines(content: &str, width: u16) -> Vec<Line<'static>> {
+    let marker_style = Style::default().fg(Color::DarkGray);
+    let mut rendered = Vec::new();
+    append_markdown(
+        content,
+        Some(usize::from(width.saturating_sub(2).max(1))),
+        &mut rendered,
+    );
+    if rendered.is_empty() {
+        rendered.push(Line::default());
+    }
+
+    let mut lines = Vec::new();
+    for (index, line) in rendered.into_iter().enumerate() {
+        let prefix = if index == 0 { "• " } else { "  " };
+        let mut spans = vec![Span::styled(prefix, marker_style)];
+        spans.extend(line.spans);
+        lines.push(Line::from(spans).style(line.style));
+    }
+    lines.push(Line::default());
+    lines
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -548,6 +576,44 @@ mod tests {
 
         assert_eq!(lines[0].spans[0].content.as_ref(), "• ");
         assert_eq!(lines[0].spans[1].content.as_ref(), "pong");
+    }
+
+    #[test]
+    fn assistant_message_renders_markdown_blocks() {
+        let cell = MessageCell::new(
+            "assistant:1",
+            "assistant",
+            "# Title\n\n- one\n- two\n\n```rust\nfn main() {}\n```",
+        );
+        let rendered = cell
+            .display_lines(80, &CellRenderState)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(rendered.iter().any(|line| line == "• # Title"));
+        assert!(rendered.iter().any(|line| line == "  - one"));
+        assert!(rendered.iter().any(|line| line == "  - two"));
+        assert!(rendered.iter().any(|line| line == "  ```rust"));
+        assert!(rendered.iter().any(|line| line == "  fn main() {}"));
+    }
+
+    #[test]
+    fn assistant_message_rerenders_markdown_at_width() {
+        let cell = MessageCell::new(
+            "assistant:1",
+            "assistant",
+            "- alpha beta gamma delta epsilon",
+        );
+        let rendered = cell
+            .display_lines(16, &CellRenderState)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(rendered.len() > 2);
+        assert!(rendered[0].starts_with("• - "));
+        assert!(rendered[1].starts_with("    "));
     }
 
     #[test]

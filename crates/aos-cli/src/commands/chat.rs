@@ -13,7 +13,7 @@ use crate::chat::config::{
 use crate::chat::protocol::{
     ChatDraftOverrideMask, ChatPromptConfig, ChatPromptProfile, ChatToolMode,
 };
-use crate::chat::tui::{ChatTuiShellOptions, run_shell};
+use crate::chat::tui::{ChatTuiShellOptions, SelectedSessionStore, run_shell};
 use crate::chat::{
     ChatControlClient, ChatDraftSettings, ChatSessionDriver, ChatSessionDriverOptions,
     parse_reasoning_effort,
@@ -198,6 +198,10 @@ async fn handle_open(global: &GlobalOpts, output: OutputOpts, args: ChatOpenArgs
         workdir,
         from: args.from,
         show_tool_details: args.show_tool_details,
+        selected_session_store: Some(SelectedSessionStore {
+            global: global.clone(),
+            world_id,
+        }),
     })
     .await
 }

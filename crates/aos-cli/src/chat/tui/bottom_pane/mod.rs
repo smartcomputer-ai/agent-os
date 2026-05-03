@@ -191,6 +191,12 @@ impl BottomPaneState {
                 self.current_session_id = Some(session_id.clone());
                 self.settings = Some(settings.clone());
             }
+            ChatEvent::GapObserved { .. } => {
+                self.status = "journal gap; refreshed".into();
+            }
+            ChatEvent::Reconnecting { from, .. } => {
+                self.status = format!("reconnecting journal #{from}");
+            }
             ChatEvent::Error(error) => {
                 self.status = error.message.clone();
             }
@@ -462,5 +468,30 @@ mod tests {
             .unwrap();
 
         assert!(format!("{}", terminal.backend()).contains("visible"));
+    }
+
+    #[test]
+    fn reconnect_and_gap_events_update_status_line() {
+        let mut pane = BottomPaneState::default();
+
+        pane.apply_chat_event(&ChatEvent::Reconnecting {
+            from: 42,
+            reason: "stream closed".into(),
+        });
+        assert!(
+            pane.status_line()
+                .to_string()
+                .contains("reconnecting journal #42")
+        );
+
+        pane.apply_chat_event(&ChatEvent::GapObserved {
+            requested_from: 40,
+            retained_from: 45,
+        });
+        assert!(
+            pane.status_line()
+                .to_string()
+                .contains("journal gap; refreshed")
+        );
     }
 }

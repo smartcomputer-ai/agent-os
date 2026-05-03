@@ -127,14 +127,16 @@ impl TranscriptState {
                 retained_from,
             } => {
                 self.replace_or_push_committed(Box::new(NoticeCell::new(
-                    format!("gap:{requested_from}"),
-                    format!("journal gap requested {requested_from}, retained {retained_from}"),
+                    "journal-gap",
+                    format!(
+                        "journal gap  requested #{requested_from}, retained from #{retained_from}; refreshed snapshot"
+                    ),
                 )));
             }
             ChatEvent::Reconnecting { from, reason } => {
                 self.replace_or_push_committed(Box::new(NoticeCell::new(
-                    "reconnecting",
-                    format!("reconnecting from {from}: {reason}"),
+                    "journal-reconnecting",
+                    format!("journal reconnecting from #{from}: {reason}"),
                 )));
             }
             ChatEvent::Error(error) => {
@@ -440,6 +442,36 @@ mod tests {
 
         assert!(state.drain_pending_history_lines(80).is_empty());
         assert!(state.cells.is_empty());
+    }
+
+    #[test]
+    fn reconnect_and_gap_notices_use_stable_cells() {
+        let mut state = TranscriptState::default();
+        state.apply_chat_event(ChatEvent::Reconnecting {
+            from: 12,
+            reason: "stream closed".into(),
+        });
+        state.apply_chat_event(ChatEvent::GapObserved {
+            requested_from: 9,
+            retained_from: 20,
+        });
+        state.apply_chat_event(ChatEvent::GapObserved {
+            requested_from: 10,
+            retained_from: 21,
+        });
+
+        assert_eq!(state.cells.len(), 2);
+        assert_eq!(state.cells[0].id(), "journal-reconnecting");
+        assert_eq!(state.cells[1].id(), "journal-gap");
+        let history = state
+            .reflow_history_lines(80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(history.contains("journal reconnecting from #12: stream closed"));
+        assert!(history.contains("journal gap  requested #10, retained from #21"));
+        assert!(!history.contains("requested #9"));
     }
 
     #[test]
