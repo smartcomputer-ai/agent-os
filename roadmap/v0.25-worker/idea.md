@@ -301,7 +301,21 @@ state_delta_ref: sha256:...
 new_state_root: sha256:...
 ```
 
-The worker should write state directly to CAS, and the coordinator should only commit the root or delta reference.
+Here `state_ref`, `state_delta_ref`, and `state_root` should be understood as **cell-scoped**
+commitments, not whole-workflow commitments.
+
+For keyed workflows, the unit is:
+
+```text
+(workflow, key)
+```
+
+For non-keyed workflows, the unit is the sentinel empty-key cell. The per-workflow `CellIndex` root
+can still be materialized only at snapshot/checkpoint time. Do not require a new root for the entire
+workflow after every event.
+
+The worker can write state directly to CAS, and the coordinator can commit only the cell root, patch,
+or delta reference.
 
 That fits the existing AOS backend model well: the backend contract already separates the journal from CAS/blob storage, and CAS is logically just `hash -> bytes` with reads verified against the requested hash.  The current workflow design also already has the right machinery in spirit: keyed workflow state uses a content-addressed `CellIndex`, with hot cache, dirty delta layer, CAS spill, and snapshot roots. 
 
@@ -309,38 +323,126 @@ The non-negotiable part is this:
 
 > The coordinator does not need state bytes, but the world journal needs a durable commitment to the state transition before progress is considered committed.
 
-That commitment can be small. It does not need to be full state.
+That commitment can be small. It does not need to be full state. But the exact shape matters for
+performance.
+
+The current AOS performance model is:
+
+```text
+journal input records
+hot cell state / dirty delta in memory
+periodic CellIndex materialization on snapshot
+replay recomputes uncheckpointed state from journal inputs
+```
+
+That model can survive in the new architecture, but only for a replayable lane. If a runner is
+strictly deterministic, the journal does not need per-step state commitments because replay can
+recompute the same workflow outputs from the same inputs.
+
+If a runner is arbitrary or non-deterministic, the journal must record decision evidence per
+committed step. Otherwise a crash after effect publication can leave no recoverable explanation for
+the state transition or emitted effects.
 
 Possible state strategies:
 
 ```text
-state_root_each_step:
-  worker writes changed CAS nodes and returns new root hash
-  journal commits new root
-  simple and strong
-
-cas_delta:
-  worker writes a compact state delta to CAS
-  journal commits delta ref
-  snapshots periodically materialize full roots
-  good for large state
-
 derived_strict:
   journal records events/effects/receipts
   deterministic runner can recompute state
   snapshots are periodic optimization
-  strongest when runner is actually deterministic
+  this preserves the current high-throughput occasional-persistence model
 
-decision_log:
-  journal records workflow decisions and state commitments
-  replay applies decisions rather than trusting code re-execution
-  best for arbitrary runtimes
+decision_patch:
+  runner returns a canonical structural patch for one cell
+  journal records the patch inline, or a CAS ref if large
+  replay applies patches from the last snapshot
+  snapshots periodically materialize patches into full cell state / CellIndex roots
+  best first default for non-strict external runners
+
+cas_delta_or_cell_root:
+  worker writes compact cell deltas or changed CAS nodes
+  journal commits delta/root refs for the advanced cell
+  stronger validation, more storage machinery, likely slower than decision_patch
+
+state_root_each_step:
+  worker writes changed CAS nodes and returns a new cell root/ref
+  journal commits the new cell commitment
+  simple and strong, but still a per-step persistence cost
 
 hot_ephemeral:
   worker keeps state in memory and only occasionally checkpoints
-  fast, but not enough for committed AOS progress unless the intervening
-  transition evidence is recoverable from journal
+  fast, but not sufficient as a committed AOS mode unless the intervening
+  transitions are recoverable from journal by strict replay or decision patches
 ```
+
+### Decision patches
+
+A decision patch is not a database update language and not a byte-range diff. It is an internal,
+canonical redo record for one workflow cell.
+
+It should be schema/path based:
+
+```text
+CellDecisionPatch:
+  workflow: aos.agent/SessionWorkflow@1
+  key: <session id>
+  base_state_hash: sha256:...
+  ops:
+    - replace /lifecycle = Running
+    - replace /active_run_id = "run-7"
+    - replace /next_run_seq = 8
+    - set     /current_run = <canonical RunState cbor or ref>
+    - append  /context_state/transcript_ledger/entries expected_len=12 items=[...]
+    - append  /context_state/active_window_items expected_len=12 items=[...]
+  emitted_events: [...]
+  emitted_effects: [...]
+  runner_signature: ...
+```
+
+Useful operations:
+
+```text
+replace(path, old_hash?, new_value_or_ref)
+clear(path, old_hash?)
+map_put(path, key, old_hash?, value_or_ref)
+map_delete(path, key, old_hash?)
+list_append(path, expected_len, items_or_ref)
+list_truncate(path, expected_len, new_len)
+list_splice(path, start, delete_count, insert_items_or_ref)
+```
+
+The first implementation can produce patches by automatic structural diff:
+
+```text
+1. runner has old hot state
+2. runner executes normal reducer code and produces new typed state
+3. runner canonicalizes old and new state as AIR values
+4. schema-aware diff emits field/map/list operations
+5. large inserted values or subtrees spill to CAS
+6. coordinator journals the patch and emitted decisions
+```
+
+This handles complex structures like `aos-agent` without hand-written deltas. Agent state contains
+nested runs, traces, pending effects, context state, tool registries, queues, and active batches, but
+many large artifacts are already hash refs. Most transitions are field replacements, map updates,
+bounded trace changes, and append-heavy ledger/window updates.
+
+Later, SDK helpers can record patch operations while mutating state. For example, helpers that append
+message refs, push trace entries, begin pending effects, or settle tool batches can emit patch ops
+directly. That avoids cloning/diffing very large state on hot paths.
+
+Decision patches are a redo log for workflow cells, not a general database. Keep the boundary clear:
+
+```text
+no arbitrary user mutation language
+no query planner
+no general secondary indexes
+no cross-cell transactions
+no SQL/document-store ambitions
+```
+
+The coordinator only needs enough structure to verify ordering, apply replay, compact patches into
+snapshots, and audit emitted decisions.
 
 The dangerous version is:
 
@@ -360,11 +462,12 @@ The safe version is:
 1. coordinator leases WorkflowTask to worker
 2. worker loads hot state or CAS state
 3. worker computes transition
-4. worker writes changed state/delta objects to CAS
-5. worker returns only refs + emitted events/effects
-6. coordinator verifies refs exist and match contract expectations
-7. coordinator journals WorkflowAdvanced
-8. only after durable flush does coordinator publish effects
+4. worker produces a strict output, decision patch, or CAS cell delta/root
+5. worker writes large patch values/deltas to CAS when needed
+6. worker returns refs/patches + emitted events/effects
+7. coordinator verifies base hash, patch/ref availability, and contract expectations
+8. coordinator journals WorkflowAdvanced
+9. only after durable flush does coordinator publish effects
 ```
 
 This preserves the effect invariant already central to AOS: external work is recorded durably before execution, and adapters/workers do not mutate world state directly. 
@@ -788,14 +891,14 @@ WorkflowTask:
   contract hash
   key
   input event or receipt
-  prior state root/ref
+  prior cell state hash/ref
   journal height
   task token
 
 WorkflowDecision:
   task token
-  prior state root/ref
-  new state root/ref or delta ref
+  prior cell state hash/ref
+  strict output, decision patch, or new cell state/delta ref
   emitted domain events
   emitted effect intents
   query/view invalidations maybe
@@ -844,32 +947,39 @@ I would sequence it like this:
    defschema, defworkflow, defeffect, routing, queries
    remove defmodule, impl, entrypoint, defsecret binding
 
-2. Define WorkflowDecision and EffectReceipt protocols:
+2. Define two workflow admission lanes:
+   derived_strict for replayable runners and today's occasional-persistence model
+   decision_patch for non-strict external runners
+
+3. Define WorkflowDecision and EffectReceipt protocols:
    refs, not large bytes
-   CAS-first payload/state handling
+   cell-scoped state commitments
+   canonical decision patches
    runner signatures
    contract hashes
 
-3. Build Rust workflow runner SDK:
+4. Build Rust workflow runner SDK:
    reducer-style first
    hot state cache
-   CAS state root/delta writes
+   automatic structural patch diff
+   optional CAS cell delta/root writes
    query handlers
 
-4. Build coordinator task service:
+5. Build coordinator task service:
    long-poll or stream workers
    leases
    binding registry
-   state-root commitment
+   strict replay lane
+   decision patch admission
    post-flush effect publication
 
-5. Add effect worker SDK:
+6. Add effect worker SDK:
    Rust first
    then TypeScript/Python
 
-6. Add strict/checked verification later:
-   deterministic WASM can become one runner type
-   not the foundation of the entire architecture
+7. Add checked/audit verification later:
+   rerun non-strict decisions for drift detection
+   keep deterministic WASM as one replayable runner type
 ```
 
 ## Bottom line
