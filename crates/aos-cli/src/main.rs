@@ -1,4 +1,5 @@
 mod authoring;
+mod chat;
 mod client;
 mod commands;
 mod config;
@@ -140,5 +141,48 @@ mod tests {
         ])
         .expect("parse air check");
         assert!(matches!(cli.command, Command::Air(_)));
+    }
+
+    #[test]
+    fn chat_new_parse_accepts_draft_settings() {
+        let cli = Cli::try_parse_from([
+            "aos",
+            "chat",
+            "--new",
+            "--provider",
+            "openai-responses",
+            "--model",
+            "gpt-5.5",
+            "--effort",
+            "medium",
+        ])
+        .expect("parse chat new");
+        assert!(matches!(cli.command, Command::Chat(_)));
+    }
+
+    #[test]
+    fn chat_new_parse_accepts_tool_options() {
+        let cli = Cli::try_parse_from([
+            "aos",
+            "chat",
+            "--new",
+            "--tools",
+            "workspace",
+            "--workdir",
+            ".",
+        ])
+        .expect("parse chat tool options");
+        assert!(matches!(cli.command, Command::Chat(_)));
+    }
+
+    #[test]
+    fn chat_new_parse_accepts_prompt_options() {
+        let cli = Cli::try_parse_from(["aos", "chat", "--new", "--prompt-profile", "local-coding"])
+            .expect("parse prompt profile");
+        assert!(matches!(cli.command, Command::Chat(_)));
+
+        let cli = Cli::try_parse_from(["aos", "chat", "--new", "--prompt", "be concise"])
+            .expect("parse inline prompt");
+        assert!(matches!(cli.command, Command::Chat(_)));
     }
 }

@@ -32,6 +32,22 @@ pub(crate) fn build_receipt<T: serde::Serialize>(
     })
 }
 
+pub(crate) fn normalize_host_fs_read_encoding(
+    encoding: Option<&str>,
+) -> Result<&'static str, String> {
+    let Some(encoding) = encoding else {
+        return Ok("utf8");
+    };
+    let trimmed = encoding.trim();
+    if trimmed.eq_ignore_ascii_case("utf8") || trimmed.eq_ignore_ascii_case("utf-8") {
+        return Ok("utf8");
+    }
+    if trimmed.eq_ignore_ascii_case("bytes") {
+        return Ok("bytes");
+    }
+    Err(format!("unsupported encoding '{encoding}'"))
+}
+
 pub(crate) fn decode_host_fs_write_file_params(
     bytes: &[u8],
 ) -> anyhow::Result<HostFsWriteFileParams> {

@@ -8,6 +8,7 @@ mod core;
 mod domains;
 mod journal;
 mod layers;
+mod observe;
 mod runtime;
 mod scheduler;
 mod supervisor;

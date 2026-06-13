@@ -4,7 +4,7 @@
 **Effort**: High  
 **Risk if deferred**: High (context, traces, interruption, and Demiurge will land against the wrong lifecycle boundary)  
 **Status**: Core SDK and Demiurge integration complete; `aos-harness-py` E2E fixture still pending  
-**Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`
+**Depends on**: `roadmap/v0.23-agent/p4-tool-bundle-refactoring.md`
 
 ## Goal
 

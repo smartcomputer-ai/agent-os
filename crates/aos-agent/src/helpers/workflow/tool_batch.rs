@@ -102,6 +102,7 @@ pub(super) fn run_tool_batch(
         pending_effects: PendingEffectSet::new(),
         execution,
         llm_results: BTreeMap::new(),
+        source_output_ref: state.last_output_ref.clone(),
         results_ref: None,
     });
     let mut refs = vec![trace_ref(
@@ -984,6 +985,14 @@ pub(super) fn take_completed_tool_batch(state: &mut SessionState) -> Option<Comp
         .collect::<Vec<_>>();
     let results_ref = hash_cbor(&ordered_results);
     batch.results_ref = Some(results_ref.clone());
+    if let Some(run) = state.current_run.as_mut()
+        && !run
+            .completed_tool_batches
+            .iter()
+            .any(|completed| completed.tool_batch_id == batch.tool_batch_id)
+    {
+        run.completed_tool_batches.push(batch.clone());
+    }
     Some(CompletedToolBatch {
         tool_batch_id: batch.tool_batch_id.clone(),
         accepted_calls,

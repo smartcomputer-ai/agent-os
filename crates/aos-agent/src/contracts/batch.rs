@@ -40,6 +40,9 @@ pub struct ActiveToolBatch {
     #[aos(schema_ref = PendingBatch<String>)]
     pub execution: PendingBatch<String>,
     pub llm_results: BTreeMap<String, super::ToolCallLlmResult>,
+    #[serde(default)]
+    #[aos(air_type = "hash")]
+    pub source_output_ref: Option<String>,
     #[aos(air_type = "hash")]
     pub results_ref: Option<String>,
 }

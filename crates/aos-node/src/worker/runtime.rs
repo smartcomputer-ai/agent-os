@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -5,18 +6,19 @@ use std::time::Duration;
 use aos_air_types::{AirNode, Manifest};
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effect_types::HashRef;
+use aos_kernel::journal::{JournalKind, JournalRecord};
 use aos_kernel::{Consistency, StateReader, Store, WorldInput};
 use aos_node::control::{
     AcceptWaitQuery, DefGetResponse, DefsListResponse, HeadInfoResponse, JournalEntriesResponse,
-    JournalEntryResponse, ManifestResponse, ManifestSummary, RawJournalEntriesResponse,
-    RawJournalEntryResponse, RouteSummary, StateCellSummary, StateGetResponse, StateListResponse,
-    WorkspaceResolveResponse,
+    JournalEntryResponse, JournalStreamQuery, JournalWaitResponse, ManifestResponse,
+    ManifestSummary, RawJournalEntriesResponse, RawJournalEntryResponse, RouteSummary,
+    StateCellSummary, StateGetResponse, StateListResponse, WorkspaceResolveResponse,
 };
 use aos_node::{
     BlobBackend, CborPayload, CheckpointBackend, CommandIngress, CommandRecord, CreateWorldRequest,
     EffectRuntimeEvent, HostControl, JournalBackend, LocalStatePaths, ReceiptIngress,
     SubmissionEnvelope, SubmissionPayload, UniverseId, WorldConfig, WorldId, WorldInventoryBackend,
-    WorldLogFrame, validate_create_world_request,
+    WorldJournalAdvance, WorldLogFrame, validate_create_world_request,
 };
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -250,6 +252,7 @@ impl HostedWorkerRuntime {
                 checkpoints: Default::default(),
             },
             state: Default::default(),
+            observer: Default::default(),
             effect_event_tx,
             effect_event_rx: Some(effect_event_rx),
             shared_effect_runtimes: Default::default(),
@@ -334,6 +337,7 @@ impl HostedWorkerRuntime {
                 checkpoints: Default::default(),
             },
             state: Default::default(),
+            observer: Default::default(),
             effect_event_tx,
             effect_event_rx: Some(effect_event_rx),
             shared_effect_runtimes: Default::default(),
@@ -392,6 +396,7 @@ impl HostedWorkerRuntime {
                 checkpoints: Default::default(),
             },
             state: Default::default(),
+            observer: Default::default(),
             effect_event_tx,
             effect_event_rx: Some(effect_event_rx),
             shared_effect_runtimes: Default::default(),
@@ -1014,6 +1019,110 @@ impl HostedWorkerRuntime {
         .map_err(WorkerError::LogFirst)
     }
 
+    pub fn subscribe_world_journal(
+        &self,
+    ) -> Result<tokio::sync::broadcast::Receiver<WorldJournalAdvance>, WorkerError> {
+        Ok(self.lock_core()?.observer.subscribe())
+    }
+
+    pub fn durable_journal_tail(
+        &self,
+        universe_id: UniverseId,
+        world_id: WorldId,
+        query: JournalStreamQuery,
+    ) -> Result<JournalWaitResponse, WorkerError> {
+        let mut core = self.lock_core()?;
+        core.require_default_universe(universe_id)?;
+        JournalBackend::refresh_world(&mut core.infra.journal, world_id)
+            .map_err(WorkerError::LogFirst)?;
+
+        let head = JournalBackend::durable_head(&core.infra.journal, world_id)
+            .map_err(WorkerError::LogFirst)?
+            .next_world_seq;
+        let all_frames = JournalBackend::world_frames(&core.infra.journal, world_id)
+            .map_err(WorkerError::LogFirst)?;
+        let known = head > 0
+            || core.state.owned_worlds.contains(&world_id)
+            || core.state.registered_worlds.contains_key(&world_id)
+            || !all_frames.is_empty();
+        if !known {
+            return Err(WorkerError::UnknownWorld {
+                universe_id,
+                world_id,
+            });
+        }
+
+        let retained_from = all_frames
+            .first()
+            .map(|frame| frame.world_seq_start)
+            .unwrap_or(head);
+        let requested_from = query.from;
+        let mut from = requested_from.unwrap_or(head);
+        let gap = from < retained_from;
+        if gap {
+            from = retained_from;
+        }
+
+        let source_frames = if from == 0 {
+            all_frames
+        } else {
+            JournalBackend::world_tail_frames(
+                &core.infra.journal,
+                world_id,
+                from.saturating_sub(1),
+                None,
+            )
+            .map_err(WorkerError::LogFirst)?
+        };
+        let kinds = normalize_journal_kinds(&query.kind);
+        let limit = query.limit.max(1) as usize;
+        let mut rows = Vec::new();
+        let mut next_from = from;
+        for frame in source_frames {
+            for (offset, record) in frame.records.iter().enumerate() {
+                let seq = frame.world_seq_start + offset as u64;
+                if seq < from {
+                    continue;
+                }
+                next_from = seq.saturating_add(1);
+                let kind = journal_kind_name(record.kind()).to_owned();
+                if !kinds.is_empty() && !kinds.contains(&kind) {
+                    continue;
+                }
+                rows.push(JournalEntryResponse {
+                    seq,
+                    kind,
+                    record: journal_record_json(record),
+                });
+                if rows.len() >= limit {
+                    return Ok(JournalWaitResponse {
+                        world_id,
+                        from,
+                        requested_from: gap.then_some(requested_from.unwrap_or(from)),
+                        retained_from,
+                        head,
+                        next_from,
+                        timed_out: false,
+                        gap,
+                        entries: rows,
+                    });
+                }
+            }
+        }
+
+        Ok(JournalWaitResponse {
+            world_id,
+            from,
+            requested_from: gap.then_some(requested_from.unwrap_or(from)),
+            retained_from,
+            head,
+            next_from,
+            timed_out: false,
+            gap,
+            entries: rows,
+        })
+    }
+
     pub fn refresh_journal_source(&self) -> Result<(), WorkerError> {
         let mut core = self.lock_core()?;
         JournalBackend::refresh_all(&mut core.infra.journal).map_err(WorkerError::LogFirst)?;
@@ -1539,6 +1648,43 @@ impl HostedWorkerRuntime {
     pub(super) fn lock_core(&self) -> Result<MutexGuard<'_, HostedWorkerCore>, WorkerError> {
         self.core.lock().map_err(|_| WorkerError::RuntimePoisoned)
     }
+}
+
+fn normalize_journal_kinds(kinds: &[String]) -> BTreeSet<String> {
+    kinds
+        .iter()
+        .map(|kind| kind.trim().to_ascii_lowercase())
+        .filter(|kind| !kind.is_empty())
+        .collect()
+}
+
+fn journal_kind_name(kind: JournalKind) -> &'static str {
+    match kind {
+        JournalKind::DomainEvent => "domain_event",
+        JournalKind::EffectIntent => "effect_intent",
+        JournalKind::EffectReceipt => "effect_receipt",
+        JournalKind::StreamFrame => "stream_frame",
+        JournalKind::Manifest => "manifest",
+        JournalKind::Snapshot => "snapshot",
+        JournalKind::Governance => "governance",
+        JournalKind::PlanStarted => "plan_started",
+        JournalKind::PlanResult => "plan_result",
+        JournalKind::PlanEnded => "plan_ended",
+        JournalKind::Custom => "custom",
+    }
+}
+
+fn journal_record_json(record: &JournalRecord) -> serde_json::Value {
+    serde_cbor::value::to_value(record)
+        .ok()
+        .and_then(|value| serde_json::to_value(value).ok())
+        .unwrap_or_else(|| {
+            serde_cbor::to_vec(record)
+                .map(
+                    |payload| serde_json::json!({ "payload_b64": BASE64_STANDARD.encode(payload) }),
+                )
+                .unwrap_or_else(|_| serde_json::json!({}))
+        })
 }
 
 fn manifest_summary(

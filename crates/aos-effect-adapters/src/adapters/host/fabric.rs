@@ -36,7 +36,7 @@ use super::output::{
 };
 use super::shared::{
     build_receipt, decode_host_fs_apply_patch_params, decode_host_fs_write_file_params,
-    now_wallclock_ns, resolve_file_content, resolve_patch_text,
+    normalize_host_fs_read_encoding, now_wallclock_ns, resolve_file_content, resolve_patch_text,
 };
 
 const HOST_SESSION_OPEN_FABRIC: &str = "host.session.open.fabric";
@@ -549,7 +549,10 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsReadFi
             Ok(bytes) => bytes,
             Err(err) => return fabric_fs_read_error(intent, "invalid_payload", err),
         };
-        let encoding = params.encoding.as_deref().unwrap_or("utf8");
+        let encoding = match normalize_host_fs_read_encoding(params.encoding.as_deref()) {
+            Ok(encoding) => encoding,
+            Err(message) => return fabric_fs_read_error(intent, "invalid_encoding", message),
+        };
         let content = match encoding {
             "bytes" => {
                 match materialize_binary_output(self.store.as_ref(), mode, &bytes, self.output_cfg)
@@ -579,13 +582,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for FabricHostFsReadFi
                     }
                 }
             }
-            other => {
-                return fabric_fs_read_error(
-                    intent,
-                    "invalid_encoding",
-                    format!("unsupported encoding '{other}'"),
-                );
-            }
+            _ => unreachable!("normalize_host_fs_read_encoding returned unknown encoding"),
         };
         let payload = HostFsReadFileReceipt {
             status: "ok".to_string(),

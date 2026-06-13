@@ -451,6 +451,7 @@ mod tests {
                 )]
                 .into_iter()
                 .collect(),
+                chat: Default::default(),
             },
         )
         .expect("save config");

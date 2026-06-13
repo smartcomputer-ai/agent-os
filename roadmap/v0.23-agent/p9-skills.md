@@ -4,7 +4,7 @@
 **Effort**: Medium  
 **Risk if deferred**: Medium (worlds will keep inventing ad hoc prompt bundles and repo-instruction loading, but the core session/context/trace seams can land first)  
 **Status**: Complete for v0.30 SDK scope; full skill descriptors, resolvers, source loaders, and harness proof are deferred implementation-layer work  
-**Depends on**: `roadmap/v0.30-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.30-agent/p6-turn-planner.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
+**Depends on**: `roadmap/v0.23-agent/p4-tool-bundle-refactoring.md`, `roadmap/v0.23-agent/p6-turn-planner.md`, `roadmap/v0.23-agent/p7-run-traces-and-intervention.md`
 
 ## Goal
 

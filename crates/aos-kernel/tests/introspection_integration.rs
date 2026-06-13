@@ -4,10 +4,13 @@
 mod helpers;
 use helpers::fixtures::{self, WorkflowAbi};
 
+use aos_effect_types::{
+    IntrospectJournalHeadReceipt, IntrospectListCellsReceipt, IntrospectManifestReceipt,
+    IntrospectWorkflowStateReceipt,
+};
 use aos_effects::{IntentBuilder, ReceiptStatus, effect_ops};
 use aos_kernel::StateReader;
 use aos_wasm_abi::WorkflowOutput;
-use serde::Deserialize;
 use serde_json::json;
 
 /// Build a simple world with a monolithic workflow that sets state on the first event.
@@ -73,26 +76,17 @@ fn introspect_manifest_matches_kernel_manifest() {
         .expect("handled");
     assert_eq!(receipt.status, ReceiptStatus::Ok);
 
-    // Decode payload map and extract manifest bytes.
-    let payload_val: serde_cbor::Value = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
-    let manifest_bytes = match payload_val {
-        serde_cbor::Value::Map(map) => map
-            .into_iter()
-            .find_map(|(k, v)| match (k, v) {
-                (serde_cbor::Value::Text(t), serde_cbor::Value::Bytes(b)) if t == "manifest" => {
-                    Some(b)
-                }
-                _ => None,
-            })
-            .expect("manifest bytes"),
-        _ => panic!("unexpected payload shape"),
-    };
-    let manifest: aos_air_types::Manifest = serde_cbor::from_slice(&manifest_bytes).unwrap();
+    let decoded: IntrospectManifestReceipt = receipt.payload().unwrap();
+    let manifest: aos_air_types::Manifest = serde_cbor::from_slice(&decoded.manifest).unwrap();
     let head_manifest = kernel
         .get_manifest(aos_kernel::Consistency::Head)
         .unwrap()
         .value;
     assert_eq!(manifest.air_version, head_manifest.air_version);
+    assert_eq!(
+        decoded.meta.manifest_hash.to_string(),
+        kernel.get_journal_head().manifest_hash.to_hex()
+    );
 }
 
 #[test]
@@ -120,14 +114,12 @@ fn introspect_workflow_state_returns_value_and_meta() {
         .expect("handled");
     assert_eq!(receipt.status, ReceiptStatus::Ok);
 
-    #[derive(Deserialize)]
-    struct WorkflowReceipt {
-        #[serde(default)]
-        state: Option<Vec<u8>>,
-    }
-
-    let decoded: WorkflowReceipt = receipt.payload().unwrap();
+    let decoded: IntrospectWorkflowStateReceipt = receipt.payload().unwrap();
     assert_eq!(decoded.state.as_deref(), Some("payload".as_bytes()));
+    assert_eq!(
+        decoded.meta.manifest_hash.to_string(),
+        kernel.get_journal_head().manifest_hash.to_hex()
+    );
 }
 
 #[test]
@@ -152,37 +144,17 @@ fn introspect_list_cells_returns_sentinel_for_non_keyed() {
         .expect("handled");
     assert_eq!(receipt.status, ReceiptStatus::Ok);
 
-    let payload: serde_cbor::Value = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
-    let cells = match payload {
-        serde_cbor::Value::Map(map) => map
-            .into_iter()
-            .find_map(|(k, v)| match (k, v) {
-                (serde_cbor::Value::Text(t), serde_cbor::Value::Array(arr)) if t == "cells" => {
-                    Some(arr)
-                }
-                _ => None,
-            })
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    };
+    let decoded: IntrospectListCellsReceipt = receipt.payload().unwrap();
     assert_eq!(
-        cells.len(),
+        decoded.cells.len(),
         1,
         "expected sentinel cell for non-keyed workflow"
     );
-    let key_len = match &cells[0] {
-        serde_cbor::Value::Map(cell_map) => cell_map
-            .iter()
-            .find_map(|(k, v)| match (k, v) {
-                (serde_cbor::Value::Text(t), serde_cbor::Value::Bytes(b)) if t == "key" => {
-                    Some(b.len())
-                }
-                _ => None,
-            })
-            .unwrap_or_default(),
-        _ => 0,
-    };
-    assert_eq!(key_len, 0, "sentinel key should be empty bytes");
+    assert_eq!(
+        decoded.cells[0].key.len(),
+        0,
+        "sentinel key should be empty bytes"
+    );
 }
 
 #[test]
@@ -203,41 +175,11 @@ fn introspect_journal_head_matches_state_reader() {
         .unwrap()
         .expect("handled");
     assert_eq!(receipt.status, ReceiptStatus::Ok);
-    let payload: serde_cbor::Value = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
-    let meta_map = match payload {
-        serde_cbor::Value::Map(map) => map
-            .into_iter()
-            .find_map(|(k, v)| match (k, v) {
-                (serde_cbor::Value::Text(t), m) if t == "meta" => Some(m),
-                _ => None,
-            })
-            .expect("meta in receipt"),
-        _ => panic!("unexpected payload shape"),
-    };
+    let decoded: IntrospectJournalHeadReceipt = receipt.payload().unwrap();
     let meta = kernel.get_journal_head();
-    let (jh, mh) = match meta_map {
-        serde_cbor::Value::Map(map) => {
-            let mut jh = None;
-            let mut mh = None;
-            for (k, v) in map {
-                match (k, v) {
-                    (serde_cbor::Value::Text(t), serde_cbor::Value::Integer(i))
-                        if t == "journal_height" =>
-                    {
-                        jh = Some(i as u64);
-                    }
-                    (serde_cbor::Value::Text(t), serde_cbor::Value::Bytes(b))
-                        if t == "manifest_hash" =>
-                    {
-                        mh = Some(b);
-                    }
-                    _ => {}
-                }
-            }
-            (jh.expect("journal_height"), mh.expect("manifest_hash"))
-        }
-        _ => panic!("meta not a map"),
-    };
-    assert_eq!(jh, meta.journal_height);
-    assert_eq!(mh, meta.manifest_hash.as_bytes());
+    assert_eq!(decoded.meta.journal_height, meta.journal_height);
+    assert_eq!(
+        decoded.meta.manifest_hash.to_string(),
+        meta.manifest_hash.to_hex()
+    );
 }

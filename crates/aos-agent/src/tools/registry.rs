@@ -243,7 +243,7 @@ pub fn local_coding_agent_tool_registry() -> BTreeMap<String, ToolSpec> {
             "host.fs.read_file",
             "read_file",
             "Read a file from the host filesystem.",
-            r#"{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"offset_bytes":{"type":"integer"},"max_bytes":{"type":"integer"},"encoding":{"type":"string"}}}"#,
+            r#"{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"offset_bytes":{"type":"integer"},"max_bytes":{"type":"integer"},"encoding":{"type":"string","enum":["utf8","bytes"]}}}"#,
             ToolMapper::HostFsReadFile,
             true,
             ToolParallelismHint {

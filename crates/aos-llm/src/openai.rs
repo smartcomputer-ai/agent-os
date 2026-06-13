@@ -1177,7 +1177,10 @@ fn build_responses_body(request: &Request, stream: bool) -> Result<Value, SDKErr
         body["stop"] = json!(stop_sequences);
     }
     if let Some(reasoning_effort) = &request.reasoning_effort {
-        body["reasoning"] = json!({ "effort": reasoning_effort });
+        body["reasoning"] = json!({
+            "effort": reasoning_effort,
+            "summary": "auto"
+        });
     }
     if let Some(metadata) = &request.metadata {
         body["metadata"] = json!(metadata);
@@ -1629,6 +1632,15 @@ fn parse_responses_api_response(
                     }
                 }
             }
+            Some("reasoning") => {
+                for text in reasoning_summary_texts(item) {
+                    message_parts.push(ContentPart::thinking(crate::types::ThinkingData {
+                        text,
+                        signature: None,
+                        redacted: false,
+                    }));
+                }
+            }
             Some("function_call") => {
                 has_tool_calls = true;
                 let call_id = item
@@ -1702,6 +1714,27 @@ fn parse_responses_api_response(
         warnings: Vec::new(),
         rate_limit: headers.and_then(parse_rate_limit_info),
     })
+}
+
+fn reasoning_summary_texts(item: &Value) -> Vec<String> {
+    item.get("summary")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|part| {
+            let part_type = part.get("type").and_then(Value::as_str);
+            if part_type == Some("summary_text")
+                || part_type == Some("reasoning_summary_text")
+                || part_type.is_none()
+            {
+                part.get("text")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn parse_openai_compaction_response(
@@ -2183,6 +2216,57 @@ mod tests {
             .expect("complete");
         assert_eq!(response.text(), "Hello");
         assert_eq!(response.usage.reasoning_tokens, Some(2));
+    }
+
+    #[test]
+    fn responses_body_requests_reasoning_summary_when_effort_is_set() {
+        let mut request = minimal_request("openai");
+        request.reasoning_effort = Some("high".into());
+
+        let body = build_responses_body(&request, false).expect("body");
+
+        assert_eq!(body["reasoning"]["effort"], "high");
+        assert_eq!(body["reasoning"]["summary"], "auto");
+    }
+
+    #[test]
+    fn parses_reasoning_summary_output_item() {
+        let response = parse_responses_api_response(
+            json!({
+                "id": "resp_1",
+                "model": "gpt-5.2",
+                "status": "completed",
+                "output": [
+                    {
+                        "id": "rs_1",
+                        "type": "reasoning",
+                        "summary": [
+                            { "type": "summary_text", "text": "I should inspect the project files." }
+                        ]
+                    },
+                    {
+                        "id": "msg_1",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "Done." }]
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 2,
+                    "total_tokens": 3
+                }
+            }),
+            "openai",
+            None,
+        )
+        .expect("response");
+
+        assert_eq!(
+            response.reasoning().as_deref(),
+            Some("I should inspect the project files.")
+        );
+        assert_eq!(response.text(), "Done.");
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -1,5 +1,6 @@
 pub(crate) mod air;
 pub(crate) mod cas;
+pub(crate) mod chat;
 pub(crate) mod common;
 pub(crate) mod node;
 pub(crate) mod ops;
@@ -37,6 +38,8 @@ pub(crate) enum Command {
     Air(air::AirArgs),
     /// Interact with the universe CAS directly.
     Cas(cas::CasArgs),
+    /// Chat with an AgentOS agent session.
+    Chat(chat::ChatArgs),
     /// Inspect service state.
     Ops(ops::OpsArgs),
 }
@@ -55,6 +58,7 @@ pub(crate) async fn dispatch(
         Command::Workspace(args) => workspace::handle(global, output, args).await,
         Command::Air(args) => air::handle(global, output, args).await,
         Command::Cas(args) => cas::handle(global, output, args).await,
+        Command::Chat(args) => chat::handle(global, output, args).await,
         Command::Ops(args) => ops::handle(global, output, args).await,
     }
 }

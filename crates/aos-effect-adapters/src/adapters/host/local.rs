@@ -40,7 +40,7 @@ use super::paths::{
 };
 use super::shared::{
     build_receipt, decode_host_fs_apply_patch_params, decode_host_fs_write_file_params,
-    now_wallclock_ns, resolve_file_content, resolve_patch_text,
+    normalize_host_fs_read_encoding, now_wallclock_ns, resolve_file_content, resolve_patch_text,
 };
 use super::state::{HostState, SessionRecord};
 
@@ -721,7 +721,10 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
         let end = offset.saturating_add(max_len).min(bytes.len());
         let slice = &bytes[offset..end];
         let truncated = end < bytes.len();
-        let encoding = params.encoding.as_deref().unwrap_or("utf8");
+        let encoding = match normalize_host_fs_read_encoding(params.encoding.as_deref()) {
+            Ok(encoding) => encoding,
+            Err(message) => return fs_read_error(intent, "invalid_encoding", message),
+        };
 
         let content = if encoding == "bytes" {
             match materialize_binary_output(self.store.as_ref(), mode, slice, self.output_cfg) {
@@ -785,11 +788,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HostFsReadFileAdap
                 }
             }
         } else {
-            return fs_read_error(
-                intent,
-                "invalid_encoding",
-                format!("unsupported encoding '{encoding}'"),
-            );
+            unreachable!("normalize_host_fs_read_encoding returned unknown encoding");
         };
 
         let payload = HostFsReadFileReceipt {
@@ -2453,7 +2452,7 @@ mod tests {
         assert_schema_normalizes("sys/HostFsWriteFileReceipt@1", &write_receipt.payload_cbor);
 
         let read_params = HostFsReadFileParams {
-            session_id: open_payload.session_id,
+            session_id: open_payload.session_id.clone(),
             path: "src/lib.rs".into(),
             offset_bytes: None,
             max_bytes: None,
@@ -2467,6 +2466,32 @@ mod tests {
             .expect("read receipt");
         assert_eq!(read_receipt.status, ReceiptStatus::Ok);
         assert_schema_normalizes("sys/HostFsReadFileReceipt@1", &read_receipt.payload_cbor);
+
+        tokio::fs::write(tmp.path().join("large.txt"), "x".repeat(20_000))
+            .await
+            .expect("write large file");
+        let large_read_params = HostFsReadFileParams {
+            session_id: open_payload.session_id,
+            path: "large.txt".into(),
+            offset_bytes: None,
+            max_bytes: None,
+            encoding: Some("utf8".into()),
+            output_mode: Some("auto".into()),
+        };
+        let large_read_receipt = set
+            .fs_read_file
+            .run_terminal(&intent_for(
+                effect_ops::HOST_FS_READ_FILE,
+                &large_read_params,
+                12,
+            ))
+            .await
+            .expect("large read receipt");
+        assert_eq!(large_read_receipt.status, ReceiptStatus::Ok);
+        assert_schema_normalizes(
+            "sys/HostFsReadFileReceipt@1",
+            &large_read_receipt.payload_cbor,
+        );
     }
 
     #[test]

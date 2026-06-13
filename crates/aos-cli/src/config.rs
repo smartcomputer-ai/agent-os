@@ -12,6 +12,8 @@ pub struct CliConfig {
     pub current_profile: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub profiles: BTreeMap<String, ProfileConfig>,
+    #[serde(default, skip_serializing_if = "CliChatConfig::is_empty")]
+    pub chat: CliChatConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -29,6 +31,36 @@ pub struct ProfileConfig {
     pub universe: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CliChatConfig {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub worlds: BTreeMap<String, CliChatWorldConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_max_tokens: Option<u64>,
+}
+
+impl CliChatConfig {
+    fn is_empty(&self) -> bool {
+        self.worlds.is_empty()
+            && self.default_provider.is_none()
+            && self.default_model.is_none()
+            && self.default_reasoning_effort.is_none()
+            && self.default_max_tokens.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CliChatWorldConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_session: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

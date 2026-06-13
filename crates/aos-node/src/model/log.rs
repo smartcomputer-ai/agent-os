@@ -116,6 +116,14 @@ pub struct WorldLogFrame {
     pub records: Vec<CanonicalWorldRecord>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldJournalAdvance {
+    pub universe_id: UniverseId,
+    pub world_id: WorldId,
+    pub world_epoch: u64,
+    pub next_world_seq: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromotableBaselineRef {
     pub snapshot_ref: String,

@@ -4,7 +4,8 @@ use aos_kernel::WorldInput;
 use aos_node::{
     CheckpointBackend, CreateWorldSource, EffectExecutionClass, HostControl, JournalBackend,
     JournalCommit, JournalDisposition, JournalFlush, JournalSourceAck, SubmissionPayload,
-    WorldCheckpointRef, WorldId, classify_effect_identity, partition_for_world,
+    WorldCheckpointRef, WorldId, WorldJournalAdvance, classify_effect_identity,
+    partition_for_world,
 };
 
 use super::commands::{
@@ -144,11 +145,15 @@ impl HostedWorkerCore {
             .iter()
             .filter_map(|ack_ref| direct_accept_token(*ack_ref))
             .collect::<BTreeSet<_>>();
+        let advances = journal_advances_from_slices(&outcome.committed_slices);
         self.remove_slice_tracking(&committed_ids);
 
         for slice in outcome.committed_slices {
             self.state.scheduler.staged_slices.remove(&slice.id);
             self.apply_post_commit(slice, &outcome.journal_commit)?;
+        }
+        for advance in advances {
+            self.observer.publish(advance);
         }
         for accept_token in completed_accept_tokens {
             if let Some(waiter) = self.state.accept_waiters.remove(&accept_token) {
@@ -641,6 +646,27 @@ fn ack_offsets_by_partition(ack_refs: &[AckRef]) -> BTreeMap<u32, i64> {
         }
     }
     commits
+}
+
+fn journal_advances_from_slices(slices: &[CompletedSlice]) -> Vec<WorldJournalAdvance> {
+    let mut advances = BTreeMap::<WorldId, WorldJournalAdvance>::new();
+    for frame in slices.iter().flat_map(|slice| slice.frames.iter()) {
+        let advance = WorldJournalAdvance {
+            universe_id: frame.universe_id,
+            world_id: frame.world_id,
+            world_epoch: frame.world_epoch,
+            next_world_seq: frame.world_seq_end.saturating_add(1),
+        };
+        advances
+            .entry(frame.world_id)
+            .and_modify(|current| {
+                if advance.next_world_seq > current.next_world_seq {
+                    *current = advance;
+                }
+            })
+            .or_insert(advance);
+    }
+    advances.into_values().collect()
 }
 
 fn format_checkpointed_world(

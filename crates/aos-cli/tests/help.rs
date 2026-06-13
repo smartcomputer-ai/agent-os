@@ -16,6 +16,7 @@ fn top_level_help_lists_resource_roots() {
         .stdout(predicate::str::contains("workspace"))
         .stdout(predicate::str::contains("air"))
         .stdout(predicate::str::contains("cas"))
+        .stdout(predicate::str::contains("chat"))
         .stdout(predicate::str::contains("ops"));
 }
 

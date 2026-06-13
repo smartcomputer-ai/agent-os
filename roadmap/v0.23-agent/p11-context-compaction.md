@@ -4,7 +4,7 @@
 **Effort**: Large
 **Risk if deferred**: High (long-running sessions will eventually overflow provider windows, and compaction decisions will be hard to audit if hidden inside provider adapters)
 **Status**: Complete for v0.30 first-cut scope; deferred quality, UI, memory/RAG, and broader provider optimization work remains future scope
-**Depends on**: `roadmap/v0.30-agent/p5-session-run-model.md`, `roadmap/v0.30-agent/p6-turn-planner.md`, `roadmap/v0.30-agent/p7-run-traces-and-intervention.md`
+**Depends on**: `roadmap/v0.23-agent/p5-session-run-model.md`, `roadmap/v0.23-agent/p6-turn-planner.md`, `roadmap/v0.23-agent/p7-run-traces-and-intervention.md`
 
 ## Progress
 

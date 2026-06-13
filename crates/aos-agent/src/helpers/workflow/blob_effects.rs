@@ -226,6 +226,13 @@ fn on_llm_output_blob(
     if let Some(tool_calls_ref) = output.tool_calls_ref {
         enqueue_blob_get(state, tool_calls_ref, PendingBlobGetKind::LlmToolCalls, out)?;
     } else {
+        if output.assistant_text.is_some() {
+            state.context_state.append_message_refs(
+                [receipt.blob_ref.as_str().to_string()],
+                "assistant_output",
+                state.updated_at,
+            );
+        }
         transition_to_waiting_input_if_running(state)?;
     }
     Ok(true)
